@@ -5,7 +5,7 @@ Lean 4 bitmap utilities with PNG encode/decode support, plus a small widget for 
 ## Usage
 
 ```lean
-import Bitmap.Basic
+import Bitmap
 ```
 
 ## Tests
