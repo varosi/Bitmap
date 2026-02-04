@@ -1,0 +1,206 @@
+import Bitmap.Basic
+import Lean
+
+open Lean Widget
+open System (FilePath)
+
+namespace Bitmaps
+namespace Widget
+
+-- Widget props and helpers
+
+abbrev BitmapWidgetPixel := PixelRGB Nat
+
+instance : Inhabited BitmapWidgetPixel := inferInstance
+instance : ToJson BitmapWidgetPixel := inferInstance
+instance : FromJson BitmapWidgetPixel := inferInstance
+instance : Server.RpcEncodable BitmapWidgetPixel := inferInstance
+
+structure BitmapWidgetProps where
+  width : Nat
+  height : Nat
+  pixels : Array BitmapWidgetPixel
+  pixelSize : Nat := 10
+  showGrid : Bool := true
+  background : String := "#070a16"
+  caption : Option String := none
+  deriving Repr, Inhabited, BEq, DecidableEq, ToJson, FromJson, Server.RpcEncodable
+
+def BitmapWidgetPixel.ofRGB8 (pixel : PixelRGB8) : BitmapWidgetPixel :=
+  { r := pixel.r.toNat, g := pixel.g.toNat, b := pixel.b.toNat }
+
+def BitmapRGB8.widgetProps (bmp : BitmapRGB8)
+    (pixelSize : Nat := 12)
+    (showGrid : Bool := true)
+    (background : String := "#050914")
+    (caption : Option String := none) :
+    BitmapWidgetProps :=
+  { width := bmp.size.width
+    height := bmp.size.height
+    pixels := bmp.data.map BitmapWidgetPixel.ofRGB8
+    pixelSize := max pixelSize 1
+    showGrid
+    background
+    caption }
+
+-------------------------------------------------------------------------------
+-- Sample bitmap and widget integration
+
+private def clampToByte (n : Nat) : UInt8 :=
+  UInt8.ofNat (n % 256)
+
+def auroraBitmap : BitmapRGB8 :=
+  let width := 56
+  let height := 32
+  { size := { width, height }
+    data := Array.ofFn fun idx : Fin (width * height) =>
+      let x := idx.val % width
+      let y := idx.val / width
+      let diag := x + y
+      let swirl := (x * 11 + (height - y) * 7) % 256
+      let r := clampToByte (diag * 4 + y * 2)
+      let g := clampToByte (swirl + 40)
+      let b := clampToByte ((width - x) * 5 + (height - y) * 3)
+      PixelRGB.mk r g b }
+
+def testPngPath : FilePath :=
+  FilePath.mk "test.png"
+
+def testPngBitmapResult : Except String BitmapRGB8 :=
+  match unsafe unsafeIO (IO.FS.readBinFile testPngPath) with
+  | Except.ok bytes =>
+      match Png.decodeBitmap bytes with
+      | some bmp => Except.ok bmp
+      | none => Except.error "invalid PNG bitmap"
+  | Except.error err => Except.error err.toString
+
+def testPngWidgetProps : BitmapWidgetProps :=
+  match testPngBitmapResult with
+  | Except.ok bmp =>
+      BitmapRGB8.widgetProps bmp
+        (pixelSize := 2)
+        (background := "#07101f")
+        (caption := some "test.png (256×256) loaded from disk")
+  | Except.error err =>
+      BitmapRGB8.widgetProps (mkBlankBitmap 1 1 { r := 0, g := 0, b := 0 })
+        (pixelSize := 2)
+        (background := "#1b0b0b")
+        (caption := some s!"PNG load failed: {err}")
+
+@[widget_module]
+def bitmapWidget : Lean.Widget.Module where
+  javascript := "
+    import * as React from 'react'
+
+    const infoStyle = { color: '#f0f3ff', fontSize: '0.85rem' }
+    const captionStyle = { color: '#c8d3ff', fontSize: '0.8rem' }
+
+    function wrapperStyle(background) {
+      return {
+        background,
+        padding: '0.85rem 1.1rem',
+        borderRadius: '0.85rem',
+        display: 'inline-flex',
+        flexDirection: 'column',
+        gap: '0.45rem',
+        boxShadow: '0 18px 40px rgba(0,0,0,0.35)',
+        border: '1px solid rgba(255,255,255,0.08)'
+      }
+    }
+
+    export default function BitmapWidget(props) {
+      const canvasRef = React.useRef(null)
+      const width = props.width ?? 0
+      const height = props.height ?? 0
+      const pixelSize = Math.max(props.pixelSize ?? 10, 1)
+
+      React.useEffect(() => {
+        const canvas = canvasRef.current
+        if (!canvas) return
+        const ctx = canvas.getContext('2d')
+        if (!ctx) return
+        canvas.width = width
+        canvas.height = height
+        if (!width || !height) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height)
+          return
+        }
+        const pixels = props.pixels ?? []
+        const image = ctx.createImageData(width, height)
+        for (let i = 0; i < width * height; i++) {
+          const offset = i * 4
+          const pixel = pixels[i] ?? { r: 0, g: 0, b: 0 }
+          image.data[offset + 0] = pixel.r ?? 0
+          image.data[offset + 1] = pixel.g ?? 0
+          image.data[offset + 2] = pixel.b ?? 0
+          image.data[offset + 3] = 255
+        }
+        ctx.putImageData(image, 0, 0)
+      }, [width, height, props.pixels])
+
+      const frameStyle = {
+        position: 'relative',
+        width: width * pixelSize,
+        height: height * pixelSize,
+        borderRadius: '0.5rem',
+        overflow: 'hidden'
+      }
+
+      const canvasStyle = {
+        width: '100%',
+        height: '100%',
+        imageRendering: 'pixelated',
+        display: 'block'
+      }
+
+      const gridOverlay = props.showGrid
+        ? React.createElement('div', {
+            style: {
+              position: 'absolute',
+              inset: 0,
+              pointerEvents: 'none',
+              backgroundImage: `linear-gradient(rgba(255,255,255,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.08) 1px, transparent 1px)`,
+              backgroundSize: `${pixelSize}px ${pixelSize}px`
+            }
+          })
+        : null
+
+      const caption = props.caption
+        ? React.createElement('div', { style: captionStyle }, props.caption)
+        : null
+
+      return React.createElement(
+        'div',
+        { style: wrapperStyle(props.background ?? '#050914') },
+        React.createElement(
+          'div',
+          { style: frameStyle },
+          React.createElement('canvas', { ref: canvasRef, style: canvasStyle }),
+          gridOverlay
+        ),
+        React.createElement('div', { style: infoStyle }, `${width} × ${height} pixels`),
+        caption
+      )
+    }
+  "
+
+end Widget
+end Bitmaps
+
+-- def List.sum [Add α] [OfNat α 0] : List α → α
+-- Fin class for Bitmap?
+-- USize (OS bit integer, like C unsigned long)
+-- LinearAlgebra namespace - https://leanprover-community.github.io/mathlib4_docs/Mathlib/LinearAlgebra/AffineSpace/AffineEquiv.html
+-- dbgTraceIfShared
+
+open Bitmaps
+open Bitmaps.Widget
+
+#widget bitmapWidget with
+  (BitmapRGB8.widgetProps auroraBitmap
+    (pixelSize := 18)
+    (background := "#040b18")
+    (caption := some "Aurora bitmap rendered via Lean"))
+
+#widget bitmapWidget with
+  (testPngWidgetProps)
