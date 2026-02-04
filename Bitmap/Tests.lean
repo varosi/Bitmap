@@ -38,6 +38,8 @@ def pngRoundTripProperty (trials : Nat) : IO Bool := do
       ok := false
   return ok
 
+-- Fill a bitmap with deterministic pixels using putPixel, then read all pixels back.
+-- Returns elapsed time in nanoseconds and a checksum to prevent dead-code elimination.
 private def perfFillRead (w h : Nat) : IO (Nat × Nat) := do
   let t0 <- IO.monoNanosNow
   let mut img := mkBlankBitmap w h { r := 0, g := 0, b := 0 }
@@ -71,52 +73,50 @@ private def perfFillRead (w h : Nat) : IO (Nat × Nat) := do
   let t1 <- IO.monoNanosNow
   return (t1 - t0, checksum)
 
-private def dimsForPixels (pixels : Nat) : Nat × Nat :=
-  let row := 1024
-  let h := min row pixels
-  let w := max 1 (pixels / h)
-  (w, h)
+-- Encode a blank bitmap to PNG and decode it back.
+-- Returns elapsed time in nanoseconds and whether the round-trip was exact.
+private def perfPngRoundTrip (w h : Nat) : IO (Nat × Bool) := do
+  let t0 <- IO.monoNanosNow
+  let bmp := mkBlankBitmap w h { r := 0, g := 0, b := 0 }
+  let bytes := Png.encodeBitmap bmp
+  let ok :=
+    match Png.decodeBitmap bytes with
+    | some bmp' => decide (bmp' = bmp)
+    | none => false
+  let t1 <- IO.monoNanosNow
+  return (t1 - t0, ok)
 
+-- Fixed-size performance test for putPixel/getPixel on this machine.
+-- Chosen so 10 runs total about 5 seconds here.
 private def runPerfTest : IO Unit := do
-  let targetNs : Nat := 5_000_000_000
-  let maxPixels : Nat := 70_000_000
-  let warmW := 512
-  let warmH := 512
-  let (warmNs, _) <- perfFillRead warmW warmH
-  let warmPixels := warmW * warmH
-  let denom := if warmNs == 0 then 1 else warmNs
-  let mut targetPixels := (targetNs * warmPixels) / denom
-  if targetPixels < 1 then
-    targetPixels := 1
-  if targetPixels > maxPixels then
-    targetPixels := maxPixels
-
-  let mut attempt := 0
-  let mut done := false
-  let mut lastNs := 0
-  let mut lastChecksum := 0
-  let mut lastW := 0
-  let mut lastH := 0
-  while attempt < 2 && !done do
-    let (w, h) := dimsForPixels targetPixels
+  let w : Nat := 2688
+  let h : Nat := 2688
+  let iters : Nat := 10
+  let mut totalNs : Nat := 0
+  let mut totalChecksum : Nat := 0
+  for _ in [0:iters] do
     let (elapsedNs, checksum) <- perfFillRead w h
-    lastNs := elapsedNs
-    lastChecksum := checksum
-    lastW := w
-    lastH := h
-    if elapsedNs >= targetNs || targetPixels == maxPixels then
-      done := true
-    else
-      let pixels := w * h
-      let scaledPixels := (targetNs * pixels) / (if elapsedNs == 0 then 1 else elapsedNs)
-      let grown := pixels * 2
-      targetPixels := min maxPixels (max grown scaledPixels)
-      attempt := attempt + 1
+    totalNs := totalNs + elapsedNs
+    totalChecksum := totalChecksum + checksum
+  let avgNs := totalNs / iters
+  let avgMs := avgNs / 1_000_000
+  IO.println s!"perf put/get: {w}x{h} pixels, avg {avgMs} ms over {iters} runs, checksum {totalChecksum}"
 
-  let elapsedMs := lastNs / 1_000_000
-  IO.println s!"perf put/get: {lastW}x{lastH} pixels, {elapsedMs} ms, checksum {lastChecksum}"
-  if lastNs < targetNs then
-    IO.println s!"perf warning: below 5s target (actual {elapsedMs} ms)"
+-- Fixed-size performance test for PNG encode/decode on this machine.
+-- Chosen so 10 runs total about 5 seconds here.
+private def runPngPerfTest : IO Unit := do
+  let w : Nat := 1600
+  let h : Nat := 1600
+  let iters : Nat := 10
+  let mut totalNs : Nat := 0
+  for _ in [0:iters] do
+    let (elapsedNs, ok) <- perfPngRoundTrip w h
+    if !ok then
+      throw (IO.userError "png perf round-trip failed")
+    totalNs := totalNs + elapsedNs
+  let avgNs := totalNs / iters
+  let avgMs := avgNs / 1_000_000
+  IO.println s!"perf png round-trip: {w}x{h} pixels, avg {avgMs} ms over {iters} runs"
 
 def run : IO Unit := do
   let ok <- pngRoundTripProperty 20
@@ -125,6 +125,7 @@ def run : IO Unit := do
   else
     throw (IO.userError "png round-trip property failed")
   runPerfTest
+  runPngPerfTest
 
 end Bitmap.Tests
 
