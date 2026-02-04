@@ -9,25 +9,15 @@ namespace Widget
 
 -- Widget props and helpers
 
-abbrev BitmapWidgetPixel := PixelRGB Nat
-
-instance : Inhabited BitmapWidgetPixel := inferInstance
-instance : ToJson BitmapWidgetPixel := inferInstance
-instance : FromJson BitmapWidgetPixel := inferInstance
-instance : Server.RpcEncodable BitmapWidgetPixel := inferInstance
-
 structure BitmapWidgetProps where
   width : Nat
   height : Nat
-  pixels : Array BitmapWidgetPixel
+  bytes : ByteArray
   pixelSize : Nat := 10
   showGrid : Bool := true
   background : String := "#070a16"
   caption : Option String := none
   deriving Repr, Inhabited, BEq, DecidableEq, ToJson, FromJson, Server.RpcEncodable
-
-def BitmapWidgetPixel.ofRGB8 (pixel : PixelRGB8) : BitmapWidgetPixel :=
-  { r := pixel.r.toNat, g := pixel.g.toNat, b := pixel.b.toNat }
 
 def BitmapRGB8.widgetProps (bmp : BitmapRGB8)
     (pixelSize : Nat := 12)
@@ -37,7 +27,7 @@ def BitmapRGB8.widgetProps (bmp : BitmapRGB8)
     BitmapWidgetProps :=
   { width := bmp.size.width
     height := bmp.size.height
-    pixels := bmp.data.map BitmapWidgetPixel.ofRGB8
+    bytes := bmp.data
     pixelSize := max pixelSize 1
     showGrid
     background
@@ -52,16 +42,15 @@ private def clampToByte (n : Nat) : UInt8 :=
 def auroraBitmap : BitmapRGB8 :=
   let width := 56
   let height := 32
-  { size := { width, height }
-    data := Array.ofFn fun idx : Fin (width * height) =>
-      let x := idx.val % width
-      let y := idx.val / width
-      let diag := x + y
-      let swirl := (x * 11 + (height - y) * 7) % 256
-      let r := clampToByte (diag * 4 + y * 2)
-      let g := clampToByte (swirl + 40)
-      let b := clampToByte ((width - x) * 5 + (height - y) * 3)
-      PixelRGB.mk r g b }
+  Bitmap.ofPixelFn width height (fun idx : Fin (width * height) =>
+    let x := idx.val % width
+    let y := idx.val / width
+    let diag := x + y
+    let swirl := (x * 11 + (height - y) * 7) % 256
+    let r := clampToByte (diag * 4 + y * 2)
+    let g := clampToByte (swirl + 40)
+    let b := clampToByte ((width - x) * 5 + (height - y) * 3)
+    PixelRGB.mk r g b)
 
 def testPngPath : FilePath :=
   FilePath.mk "test.png"
@@ -125,18 +114,22 @@ def bitmapWidget : Lean.Widget.Module where
           ctx.clearRect(0, 0, canvas.width, canvas.height)
           return
         }
-        const pixels = props.pixels ?? []
+        const bytes = props.bytes ?? []
+        const stride = 3
         const image = ctx.createImageData(width, height)
         for (let i = 0; i < width * height; i++) {
           const offset = i * 4
-          const pixel = pixels[i] ?? { r: 0, g: 0, b: 0 }
-          image.data[offset + 0] = pixel.r ?? 0
-          image.data[offset + 1] = pixel.g ?? 0
-          image.data[offset + 2] = pixel.b ?? 0
+          const base = i * stride
+          const r = bytes[base] ?? 0
+          const g = bytes[base + 1] ?? 0
+          const b = bytes[base + 2] ?? 0
+          image.data[offset + 0] = r
+          image.data[offset + 1] = g
+          image.data[offset + 2] = b
           image.data[offset + 3] = 255
         }
         ctx.putImageData(image, 0, 0)
-      }, [width, height, props.pixels])
+      }, [width, height, props.bytes])
 
       const frameStyle = {
         position: 'relative',

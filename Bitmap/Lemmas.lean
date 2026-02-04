@@ -24,14 +24,6 @@ lemma arrayCoordSize_u32
     arrayCoordSize_nat (i := x.toNat + y.toNat * w) hx hy rfl
   simpa [hi] using hlt
 
-lemma getPixel_putPixel_eq
-    {PixelT : Type} (img : Bitmap PixelT) (x y : UInt32) (pixel : PixelT)
-    (hx : x.toNat < img.size.width) (hy : y.toNat < img.size.height) :
-    getPixel (putPixel img x y pixel hx hy) x y
-      (by simpa using hx) (by simpa using hy) = pixel := by
-  classical
-  simp [getPixel, putPixel]
-
 open Png
 
 lemma u16le_size (n : Nat) : (u16le n).size = 2 := by

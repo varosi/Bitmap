@@ -17,9 +17,7 @@ private def pixelOfSeed (seed idx : Nat) : PixelRGB8 :=
   { r := randByte s1, g := randByte s2, b := randByte s3 }
 
 def bitmapOfSeed (seed w h : Nat) : BitmapRGB8 :=
-  let size : Size := { width := w, height := h }
-  let data := Array.ofFn (fun i : Fin (w * h) => pixelOfSeed seed i.val)
-  { size, data, valid := by simp [size, data] }
+  Bitmap.ofPixelFn w h (fun i : Fin (w * h) => pixelOfSeed seed i.val)
 
 def pngRoundTripOk (bmp : BitmapRGB8) : Bool :=
   match Png.decodeBitmap (Png.encodeBitmap bmp) with
