@@ -1,6 +1,43 @@
 import Bitmap.Basic
 
 namespace Bitmaps
+
+lemma byteArray_size_set {bs : ByteArray} {i : Nat} {h : i < bs.size} {b : UInt8} :
+    (bs.set i b h).size = bs.size := by
+  cases bs with
+  | mk data =>
+      simp [ByteArray.set, ByteArray.size, Array.size_set]
+
+namespace Png
+
+lemma bitIndex_readBit (br : BitReader) (h : br.bytePos < br.data.size) :
+    (BitReader.readBit br).2.bitIndex = br.bitIndex + 1 := by
+  unfold BitReader.readBit BitReader.bitIndex
+  have hne : br.bytePos ≠ br.data.size := ne_of_lt h
+  by_cases hnext : br.bitPos + 1 = 8
+  · calc
+      (BitReader.readBit br).2.bitIndex
+          = (br.bytePos + 1) * 8 := by
+              simp [BitReader.readBit, BitReader.bitIndex, hne, hnext]
+      _ = br.bytePos * 8 + (br.bitPos + 1) := by
+              simp [Nat.add_mul, hnext, Nat.add_comm]
+      _ = br.bitIndex + 1 := by
+              simp [BitReader.bitIndex, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm]
+  · simp [hne, hnext, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm]
+
+lemma readBit_data (br : BitReader) (h : br.bytePos < br.data.size) :
+    (br.readBit).2.data = br.data := by
+  unfold BitReader.readBit
+  have hne : br.bytePos ≠ br.data.size := ne_of_lt h
+  by_cases hnext : br.bitPos + 1 = 8 <;> simp [hne, hnext]
+
+lemma lengthBases_size : lengthBases.size = 29 := by decide
+lemma lengthExtra_size : lengthExtra.size = 29 := by decide
+lemma distBases_size : distBases.size = 30 := by decide
+lemma distExtra_size : distExtra.size = 30 := by decide
+
+end Png
+
 namespace Lemmas
 
 lemma arrayCoordSize_nat
@@ -53,16 +90,16 @@ lemma byteArray_get_set_ne'
   simpa using (byteArray_get_set_ne (bs := bs) (i := i) (j := j) (hi := hi) (hj := hj) (hij := hij) (v := v))
 
 lemma getPixel_putPixel_eq
-    (img : Bitmap) (x y : UInt32) (pixel : PixelRGB8)
-    (hx : x.toNat < img.size.width) (hy : y.toNat < img.size.height) :
+    (img : Bitmap) (x y : Nat) (pixel : PixelRGB8)
+    (hx : x < img.size.width) (hy : y < img.size.height) :
     getPixel (putPixel img x y pixel hx hy) x y
       (by simpa using hx) (by simpa using hy) = pixel := by
   cases pixel with
   | mk r g b =>
-      let pixIdx := x.toNat + y.toNat * img.size.width
+      let pixIdx := x + y * img.size.width
       have hPix : pixIdx < img.size.width * img.size.height := by
         simpa [pixIdx] using
-          (arrayCoordSize_u32 (i := pixIdx) (w := img.size.width) (h := img.size.height)
+          (arrayCoordSize_nat (i := pixIdx) (w := img.size.width) (h := img.size.height)
             (x := x) (y := y) hx hy rfl)
 
       let base := pixIdx * bytesPerPixel

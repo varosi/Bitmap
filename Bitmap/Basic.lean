@@ -95,34 +95,28 @@ abbrev BitmapRGB8 := Bitmap
 instance : DecidableEq BitmapRGB8 := by
   infer_instance
 
-lemma byteArray_size_set {bs : ByteArray} {i : Nat} {h : i < bs.size} {b : UInt8} :
-    (bs.set i b h).size = bs.size := by
-  cases bs with
-  | mk data =>
-      simp [ByteArray.set, ByteArray.size, Array.size_set]
-
-def putPixel (img : Bitmap) (x y : UInt32) (pixel : PixelRGB8)
-    (h1 : x.toNat < img.size.width) (h2: y.toNat < img.size.height) : Bitmap := by
-  let pixIdx := x.toNat + y.toNat * img.size.width
+def putPixel (img : Bitmap) (x y : Nat) (pixel : PixelRGB8)
+    (h1 : x < img.size.width) (h2: y < img.size.height) : Bitmap := by
+  let pixIdx := x + y * img.size.width
   have hPix : pixIdx < img.size.width * img.size.height := by
     have hx' :
-        x.toNat + y.toNat * img.size.width <
-          img.size.width + y.toNat * img.size.width := Nat.add_lt_add_right h1 _
+        x + y * img.size.width <
+          img.size.width + y * img.size.width := Nat.add_lt_add_right h1 _
     have hx'' :
-        x.toNat + y.toNat * img.size.width <
-          img.size.width * (1 + y.toNat) := by
+        x + y * img.size.width <
+          img.size.width * (1 + y) := by
       calc
-        x.toNat + y.toNat * img.size.width <
-            img.size.width + y.toNat * img.size.width := hx'
-        _ = img.size.width * (1 + y.toNat) := by
+        x + y * img.size.width <
+            img.size.width + y * img.size.width := hx'
+        _ = img.size.width * (1 + y) := by
             simp [Nat.mul_add, Nat.mul_one, Nat.mul_comm]
     have hy' :
-        img.size.width * (1 + y.toNat) ≤ img.size.width * img.size.height := by
+        img.size.width * (1 + y) ≤ img.size.width * img.size.height := by
       apply Nat.mul_le_mul_left
-      have hyle : y.toNat + 1 ≤ img.size.height := Nat.succ_le_of_lt h2
+      have hyle : y + 1 ≤ img.size.height := Nat.succ_le_of_lt h2
       simpa [Nat.add_comm] using hyle
     have hlt :
-        x.toNat + y.toNat * img.size.width <
+        x + y * img.size.width <
           img.size.width * img.size.height := lt_of_lt_of_le hx'' hy'
     simpa [pixIdx] using hlt
 
@@ -139,40 +133,50 @@ def putPixel (img : Bitmap) (x y : UInt32) (pixel : PixelRGB8)
     omega
 
   let data1 := img.data.set base pixel.r h0'
+  have hsize1 : data1.size = img.data.size := by
+    cases hdata : img.data with
+    | mk data =>
+        simp [data1, ByteArray.set, ByteArray.size, Array.size_set, -ByteArray.size_data, hdata]
   have h1'' : base + 1 < data1.size := by
-    simpa [data1, byteArray_size_set] using h1'
+    simpa [hsize1] using h1'
   let data2 := data1.set (base + 1) pixel.g h1''
+  have hsize2 : data2.size = img.data.size := by
+    cases hdata : img.data with
+    | mk data =>
+        simp [data2, data1, ByteArray.set, ByteArray.size, Array.size_set, -ByteArray.size_data, hdata]
   have h2'' : base + 2 < data2.size := by
-    simpa [data2, data1, byteArray_size_set] using h2'
+    simpa [hsize2] using h2'
   let data3 := data2.set (base + 2) pixel.b h2''
-  have hsize : data3.size = img.data.size := by
-    simp [data3, data2, data1, byteArray_size_set]
+  have hsize3 : data3.size = img.data.size := by
+    cases hdata : img.data with
+    | mk data =>
+        simp [data3, data2, data1, ByteArray.set, ByteArray.size, Array.size_set, -ByteArray.size_data, hdata]
 
-  exact { img with data := data3, valid := by simpa [hsize] using img.valid }
+  exact { img with data := data3, valid := by simpa [hsize3] using img.valid }
 
-def getPixel (img : Bitmap) (x y : UInt32)
-    (hx : x.toNat < img.size.width)
-    (hy : y.toNat < img.size.height) : PixelRGB8 := by
-  let pixIdx := x.toNat + y.toNat * img.size.width
+def getPixel (img : Bitmap) (x y : Nat)
+    (hx : x < img.size.width)
+    (hy : y < img.size.height) : PixelRGB8 := by
+  let pixIdx := x + y * img.size.width
   have hPix : pixIdx < img.size.width * img.size.height := by
     have hx' :
-        x.toNat + y.toNat * img.size.width <
-          img.size.width + y.toNat * img.size.width := Nat.add_lt_add_right hx _
+        x + y * img.size.width <
+          img.size.width + y * img.size.width := Nat.add_lt_add_right hx _
     have hx'' :
-        x.toNat + y.toNat * img.size.width <
-          img.size.width * (1 + y.toNat) := by
+        x + y * img.size.width <
+          img.size.width * (1 + y) := by
       calc
-        x.toNat + y.toNat * img.size.width <
-            img.size.width + y.toNat * img.size.width := hx'
-        _ = img.size.width * (1 + y.toNat) := by
+        x + y * img.size.width <
+            img.size.width + y * img.size.width := hx'
+        _ = img.size.width * (1 + y) := by
             simp [Nat.mul_add, Nat.mul_one, Nat.mul_comm]
     have hy' :
-        img.size.width * (1 + y.toNat) ≤ img.size.width * img.size.height := by
+        img.size.width * (1 + y) ≤ img.size.width * img.size.height := by
       apply Nat.mul_le_mul_left
-      have hyle : y.toNat + 1 ≤ img.size.height := Nat.succ_le_of_lt hy
+      have hyle : y + 1 ≤ img.size.height := Nat.succ_le_of_lt hy
       simpa [Nat.add_comm] using hyle
     have hlt :
-        x.toNat + y.toNat * img.size.width <
+        x + y * img.size.width <
           img.size.width * img.size.height := lt_of_lt_of_le hx'' hy'
     simpa [pixIdx] using hlt
 
@@ -368,27 +372,6 @@ def BitReader.readBit (br : BitReader) : Nat × BitReader :=
           hend := hend'
           hbit := hbit' })
 
-lemma bitIndex_readBit (br : BitReader) (h : br.bytePos < br.data.size) :
-    (BitReader.readBit br).2.bitIndex = br.bitIndex + 1 := by
-  unfold BitReader.readBit BitReader.bitIndex
-  have hne : br.bytePos ≠ br.data.size := ne_of_lt h
-  by_cases hnext : br.bitPos + 1 = 8
-  · calc
-      (BitReader.readBit br).2.bitIndex
-          = (br.bytePos + 1) * 8 := by
-              simp [BitReader.readBit, BitReader.bitIndex, hne, hnext]
-      _ = br.bytePos * 8 + (br.bitPos + 1) := by
-              simp [Nat.add_mul, hnext, Nat.add_comm]
-      _ = br.bitIndex + 1 := by
-              simp [BitReader.bitIndex, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm]
-  · simp [hne, hnext, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm]
-
-lemma readBit_data (br : BitReader) (h : br.bytePos < br.data.size) :
-    (br.readBit).2.data = br.data := by
-  unfold BitReader.readBit
-  have hne : br.bytePos ≠ br.data.size := ne_of_lt h
-  by_cases hnext : br.bitPos + 1 = 8 <;> simp [hne, hnext]
-
 def BitReader.readBits (br : BitReader) (n : Nat)
     (h : br.bitIndex + n <= br.data.size * 8) : Nat × BitReader := by
   induction n generalizing br with
@@ -410,10 +393,27 @@ def BitReader.readBits (br : BitReader) (n : Nat)
         exact Nat.lt_of_mul_lt_mul_left hmul'
       cases hres : br.readBit with
       | mk bit br' =>
+          have hindex' : (BitReader.readBit br).2.bitIndex = br.bitIndex + 1 := by
+            unfold BitReader.readBit BitReader.bitIndex
+            have hne : br.bytePos ≠ br.data.size := ne_of_lt hbyte
+            by_cases hnext : br.bitPos + 1 = 8
+            · calc
+                (BitReader.readBit br).2.bitIndex
+                    = (br.bytePos + 1) * 8 := by
+                        simp [BitReader.readBit, BitReader.bitIndex, hne, hnext]
+                _ = br.bytePos * 8 + (br.bitPos + 1) := by
+                        simp [Nat.add_mul, hnext, Nat.add_comm]
+                _ = br.bitIndex + 1 := by
+                        simp [BitReader.bitIndex, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm]
+            · simp [hne, hnext, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm]
+          have hdata' : (br.readBit).2.data = br.data := by
+            unfold BitReader.readBit
+            have hne : br.bytePos ≠ br.data.size := ne_of_lt hbyte
+            by_cases hnext : br.bitPos + 1 = 8 <;> simp [hne, hnext]
           have hindex : br'.bitIndex = br.bitIndex + 1 := by
-            simpa [hres] using bitIndex_readBit br hbyte
+            simpa [hres] using hindex'
           have hdata : br'.data = br.data := by
-            simpa [hres] using readBit_data br hbyte
+            simpa [hres] using hdata'
           have h' : br'.bitIndex + n <= br'.data.size * 8 := by
             have h'raw : br'.bitIndex + n <= br.data.size * 8 := by
               simpa [hindex, Nat.succ_eq_add_one, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm] using h
@@ -562,25 +562,23 @@ def distExtra : Array Nat :=
     12, 12,
     13, 13]
 
-lemma lengthBases_size : lengthBases.size = 29 := by decide
-lemma lengthExtra_size : lengthExtra.size = 29 := by decide
-lemma distBases_size : distBases.size = 30 := by decide
-lemma distExtra_size : distExtra.size = 30 := by decide
-
 def decodeLength (sym : Nat) (br : BitReader)
     (h : 257 ≤ sym ∧ sym ≤ 285)
     (hbits : br.bitIndex + (lengthExtra[(sym - 257)]'
       (by
         have hidxlt : sym - 257 < 29 := by omega
-        simpa [lengthExtra_size] using hidxlt)) <= br.data.size * 8) :
+        have hsize : lengthExtra.size = 29 := by decide
+        simpa [hsize] using hidxlt)) <= br.data.size * 8) :
     Nat × BitReader :=
   let idx := sym - 257
   have hidxle : idx ≤ 28 := by
     dsimp [idx]
     omega
   have hidxlt : idx < 29 := Nat.lt_succ_of_le hidxle
-  have hidxBase : idx < lengthBases.size := by simpa [lengthBases_size] using hidxlt
-  have hidxExtra : idx < lengthExtra.size := by simpa [lengthExtra_size] using hidxlt
+  have hLengthBasesSize : lengthBases.size = 29 := by decide
+  have hLengthExtraSize : lengthExtra.size = 29 := by decide
+  have hidxBase : idx < lengthBases.size := by simpa [hLengthBasesSize] using hidxlt
+  have hidxExtra : idx < lengthExtra.size := by simpa [hLengthExtraSize] using hidxlt
   let base := Array.getInternal lengthBases idx hidxBase
   let extra := Array.getInternal lengthExtra idx hidxExtra
   if hextra : extra = 0 then
@@ -593,10 +591,14 @@ def decodeDistance (sym : Nat) (br : BitReader)
     (h : sym < distBases.size)
     (hbits : br.bitIndex + distExtra[sym]'
       (by
-        simpa [distExtra_size, distBases_size] using h) <= br.data.size * 8) :
+        have hDistExtraSize : distExtra.size = 30 := by decide
+        have hDistBasesSize : distBases.size = 30 := by decide
+        simpa [hDistExtraSize, hDistBasesSize] using h) <= br.data.size * 8) :
     Nat × BitReader :=
+  have hDistExtraSize : distExtra.size = 30 := by decide
+  have hDistBasesSize : distBases.size = 30 := by decide
   have hdistExtra : sym < distExtra.size := by
-    simpa [distExtra_size, distBases_size] using h
+    simpa [hDistExtraSize, hDistBasesSize] using h
   let base := Array.getInternal distBases sym h
   let extra := Array.getInternal distExtra sym hdistExtra
   if hextra : extra = 0 then
@@ -609,6 +611,9 @@ partial def decodeCompressedBlock (litLen dist : Huffman) (br : BitReader) (out 
     Option (BitReader × ByteArray) := do
   let mut br := br
   let mut out := out
+  let hLengthExtraSize : lengthExtra.size = 29 := by decide
+  let hDistBasesSize : distBases.size = 30 := by decide
+  let hDistExtraSize : distExtra.size = 30 := by decide
   while true do
     let (sym, br') ← litLen.decode br
     br := br'
@@ -622,7 +627,7 @@ partial def decodeCompressedBlock (litLen dist : Huffman) (br : BitReader) (out 
         dsimp [idx]
         omega
       have hidxlt : idx < 29 := Nat.lt_succ_of_le hidxle
-      have hidxExtra : idx < lengthExtra.size := by simpa [lengthExtra_size] using hidxlt
+      have hidxExtra : idx < lengthExtra.size := by simpa [hLengthExtraSize] using hidxlt
       let extra := Array.getInternal lengthExtra idx hidxExtra
       if hbits : br.bitIndex + extra <= br.data.size * 8 then
         let (len, br'') := decodeLength sym br hlen (by simpa using hbits)
@@ -631,7 +636,7 @@ partial def decodeCompressedBlock (litLen dist : Huffman) (br : BitReader) (out 
         br := br'''
         if hdist : distSym < distBases.size then
           let extraD := Array.getInternal distExtra distSym (by
-            simpa [distExtra_size, distBases_size] using hdist)
+            simpa [hDistExtraSize, hDistBasesSize] using hdist)
           if hbitsD : br.bitIndex + extraD <= br.data.size * 8 then
             let (distance, br'''') := decodeDistance distSym br hdist (by simpa using hbitsD)
             br := br''''
