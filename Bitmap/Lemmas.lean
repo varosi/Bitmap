@@ -434,6 +434,56 @@ lemma zlibCompressStored_size (raw : ByteArray) :
   simp [ByteArray.size_append, u32be_size, hheader]
   omega
 
+-- Zlib stored-compression output has at least the 2-byte header and 4-byte Adler32.
+lemma zlibCompressStored_size_ge (raw : ByteArray) :
+    6 ≤ (zlibCompressStored raw).size := by
+  have hsz : (zlibCompressStored raw).size = (deflateStored raw).size + 6 :=
+    zlibCompressStored_size raw
+  have h6 : 6 ≤ (deflateStored raw).size + 6 := Nat.le_add_left _ _
+  rw [hsz]
+  exact h6
+
+-- Zlib header bytes in stored-compression output match the expected constants.
+lemma zlibCompressStored_cmf_flg (raw : ByteArray) :
+    let bytes := zlibCompressStored raw
+    let h0 : 0 < bytes.size := by
+      exact lt_of_lt_of_le (by decide : 0 < 6) (zlibCompressStored_size_ge raw)
+    let h1 : 1 < bytes.size := by
+      exact lt_of_lt_of_le (by decide : 1 < 6) (zlibCompressStored_size_ge raw)
+    bytes[0]'h0 = u8 0x78 ∧ bytes[1]'h1 = u8 0x01 := by
+  let bytes := zlibCompressStored raw
+  let header : ByteArray := ByteArray.mk #[u8 0x78, u8 0x01]
+  let deflated := deflateStored raw
+  let adler := u32be (adler32 raw).toNat
+  have h0h : 0 < header.size := by decide
+  have h1h : 1 < header.size := by decide
+  have h0 : 0 < bytes.size := by
+    exact lt_of_lt_of_le (by decide : 0 < 6) (zlibCompressStored_size_ge raw)
+  have h1 : 1 < bytes.size := by
+    exact lt_of_lt_of_le (by decide : 1 < 6) (zlibCompressStored_size_ge raw)
+  have hle : header.size ≤ (header ++ deflated ++ adler).size := by
+    simp [ByteArray.size_append]
+    omega
+  have h0' : 0 < (header ++ deflated ++ adler).size := lt_of_lt_of_le h0h hle
+  have h1' : 1 < (header ++ deflated ++ adler).size := lt_of_lt_of_le h1h hle
+  have hget0 :
+      (header ++ deflated ++ adler)[0]'h0' = header[0]'h0h := by
+    have hget := ByteArray.get_append_left (a := header) (b := deflated ++ adler) (i := 0) h0h
+    simpa [ByteArray.append_assoc] using hget
+  have hget1 :
+      (header ++ deflated ++ adler)[1]'h1' = header[1]'h1h := by
+    have hget := ByteArray.get_append_left (a := header) (b := deflated ++ adler) (i := 1) h1h
+    simpa [ByteArray.append_assoc] using hget
+  have hheader0 : header[0]'h0h = u8 0x78 := by
+    rfl
+  have hheader1 : header[1]'h1h = u8 0x01 := by
+    rfl
+  have hget0' : bytes[0]'h0 = u8 0x78 := by
+    simpa [bytes, zlibCompressStored, hget0, hheader0]
+  have hget1' : bytes[1]'h1 = u8 0x01 := by
+    simpa [bytes, zlibCompressStored, hget1, hheader1]
+  exact ⟨hget0', hget1'⟩
+
 
 -- IHDR payload is always 13 bytes.
 lemma ihdr_payload_size (w h : Nat) :
