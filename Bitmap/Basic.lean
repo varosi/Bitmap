@@ -932,26 +932,30 @@ partial def decodeBitmap (bytes : ByteArray) : Option BitmapRGB8 := do
   let expected := hdr.height * (rowBytes + 1)
   if raw.size != expected then
     none
-  let mut pixels := ByteArray.empty
+  let totalBytes := hdr.width * hdr.height * bytesPerPixel
+  let mut pixels := ByteArray.mk <| Array.replicate totalBytes 0
   let mut prevRow := ByteArray.empty
   let mut offset := 0
-  for _y in [0:hdr.height] do
+  for y in [0:hdr.height] do
     let filter := raw.get! offset
     offset := offset + 1
     let rowData := raw.extract offset (offset + rowBytes)
     offset := offset + rowBytes
     if hfilter : filter.toNat ≤ 4 then
       let row := unfilterRow filter rowData prevRow bpp hfilter
-      let mut x := 0
-      while x < hdr.width do
-        let base := x * bpp
-        let r := row.get! base
-        let g := row.get! (base + 1)
-        let b := row.get! (base + 2)
-        pixels := pixels.push r
-        pixels := pixels.push g
-        pixels := pixels.push b
-        x := x + 1
+      if bpp == 3 then
+        let rowOffset := y * rowBytes
+        pixels := row.copySlice 0 pixels rowOffset rowBytes
+      else
+        for x in [0:hdr.width] do
+          let base := x * bpp
+          let r := row.get! base
+          let g := row.get! (base + 1)
+          let b := row.get! (base + 2)
+          let pixBase := (y * hdr.width + x) * bytesPerPixel
+          pixels := pixels.set! pixBase r
+          pixels := pixels.set! (pixBase + 1) g
+          pixels := pixels.set! (pixBase + 2) b
       prevRow := row
     else
       none
