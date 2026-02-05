@@ -839,99 +839,52 @@ structure PngHeader where
   bitDepth : Nat
 deriving Repr
 
+def readChunk (bytes : ByteArray) (pos : Nat) : Option (ByteArray × ByteArray × Nat) := do
+  if hLen : pos + 3 < bytes.size then
+    let len := readU32BE bytes pos hLen
+    let typeStart := pos + 4
+    let dataStart := pos + 8
+    let dataEnd := dataStart + len
+    let crcEnd := dataEnd + 4
+    if crcEnd > bytes.size then
+      none
+    let typBytes := bytes.extract typeStart (typeStart + 4)
+    let data := bytes.extract dataStart dataEnd
+    return (typBytes, data, crcEnd)
+  else
+    none
+
 def parsePngSimple (bytes : ByteArray) : Option (PngHeader × ByteArray) := do
   if hsize : 8 <= bytes.size then
     if bytes.extract 0 8 != pngSignature then
       none
     let pos := 8
-    if hLen : pos + 3 < bytes.size then
-      let lenBytes := bytes.extract pos (pos + 4)
-      have hLenSize : lenBytes.size = 4 := by
-        have hle : pos + 4 ≤ bytes.size := Nat.succ_le_of_lt hLen
-        simp [lenBytes, ByteArray.size_extract, Nat.min_eq_left hle, Nat.add_sub_cancel_left]
-      have hLenPos : 0 + 3 < lenBytes.size := by
-        simp [hLenSize]
-      let len := readU32BE lenBytes 0 hLenPos
-      let typeStart := pos + 4
-      let dataStart := pos + 8
-      let dataEnd := dataStart + len
-      let crcEnd := dataEnd + 4
-      if crcEnd > bytes.size then
-        none
-      let typBytes := bytes.extract typeStart (typeStart + 4)
-      if typBytes != "IHDR".toUTF8 then
-        none
-      if hlen : len ≠ 13 then
-        none
-      else
-        if hIH : dataStart + 12 < bytes.size then
-          let ihdr := bytes.extract dataStart dataEnd
-          have hIHSize : ihdr.size = 13 := by
-            have hlen' : len = 13 := by
-              exact not_ne_iff.mp hlen
-            have hle : dataStart + 13 ≤ bytes.size := Nat.succ_le_of_lt hIH
-            have : ihdr.size = (dataStart + 13) - dataStart := by
-              simp [ihdr, ByteArray.size_extract, Nat.min_eq_left hle, dataEnd, hlen']
-            simpa [Nat.add_sub_cancel_left] using this
-          let w := readU32BE ihdr 0 (by simp [hIHSize])
-          let h := readU32BE ihdr 4 (by simp [hIHSize])
-          let bitDepth := (ihdr.get 8 (by simp [hIHSize])).toNat
-          let colorType := (ihdr.get 9 (by simp [hIHSize])).toNat
-          let comp := (ihdr.get 10 (by simp [hIHSize])).toNat
-          let filter := (ihdr.get 11 (by simp [hIHSize])).toNat
-          let interlace := (ihdr.get 12 (by simp [hIHSize])).toNat
-          if comp != 0 || filter != 0 || interlace != 0 then
-            none
-          let hdr : PngHeader := { width := w, height := h, colorType, bitDepth }
-          let pos2 := crcEnd
-          if hLen2 : pos2 + 3 < bytes.size then
-            let len2Bytes := bytes.extract pos2 (pos2 + 4)
-            have hLen2Size : len2Bytes.size = 4 := by
-              have hle : pos2 + 4 ≤ bytes.size := Nat.succ_le_of_lt hLen2
-              simp [len2Bytes, ByteArray.size_extract, Nat.min_eq_left hle, Nat.add_sub_cancel_left]
-            have hLen2Pos : 0 + 3 < len2Bytes.size := by
-              simp [hLen2Size]
-            let len2 := readU32BE len2Bytes 0 hLen2Pos
-            let typeStart2 := pos2 + 4
-            let dataStart2 := pos2 + 8
-            let dataEnd2 := dataStart2 + len2
-            let crcEnd2 := dataEnd2 + 4
-            if crcEnd2 > bytes.size then
-              none
-            let typBytes2 := bytes.extract typeStart2 (typeStart2 + 4)
-            if typBytes2 != "IDAT".toUTF8 then
-              none
-            let idat := bytes.extract dataStart2 dataEnd2
-            let pos3 := crcEnd2
-            if hLen3 : pos3 + 3 < bytes.size then
-              let len3Bytes := bytes.extract pos3 (pos3 + 4)
-              have hLen3Size : len3Bytes.size = 4 := by
-                have hle : pos3 + 4 ≤ bytes.size := Nat.succ_le_of_lt hLen3
-                simp [len3Bytes, ByteArray.size_extract, Nat.min_eq_left hle, Nat.add_sub_cancel_left]
-              have hLen3Pos : 0 + 3 < len3Bytes.size := by
-                simp [hLen3Size]
-              let len3 := readU32BE len3Bytes 0 hLen3Pos
-              if len3 != 0 then
-                none
-              let typeStart3 := pos3 + 4
-              let dataStart3 := pos3 + 8
-              let crcEnd3 := dataStart3 + 4
-              if crcEnd3 > bytes.size then
-                none
-              let typBytes3 := bytes.extract typeStart3 (typeStart3 + 4)
-              if typBytes3 != "IEND".toUTF8 then
-                none
-              return (hdr, idat)
-            else
-              none
-          else
-            none
-        else
-          none
-    else
+    let (typ1, data1, pos2) ← readChunk bytes pos
+    if typ1 != "IHDR".toUTF8 then
       none
+    if hlen : data1.size ≠ 13 then
+      none
+    else
+      let hlen' : data1.size = 13 := by
+        exact not_ne_iff.mp hlen
+      let w := readU32BE data1 0 (by simp [hlen'])
+      let h := readU32BE data1 4 (by simp [hlen'])
+      let tail := data1.extract 8 13
+      if tail != ByteArray.mk #[u8 8, u8 2, u8 0, u8 0, u8 0] then
+        none
+      let hdr : PngHeader := { width := w, height := h, colorType := 2, bitDepth := 8 }
+      let (typ2, data2, pos3) ← readChunk bytes pos2
+      if typ2 != "IDAT".toUTF8 then
+        none
+      let (typ3, data3, _) ← readChunk bytes pos3
+      if typ3 != "IEND".toUTF8 then
+        none
+      if data3.size != 0 then
+        none
+      return (hdr, data2)
   else
     none
+
 
 partial def parsePng (bytes : ByteArray) (_hsize : 8 <= bytes.size) : Option (PngHeader × ByteArray) := do
   if let some res := parsePngSimple bytes then

@@ -13,6 +13,7 @@ lemma byteArray_size_set {bs : ByteArray} {i : Nat} {h : i < bs.size} {b : UInt8
   | mk data =>
       simp [ByteArray.set, ByteArray.size, Array.size_set]
 
+
 namespace Png
 
 -- Reading one bit advances the bit index by one.
@@ -108,6 +109,14 @@ lemma byteArray_get_set_ne'
     (bs.set i v hi).get j h' = bs.get j hj := by
   simpa using (byteArray_get_set_ne (bs := bs) (i := i) (j := j) (hi := hi) (hj := hj) (hij := hij) (v := v))
 
+-- `getElem` is proof-irrelevant for ByteArrays.
+@[simp] lemma byteArray_getElem_eq {bs : ByteArray} {i : Nat} (h1 h2 : i < bs.size) :
+    bs[i]'h1 = bs[i]'h2 := by
+  rfl
+
+
+ 
+
 -- Writing a pixel then reading it back yields the same pixel.
 lemma getPixel_putPixel_eq
     (img : Bitmap) (x y : Nat) (pixel : PixelRGB8)
@@ -178,6 +187,7 @@ lemma u32be_size (n : Nat) : (u32be n).size = 4 := by
   have h : (u32be n).data.size = 4 := by
     simp [u32be]
   simpa [ByteArray.size_data] using h
+
 
 -- Reading a u16le-encoded value returns the original number (in range).
 @[simp] lemma readU16LE_u16le (n : Nat) (hn : n < 2 ^ 16) :
@@ -337,6 +347,38 @@ lemma readU32BE_u32be (n : Nat) (hn : n < 2 ^ 32) :
     simpa [h256, h24mod] using hdecomp
   simpa [hread] using hdecomp'
 
+-- Reading a 32-bit value depends only on the extracted 4-byte slice.
+lemma readU32BE_extract (bytes : ByteArray) (pos : Nat) (h : pos + 3 < bytes.size) :
+    readU32BE bytes pos h =
+      readU32BE (bytes.extract pos (pos + 4)) 0 (by
+        have hle : pos + 4 ≤ bytes.size := Nat.succ_le_of_lt h
+        simp [ByteArray.size_extract, Nat.min_eq_left hle, Nat.add_sub_cancel_left]) := by
+  cases bytes with
+  | mk data =>
+      simp [readU32BE, ByteArray.extract, ByteArray.get]
+
+-- `readU32BE` is proof-irrelevant in its bounds argument.
+lemma readU32BE_proof_irrel {bytes : ByteArray} {pos : Nat}
+    (h1 h2 : pos + 3 < bytes.size) :
+    readU32BE bytes pos h1 = readU32BE bytes pos h2 := by
+  rfl
+
+-- Reading a 32-bit value from a slice that equals `u32be n` yields `n`.
+lemma readU32BE_of_extract_eq (bytes : ByteArray) (pos n : Nat)
+    (h : pos + 3 < bytes.size)
+    (hextract : bytes.extract pos (pos + 4) = u32be n)
+    (hn : n < 2 ^ 32) :
+    readU32BE bytes pos h = n := by
+  have h' := readU32BE_extract (bytes := bytes) (pos := pos) h
+  have hcanon : readU32BE (u32be n) 0 (by simp [u32be_size]) = n :=
+    readU32BE_u32be n hn
+  have h'' :
+      readU32BE (bytes.extract pos (pos + 4)) 0 (by
+        have hle : pos + 4 ≤ bytes.size := Nat.succ_le_of_lt h
+        simp [ByteArray.size_extract, Nat.min_eq_left hle]) = n := by
+    simpa [hextract, readU32BE_proof_irrel] using hcanon
+  exact h'.trans h''
+
 -- PNG signature is 8 bytes.
 lemma pngSignature_size : pngSignature.size = 8 := by
   have h : pngSignature.data.size = 8 := by
@@ -369,12 +411,196 @@ lemma byteArray_extract_append_left (a b : ByteArray) (i j : Nat)
   -- Both subtractions are zero since the slice stays within `a`.
   simpa [Nat.sub_eq_zero_of_le hi, Nat.sub_eq_zero_of_le hj] using this
 
+
 -- IHDR payload is always 13 bytes.
 lemma ihdr_payload_size (w h : Nat) :
     (u32be w ++ u32be h ++ ByteArray.mk #[u8 8, u8 2, u8 0, u8 0, u8 0]).size = 13 := by
   have hbytes : (ByteArray.mk #[u8 8, u8 2, u8 0, u8 0, u8 0]).size = 5 := by
     decide
   simp [ByteArray.size_append, u32be_size, hbytes]
+
+-- Fixed tail bytes in the IHDR payload (bit depth, color type, and flags).
+def ihdrTail : ByteArray :=
+  ByteArray.mk #[u8 8, u8 2, u8 0, u8 0, u8 0]
+
+-- IHDR payload width slice is the encoded width.
+lemma ihdr_payload_extract_width (w h : Nat) :
+    (u32be w ++ u32be h ++ ByteArray.mk #[u8 8, u8 2, u8 0, u8 0, u8 0]).extract 0 4 =
+      u32be w := by
+  let tail := ByteArray.mk #[u8 8, u8 2, u8 0, u8 0, u8 0]
+  let ihdr := u32be w ++ u32be h ++ tail
+  ext i hi
+  · -- size goal
+    have hle : 0 + 4 ≤ ihdr.size := by
+      have : ihdr.size = 13 := by
+        simpa [ihdr, tail] using ihdr_payload_size w h
+      omega
+    have hsize : (ihdr.extract 0 4).size = 4 := by
+      simp [ByteArray.size_extract, Nat.min_eq_left hle]
+    simp [ByteArray.size_data, u32be_size]
+  · -- element goal
+    have hle : 0 + 4 ≤ ihdr.size := by
+      have : ihdr.size = 13 := by
+        simpa [ihdr, tail] using ihdr_payload_size w h
+      omega
+    have hsize : (ihdr.extract 0 4).size = 4 := by
+      simp [ByteArray.size_extract, Nat.min_eq_left hle]
+    have hi4 : i < 4 := by
+      simpa [hsize] using hi
+    have hiw : i < (u32be w).size := by
+      simpa [u32be_size] using hi4
+    have hi_ihdr : i < ihdr.size := lt_of_lt_of_le hi4 hle
+    have hget : ihdr[i]'hi_ihdr = (u32be w)[i]'hiw := by
+      have h :=
+        (ByteArray.get_append_left (a := u32be w) (b := u32be h ++ tail) (i := i) hiw)
+      simpa [ihdr, tail, ByteArray.append_assoc] using h
+    have hget' : (ihdr.extract 0 4)[i] = ihdr[i]'hi_ihdr := by
+      simp
+    calc
+      (ihdr.extract 0 4)[i] = ihdr[i]'hi_ihdr := hget'
+      _ = (u32be w)[i]'hiw := hget
+
+-- IHDR payload height slice is the encoded height.
+lemma ihdr_payload_extract_height (w h : Nat) :
+    (u32be w ++ u32be h ++ ByteArray.mk #[u8 8, u8 2, u8 0, u8 0, u8 0]).extract 4 8 =
+      u32be h := by
+  let tail := ByteArray.mk #[u8 8, u8 2, u8 0, u8 0, u8 0]
+  let ihdr := u32be w ++ u32be h ++ tail
+  ext i hi
+  · -- size goal
+    have hle : 4 + 4 ≤ ihdr.size := by
+      have : ihdr.size = 13 := by
+        simpa [ihdr, tail] using ihdr_payload_size w h
+      omega
+    have hsize : (ihdr.extract 4 8).size = 4 := by
+      simp [ByteArray.size_extract, Nat.min_eq_left hle]
+    simp [ByteArray.size_data, u32be_size]
+  · -- element goal
+    have hle : 4 + 4 ≤ ihdr.size := by
+      have : ihdr.size = 13 := by
+        simpa [ihdr, tail] using ihdr_payload_size w h
+      omega
+    have hsize : (ihdr.extract 4 8).size = 4 := by
+      simp [ByteArray.size_extract, Nat.min_eq_left hle]
+    have hi4 : i < 4 := by
+      simpa [hsize] using hi
+    have hih : i < (u32be h).size := by
+      simpa [u32be_size] using hi4
+    have hright : ihdr[4 + i]'(by
+        have : ihdr.size = 13 := by
+          simpa [ihdr, tail] using ihdr_payload_size w h
+        omega) = (u32be h ++ tail)[i]'(by
+          have : i < (u32be h ++ tail).size := by
+            have : (u32be h).size = 4 := u32be_size h
+            have h' : i < 4 := by simpa [u32be_size] using hi4
+            simpa [ByteArray.size_append, this] using
+              (Nat.lt_of_lt_of_le h' (Nat.le_add_right _ _))
+          simpa using this) := by
+      have hle' : (u32be w).size ≤ 4 + i := by
+        simp [u32be_size]
+      have hlt' : 4 + i < ihdr.size := by
+        have : ihdr.size = 13 := by
+          simpa [ihdr, tail] using ihdr_payload_size w h
+        omega
+      have h := ByteArray.get_append_right (a := u32be w) (b := u32be h ++ tail)
+        (i := 4 + i) hle' (by simpa [ihdr, tail, ByteArray.append_assoc] using hlt')
+      simpa [ihdr, tail, u32be_size, Nat.add_sub_cancel_left, ByteArray.append_assoc] using h
+    have hleft : (u32be h ++ tail)[i]'(by
+        have : i < (u32be h ++ tail).size := by
+          have : (u32be h).size = 4 := u32be_size h
+          have h' : i < 4 := by simpa [u32be_size] using hi4
+          simpa [ByteArray.size_append, this] using
+            (Nat.lt_of_lt_of_le h' (Nat.le_add_right _ _))
+        simpa using this) = (u32be h)[i]'hih := by
+      have h :=
+        (ByteArray.get_append_left (a := u32be h) (b := tail) (i := i) hih)
+      simpa [tail] using h
+    have hget' : (ihdr.extract 4 8)[i] = ihdr[4 + i]'(by
+        have : ihdr.size = 13 := by
+          simpa [ihdr, tail] using ihdr_payload_size w h
+        omega) := by
+      simp
+    calc
+      (ihdr.extract 4 8)[i] = ihdr[4 + i]'(by
+        have : ihdr.size = 13 := by
+          simpa [ihdr, tail] using ihdr_payload_size w h
+        omega) := hget'
+      _ = (u32be h ++ tail)[i]'(by
+        have : i < (u32be h ++ tail).size := by
+          have : (u32be h).size = 4 := u32be_size h
+          have h' : i < 4 := by simpa [u32be_size] using hi4
+          simpa [ByteArray.size_append, this] using
+            (Nat.lt_of_lt_of_le h' (Nat.le_add_right _ _))
+        simpa using this) := hright
+      _ = (u32be h)[i]'hih := hleft
+
+-- Reading the width from an IHDR payload yields the original width.
+lemma readU32BE_ihdr_width (w h : Nat) (hw : w < 2 ^ 32) :
+    readU32BE (u32be w ++ u32be h ++ ihdrTail) 0 (by
+      have : (u32be w ++ u32be h ++ ihdrTail).size = 13 := by
+        simpa [ihdrTail] using ihdr_payload_size w h
+      omega) = w := by
+  have hpos : 0 + 3 < (u32be w ++ u32be h ++ ihdrTail).size := by
+    have : (u32be w ++ u32be h ++ ihdrTail).size = 13 := by
+      simpa [ihdrTail] using ihdr_payload_size w h
+    omega
+  have hread :=
+    readU32BE_extract (bytes := u32be w ++ u32be h ++ ihdrTail) (pos := 0) hpos
+  have hwidth : (u32be w ++ u32be h ++ ihdrTail).extract 0 4 = u32be w := by
+    simpa [ihdrTail] using ihdr_payload_extract_width w h
+  have htotal : (u32be w ++ u32be h ++ ihdrTail).size = 13 := by
+    simpa [ihdrTail] using ihdr_payload_size w h
+  have hsize : ((u32be w ++ u32be h ++ ihdrTail).extract 0 4).size = 4 := by
+    simp [ByteArray.size_extract, htotal]
+  have hpos' : 0 + 3 < ((u32be w ++ u32be h ++ ihdrTail).extract 0 4).size := by
+    simp [hsize]
+  have hread' :
+      readU32BE ((u32be w ++ u32be h ++ ihdrTail).extract 0 4) 0 hpos' = w := by
+    simpa [hwidth] using readU32BE_u32be w hw
+  simp [hread'] at hread
+  exact hread
+
+-- Reading the height from an IHDR payload yields the original height.
+lemma readU32BE_ihdr_height (w h : Nat) (hh : h < 2 ^ 32) :
+    readU32BE (u32be w ++ u32be h ++ ihdrTail) 4 (by
+      have : (u32be w ++ u32be h ++ ihdrTail).size = 13 := by
+        simpa [ihdrTail] using ihdr_payload_size w h
+      omega) = h := by
+  have hpos : 4 + 3 < (u32be w ++ u32be h ++ ihdrTail).size := by
+    have : (u32be w ++ u32be h ++ ihdrTail).size = 13 := by
+      simpa [ihdrTail] using ihdr_payload_size w h
+    omega
+  have hread :=
+    readU32BE_extract (bytes := u32be w ++ u32be h ++ ihdrTail) (pos := 4) hpos
+  have hheight : (u32be w ++ u32be h ++ ihdrTail).extract 4 8 = u32be h := by
+    simpa [ihdrTail] using ihdr_payload_extract_height w h
+  have htotal : (u32be w ++ u32be h ++ ihdrTail).size = 13 := by
+    simpa [ihdrTail] using ihdr_payload_size w h
+  have hsize : ((u32be w ++ u32be h ++ ihdrTail).extract 4 8).size = 4 := by
+    simp [ByteArray.size_extract, htotal]
+  have hpos' : 0 + 3 < ((u32be w ++ u32be h ++ ihdrTail).extract 4 8).size := by
+    simp [hsize]
+  have hread' :
+      readU32BE ((u32be w ++ u32be h ++ ihdrTail).extract 4 8) 0 hpos' = h := by
+    simpa [hheight] using readU32BE_u32be h hh
+  simp [hread'] at hread
+  exact hread
+
+-- The fixed IHDR tail bytes are present.
+lemma ihdr_payload_extract_tail (w h : Nat) :
+    (u32be w ++ u32be h ++ ihdrTail).extract 8 13 = ihdrTail := by
+  have hsize : (u32be w ++ u32be h).size = 8 := by
+    simp [ByteArray.size_append, u32be_size]
+  have hshift :
+      (u32be w ++ u32be h ++ ihdrTail).extract 8 13 = ihdrTail.extract 0 5 := by
+    simpa [ByteArray.append_assoc, hsize] using
+      (ByteArray.extract_append_size_add
+        (a := u32be w ++ u32be h)
+        (b := ihdrTail)
+        (i := 0) (j := 5))
+  have htail : ihdrTail.extract 0 5 = ihdrTail := by
+    decide
+  simpa [htail] using hshift
 
 -- IHDR tag is 4 bytes in UTF-8.
 lemma ihdr_utf8_size : ("IHDR".toUTF8).size = 4 := by decide
@@ -501,6 +727,13 @@ lemma encodeBitmap_extract_ihdr_len (bmp : BitmapRGB8) :
   have hlen : (mkChunk "IHDR" ihdr).extract 0 4 = u32be ihdr.size :=
     mkChunk_extract_len _ _
   simp [hshift, hprefix, hlen, hihdr]
+
+-- Reading the IHDR length from the encoded PNG yields 13.
+lemma readU32BE_encodeBitmap_ihdr_len (bmp : BitmapRGB8)
+    (h : 8 + 3 < (encodeBitmap bmp).size) :
+    readU32BE (encodeBitmap bmp) 8 h = 13 := by
+  exact readU32BE_of_extract_eq (bytes := encodeBitmap bmp) (pos := 8) (n := 13) h
+    (encodeBitmap_extract_ihdr_len bmp) (by decide)
 
 -- The IHDR type field in the encoded PNG is "IHDR".
 lemma encodeBitmap_extract_ihdr_type (bmp : BitmapRGB8) :
@@ -633,6 +866,18 @@ lemma encodeBitmap_extract_idat_len (bmp : BitmapRGB8) :
   have hlen : (mkChunk "IDAT" idat).extract 0 4 = u32be idat.size :=
     mkChunk_extract_len _ _
   simp [hshift, hprefix, hlen, idat]
+
+-- Reading the IDAT length from the encoded PNG yields the compressed payload size.
+lemma readU32BE_encodeBitmap_idat_len (bmp : BitmapRGB8)
+    (h : 33 + 3 < (encodeBitmap bmp).size)
+    (hidat : (zlibCompressStored (encodeRaw bmp)).size < 2 ^ 32) :
+    readU32BE (encodeBitmap bmp) 33 h =
+      (zlibCompressStored (encodeRaw bmp)).size := by
+  let idat := zlibCompressStored (encodeRaw bmp)
+  have hextract : (encodeBitmap bmp).extract 33 37 = u32be idat.size := by
+    simpa [idat] using encodeBitmap_extract_idat_len bmp
+  exact readU32BE_of_extract_eq (bytes := encodeBitmap bmp) (pos := 33) (n := idat.size) h
+    hextract hidat
 
 -- The IDAT type field in the encoded PNG is "IDAT".
 lemma encodeBitmap_extract_idat_type (bmp : BitmapRGB8) :
@@ -782,6 +1027,21 @@ lemma encodeBitmap_extract_iend_len (bmp : BitmapRGB8) :
     _ = (mkChunk "IEND" ByteArray.empty).extract 0 4 := hleft
     _ = u32be 0 := hlen
 
+-- Reading the IEND length from the encoded PNG yields zero.
+set_option maxHeartbeats 1000000 in
+lemma readU32BE_encodeBitmap_iend_len (bmp : BitmapRGB8)
+    (h : 45 + (zlibCompressStored (encodeRaw bmp)).size + 3 < (encodeBitmap bmp).size) :
+    readU32BE (encodeBitmap bmp) (45 + (zlibCompressStored (encodeRaw bmp)).size) h = 0 := by
+  let idat := zlibCompressStored (encodeRaw bmp)
+  have hpos : 45 + idat.size + 3 < (encodeBitmap bmp).size := by
+    simpa [idat] using h
+  have hextract :
+      (encodeBitmap bmp).extract (45 + idat.size) (45 + idat.size + 4) = u32be 0 := by
+    have hshift : 45 + idat.size + 4 = 49 + idat.size := by omega
+    simpa [idat, hshift] using encodeBitmap_extract_iend_len bmp
+  exact readU32BE_of_extract_eq (bytes := encodeBitmap bmp) (pos := 45 + idat.size) (n := 0) hpos
+    hextract (by decide)
+
 -- The IEND type field in the encoded PNG is "IEND".
 lemma encodeBitmap_extract_iend_type (bmp : BitmapRGB8) :
     (encodeBitmap bmp).extract
@@ -857,6 +1117,155 @@ lemma encodeBitmap_size (bmp : BitmapRGB8) :
   simp [Id.run, ByteArray.size_append, mkChunk_size, pngSignature_size, hihdr,
     ihdr_utf8ByteSize, idat_utf8ByteSize, iend_utf8ByteSize, Nat.add_left_comm, Nat.add_comm]
   omega
+
+-- Reading the IHDR chunk from an encoded bitmap yields its header payload.
+lemma readChunk_encodeBitmap_ihdr (bmp : BitmapRGB8) :
+    readChunk (encodeBitmap bmp) 8 =
+      some ("IHDR".toUTF8,
+        u32be bmp.size.width ++ u32be bmp.size.height ++
+          ByteArray.mk #[u8 8, u8 2, u8 0, u8 0, u8 0],
+        33) := by
+  let ihdr :=
+    u32be bmp.size.width ++ u32be bmp.size.height ++
+      ByteArray.mk #[u8 8, u8 2, u8 0, u8 0, u8 0]
+  let idat := zlibCompressStored (encodeRaw bmp)
+  have hsize : (encodeBitmap bmp).size = idat.size + 57 := by
+    simpa [idat] using encodeBitmap_size bmp
+  have hlen : 8 + 3 < (encodeBitmap bmp).size := by
+    simp [hsize]
+  have hcrc : ¬ (33 > (encodeBitmap bmp).size) := by
+    have hsz : 33 ≤ (encodeBitmap bmp).size := by
+      simp [hsize]
+    exact not_lt_of_ge hsz
+  unfold readChunk
+  simp [hlen, hcrc,
+    readU32BE_encodeBitmap_ihdr_len (bmp := bmp) (h := hlen),
+    encodeBitmap_extract_ihdr_type, encodeBitmap_extract_ihdr_data]
+
+-- Reading the IDAT chunk from an encoded bitmap yields the compressed payload.
+lemma readChunk_encodeBitmap_idat (bmp : BitmapRGB8)
+    (hidat : (zlibCompressStored (encodeRaw bmp)).size < 2 ^ 32) :
+    readChunk (encodeBitmap bmp) 33 =
+      some ("IDAT".toUTF8, zlibCompressStored (encodeRaw bmp),
+        45 + (zlibCompressStored (encodeRaw bmp)).size) := by
+  let idat := zlibCompressStored (encodeRaw bmp)
+  have hsize : (encodeBitmap bmp).size = idat.size + 57 := by
+    simpa [idat] using encodeBitmap_size bmp
+  have hlen : 33 + 3 < (encodeBitmap bmp).size := by
+    simp [hsize]
+  have hlenval : readU32BE (encodeBitmap bmp) 33 hlen = idat.size := by
+    simpa [idat] using
+      (readU32BE_encodeBitmap_idat_len (bmp := bmp) (h := hlen) (hidat := hidat))
+  have htype : 33 + 4 = 37 := by omega
+  have hdataStart : 33 + 8 = 41 := by omega
+  have hcrcEnd : 41 + idat.size + 4 = 45 + idat.size := by omega
+  have hcrc : ¬ (45 + idat.size > (encodeBitmap bmp).size) := by
+    have hsz : 45 + idat.size ≤ (encodeBitmap bmp).size := by
+      simp [hsize]; omega
+    exact not_lt_of_ge hsz
+  unfold readChunk
+  simp [hlen, hlenval, hcrc, htype, hdataStart, hcrcEnd,
+    encodeBitmap_extract_idat_type, encodeBitmap_extract_idat_data, idat]
+
+-- Reading the IEND chunk from an encoded bitmap yields an empty payload.
+lemma readChunk_encodeBitmap_iend (bmp : BitmapRGB8) :
+    readChunk (encodeBitmap bmp)
+        (45 + (zlibCompressStored (encodeRaw bmp)).size) =
+      some ("IEND".toUTF8, ByteArray.empty,
+        57 + (zlibCompressStored (encodeRaw bmp)).size) := by
+  let idat := zlibCompressStored (encodeRaw bmp)
+  have hsize : (encodeBitmap bmp).size = idat.size + 57 := by
+    simpa [idat] using encodeBitmap_size bmp
+  have hlen : 45 + idat.size + 3 < (encodeBitmap bmp).size := by
+    simp [hsize]; omega
+  have hlenval : readU32BE (encodeBitmap bmp) (45 + idat.size) hlen = 0 := by
+    simpa [idat, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm] using
+      (readU32BE_encodeBitmap_iend_len (bmp := bmp) (h := hlen))
+  have htype : 45 + idat.size + 4 = 49 + idat.size := by omega
+  have htypeEnd : 49 + idat.size + 4 = 53 + idat.size := by omega
+  have hdataStart : 45 + idat.size + 8 = 53 + idat.size := by omega
+  have hcrcEnd : 53 + idat.size + 4 = 57 + idat.size := by omega
+  have hcrc : ¬ (53 + idat.size + 4 > (encodeBitmap bmp).size) := by
+    have hsz : 53 + idat.size + 4 ≤ (encodeBitmap bmp).size := by
+      simp [hsize]; omega
+    exact not_lt_of_ge hsz
+  have hpos : 57 + idat.size ≤ (encodeBitmap bmp).size := by
+    simp [hsize]; omega
+  unfold readChunk
+  simp [hlen, hlenval, hcrcEnd, htype, htypeEnd, hdataStart,
+    encodeBitmap_extract_iend_type, idat, hpos]
+
+-- Parsing an encoded bitmap with the simple PNG parser recovers the header and payload.
+set_option maxHeartbeats 1000000 in
+lemma parsePngSimple_encodeBitmap (bmp : BitmapRGB8)
+    (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (hidat : (zlibCompressStored (encodeRaw bmp)).size < 2 ^ 32) :
+    parsePngSimple (encodeBitmap bmp) =
+      some ({ width := bmp.size.width, height := bmp.size.height
+            , colorType := 2, bitDepth := 8 },
+            zlibCompressStored (encodeRaw bmp)) := by
+  let w := bmp.size.width
+  let h := bmp.size.height
+  let ihdr := u32be w ++ u32be h ++ ihdrTail
+  let idat := zlibCompressStored (encodeRaw bmp)
+  have hsize : 8 <= (encodeBitmap bmp).size := by
+    have hsz : (encodeBitmap bmp).size = idat.size + 57 := by
+      simpa [idat] using encodeBitmap_size bmp
+    have h57 : 57 ≤ idat.size + 57 := Nat.le_add_left _ _
+    have h8 : 8 ≤ 57 := by decide
+    have : 8 ≤ idat.size + 57 := le_trans h8 h57
+    simp [hsz]
+  have hlen' : ihdr.size = 13 := by
+    simpa [ihdr, ihdrTail] using ihdr_payload_size w h
+  have hsigNe : (pngSignature != pngSignature) = false := by
+    exact bne_self_eq_false' (a := pngSignature)
+  have hihdrNe : ("IHDR".toUTF8 != "IHDR".toUTF8) = false := by
+    exact bne_self_eq_false' (a := "IHDR".toUTF8)
+  have hidatNe : ("IDAT".toUTF8 != "IDAT".toUTF8) = false := by
+    exact bne_self_eq_false' (a := "IDAT".toUTF8)
+  have hiendNe : ("IEND".toUTF8 != "IEND".toUTF8) = false := by
+    exact bne_self_eq_false' (a := "IEND".toUTF8)
+  have htailEq : ihdr.extract 8 13 = ihdrTail := by
+    simpa [ihdr, ihdrTail] using ihdr_payload_extract_tail w h
+  have htailNe : (ihdr.extract 8 13 != ihdrTail) = false := by
+    rw [htailEq]
+    exact bne_self_eq_false' (a := ihdrTail)
+  have hpos0 : 0 + 3 < ihdr.size := by
+    have : ihdr.size = 13 := hlen'
+    omega
+  have hpos4 : 4 + 3 < ihdr.size := by
+    have : ihdr.size = 13 := hlen'
+    omega
+  have hwidth0 : readU32BE ihdr 0 hpos0 = w := by
+    have hextract : ihdr.extract 0 4 = u32be w := by
+      simpa [ihdr, ihdrTail] using ihdr_payload_extract_width w h
+    exact readU32BE_of_extract_eq ihdr 0 w hpos0 hextract hw
+  have hheight0 : readU32BE ihdr 4 hpos4 = h := by
+    have hextract : ihdr.extract 4 8 = u32be h := by
+      simpa [ihdr, ihdrTail] using ihdr_payload_extract_height w h
+    exact readU32BE_of_extract_eq ihdr 4 h hpos4 hextract hh
+  have hwidth : readU32BE ihdr 0 (by simp [hlen']) = w := by
+    have hproof :=
+      readU32BE_proof_irrel (bytes := ihdr) (pos := 0)
+        (h1 := by simp [hlen']) (h2 := hpos0)
+    exact hproof.trans hwidth0
+  have hheight : readU32BE ihdr 4 (by simp [hlen']) = h := by
+    have hproof :=
+      readU32BE_proof_irrel (bytes := ihdr) (pos := 4)
+        (h1 := by simp [hlen']) (h2 := hpos4)
+    exact hproof.trans hheight0
+  -- Unfold and simplify the parser using the chunk-level lemmas.
+  unfold parsePngSimple
+  simp [hsize, encodeBitmap_signature,
+    readChunk_encodeBitmap_ihdr,
+    readChunk_encodeBitmap_idat (bmp := bmp) (hidat := hidat),
+    readChunk_encodeBitmap_iend]
+  refine And.intro hsigNe ?_
+  refine And.intro hihdrNe ?_
+  refine And.intro htailNe ?_
+  refine And.intro hidatNe ?_
+  refine And.intro hiendNe ?_
+  exact ⟨hlen', hwidth, hheight⟩
 
 lemma bitIndex_readBit (br : BitReader) (h : br.bytePos < br.data.size) :
     (BitReader.readBit br).2.bitIndex = br.bitIndex + 1 :=
