@@ -970,11 +970,12 @@ def encodeBitmap (bmp : BitmapRGB8) : ByteArray :=
     let w := bmp.size.width
     let h := bmp.size.height
     let rowBytes := w * bytesPerPixel
-    let mut raw := ByteArray.empty
+    let rawSize := h * (rowBytes + 1)
+    let mut raw := ByteArray.mk <| Array.replicate rawSize 0
     for y in [0:h] do
-      raw := raw.push 0
+      let outOff := y * (rowBytes + 1)
       let start := y * rowBytes
-      raw := raw ++ bmp.data.extract start (start + rowBytes)
+      raw := bmp.data.copySlice start raw (outOff + 1) rowBytes
     let ihdr := u32be w ++ u32be h ++ ByteArray.mk #[u8 8, u8 2, u8 0, u8 0, u8 0]
     let idat := zlibCompressStored raw
     pngSignature
