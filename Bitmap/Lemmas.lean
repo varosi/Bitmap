@@ -411,6 +411,29 @@ lemma byteArray_extract_append_left (a b : ByteArray) (i j : Nat)
   -- Both subtractions are zero since the slice stays within `a`.
   simpa [Nat.sub_eq_zero_of_le hi, Nat.sub_eq_zero_of_le hj] using this
 
+-- The zlib stored-compression header bytes are fixed.
+lemma zlibCompressStored_header (raw : ByteArray) :
+    (zlibCompressStored raw).extract 0 2 = ByteArray.mk #[u8 0x78, u8 0x01] := by
+  let header : ByteArray := ByteArray.mk #[u8 0x78, u8 0x01]
+  let deflated := deflateStored raw
+  let adler := u32be (adler32 raw).toNat
+  have hsize : header.size = 2 := by decide
+  have hprefix :
+      (header ++ deflated ++ adler).extract 0 2 = header.extract 0 2 := by
+    apply byteArray_extract_append_prefix (a := header) (b := deflated ++ adler) (n := 2)
+    simp [hsize]
+  have hheader : header.extract 0 2 = header := by
+    rw [← hsize, ByteArray.extract_zero_size]
+  simp [zlibCompressStored, header, deflated, adler, hprefix, hheader]
+
+-- Size of zlib stored-compression output (header + deflate + adler32).
+lemma zlibCompressStored_size (raw : ByteArray) :
+    (zlibCompressStored raw).size = (deflateStored raw).size + 6 := by
+  unfold zlibCompressStored
+  have hheader : (ByteArray.mk #[u8 0x78, u8 0x01]).size = 2 := by decide
+  simp [ByteArray.size_append, u32be_size, hheader]
+  omega
+
 
 -- IHDR payload is always 13 bytes.
 lemma ihdr_payload_size (w h : Nat) :
