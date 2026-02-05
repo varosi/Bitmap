@@ -577,6 +577,151 @@ lemma encodeBitmap_extract_ihdr_data (bmp : BitmapRGB8) :
     simpa using this
   simp [hshift, hleft, hdata, ihdr]
 
+-- Size of the PNG signature plus the IHDR chunk in the encoded PNG.
+lemma encodeBitmap_sig_ihdr_size (bmp : BitmapRGB8) :
+    (pngSignature ++
+        mkChunk "IHDR"
+          (u32be bmp.size.width ++ u32be bmp.size.height ++
+            ByteArray.mk #[u8 8, u8 2, u8 0, u8 0, u8 0])).size = 33 := by
+  let ihdr :=
+    u32be bmp.size.width ++ u32be bmp.size.height ++
+      ByteArray.mk #[u8 8, u8 2, u8 0, u8 0, u8 0]
+  have hihdr : ihdr.size = 13 := by
+    simpa [ihdr] using ihdr_payload_size bmp.size.width bmp.size.height
+  calc
+    (pngSignature ++ mkChunk "IHDR" ihdr).size
+        = pngSignature.size + (mkChunk "IHDR" ihdr).size := by
+            simp [ByteArray.size_append]
+    _ = 8 + (ihdr.size + "IHDR".utf8ByteSize + 8) := by
+            simp [pngSignature_size, mkChunk_size]
+    _ = 33 := by
+            simp [hihdr, ihdr_utf8ByteSize, Nat.add_comm]
+
+-- The IDAT length field in the encoded PNG matches the compressed payload size.
+lemma encodeBitmap_extract_idat_len (bmp : BitmapRGB8) :
+    (encodeBitmap bmp).extract 33 37 =
+      u32be (zlibCompressStored (encodeRaw bmp)).size := by
+  let ihdr :=
+    u32be bmp.size.width ++ u32be bmp.size.height ++ ByteArray.mk #[u8 8, u8 2, u8 0, u8 0, u8 0]
+  let idat := zlibCompressStored (encodeRaw bmp)
+  have hsig : (pngSignature ++ mkChunk "IHDR" ihdr).size = 33 := by
+    simpa [ihdr] using encodeBitmap_sig_ihdr_size bmp
+  have hshift :
+      (encodeBitmap bmp).extract 33 37 =
+        (mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty).extract 0 4 := by
+    simpa [encodeBitmap, hsig, ByteArray.append_assoc] using
+      (ByteArray.extract_append_size_add
+        (a := pngSignature ++ mkChunk "IHDR" ihdr)
+        (b := mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty)
+        (i := 0) (j := 4))
+  have hprefix :
+      (mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty).extract 0 4 =
+        (mkChunk "IDAT" idat).extract 0 4 := by
+    have hchunk_ge : 4 ≤ (mkChunk "IDAT" idat).size := by
+      have hsize : (mkChunk "IDAT" idat).size = idat.size + "IDAT".utf8ByteSize + 8 :=
+        mkChunk_size _ _
+      calc
+        4 ≤ idat.size + "IDAT".utf8ByteSize + 8 := by omega
+        _ = (mkChunk "IDAT" idat).size := by
+          simp [hsize]
+    simpa using
+      (byteArray_extract_append_prefix
+        (a := mkChunk "IDAT" idat)
+        (b := mkChunk "IEND" ByteArray.empty)
+        (n := 4) hchunk_ge)
+  have hlen : (mkChunk "IDAT" idat).extract 0 4 = u32be idat.size :=
+    mkChunk_extract_len _ _
+  simp [hshift, hprefix, hlen, idat]
+
+-- The IDAT type field in the encoded PNG is "IDAT".
+lemma encodeBitmap_extract_idat_type (bmp : BitmapRGB8) :
+    (encodeBitmap bmp).extract 37 41 = "IDAT".toUTF8 := by
+  let ihdr :=
+    u32be bmp.size.width ++ u32be bmp.size.height ++ ByteArray.mk #[u8 8, u8 2, u8 0, u8 0, u8 0]
+  let idat := zlibCompressStored (encodeRaw bmp)
+  have hsig : (pngSignature ++ mkChunk "IHDR" ihdr).size = 33 := by
+    simpa [ihdr] using encodeBitmap_sig_ihdr_size bmp
+  have hshift :
+      (encodeBitmap bmp).extract 37 41 =
+        (mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty).extract 4 8 := by
+    simpa [encodeBitmap, hsig, ByteArray.append_assoc] using
+      (ByteArray.extract_append_size_add
+        (a := pngSignature ++ mkChunk "IHDR" ihdr)
+        (b := mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty)
+        (i := 4) (j := 8))
+  have hleft :
+      (mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty).extract 4 8 =
+        (mkChunk "IDAT" idat).extract 4 8 := by
+    have hchunk_ge : 8 ≤ (mkChunk "IDAT" idat).size := by
+      have hsize : (mkChunk "IDAT" idat).size = idat.size + "IDAT".utf8ByteSize + 8 :=
+        mkChunk_size _ _
+      calc
+        8 ≤ idat.size + "IDAT".utf8ByteSize + 8 := by omega
+        _ = (mkChunk "IDAT" idat).size := by
+          simp [hsize]
+    simpa using
+      (byteArray_extract_append_left
+        (a := mkChunk "IDAT" idat)
+        (b := mkChunk "IEND" ByteArray.empty)
+        (i := 4) (j := 8)
+        (hi := by omega) (hj := hchunk_ge))
+  have htyp : (mkChunk "IDAT" idat).extract 4 8 = "IDAT".toUTF8 := by
+    simpa using mkChunk_extract_type "IDAT" idat idat_utf8ByteSize
+  simp [hshift, hleft, htyp]
+
+-- The IDAT payload bytes in the encoded PNG are the compressed bitmap bytes.
+lemma encodeBitmap_extract_idat_data (bmp : BitmapRGB8) :
+    (encodeBitmap bmp).extract 41 (41 + (zlibCompressStored (encodeRaw bmp)).size) =
+      zlibCompressStored (encodeRaw bmp) := by
+  let ihdr :=
+    u32be bmp.size.width ++ u32be bmp.size.height ++ ByteArray.mk #[u8 8, u8 2, u8 0, u8 0, u8 0]
+  let idat := zlibCompressStored (encodeRaw bmp)
+  let sigIhdr := pngSignature ++ mkChunk "IHDR" ihdr
+  let tail := mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty
+  have hsig : sigIhdr.size = 33 := by
+    simpa [sigIhdr, ihdr] using encodeBitmap_sig_ihdr_size bmp
+  have hdef : encodeBitmap bmp = sigIhdr ++ tail := by
+    simp [encodeBitmap, sigIhdr, tail, ihdr, idat, ByteArray.append_assoc, Id.run]
+  have hshift' :
+      (encodeBitmap bmp).extract (sigIhdr.size + 8) (sigIhdr.size + (8 + idat.size)) =
+        tail.extract 8 (8 + idat.size) := by
+    simpa [hdef] using
+      (ByteArray.extract_append_size_add
+        (a := sigIhdr)
+        (b := tail)
+        (i := 8) (j := 8 + idat.size))
+  have h41 : sigIhdr.size + 8 = 41 := by
+    omega
+  have h41' : sigIhdr.size + (8 + idat.size) = 41 + idat.size := by
+    omega
+  have hshift :
+      (encodeBitmap bmp).extract 41 (41 + idat.size) =
+        tail.extract 8 (8 + idat.size) := by
+    simpa [h41, h41'] using hshift'
+  have hleft :
+      tail.extract 8 (8 + idat.size) =
+        (mkChunk "IDAT" idat).extract 8 (8 + idat.size) := by
+    have hchunk_ge : 8 + idat.size ≤ (mkChunk "IDAT" idat).size := by
+      have hsize : (mkChunk "IDAT" idat).size = idat.size + "IDAT".utf8ByteSize + 8 :=
+        mkChunk_size _ _
+      calc
+        8 + idat.size ≤ idat.size + "IDAT".utf8ByteSize + 8 := by omega
+        _ = (mkChunk "IDAT" idat).size := by
+          simp [hsize, Nat.add_comm]
+    simpa using
+      (byteArray_extract_append_left
+        (a := mkChunk "IDAT" idat)
+        (b := mkChunk "IEND" ByteArray.empty)
+        (i := 8) (j := 8 + idat.size)
+        (hi := by omega) (hj := hchunk_ge))
+  have hdata : (mkChunk "IDAT" idat).extract 8 (8 + idat.size) = idat := by
+    simpa using mkChunk_extract_data "IDAT" idat idat_utf8ByteSize
+  calc
+    (encodeBitmap bmp).extract 41 (41 + idat.size)
+        = tail.extract 8 (8 + idat.size) := hshift
+    _ = (mkChunk "IDAT" idat).extract 8 (8 + idat.size) := hleft
+    _ = idat := hdata
+
 -- Closed-form size of PNG produced by encodeBitmap.
 lemma encodeBitmap_size (bmp : BitmapRGB8) :
     (encodeBitmap bmp).size = (zlibCompressStored (encodeRaw bmp)).size + 57 := by
