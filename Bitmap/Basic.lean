@@ -238,14 +238,14 @@ def u8 (n : Nat) : UInt8 :=
   UInt8.ofNat n
 
 def u16le (n : Nat) : ByteArray :=
-  ByteArray.mk #[u8 (n &&& 0xFF), u8 ((n >>> 8) &&& 0xFF)]
+  ByteArray.mk #[u8 (n % 256), u8 ((n / 256) % 256)]
 
 def u32be (n : Nat) : ByteArray :=
   ByteArray.mk #[
-    u8 ((n >>> 24) &&& 0xFF),
-    u8 ((n >>> 16) &&& 0xFF),
-    u8 ((n >>> 8) &&& 0xFF),
-    u8 (n &&& 0xFF)
+    u8 ((n / 2 ^ 24) % 256),
+    u8 ((n / 2 ^ 16) % 256),
+    u8 ((n / 2 ^ 8) % 256),
+    u8 (n % 256)
   ]
 
 def readU16LE (bytes : ByteArray) (pos : Nat) (h : pos + 1 < bytes.size) : Nat :=
@@ -839,7 +839,103 @@ structure PngHeader where
   bitDepth : Nat
 deriving Repr
 
+def parsePngSimple (bytes : ByteArray) : Option (PngHeader × ByteArray) := do
+  if hsize : 8 <= bytes.size then
+    if bytes.extract 0 8 != pngSignature then
+      none
+    let pos := 8
+    if hLen : pos + 3 < bytes.size then
+      let lenBytes := bytes.extract pos (pos + 4)
+      have hLenSize : lenBytes.size = 4 := by
+        have hle : pos + 4 ≤ bytes.size := Nat.succ_le_of_lt hLen
+        simp [lenBytes, ByteArray.size_extract, Nat.min_eq_left hle, Nat.add_sub_cancel_left]
+      have hLenPos : 0 + 3 < lenBytes.size := by
+        simp [hLenSize]
+      let len := readU32BE lenBytes 0 hLenPos
+      let typeStart := pos + 4
+      let dataStart := pos + 8
+      let dataEnd := dataStart + len
+      let crcEnd := dataEnd + 4
+      if crcEnd > bytes.size then
+        none
+      let typBytes := bytes.extract typeStart (typeStart + 4)
+      if typBytes != "IHDR".toUTF8 then
+        none
+      if hlen : len ≠ 13 then
+        none
+      else
+        if hIH : dataStart + 12 < bytes.size then
+          let ihdr := bytes.extract dataStart dataEnd
+          have hIHSize : ihdr.size = 13 := by
+            have hlen' : len = 13 := by
+              exact not_ne_iff.mp hlen
+            have hle : dataStart + 13 ≤ bytes.size := Nat.succ_le_of_lt hIH
+            have : ihdr.size = (dataStart + 13) - dataStart := by
+              simp [ihdr, ByteArray.size_extract, Nat.min_eq_left hle, dataEnd, hlen']
+            simpa [Nat.add_sub_cancel_left] using this
+          let w := readU32BE ihdr 0 (by simp [hIHSize])
+          let h := readU32BE ihdr 4 (by simp [hIHSize])
+          let bitDepth := (ihdr.get 8 (by simp [hIHSize])).toNat
+          let colorType := (ihdr.get 9 (by simp [hIHSize])).toNat
+          let comp := (ihdr.get 10 (by simp [hIHSize])).toNat
+          let filter := (ihdr.get 11 (by simp [hIHSize])).toNat
+          let interlace := (ihdr.get 12 (by simp [hIHSize])).toNat
+          if comp != 0 || filter != 0 || interlace != 0 then
+            none
+          let hdr : PngHeader := { width := w, height := h, colorType, bitDepth }
+          let pos2 := crcEnd
+          if hLen2 : pos2 + 3 < bytes.size then
+            let len2Bytes := bytes.extract pos2 (pos2 + 4)
+            have hLen2Size : len2Bytes.size = 4 := by
+              have hle : pos2 + 4 ≤ bytes.size := Nat.succ_le_of_lt hLen2
+              simp [len2Bytes, ByteArray.size_extract, Nat.min_eq_left hle, Nat.add_sub_cancel_left]
+            have hLen2Pos : 0 + 3 < len2Bytes.size := by
+              simp [hLen2Size]
+            let len2 := readU32BE len2Bytes 0 hLen2Pos
+            let typeStart2 := pos2 + 4
+            let dataStart2 := pos2 + 8
+            let dataEnd2 := dataStart2 + len2
+            let crcEnd2 := dataEnd2 + 4
+            if crcEnd2 > bytes.size then
+              none
+            let typBytes2 := bytes.extract typeStart2 (typeStart2 + 4)
+            if typBytes2 != "IDAT".toUTF8 then
+              none
+            let idat := bytes.extract dataStart2 dataEnd2
+            let pos3 := crcEnd2
+            if hLen3 : pos3 + 3 < bytes.size then
+              let len3Bytes := bytes.extract pos3 (pos3 + 4)
+              have hLen3Size : len3Bytes.size = 4 := by
+                have hle : pos3 + 4 ≤ bytes.size := Nat.succ_le_of_lt hLen3
+                simp [len3Bytes, ByteArray.size_extract, Nat.min_eq_left hle, Nat.add_sub_cancel_left]
+              have hLen3Pos : 0 + 3 < len3Bytes.size := by
+                simp [hLen3Size]
+              let len3 := readU32BE len3Bytes 0 hLen3Pos
+              if len3 != 0 then
+                none
+              let typeStart3 := pos3 + 4
+              let dataStart3 := pos3 + 8
+              let crcEnd3 := dataStart3 + 4
+              if crcEnd3 > bytes.size then
+                none
+              let typBytes3 := bytes.extract typeStart3 (typeStart3 + 4)
+              if typBytes3 != "IEND".toUTF8 then
+                none
+              return (hdr, idat)
+            else
+              none
+          else
+            none
+        else
+          none
+    else
+      none
+  else
+    none
+
 partial def parsePng (bytes : ByteArray) (_hsize : 8 <= bytes.size) : Option (PngHeader × ByteArray) := do
+  if let some res := parsePngSimple bytes then
+    return res
   if bytes.extract 0 8 != pngSignature then
     none
   let mut pos := 8
@@ -855,9 +951,8 @@ partial def parsePng (bytes : ByteArray) (_hsize : 8 <= bytes.size) : Option (Pn
       if crcEnd > bytes.size then
         none
       let typBytes := bytes.extract typeStart (typeStart + 4)
-      let typ := String.fromUTF8! typBytes
       let chunkData := bytes.extract dataStart dataEnd
-      if typ == "IHDR" then
+      if typBytes == "IHDR".toUTF8 then
         if len != 13 then
           none
         if hIH : dataStart + 12 < bytes.size then
@@ -873,9 +968,9 @@ partial def parsePng (bytes : ByteArray) (_hsize : 8 <= bytes.size) : Option (Pn
           header := some { width := w, height := h, colorType, bitDepth }
         else
           none
-      else if typ == "IDAT" then
+      else if typBytes == "IDAT".toUTF8 then
         idat := idat ++ chunkData
-      else if typ == "IEND" then
+      else if typBytes == "IEND".toUTF8 then
         break
       pos := crcEnd
     else
@@ -965,7 +1060,7 @@ partial def decodeBitmap (bytes : ByteArray) : Option BitmapRGB8 := do
   else
     none
 
-def encodeBitmap (bmp : BitmapRGB8) : ByteArray :=
+def encodeRaw (bmp : BitmapRGB8) : ByteArray :=
   Id.run do
     let w := bmp.size.width
     let h := bmp.size.height
@@ -976,6 +1071,13 @@ def encodeBitmap (bmp : BitmapRGB8) : ByteArray :=
       let outOff := y * (rowBytes + 1)
       let start := y * rowBytes
       raw := bmp.data.copySlice start raw (outOff + 1) rowBytes
+    return raw
+
+def encodeBitmap (bmp : BitmapRGB8) : ByteArray :=
+  Id.run do
+    let w := bmp.size.width
+    let h := bmp.size.height
+    let raw := encodeRaw bmp
     let ihdr := u32be w ++ u32be h ++ ByteArray.mk #[u8 8, u8 2, u8 0, u8 0, u8 0]
     let idat := zlibCompressStored raw
     pngSignature
