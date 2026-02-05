@@ -1199,8 +1199,9 @@ lemma readChunk_encodeBitmap_iend (bmp : BitmapRGB8) :
 set_option maxHeartbeats 1000000 in
 lemma parsePngSimple_encodeBitmap (bmp : BitmapRGB8)
     (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
-    (hidat : (zlibCompressStored (encodeRaw bmp)).size < 2 ^ 32) :
-    parsePngSimple (encodeBitmap bmp) =
+    (hidat : (zlibCompressStored (encodeRaw bmp)).size < 2 ^ 32)
+    (hsize : 8 <= (encodeBitmap bmp).size) :
+    parsePngSimple (encodeBitmap bmp) hsize =
       some ({ width := bmp.size.width, height := bmp.size.height
             , colorType := 2, bitDepth := 8 },
             zlibCompressStored (encodeRaw bmp)) := by
@@ -1208,13 +1209,6 @@ lemma parsePngSimple_encodeBitmap (bmp : BitmapRGB8)
   let h := bmp.size.height
   let ihdr := u32be w ++ u32be h ++ ihdrTail
   let idat := zlibCompressStored (encodeRaw bmp)
-  have hsize : 8 <= (encodeBitmap bmp).size := by
-    have hsz : (encodeBitmap bmp).size = idat.size + 57 := by
-      simpa [idat] using encodeBitmap_size bmp
-    have h57 : 57 ≤ idat.size + 57 := Nat.le_add_left _ _
-    have h8 : 8 ≤ 57 := by decide
-    have : 8 ≤ idat.size + 57 := le_trans h8 h57
-    simp [hsz]
   have hlen' : ihdr.size = 13 := by
     simpa [ihdr, ihdrTail] using ihdr_payload_size w h
   have hsigNe : (pngSignature != pngSignature) = false := by
@@ -1256,7 +1250,7 @@ lemma parsePngSimple_encodeBitmap (bmp : BitmapRGB8)
     exact hproof.trans hheight0
   -- Unfold and simplify the parser using the chunk-level lemmas.
   unfold parsePngSimple
-  simp [hsize, encodeBitmap_signature,
+  simp [encodeBitmap_signature,
     readChunk_encodeBitmap_ihdr,
     readChunk_encodeBitmap_idat (bmp := bmp) (hidat := hidat),
     readChunk_encodeBitmap_iend]
@@ -1266,6 +1260,19 @@ lemma parsePngSimple_encodeBitmap (bmp : BitmapRGB8)
   refine And.intro hidatNe ?_
   refine And.intro hiendNe ?_
   exact ⟨hlen', hwidth, hheight⟩
+
+-- Parsing an encoded bitmap with the full PNG parser yields the header and payload.
+lemma parsePng_encodeBitmap (bmp : BitmapRGB8)
+    (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (hidat : (zlibCompressStored (encodeRaw bmp)).size < 2 ^ 32)
+    (hsize : 8 <= (encodeBitmap bmp).size) :
+    parsePng (encodeBitmap bmp) hsize =
+      some ({ width := bmp.size.width, height := bmp.size.height
+            , colorType := 2, bitDepth := 8 },
+            zlibCompressStored (encodeRaw bmp)) := by
+  have hsimple := parsePngSimple_encodeBitmap bmp hw hh hidat hsize
+  unfold parsePng
+  simp [hsimple]
 
 lemma bitIndex_readBit (br : BitReader) (h : br.bytePos < br.data.size) :
     (BitReader.readBit br).2.bitIndex = br.bitIndex + 1 :=
