@@ -215,6 +215,57 @@ lemma u32be_size (n : Nat) : (u32be n).size = 4 := by
     simpa [Nat.add_comm, Nat.mul_comm, Nat.mul_left_comm, Nat.mul_assoc] using (Nat.mod_add_div n 256)
   simpa [Nat.mul_comm, Nat.mul_left_comm, Nat.mul_assoc, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using this
 
+-- Reading a 16-bit value depends only on the extracted 2-byte slice.
+lemma readU16LE_extract (bytes : ByteArray) (pos : Nat) (h : pos + 1 < bytes.size) :
+    readU16LE bytes pos h =
+      readU16LE (bytes.extract pos (pos + 2)) 0 (by
+        have hle : pos + 2 ≤ bytes.size := Nat.succ_le_of_lt h
+        simp [ByteArray.size_extract, Nat.min_eq_left hle, Nat.add_sub_cancel_left]) := by
+  cases bytes with
+  | mk data =>
+      simp [readU16LE, ByteArray.extract, ByteArray.get]
+
+-- `readU16LE` is proof-irrelevant in its bounds argument.
+lemma readU16LE_proof_irrel {bytes : ByteArray} {pos : Nat}
+    (h1 h2 : pos + 1 < bytes.size) :
+    readU16LE bytes pos h1 = readU16LE bytes pos h2 := by
+  rfl
+
+-- Reading a 16-bit value from a slice that equals `u16le n` yields `n`.
+lemma readU16LE_of_extract_eq (bytes : ByteArray) (pos n : Nat)
+    (h : pos + 1 < bytes.size)
+    (hextract : bytes.extract pos (pos + 2) = u16le n)
+    (hn : n < 2 ^ 16) :
+    readU16LE bytes pos h = n := by
+  have h' := readU16LE_extract (bytes := bytes) (pos := pos) h
+  have hcanon : readU16LE (u16le n) 0 (by simp [u16le_size]) = n :=
+    readU16LE_u16le n hn
+  have h'' :
+      readU16LE (bytes.extract pos (pos + 2)) 0 (by
+        have hle : pos + 2 ≤ bytes.size := Nat.succ_le_of_lt h
+        simp [ByteArray.size_extract, Nat.min_eq_left hle]) = n := by
+    simpa [hextract] using hcanon
+  exact h'.trans h''
+
+-- Proof-friendly spec: expose the stored-block inflater with remainder.
+def inflateStoredSpec (data : ByteArray) : Option (ByteArray × ByteArray) :=
+  inflateStoredAux data
+
+-- The public inflater is the spec restricted to empty remainder.
+lemma inflateStored_eq_spec (data : ByteArray) :
+    inflateStored data =
+      match inflateStoredSpec data with
+      | some (payload, rest) => if rest.size == 0 then some payload else none
+      | none => none := by
+  cases h : inflateStoredAux data with
+  | none =>
+      simp [inflateStored, inflateStoredSpec, h]
+  | some pair =>
+      cases pair with
+      | mk payload rest =>
+          simp [inflateStored, inflateStoredSpec, h]
+
+
 -- Reading a u32be-encoded value returns the original number (in range).
 lemma readU32BE_u32be (n : Nat) (hn : n < 2 ^ 32) :
     readU32BE (u32be n) 0 (by simp [u32be_size]) = n := by
@@ -410,6 +461,490 @@ lemma byteArray_extract_append_left (a b : ByteArray) (i j : Nat)
   have := (ByteArray.extract_append (as := a) (bs := b) (i := i) (j := j))
   -- Both subtractions are zero since the slice stays within `a`.
   simpa [Nat.sub_eq_zero_of_le hi, Nat.sub_eq_zero_of_le hj] using this
+
+-- Splitting a byte array into prefix/suffix extracts and re-appending yields the original.
+lemma byteArray_extract_split (a : ByteArray) (n : Nat) (hn : n ≤ a.size) :
+    a.extract 0 n ++ a.extract n a.size = a := by
+  ext i hi
+  · -- size goal
+    simp
+  · -- element goal
+    by_cases hlt : i < n
+    · have hleft : i < (a.extract 0 n).size := by
+        simp [ByteArray.size_extract, Nat.min_eq_left hn, hlt]
+      have hget_left :
+          (a.extract 0 n ++ a.extract n a.size)[i] = (a.extract 0 n)[i] := by
+        exact
+          (ByteArray.get_append_left (a := a.extract 0 n) (b := a.extract n a.size)
+            (i := i) hleft)
+      have hget_extract : (a.extract 0 n)[i] = a[i] := by
+        calc
+          (a.extract 0 n)[i] = a[0 + i] := by
+            exact
+              (ByteArray.get_extract (a := a) (start := 0) (stop := n) (i := i) hleft)
+          _ = a[i] := by simp
+      calc
+        (a.extract 0 n ++ a.extract n a.size)[i] = (a.extract 0 n)[i] := hget_left
+        _ = a[i] := hget_extract
+    · have hge : n ≤ i := Nat.le_of_not_lt hlt
+      have hright : i - n < (a.extract n a.size).size := by
+        have hi' : i < a.size := by
+          have hi' := hi
+          simp at hi'
+          exact hi'
+        have hlt' : i - n < a.size - n := Nat.sub_lt_sub_right hge hi'
+        have hsize : (a.extract n a.size).size = a.size - n := by
+          simp [ByteArray.size_extract]
+        rw [hsize]
+        exact hlt'
+      have hget_right :
+          (a.extract 0 n ++ a.extract n a.size)[i] =
+            (a.extract n a.size)[i - n] := by
+        have hle : (a.extract 0 n).size ≤ i := by
+          simp [ByteArray.size_extract, Nat.min_eq_left hn, hge]
+        have hget' :=
+          (ByteArray.get_append_right (a := a.extract 0 n) (b := a.extract n a.size)
+            (i := i) (hle := hle) (h := hi))
+        have hsize_left : (a.extract 0 n).size = n := by
+          simp [ByteArray.size_extract, Nat.min_eq_left hn]
+        calc
+          (a.extract 0 n ++ a.extract n a.size)[i] =
+              (a.extract n a.size)[i - (a.extract 0 n).size] := hget'
+          _ = (a.extract n a.size)[i - n] := by
+              simp [hsize_left]
+      have hget_extract : (a.extract n a.size)[i - n] = a[i] := by
+        have hi' : i < a.size := by
+          have hi' := hi
+          simp at hi'
+          exact hi'
+        have htmp :
+            (a.extract n a.size)[i - n] = a[n + (i - n)] := by
+          exact
+            (ByteArray.get_extract (a := a) (start := n) (stop := a.size)
+              (i := i - n) hright)
+        calc
+          (a.extract n a.size)[i - n] = a[n + (i - n)] := htmp
+          _ = a[i] := by
+            simp [Nat.add_sub_of_le hge]
+      calc
+        (a.extract 0 n ++ a.extract n a.size)[i] =
+            (a.extract n a.size)[i - n] := hget_right
+        _ = a[i] := hget_extract
+
+-- Size of a stored deflate block: header + LEN + NLEN + payload.
+lemma storedBlock_size (payload : ByteArray) (final : Bool) :
+    (storedBlock payload final).size = payload.size + 5 := by
+  let header : ByteArray := ByteArray.mk #[if final then u8 0x01 else u8 0x00]
+  have hheader : header.size = 1 := by rfl
+  simp [storedBlock, header, ByteArray.size_append, u16le_size, hheader, Nat.add_comm]
+
+-- The LEN field of a stored block encodes the payload size.
+lemma storedBlock_extract_len (payload : ByteArray) (final : Bool) :
+    (storedBlock payload final).extract 1 3 = u16le payload.size := by
+  let len := payload.size
+  let header : ByteArray := ByteArray.mk #[if final then u8 0x01 else u8 0x00]
+  have hheader : header.size = 1 := by rfl
+  have hshift :
+      (storedBlock payload final).extract 1 3 =
+        (u16le len ++ u16le (0xFFFF - len) ++ payload).extract 0 2 := by
+    simpa [storedBlock, header, hheader, ByteArray.append_assoc] using
+      (ByteArray.extract_append_size_add
+        (a := header)
+        (b := u16le len ++ u16le (0xFFFF - len) ++ payload)
+        (i := 0) (j := 2))
+  have hprefix :
+      (u16le len ++ u16le (0xFFFF - len) ++ payload).extract 0 2 = u16le len := by
+    have h :=
+      (ByteArray.extract_append_eq_left
+        (a := u16le len)
+        (b := u16le (0xFFFF - len) ++ payload)
+        (i := (u16le len).size) rfl)
+    simpa [u16le_size] using h
+  simp [hshift, hprefix, len]
+
+-- The NLEN field of a stored block is the ones-complement of LEN.
+lemma storedBlock_extract_nlen (payload : ByteArray) (final : Bool) :
+    (storedBlock payload final).extract 3 5 = u16le (0xFFFF - payload.size) := by
+  let len := payload.size
+  let header : ByteArray := ByteArray.mk #[if final then u8 0x01 else u8 0x00]
+  have hheader : header.size = 1 := by rfl
+  have hshift :
+      (storedBlock payload final).extract 3 5 =
+        (u16le len ++ u16le (0xFFFF - len) ++ payload).extract 2 4 := by
+    simpa [storedBlock, header, hheader, ByteArray.append_assoc] using
+      (ByteArray.extract_append_size_add
+        (a := header)
+        (b := u16le len ++ u16le (0xFFFF - len) ++ payload)
+        (i := 2) (j := 4))
+  have hshift' :
+      (u16le len ++ u16le (0xFFFF - len) ++ payload).extract 2 4 =
+        (u16le (0xFFFF - len) ++ payload).extract 0 2 := by
+    simpa [ByteArray.append_assoc] using
+      (ByteArray.extract_append_size_add
+        (a := u16le len)
+        (b := u16le (0xFFFF - len) ++ payload)
+        (i := 0) (j := 2))
+  have hprefix :
+      (u16le (0xFFFF - len) ++ payload).extract 0 2 = u16le (0xFFFF - len) := by
+    have h :=
+      (ByteArray.extract_append_eq_left
+        (a := u16le (0xFFFF - len))
+        (b := payload)
+        (i := (u16le (0xFFFF - len)).size) rfl)
+    simpa [u16le_size] using h
+  simp [hshift, hshift', hprefix, len]
+
+-- The payload slice of a stored block recovers the original payload.
+lemma storedBlock_extract_payload (payload : ByteArray) (final : Bool) :
+    (storedBlock payload final).extract 5 (5 + payload.size) = payload := by
+  let len := payload.size
+  let header : ByteArray := ByteArray.mk #[if final then u8 0x01 else u8 0x00]
+  have hheader : header.size = 1 := by rfl
+  let blockPrefix : ByteArray := header ++ u16le len ++ u16le (0xFFFF - len)
+  have hprefix : blockPrefix.size = 5 := by
+    simp [blockPrefix, ByteArray.size_append, u16le_size, hheader]
+  have hprefix' : 5 = blockPrefix.size := hprefix.symm
+  have hdef : storedBlock payload final = blockPrefix ++ payload := by
+    simp [storedBlock, blockPrefix, len, header, ByteArray.append_assoc]
+  have hbase :
+      (blockPrefix ++ payload).extract blockPrefix.size (blockPrefix.size + payload.size) =
+        payload.extract 0 payload.size :=
+    (ByteArray.extract_append_size_add
+      (a := blockPrefix)
+      (b := payload)
+      (i := 0) (j := payload.size))
+  calc
+    (storedBlock payload final).extract 5 (5 + payload.size) =
+        (blockPrefix ++ payload).extract 5 (5 + payload.size) := by
+          rw [hdef]
+    _ = (blockPrefix ++ payload).extract blockPrefix.size (blockPrefix.size + payload.size) := by
+          rw [hprefix']
+    _ = payload.extract 0 payload.size := hbase
+    _ = payload := by simp
+
+-- `get` agrees with the `[]` notation for byte arrays.
+lemma byteArray_get_eq_getElem (a : ByteArray) (i : Nat) (h : i < a.size) :
+    a.get i h = a[i]'h := rfl
+
+-- `ByteArray.get` does not depend on the bounds proof.
+lemma byteArray_get_proof_irrel {a : ByteArray} {i : Nat} (h1 h2 : i < a.size) :
+    a.get i h1 = a.get i h2 := by
+  cases a
+  rfl
+
+-- The stored-block header has btype = 0.
+lemma storedBlock_btype (final : Bool) :
+    ((if final then (u8 0x01) else (u8 0x00)) >>> 1) &&& (0x03 : UInt8) = 0 := by
+  cases final <;> decide
+
+-- The stored-block header encodes the final bit in the low bit.
+lemma storedBlock_bfinal (final : Bool) :
+    (if final then (u8 0x01) else (u8 0x00)) &&& (0x01 : UInt8) =
+      (if final then (1 : UInt8) else 0) := by
+  cases final <;> decide
+
+-- The stored-block final-bit test reduces to the boolean flag.
+lemma storedBlock_bfinal_eq (final : Bool) :
+    ((if final then (1 : UInt8) else 0) == (1 : UInt8)) = final := by
+  cases final <;> decide
+
+-- The first byte of a stored block (even with trailing bytes) encodes the final flag.
+lemma storedBlock_get0_append (payload rest : ByteArray) (final : Bool)
+    (h : 0 < (storedBlock payload final ++ rest).size) :
+    (storedBlock payload final ++ rest).get 0 h = if final then u8 0x01 else u8 0x00 := by
+  have h0 : 0 < (storedBlock payload final).size := by
+    have : 0 < payload.size + 5 := by omega
+    simp [storedBlock_size payload final, this]
+  have hget0 :
+      (storedBlock payload final ++ rest)[0]'h = (storedBlock payload final)[0]'h0 := by
+    have hget := ByteArray.get_append_left (a := storedBlock payload final) (b := rest) (i := 0) h0
+    simpa using hget
+  have hheader0 :
+      (storedBlock payload final)[0]'h0 = if final then u8 0x01 else u8 0x00 := by
+    have hheaderPos : 0 < (ByteArray.mk #[if final then u8 0x01 else u8 0x00]).size := by
+      simp [ByteArray.size]
+    have hget :=
+      ByteArray.get_append_left
+        (a := ByteArray.mk #[if final then u8 0x01 else u8 0x00])
+        (b := u16le payload.size ++ u16le (0xFFFF - payload.size) ++ payload)
+        (i := 0) hheaderPos
+    have hget' :
+        (storedBlock payload final)[0]'h0 =
+          (ByteArray.mk #[if final then u8 0x01 else u8 0x00])[0]'hheaderPos := by
+      simpa [storedBlock, ByteArray.append_assoc] using hget
+    have hhead : (ByteArray.mk #[if final then u8 0x01 else u8 0x00])[0]'hheaderPos =
+        if final then u8 0x01 else u8 0x00 := by
+      rfl
+    simpa [hhead] using hget'
+  have hget0' :
+      (storedBlock payload final ++ rest)[0]'h = if final then u8 0x01 else u8 0x00 := by
+    simpa [hheader0] using hget0
+  simpa [byteArray_get_eq_getElem] using hget0'
+
+-- Inflating a stored block recovers its payload and any remaining bytes.
+set_option maxHeartbeats 1000000 in
+lemma inflateStoredAux_storedBlock (payload rest : ByteArray) (final : Bool)
+    (hlen : payload.size ≤ 0xFFFF) :
+    inflateStoredAux (storedBlock payload final ++ rest) =
+      if final then some (payload, rest) else
+        match inflateStoredAux rest with
+        | some (tail, rest') => some (payload ++ tail, rest')
+        | none => none := by
+  let data := storedBlock payload final ++ rest
+  have hblockSize : (storedBlock payload final).size = payload.size + 5 :=
+    storedBlock_size payload final
+  have hdataPos : 0 < data.size := by
+    simp [data, ByteArray.size_append, hblockSize]
+    omega
+  have hlenPos : 1 + 3 < data.size := by
+    simp [data, ByteArray.size_append, hblockSize]
+    omega
+  have hsize1 : 1 ≤ (storedBlock payload final).size := by
+    have : 1 ≤ payload.size + 5 := by omega
+    simp [hblockSize, this]
+  have hsize3 : 3 ≤ (storedBlock payload final).size := by
+    have : 3 ≤ payload.size + 5 := by omega
+    simp [hblockSize, this]
+  have hsize5 : 5 ≤ (storedBlock payload final).size := by
+    have : 5 ≤ payload.size + 5 := by omega
+    simp [hblockSize, this]
+  have hsize5len : 5 + payload.size ≤ (storedBlock payload final).size := by
+    simp [hblockSize, Nat.add_comm]
+  have hlen_extract :
+      data.extract 1 3 = u16le payload.size := by
+    have hleft :
+        data.extract 1 3 = (storedBlock payload final).extract 1 3 := by
+      apply byteArray_extract_append_left (a := storedBlock payload final) (b := rest) (i := 1) (j := 3)
+      · exact hsize1
+      · exact hsize3
+    calc
+      data.extract 1 3 = (storedBlock payload final).extract 1 3 := hleft
+      _ = u16le payload.size := storedBlock_extract_len payload final
+  have hnlen_extract :
+      data.extract 3 5 = u16le (0xFFFF - payload.size) := by
+    have hleft :
+        data.extract 3 5 = (storedBlock payload final).extract 3 5 := by
+      apply byteArray_extract_append_left (a := storedBlock payload final) (b := rest) (i := 3) (j := 5)
+      · exact hsize3
+      · exact hsize5
+    calc
+      data.extract 3 5 = (storedBlock payload final).extract 3 5 := hleft
+      _ = u16le (0xFFFF - payload.size) := storedBlock_extract_nlen payload final
+  have hpayload_extract :
+      data.extract 5 (5 + payload.size) = payload := by
+    have hleft :
+        data.extract 5 (5 + payload.size) =
+          (storedBlock payload final).extract 5 (5 + payload.size) := by
+      apply byteArray_extract_append_left (a := storedBlock payload final) (b := rest)
+        (i := 5) (j := 5 + payload.size)
+      · exact hsize5
+      · exact hsize5len
+    calc
+      data.extract 5 (5 + payload.size) =
+          (storedBlock payload final).extract 5 (5 + payload.size) := hleft
+      _ = payload := storedBlock_extract_payload payload final
+  have hnext_extract :
+      data.extract (5 + payload.size) data.size = rest := by
+    have h :=
+      (ByteArray.extract_append_size_add
+        (a := storedBlock payload final)
+        (b := rest)
+        (i := 0) (j := rest.size))
+    simpa [data, hblockSize, ByteArray.size_append, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using h
+  have hlen_read : readU16LE data 1 (by omega) = payload.size := by
+    have hlt : payload.size < 2 ^ 16 := by
+      have hlt' : (0xFFFF : Nat) < 2 ^ 16 := by decide
+      exact lt_of_le_of_lt hlen hlt'
+    exact readU16LE_of_extract_eq (bytes := data) (pos := 1) (n := payload.size)
+      (h := by omega) hlen_extract hlt
+  have hnlen_read : readU16LE data 3 (by omega) = 0xFFFF - payload.size := by
+    have hlt : 0xFFFF - payload.size < 2 ^ 16 := by
+      have hlt' : (0xFFFF : Nat) < 2 ^ 16 := by decide
+      exact lt_of_le_of_lt (Nat.sub_le _ _) hlt'
+    exact readU16LE_of_extract_eq (bytes := data) (pos := 3) (n := 0xFFFF - payload.size)
+      (h := by omega) hnlen_extract hlt
+  have hsum : payload.size + (0xFFFF - payload.size) = 0xFFFF := by
+    exact Nat.add_sub_of_le hlen
+  have hbad : ¬ 5 + payload.size > data.size := by
+    have hle : 5 + payload.size ≤ data.size := by
+      simp [data, ByteArray.size_append, hblockSize]
+      omega
+    exact not_lt_of_ge hle
+  have hheader : data.get 0 hdataPos = if final then u8 0x01 else u8 0x00 := by
+    simpa [data] using
+      (storedBlock_get0_append (payload := payload) (rest := rest) (final := final) hdataPos)
+  have hbtype : (data.get 0 hdataPos >>> 1 &&& (0x03 : UInt8)) = 0 := by
+    simpa [hheader] using storedBlock_btype final
+  have hbfinal : (data.get 0 hdataPos &&& (0x01 : UInt8)) = if final then (1 : UInt8) else 0 := by
+    simpa [hheader] using storedBlock_bfinal final
+  have hbfinal_eq : (data.get 0 hdataPos &&& (0x01 : UInt8) = (1 : UInt8)) = final := by
+    cases final <;> simp [hbfinal]
+  have hpos : 0 < (storedBlock payload final).size + rest.size := by
+    simpa [data, ByteArray.size_append] using hdataPos
+  have hlenPos' : 4 < (storedBlock payload final).size + rest.size := by
+    simp [hblockSize]
+    omega
+  have hlenPos1 : 1 + 1 < (storedBlock payload final ++ rest).size := by
+    simp [ByteArray.size_append, hblockSize]
+    omega
+  have hlenPos3 : 3 + 1 < (storedBlock payload final ++ rest).size := by
+    simp [ByteArray.size_append, hblockSize]
+    omega
+  have hlen_read' :
+      readU16LE (storedBlock payload final ++ rest) 1 hlenPos1 = payload.size := by
+    have hlen_read'' :
+        readU16LE (storedBlock payload final ++ rest) 1 (by omega) = payload.size := by
+      simpa [data] using hlen_read
+    simpa [readU16LE_proof_irrel] using hlen_read''
+  have hnlen_read' :
+      readU16LE (storedBlock payload final ++ rest) 3 hlenPos3 = 0xFFFF - payload.size := by
+    have hnlen_read'' :
+        readU16LE (storedBlock payload final ++ rest) 3 (by omega) = 0xFFFF - payload.size := by
+      simpa [data] using hnlen_read
+    simpa [readU16LE_proof_irrel] using hnlen_read''
+  have hsum' :
+      readU16LE (storedBlock payload final ++ rest) 1 hlenPos1 +
+        readU16LE (storedBlock payload final ++ rest) 3 hlenPos3 = 0xFFFF := by
+    simpa [hlen_read', hnlen_read'] using hsum
+  have hbad' :
+      ¬ 5 + readU16LE (storedBlock payload final ++ rest) 1 hlenPos1 >
+        (storedBlock payload final).size + rest.size := by
+    simpa [data, ByteArray.size_append, hlen_read', readU16LE_proof_irrel] using hbad
+  have hpayload_extract' :
+      (storedBlock payload final ++ rest).extract 5
+          (5 + readU16LE (storedBlock payload final ++ rest) 1 hlenPos1) = payload := by
+    simpa [data, hlen_read', readU16LE_proof_irrel] using hpayload_extract
+  have hnext_extract' :
+      (storedBlock payload final ++ rest).extract
+          (5 + readU16LE (storedBlock payload final ++ rest) 1 hlenPos1)
+          ((storedBlock payload final).size + rest.size) = rest := by
+    simpa [data, ByteArray.size_append, hlen_read', readU16LE_proof_irrel] using hnext_extract
+  have hnot_lt : ¬ (storedBlock payload final).size + rest.size < 5 + payload.size := by
+    simp [hblockSize]
+    omega
+  have hpayload_extract'' :
+      (storedBlock payload final ++ rest).extract 5 (5 + payload.size) = payload := by
+    simpa [data] using hpayload_extract
+  have hnext_extract'' :
+      (storedBlock payload final ++ rest).extract (5 + payload.size)
+          ((storedBlock payload final).size + rest.size) = rest := by
+    simpa [data, ByteArray.size_append] using hnext_extract
+  rw [inflateStoredAux.eq_1]
+  simp [hpos, hlenPos', hbtype, hbfinal_eq, hsum, hnot_lt, hpayload_extract'',
+    hnext_extract'', hlen_read', hnlen_read', data]
+  by_cases hfinal : final = true
+  · simp [hfinal]
+  · cases h : inflateStoredAux rest <;> simp [hfinal, Option.bind]
+
+-- Inflating the stored deflate stream yields the original bytes and no remainder.
+lemma inflateStoredAux_deflateStored (raw : ByteArray) :
+    inflateStoredAux (deflateStored raw) = some (raw, ByteArray.empty) := by
+  classical
+  refine Nat.strongRecOn (motive := fun n =>
+    ∀ raw, raw.size = n → inflateStoredAux (deflateStored raw) = some (raw, ByteArray.empty))
+    raw.size ?_ raw rfl
+  intro n ih raw hsize
+  subst hsize
+  by_cases hzero : raw.size = 0
+  · have hraw : raw = ByteArray.empty := (ByteArray.size_eq_zero_iff).1 hzero
+    have hdef : deflateStored raw = storedBlock ByteArray.empty true := by
+      rw [deflateStored.eq_1]
+      simp [hraw]
+    have haux :
+        inflateStoredAux (storedBlock ByteArray.empty true) =
+          some (ByteArray.empty, ByteArray.empty) := by
+      simpa using
+        (inflateStoredAux_storedBlock (payload := ByteArray.empty) (rest := ByteArray.empty)
+          (final := true) (by decide))
+    have hdone :
+        inflateStoredAux (deflateStored raw) =
+          some (ByteArray.empty, ByteArray.empty) := by
+      calc
+        inflateStoredAux (deflateStored raw) =
+            inflateStoredAux (storedBlock ByteArray.empty true) := by
+              simp [hdef]
+        _ = some (ByteArray.empty, ByteArray.empty) := haux
+    simpa [hraw] using hdone
+  · let blockLen := if raw.size > 65535 then 65535 else raw.size
+    let final := blockLen == raw.size
+    let payload := raw.extract 0 blockLen
+    let restRaw := raw.extract blockLen raw.size
+    let block := storedBlock payload final
+    have hblockLen_le : blockLen ≤ raw.size := by
+      by_cases hlarge : raw.size > 65535
+      · have : (65535 : Nat) ≤ raw.size := Nat.le_of_lt hlarge
+        simpa [blockLen, hlarge] using this
+      · simp [blockLen, hlarge]
+    have hpayload_size : payload.size = blockLen := by
+      simp [payload, ByteArray.size_extract, Nat.min_eq_left hblockLen_le]
+    have hpayload_le : payload.size ≤ 65535 := by
+      by_cases hlarge : raw.size > 65535
+      · have hlen : blockLen = 65535 := by simp [blockLen, hlarge]
+        simp [hpayload_size, hlen]
+      · have hle : raw.size ≤ 65535 := Nat.le_of_not_lt hlarge
+        have hlen : blockLen = raw.size := by simp [blockLen, hlarge]
+        simpa [hpayload_size, hlen] using hle
+    by_cases hlarge : raw.size > 65535
+    · have hfinal : final = false := by
+        have hlen : blockLen = 65535 := by simp [blockLen, hlarge]
+        have hneq : (65535 : Nat) ≠ raw.size := by
+          exact (ne_comm).mp (ne_of_gt hlarge)
+        simp [final, hlen, hneq]
+      have hneq : (65535 : Nat) ≠ raw.size := by
+        exact (ne_comm).mp (ne_of_gt hlarge)
+      have hbeq : (65535 == raw.size) = false := by
+        exact beq_false_of_ne hneq
+      have hdef :
+          deflateStored raw = block ++ deflateStored restRaw := by
+        rw [deflateStored.eq_1]
+        simp [hzero, blockLen, hlarge, final, hfinal, block, payload, restRaw, hbeq]
+      have hrest_size : restRaw.size = raw.size - blockLen := by
+        simp [restRaw, ByteArray.size_extract]
+      have hrest_lt : restRaw.size < raw.size := by
+        have hpos : 0 < blockLen := by
+          simp [blockLen, hlarge]
+        have hlt : raw.size - blockLen < raw.size := Nat.sub_lt_self hpos hblockLen_le
+        simpa [hrest_size] using hlt
+      have ih' :
+          inflateStoredAux (deflateStored restRaw) = some (restRaw, ByteArray.empty) :=
+        ih restRaw.size hrest_lt restRaw rfl
+      have haux :=
+        inflateStoredAux_storedBlock (payload := payload) (rest := deflateStored restRaw)
+          (final := false) hpayload_le
+      have hsplit : payload ++ restRaw = raw := by
+        simp [payload, restRaw, byteArray_extract_split (a := raw) (n := blockLen) hblockLen_le]
+      calc
+        inflateStoredAux (deflateStored raw)
+            = inflateStoredAux (storedBlock payload false ++ deflateStored restRaw) := by
+                simp [hdef, hfinal, block]
+        _ = some (payload ++ restRaw, ByteArray.empty) := by
+              simp [haux, ih']
+        _ = some (raw, ByteArray.empty) := by
+              simp [hsplit]
+    · have hfinal : final = true := by
+        have hlen : blockLen = raw.size := by simp [blockLen, hlarge]
+        simp [final, hlen]
+      have hdef : deflateStored raw = block := by
+        rw [deflateStored.eq_1]
+        simp [hzero, blockLen, hlarge, final, hfinal, block, payload]
+      have hpayload_eq : payload = raw := by
+        have hlen : blockLen = raw.size := by simp [blockLen, hlarge]
+        simp [payload, hlen, ByteArray.extract_zero_size]
+      calc
+        inflateStoredAux (deflateStored raw)
+            = inflateStoredAux (storedBlock payload true) := by
+                simp [hdef, hfinal, block]
+        _ = some (payload, ByteArray.empty) := by
+              simpa using (inflateStoredAux_storedBlock (payload := payload) (rest := ByteArray.empty)
+                (final := true) hpayload_le)
+        _ = some (raw, ByteArray.empty) := by
+              simp [hpayload_eq]
+
+-- Inflating a deflateStored stream yields the original bytes.
+lemma inflateStored_deflateStored (raw : ByteArray) :
+    inflateStored (deflateStored raw) = some raw := by
+  have haux := inflateStoredAux_deflateStored raw
+  simp [inflateStored, haux]
 
 -- The zlib stored-compression header bytes are fixed.
 lemma zlibCompressStored_header (raw : ByteArray) :

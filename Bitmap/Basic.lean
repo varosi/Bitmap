@@ -307,20 +307,37 @@ def mkChunk (typ : String) (data : ByteArray) : ByteArray :=
   let crc := crc32 (typBytes ++ data)
   lenBytes ++ typBytes ++ data ++ u32be crc.toNat
 
+def storedBlock (payload : ByteArray) (final : Bool) : ByteArray :=
+  let len := payload.size
+  ByteArray.mk #[if final then u8 0x01 else u8 0x00]
+    ++ u16le len ++ u16le (0xFFFF - len) ++ payload
+
 def deflateStored (raw : ByteArray) : ByteArray :=
-  Id.run do
-    let mut out := ByteArray.empty
-    let mut pos := 0
-    while pos < raw.size do
-      let remaining := raw.size - pos
-      let blockLen := if remaining > 65535 then 65535 else remaining
-      let final := (pos + blockLen == raw.size)
-      out := out.push (if final then u8 0x01 else u8 0x00)
-      out := out ++ u16le blockLen
-      out := out ++ u16le (0xFFFF - blockLen)
-      out := out ++ raw.extract pos (pos + blockLen)
-      pos := pos + blockLen
-    return out
+  if _hzero : raw.size = 0 then
+    storedBlock ByteArray.empty true
+  else
+    let blockLen := if raw.size > 65535 then 65535 else raw.size
+    let final := blockLen == raw.size
+    let payload := raw.extract 0 blockLen
+    let block := storedBlock payload final
+    if _hfinal : final then
+      block
+    else
+      block ++ deflateStored (raw.extract blockLen raw.size)
+termination_by raw.size
+decreasing_by
+  have hle : blockLen ≤ raw.size := by
+    by_cases hlarge : raw.size > 65535
+    · have : (65535 : Nat) ≤ raw.size := Nat.le_of_lt hlarge
+      simpa [blockLen, hlarge] using this
+    · simp [blockLen, hlarge]
+  have hpos : 0 < blockLen := by
+    have hpos_raw : 0 < raw.size := Nat.pos_of_ne_zero _hzero
+    by_cases hlarge : raw.size > 65535
+    · simp [blockLen, hlarge]
+    · simp [blockLen, hlarge, hpos_raw]
+  simp [ByteArray.size_extract]
+  exact Nat.sub_lt_self hpos hle
 
 def zlibCompressStored (raw : ByteArray) : ByteArray :=
   let header := ByteArray.mk #[u8 0x78, u8 0x01]
@@ -832,6 +849,80 @@ partial def zlibDecompress (data : ByteArray) (hsize : 2 <= data.size) : Option 
     none
   return out
 
+-- Parse stored (uncompressed) deflate blocks from a deflated byte stream.
+-- Returns the decoded payload and any remaining suffix.
+def inflateStoredAux (data : ByteArray) : Option (ByteArray × ByteArray) := do
+  if h : 0 < data.size then
+    let header := data.get 0 h
+    let bfinal := header &&& (0x01 : UInt8)
+    let btype := (header >>> 1) &&& (0x03 : UInt8)
+    if btype != (0 : UInt8) then
+      none
+    if hlen : 1 + 3 < data.size then
+      let len := readU16LE data 1 (by omega)
+      let nlen := readU16LE data 3 (by omega)
+      if len + nlen != 0xFFFF then
+        none
+      let start := 5
+      if hbad : start + len > data.size then
+        none
+      else
+        let payload := data.extract start (start + len)
+        let next := data.extract (start + len) data.size
+        if bfinal == (1 : UInt8) then
+          return (payload, next)
+        else
+          let (tail, rest) ← inflateStoredAux next
+          return (payload ++ tail, rest)
+    else
+      none
+  else
+    none
+termination_by data.size
+decreasing_by
+  -- The recursive call consumes at least the 5-byte header.
+  have hle : 5 + readU16LE data 1 (by omega) ≤ data.size := by
+    exact not_lt.mp hbad
+  have hpos : 0 < 5 + readU16LE data 1 (by omega) := by omega
+  -- Reduce the suffix size and apply `Nat.sub_lt_self`.
+  simp [ByteArray.size_extract]
+  exact Nat.sub_lt_self hpos hle
+
+-- Inflate stored blocks and require the stream to end exactly at the final block.
+partial def inflateStored (data : ByteArray) : Option ByteArray := do
+  let (payload, rest) ← inflateStoredAux data
+  if rest.size == 0 then
+    return payload
+  else
+    none
+
+-- Fast path for zlib streams that use only stored (uncompressed) deflate blocks.
+partial def zlibDecompressStored (data : ByteArray) (hsize : 2 <= data.size) : Option ByteArray := do
+  let h0 : 0 < data.size := by omega
+  let h1 : 1 < data.size := by omega
+  let cmf := data.get 0 h0
+  let flg := data.get 1 h1
+  if ((cmf.toNat <<< 8) + flg.toNat) % 31 != 0 then
+    none
+  if (cmf &&& (0x0F : UInt8)) != (8 : UInt8) then
+    none
+  if (flg &&& (0x20 : UInt8)) != (0 : UInt8) then
+    none
+  if hmin : 6 ≤ data.size then
+    let deflated := data.extract 2 (data.size - 4)
+    let out ← inflateStored deflated
+    let pos := data.size - 4
+    have hAdler : pos + 3 < data.size := by
+      have : 4 ≤ data.size := by omega
+      omega
+    let adlerExpected := readU32BE data pos hAdler
+    let adlerActual := (adler32 out).toNat
+    if adlerExpected != adlerActual then
+      none
+    return out
+  else
+    none
+
 structure PngHeader where
   width : Nat
   height : Nat
@@ -971,7 +1062,9 @@ partial def decodeBitmap (bytes : ByteArray) : Option BitmapRGB8 := do
   let bpp := if hdr.colorType == 2 then 3 else 4
   let raw ←
     if hsize : 2 <= idat.size then
-      zlibDecompress idat hsize
+      match zlibDecompressStored idat hsize with
+      | some raw => some raw
+      | none => zlibDecompress idat hsize
     else
       none
   let rowBytes := hdr.width * bpp
