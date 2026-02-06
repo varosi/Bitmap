@@ -249,19 +249,15 @@ def u32be (n : Nat) : ByteArray :=
   ]
 
 def readU16LE (bytes : ByteArray) (pos : Nat) (h : pos + 1 < bytes.size) : Nat :=
-  let h0 : pos < bytes.size := by omega
-  let b0 := bytes.get pos h0
+  let b0 := bytes.get pos (by omega)
   let b1 := bytes.get (pos + 1) (by simpa using h)
   b0.toNat + (b1.toNat <<< 8)
 
 def readU32BE (bytes : ByteArray) (pos : Nat) (h : pos + 3 < bytes.size) : Nat :=
-  let h2 : pos + 2 < bytes.size := by omega
-  let h1 : pos + 1 < bytes.size := by omega
-  let h0 : pos < bytes.size := by omega
-  let b0 := bytes.get pos h0
-  let b1 := bytes.get (pos + 1) (by simpa using h1)
-  let b2 := bytes.get (pos + 2) (by simpa using h2)
-  let b3 := bytes.get (pos + 3) (by simpa using h)
+  let b0 := bytes.get pos (by omega)
+  let b1 := bytes.get (pos + 1) (by omega)
+  let b2 := bytes.get (pos + 2) (by omega)
+  let b3 := bytes.get (pos + 3) (by omega)
   (b0.toNat <<< 24) + (b1.toNat <<< 16) + (b2.toNat <<< 8) + b3.toNat
 
 def crc32Table : Array UInt32 :=
