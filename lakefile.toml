@@ -1,5 +1,5 @@
 name = "bitmap"
-version = "0.1.0"
+version = "0.1.1"
 keywords = ["graphics", "image", "bitmap", "png"]
 defaultTargets = ["Bitmap"]
 testDriver = "bitmap_tests"

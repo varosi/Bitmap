@@ -238,30 +238,26 @@ def u8 (n : Nat) : UInt8 :=
   UInt8.ofNat n
 
 def u16le (n : Nat) : ByteArray :=
-  ByteArray.mk #[u8 (n &&& 0xFF), u8 ((n >>> 8) &&& 0xFF)]
+  ByteArray.mk #[u8 (n % 256), u8 ((n / 256) % 256)]
 
 def u32be (n : Nat) : ByteArray :=
   ByteArray.mk #[
-    u8 ((n >>> 24) &&& 0xFF),
-    u8 ((n >>> 16) &&& 0xFF),
-    u8 ((n >>> 8) &&& 0xFF),
-    u8 (n &&& 0xFF)
+    u8 ((n / 2 ^ 24) % 256),
+    u8 ((n / 2 ^ 16) % 256),
+    u8 ((n / 2 ^ 8) % 256),
+    u8 (n % 256)
   ]
 
 def readU16LE (bytes : ByteArray) (pos : Nat) (h : pos + 1 < bytes.size) : Nat :=
-  let h0 : pos < bytes.size := by omega
-  let b0 := bytes.get pos h0
+  let b0 := bytes.get pos (by omega)
   let b1 := bytes.get (pos + 1) (by simpa using h)
   b0.toNat + (b1.toNat <<< 8)
 
 def readU32BE (bytes : ByteArray) (pos : Nat) (h : pos + 3 < bytes.size) : Nat :=
-  let h2 : pos + 2 < bytes.size := by omega
-  let h1 : pos + 1 < bytes.size := by omega
-  let h0 : pos < bytes.size := by omega
-  let b0 := bytes.get pos h0
-  let b1 := bytes.get (pos + 1) (by simpa using h1)
-  let b2 := bytes.get (pos + 2) (by simpa using h2)
-  let b3 := bytes.get (pos + 3) (by simpa using h)
+  let b0 := bytes.get pos (by omega)
+  let b1 := bytes.get (pos + 1) (by omega)
+  let b2 := bytes.get (pos + 2) (by omega)
+  let b3 := bytes.get (pos + 3) (by omega)
   (b0.toNat <<< 24) + (b1.toNat <<< 16) + (b2.toNat <<< 8) + b3.toNat
 
 def crc32Table : Array UInt32 :=
@@ -307,20 +303,37 @@ def mkChunk (typ : String) (data : ByteArray) : ByteArray :=
   let crc := crc32 (typBytes ++ data)
   lenBytes ++ typBytes ++ data ++ u32be crc.toNat
 
+def storedBlock (payload : ByteArray) (final : Bool) : ByteArray :=
+  let len := payload.size
+  ByteArray.mk #[if final then u8 0x01 else u8 0x00]
+    ++ u16le len ++ u16le (0xFFFF - len) ++ payload
+
 def deflateStored (raw : ByteArray) : ByteArray :=
-  Id.run do
-    let mut out := ByteArray.empty
-    let mut pos := 0
-    while pos < raw.size do
-      let remaining := raw.size - pos
-      let blockLen := if remaining > 65535 then 65535 else remaining
-      let final := (pos + blockLen == raw.size)
-      out := out.push (if final then u8 0x01 else u8 0x00)
-      out := out ++ u16le blockLen
-      out := out ++ u16le (0xFFFF - blockLen)
-      out := out ++ raw.extract pos (pos + blockLen)
-      pos := pos + blockLen
-    return out
+  if _hzero : raw.size = 0 then
+    storedBlock ByteArray.empty true
+  else
+    let blockLen := if raw.size > 65535 then 65535 else raw.size
+    let final := blockLen == raw.size
+    let payload := raw.extract 0 blockLen
+    let block := storedBlock payload final
+    if _hfinal : final then
+      block
+    else
+      block ++ deflateStored (raw.extract blockLen raw.size)
+termination_by raw.size
+decreasing_by
+  have hle : blockLen ≤ raw.size := by
+    by_cases hlarge : raw.size > 65535
+    · have : (65535 : Nat) ≤ raw.size := Nat.le_of_lt hlarge
+      simpa [blockLen, hlarge] using this
+    · simp [blockLen, hlarge]
+  have hpos : 0 < blockLen := by
+    have hpos_raw : 0 < raw.size := Nat.pos_of_ne_zero _hzero
+    by_cases hlarge : raw.size > 65535
+    · simp [blockLen, hlarge]
+    · simp [blockLen, hlarge, hpos_raw]
+  simp [ByteArray.size_extract]
+  exact Nat.sub_lt_self hpos hle
 
 def zlibCompressStored (raw : ByteArray) : ByteArray :=
   let header := ByteArray.mk #[u8 0x78, u8 0x01]
@@ -832,6 +845,86 @@ partial def zlibDecompress (data : ByteArray) (hsize : 2 <= data.size) : Option 
     none
   return out
 
+-- Parse stored (uncompressed) deflate blocks from a deflated byte stream.
+-- Returns the decoded payload and any remaining suffix.
+def inflateStoredAux (data : ByteArray) (h : 0 < data.size) : Option (ByteArray × ByteArray) := do
+  let header := data.get 0 h
+  let bfinal := header &&& (0x01 : UInt8)
+  let btype := (header >>> 1) &&& (0x03 : UInt8)
+  if btype != (0 : UInt8) then
+    none
+  if hlen : 1 + 3 < data.size then
+    let len := readU16LE data 1 (by omega)
+    let nlen := readU16LE data 3 (by omega)
+    if len + nlen != 0xFFFF then
+      none
+    let start := 5
+    if hbad : start + len > data.size then
+      none
+    else
+      let payload := data.extract start (start + len)
+      let next := data.extract (start + len) data.size
+      if bfinal == (1 : UInt8) then
+        return (payload, next)
+      else
+        if hnext : start + len < data.size then
+          have hnextsize : next.size = data.size - (start + len) := by
+            simp [next, ByteArray.size_extract]
+          have hnext' : 0 < next.size := by
+            have hpos : 0 < data.size - (start + len) := Nat.sub_pos_of_lt hnext
+            simpa [hnextsize] using hpos
+          let (tail, rest) ← inflateStoredAux next hnext'
+          return (payload ++ tail, rest)
+        else
+          none
+  else
+    none
+termination_by data.size
+decreasing_by
+  -- The recursive call consumes at least the 5-byte header.
+  have hle : 5 + readU16LE data 1 (by omega) ≤ data.size := by
+    exact not_lt.mp hbad
+  have hpos : 0 < 5 + readU16LE data 1 (by omega) := by omega
+  -- Reduce the suffix size and apply `Nat.sub_lt_self`.
+  simp [ByteArray.size_extract]
+  exact Nat.sub_lt_self hpos hle
+
+-- Inflate stored blocks and require the stream to end exactly at the final block.
+partial def inflateStored (data : ByteArray) : Option ByteArray := do
+  if h : 0 < data.size then
+    let (payload, rest) ← inflateStoredAux data h
+    if rest.size == 0 then
+      return payload
+    else
+      none
+  else
+    none
+
+-- Fast path for zlib streams that use only stored (uncompressed) deflate blocks.
+partial def zlibDecompressStored (data : ByteArray) (hsize : 2 <= data.size) : Option ByteArray := do
+  let cmf := data.get 0 (by omega)
+  let flg := data.get 1 (by omega)
+  if ((cmf.toNat <<< 8) + flg.toNat) % 31 != 0 then
+    none
+  if (cmf &&& (0x0F : UInt8)) != (8 : UInt8) then
+    none
+  if (flg &&& (0x20 : UInt8)) != (0 : UInt8) then
+    none
+  if hmin : 6 ≤ data.size then
+    let deflated := data.extract 2 (data.size - 4)
+    let out ← inflateStored deflated
+    let pos := data.size - 4
+    have hAdler : pos + 3 < data.size := by
+      have : 4 ≤ data.size := by omega
+      omega
+    let adlerExpected := readU32BE data pos hAdler
+    let adlerActual := (adler32 out).toNat
+    if adlerExpected != adlerActual then
+      none
+    return out
+  else
+    none
+
 structure PngHeader where
   width : Nat
   height : Nat
@@ -839,7 +932,72 @@ structure PngHeader where
   bitDepth : Nat
 deriving Repr
 
+def readChunk (bytes : ByteArray) (pos : Nat)
+    (hLen : pos + 3 < bytes.size) :
+    Option (ByteArray × ByteArray × Nat) :=
+  let len := readU32BE bytes pos hLen
+  if _hCrc : pos + 8 + len + 4 ≤ bytes.size then
+    let typeStart := pos + 4
+    let dataStart := pos + 8
+    let dataEnd := dataStart + len
+    let crcEnd := dataEnd + 4
+    let typBytes := bytes.extract typeStart (typeStart + 4)
+    let data := bytes.extract dataStart dataEnd
+    some (typBytes, data, crcEnd)
+  else
+    none
+
+def parsePngSimple (bytes : ByteArray) (_hsize : 8 <= bytes.size) :
+    Option (PngHeader × ByteArray) := do
+  if bytes.extract 0 8 != pngSignature then
+    none
+  let pos := 8
+  if hLen1 : pos + 3 < bytes.size then
+    match readChunk bytes pos hLen1 with
+    | some (typ1, data1, pos2) =>
+        if typ1 != "IHDR".toUTF8 then
+          none
+        if hlen : data1.size ≠ 13 then
+          none
+        else
+          let hlen' : data1.size = 13 := by
+            exact not_ne_iff.mp hlen
+          let w := readU32BE data1 0 (by simp [hlen'])
+          let h := readU32BE data1 4 (by simp [hlen'])
+          let tail := data1.extract 8 13
+          if tail != ByteArray.mk #[u8 8, u8 2, u8 0, u8 0, u8 0] then
+            none
+          let hdr : PngHeader := { width := w, height := h, colorType := 2, bitDepth := 8 }
+          if hLen2 : pos2 + 3 < bytes.size then
+            match readChunk bytes pos2 hLen2 with
+            | some (typ2, data2, pos3) =>
+                if typ2 != "IDAT".toUTF8 then
+                  none
+                if hLen3 : pos3 + 3 < bytes.size then
+                  match readChunk bytes pos3 hLen3 with
+                  | some (typ3, data3, _) =>
+                      if typ3 != "IEND".toUTF8 then
+                        none
+                      if data3.size != 0 then
+                        none
+                      return (hdr, data2)
+                  | none =>
+                      none
+                else
+                  none
+            | none =>
+                none
+          else
+            none
+    | none =>
+        none
+  else
+    none
+
+
 partial def parsePng (bytes : ByteArray) (_hsize : 8 <= bytes.size) : Option (PngHeader × ByteArray) := do
+  if let some res := parsePngSimple bytes _hsize then
+    return res
   if bytes.extract 0 8 != pngSignature then
     none
   let mut pos := 8
@@ -848,36 +1006,32 @@ partial def parsePng (bytes : ByteArray) (_hsize : 8 <= bytes.size) : Option (Pn
   while pos + 8 <= bytes.size do
     if hLen : pos + 3 < bytes.size then
       let len := readU32BE bytes pos hLen
-      let typeStart := pos + 4
       let dataStart := pos + 8
-      let dataEnd := dataStart + len
-      let crcEnd := dataEnd + 4
-      if crcEnd > bytes.size then
-        none
-      let typBytes := bytes.extract typeStart (typeStart + 4)
-      let typ := String.fromUTF8! typBytes
-      let chunkData := bytes.extract dataStart dataEnd
-      if typ == "IHDR" then
-        if len != 13 then
+      match readChunk bytes pos hLen with
+      | some (typBytes, chunkData, posNext) =>
+          if typBytes == "IHDR".toUTF8 then
+            if len != 13 then
+              none
+            if hIH : dataStart + 12 < bytes.size then
+              let w := readU32BE bytes dataStart (by omega)
+              let h := readU32BE bytes (dataStart + 4) (by omega)
+              let bitDepth := (bytes.get (dataStart + 8) (by omega)).toNat
+              let colorType := (bytes.get (dataStart + 9) (by omega)).toNat
+              let comp := (bytes.get (dataStart + 10) (by omega)).toNat
+              let filter := (bytes.get (dataStart + 11) (by omega)).toNat
+              let interlace := (bytes.get (dataStart + 12) (by omega)).toNat
+              if comp != 0 || filter != 0 || interlace != 0 then
+                none
+              header := some { width := w, height := h, colorType, bitDepth }
+            else
+              none
+          else if typBytes == "IDAT".toUTF8 then
+            idat := idat ++ chunkData
+          else if typBytes == "IEND".toUTF8 then
+            break
+          pos := posNext
+      | none =>
           none
-        if hIH : dataStart + 12 < bytes.size then
-          let w := readU32BE bytes dataStart (by omega)
-          let h := readU32BE bytes (dataStart + 4) (by omega)
-          let bitDepth := (bytes.get (dataStart + 8) (by omega)).toNat
-          let colorType := (bytes.get (dataStart + 9) (by omega)).toNat
-          let comp := (bytes.get (dataStart + 10) (by omega)).toNat
-          let filter := (bytes.get (dataStart + 11) (by omega)).toNat
-          let interlace := (bytes.get (dataStart + 12) (by omega)).toNat
-          if comp != 0 || filter != 0 || interlace != 0 then
-            none
-          header := some { width := w, height := h, colorType, bitDepth }
-        else
-          none
-      else if typ == "IDAT" then
-        idat := idat ++ chunkData
-      else if typ == "IEND" then
-        break
-      pos := crcEnd
     else
       none
   match header with
@@ -912,6 +1066,47 @@ def unfilterRow (filter : UInt8) (row : ByteArray) (prev : ByteArray) (bpp : Nat
       out := out.push recon
     return out
 
+def decodeRowsLoop (raw : ByteArray) (w h bpp rowBytes : Nat)
+    (y offset : Nat) (prevRow pixels : ByteArray) : Option ByteArray := do
+  if hlt : y < h then
+    let filter := raw.get! offset
+    let offset := offset + 1
+    let rowData := raw.extract offset (offset + rowBytes)
+    let offset := offset + rowBytes
+    if hfilter : filter.toNat ≤ 4 then
+      let row :=
+        if filter.toNat = 0 then
+          rowData
+        else
+          unfilterRow filter rowData prevRow bpp hfilter
+      let pixels :=
+        if bpp == 3 then
+          let rowOffset := y * rowBytes
+          row.copySlice 0 pixels rowOffset rowBytes
+        else
+          Id.run do
+            let mut pixels := pixels
+            for x in [0:w] do
+              let base := x * bpp
+              let r := row.get! base
+              let g := row.get! (base + 1)
+              let b := row.get! (base + 2)
+              let pixBase := (y * w + x) * bytesPerPixel
+              pixels := pixels.set! pixBase r
+              pixels := pixels.set! (pixBase + 1) g
+              pixels := pixels.set! (pixBase + 2) b
+            return pixels
+      decodeRowsLoop raw w h bpp rowBytes (y + 1) offset row pixels
+    else
+      none
+  else
+    return pixels
+termination_by h - y
+decreasing_by
+  have hy : y < h := hlt
+  have hy' : y < y + 1 := Nat.lt_succ_self y
+  exact Nat.sub_lt_sub_left hy hy'
+
 partial def decodeBitmap (bytes : ByteArray) : Option BitmapRGB8 := do
   let (hdr, idat) ←
     if hsize : 8 <= bytes.size then
@@ -925,7 +1120,9 @@ partial def decodeBitmap (bytes : ByteArray) : Option BitmapRGB8 := do
   let bpp := if hdr.colorType == 2 then 3 else 4
   let raw ←
     if hsize : 2 <= idat.size then
-      zlibDecompress idat hsize
+      match zlibDecompressStored idat hsize with
+      | some raw => some raw
+      | none => zlibDecompress idat hsize
     else
       none
   let rowBytes := hdr.width * bpp
@@ -933,49 +1130,41 @@ partial def decodeBitmap (bytes : ByteArray) : Option BitmapRGB8 := do
   if raw.size != expected then
     none
   let totalBytes := hdr.width * hdr.height * bytesPerPixel
-  let mut pixels := ByteArray.mk <| Array.replicate totalBytes 0
-  let mut prevRow := ByteArray.empty
-  let mut offset := 0
-  for y in [0:hdr.height] do
-    let filter := raw.get! offset
-    offset := offset + 1
-    let rowData := raw.extract offset (offset + rowBytes)
-    offset := offset + rowBytes
-    if hfilter : filter.toNat ≤ 4 then
-      let row := unfilterRow filter rowData prevRow bpp hfilter
-      if bpp == 3 then
-        let rowOffset := y * rowBytes
-        pixels := row.copySlice 0 pixels rowOffset rowBytes
-      else
-        for x in [0:hdr.width] do
-          let base := x * bpp
-          let r := row.get! base
-          let g := row.get! (base + 1)
-          let b := row.get! (base + 2)
-          let pixBase := (y * hdr.width + x) * bytesPerPixel
-          pixels := pixels.set! pixBase r
-          pixels := pixels.set! (pixBase + 1) g
-          pixels := pixels.set! (pixBase + 2) b
-      prevRow := row
-    else
-      none
+  let pixels0 := ByteArray.mk <| Array.replicate totalBytes 0
+  let pixels ← decodeRowsLoop raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
   let size : Size := { width := hdr.width, height := hdr.height }
   if hsize : pixels.size = size.width * size.height * bytesPerPixel then
     return { size, data := pixels, valid := hsize }
   else
     none
 
+def encodeRawLoop (data : ByteArray) (rowBytes h : Nat) (y : Nat) (raw : ByteArray) : ByteArray :=
+  if hlt : y < h then
+    let outOff := y * (rowBytes + 1)
+    let start := y * rowBytes
+    let raw := data.copySlice start raw (outOff + 1) rowBytes
+    encodeRawLoop data rowBytes h (y + 1) raw
+  else
+    raw
+termination_by h - y
+decreasing_by
+  have hy : y < h := hlt
+  have hy' : y < y + 1 := Nat.lt_succ_self y
+  exact Nat.sub_lt_sub_left hy hy'
+
+def encodeRaw (bmp : BitmapRGB8) : ByteArray :=
+  let w := bmp.size.width
+  let h := bmp.size.height
+  let rowBytes := w * bytesPerPixel
+  let rawSize := h * (rowBytes + 1)
+  let raw := ByteArray.mk <| Array.replicate rawSize 0
+  encodeRawLoop bmp.data rowBytes h 0 raw
+
 def encodeBitmap (bmp : BitmapRGB8) : ByteArray :=
   Id.run do
     let w := bmp.size.width
     let h := bmp.size.height
-    let rowBytes := w * bytesPerPixel
-    let rawSize := h * (rowBytes + 1)
-    let mut raw := ByteArray.mk <| Array.replicate rawSize 0
-    for y in [0:h] do
-      let outOff := y * (rowBytes + 1)
-      let start := y * rowBytes
-      raw := bmp.data.copySlice start raw (outOff + 1) rowBytes
+    let raw := encodeRaw bmp
     let ihdr := u32be w ++ u32be h ++ ByteArray.mk #[u8 8, u8 2, u8 0, u8 0, u8 0]
     let idat := zlibCompressStored raw
     pngSignature
