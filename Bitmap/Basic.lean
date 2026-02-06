@@ -1049,6 +1049,47 @@ def unfilterRow (filter : UInt8) (row : ByteArray) (prev : ByteArray) (bpp : Nat
       out := out.push recon
     return out
 
+def decodeRowsLoop (raw : ByteArray) (w h bpp rowBytes : Nat)
+    (y offset : Nat) (prevRow pixels : ByteArray) : Option ByteArray := do
+  if hlt : y < h then
+    let filter := raw.get! offset
+    let offset := offset + 1
+    let rowData := raw.extract offset (offset + rowBytes)
+    let offset := offset + rowBytes
+    if hfilter : filter.toNat ≤ 4 then
+      let row :=
+        if filter.toNat = 0 then
+          rowData
+        else
+          unfilterRow filter rowData prevRow bpp hfilter
+      let pixels :=
+        if bpp == 3 then
+          let rowOffset := y * rowBytes
+          row.copySlice 0 pixels rowOffset rowBytes
+        else
+          Id.run do
+            let mut pixels := pixels
+            for x in [0:w] do
+              let base := x * bpp
+              let r := row.get! base
+              let g := row.get! (base + 1)
+              let b := row.get! (base + 2)
+              let pixBase := (y * w + x) * bytesPerPixel
+              pixels := pixels.set! pixBase r
+              pixels := pixels.set! (pixBase + 1) g
+              pixels := pixels.set! (pixBase + 2) b
+            return pixels
+      decodeRowsLoop raw w h bpp rowBytes (y + 1) offset row pixels
+    else
+      none
+  else
+    return pixels
+termination_by h - y
+decreasing_by
+  have hy : y < h := hlt
+  have hy' : y < y + 1 := Nat.lt_succ_self y
+  exact Nat.sub_lt_sub_left hy hy'
+
 partial def decodeBitmap (bytes : ByteArray) : Option BitmapRGB8 := do
   let (hdr, idat) ←
     if hsize : 8 <= bytes.size then
@@ -1072,50 +1113,35 @@ partial def decodeBitmap (bytes : ByteArray) : Option BitmapRGB8 := do
   if raw.size != expected then
     none
   let totalBytes := hdr.width * hdr.height * bytesPerPixel
-  let mut pixels := ByteArray.mk <| Array.replicate totalBytes 0
-  let mut prevRow := ByteArray.empty
-  let mut offset := 0
-  for y in [0:hdr.height] do
-    let filter := raw.get! offset
-    offset := offset + 1
-    let rowData := raw.extract offset (offset + rowBytes)
-    offset := offset + rowBytes
-    if hfilter : filter.toNat ≤ 4 then
-      let row := unfilterRow filter rowData prevRow bpp hfilter
-      if bpp == 3 then
-        let rowOffset := y * rowBytes
-        pixels := row.copySlice 0 pixels rowOffset rowBytes
-      else
-        for x in [0:hdr.width] do
-          let base := x * bpp
-          let r := row.get! base
-          let g := row.get! (base + 1)
-          let b := row.get! (base + 2)
-          let pixBase := (y * hdr.width + x) * bytesPerPixel
-          pixels := pixels.set! pixBase r
-          pixels := pixels.set! (pixBase + 1) g
-          pixels := pixels.set! (pixBase + 2) b
-      prevRow := row
-    else
-      none
+  let pixels0 := ByteArray.mk <| Array.replicate totalBytes 0
+  let pixels ← decodeRowsLoop raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
   let size : Size := { width := hdr.width, height := hdr.height }
   if hsize : pixels.size = size.width * size.height * bytesPerPixel then
     return { size, data := pixels, valid := hsize }
   else
     none
 
+def encodeRawLoop (data : ByteArray) (rowBytes h : Nat) (y : Nat) (raw : ByteArray) : ByteArray :=
+  if hlt : y < h then
+    let outOff := y * (rowBytes + 1)
+    let start := y * rowBytes
+    let raw := data.copySlice start raw (outOff + 1) rowBytes
+    encodeRawLoop data rowBytes h (y + 1) raw
+  else
+    raw
+termination_by h - y
+decreasing_by
+  have hy : y < h := hlt
+  have hy' : y < y + 1 := Nat.lt_succ_self y
+  exact Nat.sub_lt_sub_left hy hy'
+
 def encodeRaw (bmp : BitmapRGB8) : ByteArray :=
-  Id.run do
-    let w := bmp.size.width
-    let h := bmp.size.height
-    let rowBytes := w * bytesPerPixel
-    let rawSize := h * (rowBytes + 1)
-    let mut raw := ByteArray.mk <| Array.replicate rawSize 0
-    for y in [0:h] do
-      let outOff := y * (rowBytes + 1)
-      let start := y * rowBytes
-      raw := bmp.data.copySlice start raw (outOff + 1) rowBytes
-    return raw
+  let w := bmp.size.width
+  let h := bmp.size.height
+  let rowBytes := w * bytesPerPixel
+  let rawSize := h * (rowBytes + 1)
+  let raw := ByteArray.mk <| Array.replicate rawSize 0
+  encodeRawLoop bmp.data rowBytes h 0 raw
 
 def encodeBitmap (bmp : BitmapRGB8) : ByteArray :=
   Id.run do

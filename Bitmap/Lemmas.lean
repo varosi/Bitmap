@@ -531,6 +531,106 @@ lemma byteArray_extract_split (a : ByteArray) (n : Nat) (hn : n ≤ a.size) :
             (a.extract n a.size)[i - n] := hget_right
         _ = a[i] := hget_extract
 
+-- Copying a slice preserves the prefix before the destination offset.
+lemma byteArray_copySlice_extract_prefix (src dest : ByteArray)
+    (srcOff destOff len : Nat) (hdest : destOff + len ≤ dest.size) :
+    (src.copySlice srcOff dest destOff len).extract 0 destOff = dest.extract 0 destOff := by
+  have hdo : destOff ≤ dest.size := by omega
+  have hsize : (dest.extract 0 destOff).size = destOff := by
+    simp [ByteArray.size_extract, Nat.min_eq_left hdo]
+  calc
+    (src.copySlice srcOff dest destOff len).extract 0 destOff
+        = (dest.extract 0 destOff ++
+            src.extract srcOff (srcOff + len) ++
+            dest.extract (destOff + min len (src.data.size - srcOff)) dest.data.size).extract 0 destOff := by
+            simp [ByteArray.copySlice_eq_append, ByteArray.append_assoc]
+    _ = (dest.extract 0 destOff).extract 0 destOff := by
+          have hprefix :=
+            byteArray_extract_append_prefix
+              (a := dest.extract 0 destOff)
+              (b := src.extract srcOff (srcOff + len) ++
+                    dest.extract (destOff + min len (src.data.size - srcOff)) dest.data.size)
+              (n := destOff) (by simp [hsize])
+          simpa [ByteArray.append_assoc] using hprefix
+    _ = dest.extract 0 destOff := by
+          have hzero :
+              (dest.extract 0 destOff).extract 0 (dest.extract 0 destOff).size =
+                dest.extract 0 destOff := by
+            simpa using (ByteArray.extract_zero_size (b := dest.extract 0 destOff))
+          simpa [hsize] using hzero
+
+-- Copying a slice installs the source segment at the destination offset.
+lemma byteArray_copySlice_extract_mid (src dest : ByteArray)
+    (srcOff destOff len : Nat) (hsrc : srcOff + len ≤ src.size) (hdest : destOff + len ≤ dest.size) :
+    (src.copySlice srcOff dest destOff len).extract destOff (destOff + len) =
+      src.extract srcOff (srcOff + len) := by
+  have hmin : min len (src.size - srcOff) = len := by
+    have hle : len ≤ src.size - srcOff := by
+      have hsrc' : len + srcOff ≤ src.size := by
+        simpa [Nat.add_comm] using hsrc
+      exact Nat.le_sub_of_add_le hsrc'
+    exact Nat.min_eq_left hle
+  have hdo : destOff ≤ dest.size := by omega
+  have hsize : (dest.extract 0 destOff).size = destOff := by
+    simp [ByteArray.size_extract, Nat.min_eq_left hdo]
+  have hmidSize : (src.extract srcOff (srcOff + len)).size = len := by
+    simp [ByteArray.size_extract, Nat.min_eq_left hsrc]
+  calc
+    (src.copySlice srcOff dest destOff len).extract destOff (destOff + len)
+        = (dest.extract 0 destOff ++ src.extract srcOff (srcOff + len) ++
+            dest.extract (destOff + len) dest.size).extract destOff (destOff + len) := by
+            simp [ByteArray.copySlice_eq_append, hmin, ByteArray.append_assoc, ByteArray.size_data]
+    _ = (dest.extract 0 destOff ++
+          (src.extract srcOff (srcOff + len) ++ dest.extract (destOff + len) dest.size)).extract
+          destOff (destOff + len) := by
+          simp [ByteArray.append_assoc]
+    _ = (src.extract srcOff (srcOff + len) ++ dest.extract (destOff + len) dest.size).extract 0 len := by
+          have h :=
+            (ByteArray.extract_append_size_add'
+              (a := dest.extract 0 destOff)
+              (b := src.extract srcOff (srcOff + len) ++ dest.extract (destOff + len) dest.size)
+              (i := 0) (j := len) (h := hsize.symm))
+          simpa using h
+    _ = (src.extract srcOff (srcOff + len)).extract 0 len := by
+          have hprefix :=
+            byteArray_extract_append_prefix
+              (a := src.extract srcOff (srcOff + len))
+              (b := dest.extract (destOff + len) dest.size)
+              (n := len) (by simp [hmidSize])
+          simpa using hprefix
+    _ = src.extract srcOff (srcOff + len) := by
+          have hzero :
+              (src.extract srcOff (srcOff + len)).extract 0
+                  (src.extract srcOff (srcOff + len)).size =
+                src.extract srcOff (srcOff + len) := by
+            simpa using
+              (ByteArray.extract_zero_size (b := src.extract srcOff (srcOff + len)))
+          simpa [hmidSize] using hzero
+
+-- Copying a slice within bounds preserves the destination size.
+lemma byteArray_copySlice_size (src dest : ByteArray)
+    (srcOff destOff len : Nat) (hsrc : srcOff + len ≤ src.size) (hdest : destOff + len ≤ dest.size) :
+    (src.copySlice srcOff dest destOff len).size = dest.size := by
+  have hmin : min len (src.size - srcOff) = len := by
+    have hle : len ≤ src.size - srcOff := by
+      have hsrc' : len + srcOff ≤ src.size := by
+        simpa [Nat.add_comm] using hsrc
+      exact Nat.le_sub_of_add_le hsrc'
+    exact Nat.min_eq_left hle
+  have hdo : destOff ≤ dest.size := by omega
+  calc
+    (src.copySlice srcOff dest destOff len).size
+        = (dest.extract 0 destOff ++ src.extract srcOff (srcOff + len) ++
+            dest.extract (destOff + len) dest.size).size := by
+            simp [ByteArray.copySlice_eq_append, hmin, ByteArray.append_assoc, ByteArray.size_data]
+    _ = (dest.extract 0 destOff).size +
+        (src.extract srcOff (srcOff + len)).size +
+        (dest.extract (destOff + len) dest.size).size := by
+          simp [ByteArray.size_append]
+    _ = destOff + len + (dest.size - (destOff + len)) := by
+          simp [ByteArray.size_extract, Nat.min_eq_left hdo, Nat.min_eq_left hsrc]
+    _ = dest.size := by omega
+
 -- Size of a stored deflate block: header + LEN + NLEN + payload.
 lemma storedBlock_size (payload : ByteArray) (final : Bool) :
     (storedBlock payload final).size = payload.size + 5 := by
@@ -1018,6 +1118,111 @@ lemma zlibCompressStored_cmf_flg (raw : ByteArray) :
   have hget1' : bytes[1]'h1 = u8 0x01 := by
     simpa [bytes, zlibCompressStored, hget1, hheader1]
   exact ⟨hget0', hget1'⟩
+
+-- Extracting the deflated payload from zlib stored-compression output.
+lemma zlibCompressStored_extract_deflated (raw : ByteArray) :
+    (zlibCompressStored raw).extract 2 ((zlibCompressStored raw).size - 4) = deflateStored raw := by
+  let header : ByteArray := ByteArray.mk #[u8 0x78, u8 0x01]
+  let deflated := deflateStored raw
+  let adler := u32be (adler32 raw).toNat
+  have hheader : header.size = 2 := by decide
+  have hadler : adler.size = 4 := by
+    simpa using (u32be_size (adler32 raw).toNat)
+  have hsize'' : header.size + deflated.size + adler.size - 4 = deflated.size + 2 := by
+    simp [hheader, hadler]
+    omega
+  calc
+    (zlibCompressStored raw).extract 2 ((zlibCompressStored raw).size - 4)
+        = (header ++ deflated ++ adler).extract 2 (header.size + deflated.size + adler.size - 4) := by
+            simp [zlibCompressStored, header, deflated, adler, ByteArray.size_append, hheader, hadler]
+    _ = (header ++ deflated ++ adler).extract 2 (deflated.size + 2) := by
+          simp [hsize'']
+    _ = (deflated ++ adler).extract 0 deflated.size := by
+          have h :=
+            (ByteArray.extract_append_size_add
+              (a := header) (b := deflated ++ adler) (i := 0) (j := deflated.size))
+          simpa [hheader, ByteArray.append_assoc, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using h
+    _ = deflated := by
+          have hprefix :
+              (deflated ++ adler).extract 0 deflated.size = deflated.extract 0 deflated.size := by
+            exact byteArray_extract_append_prefix (a := deflated) (b := adler) (n := deflated.size) (by exact le_rfl)
+          simp [hprefix, ByteArray.extract_zero_size]
+
+-- Extracting the Adler32 trailer from zlib stored-compression output.
+lemma zlibCompressStored_extract_adler (raw : ByteArray) :
+    (zlibCompressStored raw).extract ((zlibCompressStored raw).size - 4)
+        ((zlibCompressStored raw).size - 4 + 4) = u32be (adler32 raw).toNat := by
+  let header : ByteArray := ByteArray.mk #[u8 0x78, u8 0x01]
+  let deflated := deflateStored raw
+  let adler := u32be (adler32 raw).toNat
+  have hheader : header.size = 2 := by decide
+  have hadler : adler.size = 4 := by
+    simpa using (u32be_size (adler32 raw).toNat)
+  have hsize'' : header.size + deflated.size + adler.size - 4 = deflated.size + 2 := by
+    simp [hheader, hadler]
+    omega
+  have hprefix : (header ++ deflated).size = deflated.size + 2 := by
+    simp [ByteArray.size_append, hheader, Nat.add_comm]
+  calc
+    (zlibCompressStored raw).extract ((zlibCompressStored raw).size - 4)
+        ((zlibCompressStored raw).size - 4 + 4)
+        = (header ++ deflated ++ adler).extract (header.size + deflated.size + adler.size - 4)
+            (header.size + deflated.size + adler.size - 4 + 4) := by
+              simp [zlibCompressStored, header, deflated, adler, ByteArray.size_append, hheader, hadler]
+    _ = (header ++ deflated ++ adler).extract (deflated.size + 2) (deflated.size + 2 + 4) := by
+          simp [hsize'']
+    _ = adler.extract 0 adler.size := by
+          have h :=
+            (ByteArray.extract_append_size_add
+              (a := header ++ deflated) (b := adler) (i := 0) (j := adler.size))
+          simpa [hprefix, hadler, ByteArray.append_assoc, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using h
+    _ = adler := by
+          simp [ByteArray.extract_zero_size]
+
+-- Zlib decompression of stored-compression output yields the original bytes.
+lemma zlibDecompressStored_zlibCompressStored (raw : ByteArray)
+    (hsize : 2 ≤ (zlibCompressStored raw).size) :
+    zlibDecompressStored (zlibCompressStored raw) hsize = some raw := by
+  let bytes := zlibCompressStored raw
+  have hmin : 6 ≤ bytes.size := zlibCompressStored_size_ge raw
+  have h0 : 0 < bytes.size := lt_of_lt_of_le (by decide : 0 < 6) hmin
+  have h1 : 1 < bytes.size := lt_of_lt_of_le (by decide : 1 < 6) hmin
+  have h0' : 0 < bytes.size := lt_of_lt_of_le (by decide : 0 < 6) hmin
+  have h1' : 1 < bytes.size := lt_of_lt_of_le (by decide : 1 < 6) hmin
+  have hcmf' : bytes[0]'h0' = u8 0x78 := (zlibCompressStored_cmf_flg raw).1
+  have hflg' : bytes[1]'h1' = u8 0x01 := (zlibCompressStored_cmf_flg raw).2
+  have hcmf : bytes.get 0 h0 = u8 0x78 := by
+    have htmp : bytes.get 0 h0' = u8 0x78 := by
+      simpa [byteArray_get_eq_getElem] using hcmf'
+    simpa [byteArray_get_proof_irrel] using htmp
+  have hflg : bytes.get 1 h1 = u8 0x01 := by
+    have htmp : bytes.get 1 h1' = u8 0x01 := by
+      simpa [byteArray_get_eq_getElem] using hflg'
+    simpa [byteArray_get_proof_irrel] using htmp
+  have hdeflated : bytes.extract 2 (bytes.size - 4) = deflateStored raw := by
+    simpa [bytes] using zlibCompressStored_extract_deflated raw
+  have hAdlerPos : bytes.size - 4 + 3 < bytes.size := by
+    omega
+  have hadler : readU32BE bytes (bytes.size - 4) hAdlerPos = (adler32 raw).toNat := by
+    have hextract :
+        bytes.extract (bytes.size - 4) (bytes.size - 4 + 4) =
+          u32be (adler32 raw).toNat := by
+      simpa [bytes] using zlibCompressStored_extract_adler raw
+    have hlt : (adler32 raw).toNat < 2 ^ 32 := by
+      simpa using (UInt32.toNat_lt (adler32 raw))
+    exact readU32BE_of_extract_eq (bytes := bytes) (pos := bytes.size - 4)
+      (n := (adler32 raw).toNat) (h := hAdlerPos) hextract hlt
+  have hinflate : inflateStored (bytes.extract 2 (bytes.size - 4)) = some raw := by
+    simpa [hdeflated] using inflateStored_deflateStored raw
+  have hmod : ((u8 0x78).toNat <<< 8 + (u8 0x01).toNat) % 31 = 0 := by
+    decide
+  have hbtype : (u8 0x78 &&& (0x0F : UInt8)) = 8 := by
+    decide
+  have hflg0 : (u8 0x01 &&& (0x20 : UInt8)) = 0 := by
+    decide
+  -- Evaluate the decompressor on the stored-compression stream.
+  unfold zlibDecompressStored
+  simp [bytes, hcmf, hflg, hmin, hinflate, hadler, hmod, hbtype, hflg0]
 
 
 -- IHDR payload is always 13 bytes.
@@ -1889,6 +2094,102 @@ lemma bitIndex_readBit (br : BitReader) (h : br.bytePos < br.data.size) :
 lemma readBit_data (br : BitReader) (h : br.bytePos < br.data.size) :
     (br.readBit).2.data = br.data :=
   Png.readBit_data br h
+
+-- The raw-encoding loop preserves the buffer size.
+lemma encodeRawLoop_size (data : ByteArray) (rowBytes h y : Nat) (raw : ByteArray)
+    (hdata : data.size = h * rowBytes) (hraw : raw.size = h * (rowBytes + 1)) :
+    (encodeRawLoop data rowBytes h y raw).size = raw.size := by
+  have hk :
+      ∀ k, ∀ y raw, h - y = k → raw.size = h * (rowBytes + 1) →
+        (encodeRawLoop data rowBytes h y raw).size = raw.size := by
+    intro k
+    induction k with
+    | zero =>
+        intro y raw hk hraw
+        have hy : h ≤ y := Nat.le_of_sub_eq_zero hk
+        have hlt : ¬ y < h := not_lt_of_ge hy
+        simp [encodeRawLoop, hlt, hraw]
+    | succ k ih =>
+        intro y raw hk hraw
+        have hlt : y < h := Nat.lt_of_sub_eq_succ hk
+        have hy : y + 1 ≤ h := Nat.succ_le_of_lt hlt
+        have hsrc : y * rowBytes + rowBytes ≤ data.size := by
+          have hmul : (y + 1) * rowBytes ≤ h * rowBytes :=
+            Nat.mul_le_mul_right rowBytes hy
+          have hmul' : (y + 1) * rowBytes ≤ data.size := by
+            simpa [hdata] using hmul
+          simpa [Nat.add_mul, Nat.one_mul, Nat.add_assoc, Nat.add_comm] using hmul'
+        have hdest : y * (rowBytes + 1) + 1 + rowBytes ≤ raw.size := by
+          have hmul : (y + 1) * (rowBytes + 1) ≤ h * (rowBytes + 1) :=
+            Nat.mul_le_mul_right (rowBytes + 1) hy
+          have hmul' : (y + 1) * (rowBytes + 1) ≤ raw.size := by
+            simpa [hraw] using hmul
+          have hcalc : y * (rowBytes + 1) + 1 + rowBytes = (y + 1) * (rowBytes + 1) := by
+            calc
+              y * (rowBytes + 1) + 1 + rowBytes =
+                  y * (rowBytes + 1) + (rowBytes + 1) := by
+                    omega
+              _ = (y + 1) * (rowBytes + 1) := by
+                    simp [Nat.add_mul, Nat.one_mul, Nat.add_assoc, Nat.add_comm]
+          simpa [hcalc] using hmul'
+        let raw' :=
+          data.copySlice (y * rowBytes) raw (y * (rowBytes + 1) + 1) rowBytes
+        have hcopy : raw'.size = raw.size := by
+          exact
+            byteArray_copySlice_size (src := data) (dest := raw)
+              (srcOff := y * rowBytes) (destOff := y * (rowBytes + 1) + 1) (len := rowBytes) hsrc hdest
+        have hk' : h - (y + 1) = k := by
+          have hsum : h = Nat.succ k + y := Nat.eq_add_of_sub_eq (Nat.le_of_lt hlt) hk
+          calc
+            h - (y + 1) = (Nat.succ k + y) - (y + 1) := by simp [hsum]
+            _ = k := by omega
+        have hraw' : raw'.size = h * (rowBytes + 1) := by
+          calc
+            raw'.size = raw.size := hcopy
+            _ = h * (rowBytes + 1) := hraw
+        have ih' :=
+          ih (y := y + 1) (raw := raw') hk' hraw'
+        have hdef :
+            (encodeRawLoop data rowBytes h y raw).size =
+              (if y < h then encodeRawLoop data rowBytes h (y + 1) raw' else raw).size := by
+          have hdef0 :=
+            congrArg ByteArray.size
+              (encodeRawLoop.eq_1 (data := data) (rowBytes := rowBytes) (h := h) (y := y) (raw := raw))
+          simpa [raw'] using hdef0
+        calc
+          (encodeRawLoop data rowBytes h y raw).size =
+              (if y < h then encodeRawLoop data rowBytes h (y + 1) raw' else raw).size := by
+                rw [hdef]
+          _ = (encodeRawLoop data rowBytes h (y + 1) raw').size := by
+                simp [hlt]
+          _ = raw'.size := ih'
+          _ = raw.size := hcopy
+  exact hk (h - y) y raw rfl hraw
+
+-- Raw encoding size equals height times (row bytes + filter byte).
+lemma encodeRaw_size (bmp : BitmapRGB8) :
+    (encodeRaw bmp).size =
+      bmp.size.height * (bmp.size.width * bytesPerPixel + 1) := by
+  let w := bmp.size.width
+  let h := bmp.size.height
+  let rowBytes := w * bytesPerPixel
+  let rawSize := h * (rowBytes + 1)
+  have hdata : bmp.data.size = h * rowBytes := by
+    calc
+      bmp.data.size = w * h * bytesPerPixel := bmp.valid
+      _ = h * (w * bytesPerPixel) := by
+            simp [Nat.mul_left_comm, Nat.mul_comm]
+      _ = h * rowBytes := by simp [rowBytes]
+  have hraw : (ByteArray.mk (Array.replicate rawSize 0)).size = h * (rowBytes + 1) := by
+    simp [rawSize, ByteArray.size, Array.size_replicate]
+  unfold encodeRaw
+  have hsize :=
+    encodeRawLoop_size (data := bmp.data) (rowBytes := rowBytes) (h := h) (y := 0)
+      (raw := ByteArray.mk (Array.replicate rawSize 0)) hdata hraw
+  calc
+    (encodeRawLoop bmp.data rowBytes h 0
+        (ByteArray.mk (Array.replicate rawSize 0))).size = (ByteArray.mk (Array.replicate rawSize 0)).size := hsize
+    _ = h * (rowBytes + 1) := hraw
 
 -- Re-export: static Huffman length base table size.
 lemma lengthBases_size : lengthBases.size = 29 := Png.lengthBases_size
