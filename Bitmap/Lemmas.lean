@@ -2191,6 +2191,903 @@ lemma encodeRaw_size (bmp : BitmapRGB8) :
         (ByteArray.mk (Array.replicate rawSize 0))).size = (ByteArray.mk (Array.replicate rawSize 0)).size := hsize
     _ = h * (rowBytes + 1) := hraw
 
+-- Copying a slice preserves any prefix that ends before the destination offset.
+lemma byteArray_copySlice_extract_prefix_le (src dest : ByteArray)
+    (srcOff destOff len n : Nat) (hn : n ≤ destOff) (hdest : destOff + len ≤ dest.size) :
+    (src.copySlice srcOff dest destOff len).extract 0 n = dest.extract 0 n := by
+  have hprefix : (src.copySlice srcOff dest destOff len).extract 0 destOff = dest.extract 0 destOff := by
+    exact byteArray_copySlice_extract_prefix (src := src) (dest := dest)
+      (srcOff := srcOff) (destOff := destOff) (len := len) hdest
+  have hleft :
+      ((src.copySlice srcOff dest destOff len).extract 0 destOff).extract 0 n =
+        (src.copySlice srcOff dest destOff len).extract 0 n := by
+    simpa [Nat.min_eq_left hn] using
+      (ByteArray.extract_extract
+        (a := src.copySlice srcOff dest destOff len) (i := 0) (j := destOff) (k := 0) (l := n))
+  have hright :
+      (dest.extract 0 destOff).extract 0 n = dest.extract 0 n := by
+    simpa [Nat.min_eq_left hn] using
+      (ByteArray.extract_extract (a := dest) (i := 0) (j := destOff) (k := 0) (l := n))
+  calc
+    (src.copySlice srcOff dest destOff len).extract 0 n =
+        ((src.copySlice srcOff dest destOff len).extract 0 destOff).extract 0 n := by
+          simpa using hleft.symm
+    _ = (dest.extract 0 destOff).extract 0 n := by
+          simp [hprefix]
+    _ = dest.extract 0 n := hright
+
+-- If two byte arrays share a prefix, then any slice inside that prefix is equal.
+lemma byteArray_extract_eq_of_prefix_eq (a b : ByteArray) (n i j : Nat)
+    (hprefix : a.extract 0 n = b.extract 0 n) (hj : j ≤ n) :
+    a.extract i j = b.extract i j := by
+  have hleft :
+      (a.extract 0 n).extract i j = a.extract i j := by
+    simpa [Nat.min_eq_left hj] using
+      (ByteArray.extract_extract (a := a) (i := 0) (j := n) (k := i) (l := j))
+  have hright :
+      (b.extract 0 n).extract i j = b.extract i j := by
+    simpa [Nat.min_eq_left hj] using
+      (ByteArray.extract_extract (a := b) (i := 0) (j := n) (k := i) (l := j))
+  calc
+    a.extract i j = (a.extract 0 n).extract i j := by
+      simpa using hleft.symm
+    _ = (b.extract 0 n).extract i j := by
+      simp [hprefix]
+    _ = b.extract i j := hright
+
+-- Reading the single-byte extract recovers the original byte.
+lemma byteArray_get!_eq_get (a : ByteArray) (i : Nat) (h : i < a.size) :
+    a.get! i = a[i]'h := by
+  cases a with
+  | mk arr =>
+      have h' : i < arr.size := by
+        simpa using h
+      calc
+        arr[i]! = arr[i]'h' := by
+          simp [getElem!_pos, h']
+        _ = arr[i] := rfl
+
+lemma byteArray_get!_extract0 (a : ByteArray) (start : Nat) (h : start + 1 ≤ a.size) :
+    (a.extract start (start + 1)).get! 0 = a.get! start := by
+  have hlt : start < a.size := Nat.lt_of_lt_of_le (Nat.lt_succ_self start) h
+  have hpos : 0 < (a.extract start (start + 1)).size := by
+    simp [ByteArray.size_extract, Nat.min_eq_left h]
+  have hget :
+      (a.extract start (start + 1))[0]'hpos = a[start]'hlt := by
+    simp [ByteArray.get_extract]
+  calc
+    (a.extract start (start + 1)).get! 0 =
+        (a.extract start (start + 1))[0]'hpos := by
+          simpa using (byteArray_get!_eq_get (a := a.extract start (start + 1)) (i := 0) hpos)
+    _ = a[start]'hlt := hget
+    _ = a.get! start := by
+          simpa using (byteArray_get!_eq_get (a := a) (i := start) hlt).symm
+
+-- Extending a prefix equality by matching the next slice.
+lemma byteArray_extract_prefix_extend (a b : ByteArray) (n m : Nat)
+    (hnm : n ≤ m) (ha : m ≤ a.size) (hb : m ≤ b.size)
+    (hprefix : a.extract 0 n = b.extract 0 n)
+    (hmid : a.extract n m = b.extract n m) :
+    a.extract 0 m = b.extract 0 m := by
+  have hsize_a : (a.extract 0 m).size = m := by
+    simp [ByteArray.size_extract, Nat.min_eq_left ha]
+  have hsize_b : (b.extract 0 m).size = m := by
+    simp [ByteArray.size_extract, Nat.min_eq_left hb]
+  have hn_a : n ≤ (a.extract 0 m).size := by
+    simpa [hsize_a] using hnm
+  have hn_b : n ≤ (b.extract 0 m).size := by
+    simpa [hsize_b] using hnm
+  have hsplit_a :
+      a.extract 0 m = a.extract 0 n ++ a.extract n m := by
+    have hsplit := byteArray_extract_split (a := a.extract 0 m) (n := n) (hn := hn_a)
+    have hleft :
+        (a.extract 0 m).extract 0 n = a.extract 0 n := by
+      simpa [Nat.min_eq_left hnm] using
+        (ByteArray.extract_extract (a := a) (i := 0) (j := m) (k := 0) (l := n))
+    have hright :
+        (a.extract 0 m).extract n m = a.extract n m := by
+      simpa [Nat.min_eq_left (le_rfl : m ≤ m)] using
+        (ByteArray.extract_extract (a := a) (i := 0) (j := m) (k := n) (l := m))
+    calc
+      a.extract 0 m =
+          (a.extract 0 m).extract 0 n ++ (a.extract 0 m).extract n (a.extract 0 m).size := by
+            simpa [hsize_a] using hsplit.symm
+      _ = (a.extract 0 m).extract 0 n ++ (a.extract 0 m).extract n m := by
+            simp [hsize_a]
+      _ = a.extract 0 n ++ a.extract n m := by
+            simp [hleft, hright]
+  have hsplit_b :
+      b.extract 0 m = b.extract 0 n ++ b.extract n m := by
+    have hsplit := byteArray_extract_split (a := b.extract 0 m) (n := n) (hn := hn_b)
+    have hleft :
+        (b.extract 0 m).extract 0 n = b.extract 0 n := by
+      simpa [Nat.min_eq_left hnm] using
+        (ByteArray.extract_extract (a := b) (i := 0) (j := m) (k := 0) (l := n))
+    have hright :
+        (b.extract 0 m).extract n m = b.extract n m := by
+      simpa [Nat.min_eq_left (le_rfl : m ≤ m)] using
+        (ByteArray.extract_extract (a := b) (i := 0) (j := m) (k := n) (l := m))
+    calc
+      b.extract 0 m =
+          (b.extract 0 m).extract 0 n ++ (b.extract 0 m).extract n (b.extract 0 m).size := by
+            simpa [hsize_b] using hsplit.symm
+      _ = (b.extract 0 m).extract 0 n ++ (b.extract 0 m).extract n m := by
+            simp [hsize_b]
+      _ = b.extract 0 n ++ b.extract n m := by
+            simp [hleft, hright]
+  calc
+    a.extract 0 m = a.extract 0 n ++ a.extract n m := hsplit_a
+    _ = b.extract 0 n ++ b.extract n m := by
+          simp [hprefix, hmid]
+    _ = b.extract 0 m := hsplit_b.symm
+
+-- Copying a slice does not affect bytes beyond the destination range.
+lemma byteArray_copySlice_get_of_ge (src dest : ByteArray)
+    (srcOff destOff len i : Nat) (hsrc : srcOff + len ≤ src.size)
+    (hdest : destOff + len ≤ dest.size) (hi : destOff + len ≤ i) (hi' : i < dest.size) :
+    (src.copySlice srcOff dest destOff len)[i]'(by
+        have hsize :=
+          byteArray_copySlice_size (src := src) (dest := dest)
+            (srcOff := srcOff) (destOff := destOff) (len := len) hsrc hdest
+        simpa [hsize] using hi') = dest[i]'hi' := by
+  have hmin : min len (src.size - srcOff) = len := by
+    have hle : len ≤ src.size - srcOff := by
+      have hsrc' : len + srcOff ≤ src.size := by
+        simpa [Nat.add_comm] using hsrc
+      exact Nat.le_sub_of_add_le hsrc'
+    exact Nat.min_eq_left hle
+  let left :=
+    dest.extract 0 destOff ++ src.extract srcOff (srcOff + len)
+  let right := dest.extract (destOff + len) dest.size
+  have hsize_left : left.size = destOff + len := by
+    have hdo : destOff ≤ dest.size := by omega
+    have hsize_dest : (dest.extract 0 destOff).size = destOff := by
+      simp [ByteArray.size_extract, Nat.min_eq_left hdo]
+    have hsize_src : (src.extract srcOff (srcOff + len)).size = len := by
+      simp [ByteArray.size_extract, Nat.min_eq_left hsrc]
+    simp [left, ByteArray.size_append, hsize_dest, hsize_src]
+  have hsize_copy : (src.copySlice srcOff dest destOff len).size = dest.size := by
+    exact
+      byteArray_copySlice_size (src := src) (dest := dest)
+        (srcOff := srcOff) (destOff := destOff) (len := len) hsrc hdest
+  have hsize_right : right.size = dest.size - (destOff + len) := by
+    have hdo : destOff + len ≤ dest.size := hdest
+    simp [right, ByteArray.size_extract]
+  have hsize_lr : (left ++ right).size = dest.size := by
+    simp [ByteArray.size_append, hsize_left, hsize_right, Nat.add_sub_of_le hdest]
+  have hi'' : i < (left ++ right).size := by
+    simpa [hsize_lr] using hi'
+  have hle : left.size ≤ i := by
+    simpa [hsize_left] using hi
+  have hget :=
+    (ByteArray.get_append_right (a := left) (b := right) (i := i) (hle := hle) (h := hi''))
+  have hidx' : i - left.size < right.size := by
+    have hsub : i - (destOff + len) < dest.size - (destOff + len) := by
+      exact Nat.sub_lt_sub_right (by simpa [hsize_left] using hle) hi'
+    simpa [hsize_left, hsize_right] using hsub
+  have hcalc : i - left.size = i - (destOff + len) := by
+    simp [hsize_left]
+  have hidx'' : i - (destOff + len) < right.size := by
+    simpa [hcalc] using hidx'
+  have hget' :=
+    (ByteArray.get_extract (a := dest) (start := destOff + len) (stop := dest.size)
+      (i := i - (destOff + len)) (by
+        simpa [hsize_right] using hidx''))
+  calc
+    (src.copySlice srcOff dest destOff len)[i]'(by
+        have hsize :=
+          byteArray_copySlice_size (src := src) (dest := dest)
+            (srcOff := srcOff) (destOff := destOff) (len := len) hsrc hdest
+        simpa [hsize] using hi')
+        = (left ++ right)[i]'hi'' := by
+            simp [left, right, ByteArray.copySlice_eq_append, hmin, ByteArray.append_assoc, ByteArray.size_data]
+    _ = right[i - left.size]'hidx' := by
+          simpa using hget
+    _ = dest[i]'hi' := by
+          simp [right, hcalc, Nat.add_sub_of_le hi, hget']
+
+
+-- Starting at row `y`, the encoder leaves the prefix up to `y*(rowBytes+1)+1` untouched.
+lemma encodeRawLoop_preserve_prefix (data : ByteArray) (rowBytes h y : Nat) (raw : ByteArray)
+    (hdata : data.size = h * rowBytes) (hraw : raw.size = h * (rowBytes + 1))
+    (n : Nat) (hn : n ≤ y * (rowBytes + 1) + 1) :
+    (encodeRawLoop data rowBytes h y raw).extract 0 n = raw.extract 0 n := by
+  have hk :
+      ∀ k, ∀ y raw, h - y = k → raw.size = h * (rowBytes + 1) → n ≤ y * (rowBytes + 1) + 1 →
+        (encodeRawLoop data rowBytes h y raw).extract 0 n = raw.extract 0 n := by
+    intro k
+    induction k with
+    | zero =>
+        intro y raw hk hraw hn
+        have hy : h ≤ y := Nat.le_of_sub_eq_zero hk
+        have hlt : ¬ y < h := not_lt_of_ge hy
+        simp [encodeRawLoop, hlt]
+    | succ k ih =>
+        intro y raw hk hraw hn
+        have hlt : y < h := Nat.lt_of_sub_eq_succ hk
+        have hy : y + 1 ≤ h := Nat.succ_le_of_lt hlt
+        have hsrc : y * rowBytes + rowBytes ≤ data.size := by
+          have hmul : (y + 1) * rowBytes ≤ h * rowBytes :=
+            Nat.mul_le_mul_right rowBytes hy
+          have hmul' : (y + 1) * rowBytes ≤ data.size := by
+            simpa [hdata] using hmul
+          simpa [Nat.add_mul, Nat.one_mul, Nat.add_assoc, Nat.add_comm] using hmul'
+        have hdest : y * (rowBytes + 1) + 1 + rowBytes ≤ raw.size := by
+          have hmul : (y + 1) * (rowBytes + 1) ≤ h * (rowBytes + 1) :=
+            Nat.mul_le_mul_right (rowBytes + 1) hy
+          have hmul' : (y + 1) * (rowBytes + 1) ≤ raw.size := by
+            simpa [hraw] using hmul
+          have hcalc : y * (rowBytes + 1) + 1 + rowBytes = (y + 1) * (rowBytes + 1) := by
+            calc
+              y * (rowBytes + 1) + 1 + rowBytes =
+                  y * (rowBytes + 1) + (rowBytes + 1) := by omega
+              _ = (y + 1) * (rowBytes + 1) := by
+                    simp [Nat.add_mul, Nat.one_mul, Nat.add_assoc, Nat.add_comm]
+          simpa [hcalc] using hmul'
+        let raw' :=
+          data.copySlice (y * rowBytes) raw (y * (rowBytes + 1) + 1) rowBytes
+        have hcopy : raw'.size = raw.size := by
+          exact
+            byteArray_copySlice_size (src := data) (dest := raw)
+              (srcOff := y * rowBytes) (destOff := y * (rowBytes + 1) + 1) (len := rowBytes) hsrc hdest
+        have hraw' : raw'.size = h * (rowBytes + 1) := by
+          calc
+            raw'.size = raw.size := hcopy
+            _ = h * (rowBytes + 1) := hraw
+        have ih' := ih (y := y + 1) (raw := raw') (by
+          have hsum : h = Nat.succ k + y := Nat.eq_add_of_sub_eq (Nat.le_of_lt hlt) hk
+          calc
+            h - (y + 1) = (Nat.succ k + y) - (y + 1) := by simp [hsum]
+            _ = k := by omega) hraw' (by
+              have hle :
+                  y * (rowBytes + 1) + 1 ≤ (y + 1) * (rowBytes + 1) + 1 := by
+                    calc
+                      y * (rowBytes + 1) + 1
+                          ≤ y * (rowBytes + 1) + (rowBytes + 1) + 1 := by
+                                omega
+                      _ = (y + 1) * (rowBytes + 1) + 1 := by
+                            simp [Nat.add_mul, Nat.one_mul, Nat.add_assoc, Nat.add_comm]
+              exact Nat.le_trans hn hle)
+        have hprefix :
+            raw'.extract 0 n = raw.extract 0 n := by
+          have hdestOff : n ≤ y * (rowBytes + 1) + 1 := by omega
+          simpa [raw'] using
+            byteArray_copySlice_extract_prefix_le
+              (src := data) (dest := raw) (srcOff := y * rowBytes)
+              (destOff := y * (rowBytes + 1) + 1) (len := rowBytes) (n := n) hdestOff hdest
+        calc
+          (encodeRawLoop data rowBytes h y raw).extract 0 n =
+              (if y < h then encodeRawLoop data rowBytes h (y + 1) raw' else raw).extract 0 n := by
+                have hdef :=
+                  congrArg (fun b => b.extract 0 n)
+                    (encodeRawLoop.eq_1 (data := data) (rowBytes := rowBytes) (h := h) (y := y) (raw := raw))
+                simpa [raw'] using hdef
+          _ = (encodeRawLoop data rowBytes h (y + 1) raw').extract 0 n := by
+                simp [hlt]
+          _ = raw'.extract 0 n := ih'
+          _ = raw.extract 0 n := hprefix
+  exact hk (h - y) y raw rfl hraw hn
+
+-- Helper: apply the first `y` copySlice steps of the raw encoder.
+private def encodeRawPrefix (data : ByteArray) (rowBytes : Nat) : Nat → ByteArray → ByteArray
+  | 0, raw => raw
+  | y + 1, raw =>
+      let raw' := encodeRawPrefix data rowBytes y raw
+      let outOff := y * (rowBytes + 1)
+      let start := y * rowBytes
+      data.copySlice start raw' (outOff + 1) rowBytes
+
+-- Applying the prefix encoder preserves the buffer size.
+lemma encodeRawPrefix_size (data : ByteArray) (rowBytes h y : Nat) (raw : ByteArray)
+    (hdata : data.size = h * rowBytes) (hraw : raw.size = h * (rowBytes + 1))
+    (hy : y ≤ h) :
+    (encodeRawPrefix data rowBytes y raw).size = raw.size := by
+  induction y with
+  | zero =>
+      simp [encodeRawPrefix]
+  | succ y ih =>
+      have hy' : y ≤ h := Nat.le_of_succ_le hy
+      have hsrc : y * rowBytes + rowBytes ≤ data.size := by
+        have hmul : (y + 1) * rowBytes ≤ h * rowBytes :=
+          Nat.mul_le_mul_right rowBytes hy
+        have hmul' : (y + 1) * rowBytes ≤ data.size := by
+          simpa [hdata] using hmul
+        simpa [Nat.add_mul, Nat.one_mul, Nat.add_assoc, Nat.add_comm] using hmul'
+      have hdest : y * (rowBytes + 1) + 1 + rowBytes ≤ raw.size := by
+        have hmul : (y + 1) * (rowBytes + 1) ≤ h * (rowBytes + 1) :=
+          Nat.mul_le_mul_right (rowBytes + 1) hy
+        have hmul' : (y + 1) * (rowBytes + 1) ≤ raw.size := by
+          simpa [hraw] using hmul
+        have hcalc : y * (rowBytes + 1) + 1 + rowBytes = (y + 1) * (rowBytes + 1) := by
+          calc
+            y * (rowBytes + 1) + 1 + rowBytes =
+                y * (rowBytes + 1) + (rowBytes + 1) := by omega
+            _ = (y + 1) * (rowBytes + 1) := by
+                  simp [Nat.add_mul, Nat.one_mul, Nat.add_assoc, Nat.add_comm]
+        simpa [hcalc] using hmul'
+      have hraw' : (encodeRawPrefix data rowBytes y raw).size = raw.size := ih hy'
+      have hdest' :
+          y * (rowBytes + 1) + 1 + rowBytes ≤ (encodeRawPrefix data rowBytes y raw).size := by
+        simpa [hraw'] using hdest
+      have hsize :=
+        byteArray_copySlice_size (src := data) (dest := encodeRawPrefix data rowBytes y raw)
+          (srcOff := y * rowBytes) (destOff := y * (rowBytes + 1) + 1) (len := rowBytes)
+          hsrc hdest'
+      simpa [encodeRawPrefix, hraw'] using hsize
+
+-- Running the encoder from row 0 is equivalent to resuming from row `y`.
+lemma encodeRawLoop_eq_prefix (data : ByteArray) (rowBytes h y : Nat) (raw : ByteArray)
+    (hy : y ≤ h) :
+    encodeRawLoop data rowBytes h 0 raw =
+      encodeRawLoop data rowBytes h y (encodeRawPrefix data rowBytes y raw) := by
+  induction y with
+  | zero =>
+      simp [encodeRawPrefix]
+  | succ y ih =>
+      have hy' : y ≤ h := Nat.le_of_succ_le hy
+      have hlt : y < h := Nat.lt_of_succ_le hy
+      have hdef :=
+        encodeRawLoop.eq_1 (data := data) (rowBytes := rowBytes) (h := h) (y := y)
+          (raw := encodeRawPrefix data rowBytes y raw)
+      calc
+        encodeRawLoop data rowBytes h 0 raw =
+            encodeRawLoop data rowBytes h y (encodeRawPrefix data rowBytes y raw) := ih hy'
+        _ =
+            (if y < h then
+              encodeRawLoop data rowBytes h (y + 1)
+                (data.copySlice (y * rowBytes) (encodeRawPrefix data rowBytes y raw)
+                  (y * (rowBytes + 1) + 1) rowBytes)
+            else encodeRawPrefix data rowBytes y raw) := by
+              simpa using hdef
+        _ = encodeRawLoop data rowBytes h (y + 1)
+              (encodeRawPrefix data rowBytes (y + 1) raw) := by
+              simp [encodeRawPrefix, hlt]
+
+-- The raw encoding loop writes row `y` into its destination slice.
+lemma encodeRawLoop_row_extract (data : ByteArray) (rowBytes h y : Nat) (raw : ByteArray)
+    (hdata : data.size = h * rowBytes) (hraw : raw.size = h * (rowBytes + 1))
+    (hy : y < h) :
+    (encodeRawLoop data rowBytes h y raw).extract (y * (rowBytes + 1) + 1)
+        (y * (rowBytes + 1) + 1 + rowBytes) =
+      data.extract (y * rowBytes) (y * rowBytes + rowBytes) := by
+  have hsrc : y * rowBytes + rowBytes ≤ data.size := by
+    have hmul : (y + 1) * rowBytes ≤ h * rowBytes :=
+      Nat.mul_le_mul_right rowBytes (Nat.succ_le_of_lt hy)
+    have hmul' : (y + 1) * rowBytes ≤ data.size := by
+      simpa [hdata] using hmul
+    simpa [Nat.add_mul, Nat.one_mul, Nat.add_assoc, Nat.add_comm] using hmul'
+  have hdest : y * (rowBytes + 1) + 1 + rowBytes ≤ raw.size := by
+    have hmul : (y + 1) * (rowBytes + 1) ≤ h * (rowBytes + 1) :=
+      Nat.mul_le_mul_right (rowBytes + 1) (Nat.succ_le_of_lt hy)
+    have hmul' : (y + 1) * (rowBytes + 1) ≤ raw.size := by
+      simpa [hraw] using hmul
+    have hcalc : y * (rowBytes + 1) + 1 + rowBytes = (y + 1) * (rowBytes + 1) := by
+      calc
+        y * (rowBytes + 1) + 1 + rowBytes =
+            y * (rowBytes + 1) + (rowBytes + 1) := by omega
+        _ = (y + 1) * (rowBytes + 1) := by
+              simp [Nat.add_mul, Nat.one_mul, Nat.add_assoc, Nat.add_comm]
+    simpa [hcalc] using hmul'
+  let raw' :=
+    data.copySlice (y * rowBytes) raw (y * (rowBytes + 1) + 1) rowBytes
+  have hcopy : raw'.size = raw.size := by
+    exact
+      byteArray_copySlice_size (src := data) (dest := raw)
+        (srcOff := y * rowBytes) (destOff := y * (rowBytes + 1) + 1) (len := rowBytes) hsrc hdest
+  have hraw' : raw'.size = h * (rowBytes + 1) := by
+    simpa [hraw] using hcopy
+  have hmid :
+      raw'.extract (y * (rowBytes + 1) + 1) (y * (rowBytes + 1) + 1 + rowBytes) =
+        data.extract (y * rowBytes) (y * rowBytes + rowBytes) := by
+    simpa [raw'] using
+      byteArray_copySlice_extract_mid (src := data) (dest := raw)
+        (srcOff := y * rowBytes) (destOff := y * (rowBytes + 1) + 1) (len := rowBytes) hsrc hdest
+  have hprefix :
+      (encodeRawLoop data rowBytes h (y + 1) raw').extract 0 ((y + 1) * (rowBytes + 1)) =
+        raw'.extract 0 ((y + 1) * (rowBytes + 1)) := by
+    have hle : (y + 1) * (rowBytes + 1) ≤ (y + 1) * (rowBytes + 1) + 1 := by omega
+    simpa using
+      (encodeRawLoop_preserve_prefix (data := data) (rowBytes := rowBytes) (h := h) (y := y + 1)
+        (raw := raw') hdata hraw' ((y + 1) * (rowBytes + 1)) hle)
+  have hslice :
+      (encodeRawLoop data rowBytes h (y + 1) raw').extract (y * (rowBytes + 1) + 1)
+          (y * (rowBytes + 1) + 1 + rowBytes) =
+        raw'.extract (y * (rowBytes + 1) + 1) (y * (rowBytes + 1) + 1 + rowBytes) := by
+    have hj : y * (rowBytes + 1) + 1 + rowBytes = (y + 1) * (rowBytes + 1) := by
+      calc
+        y * (rowBytes + 1) + 1 + rowBytes =
+            y * (rowBytes + 1) + (rowBytes + 1) := by omega
+        _ = (y + 1) * (rowBytes + 1) := by
+              simp [Nat.add_mul, Nat.one_mul, Nat.add_assoc, Nat.add_comm]
+    have hslice' :=
+      byteArray_extract_eq_of_prefix_eq
+        (a := encodeRawLoop data rowBytes h (y + 1) raw')
+        (b := raw') (n := (y + 1) * (rowBytes + 1))
+        (i := y * (rowBytes + 1) + 1) (j := y * (rowBytes + 1) + 1 + rowBytes)
+        hprefix (by omega)
+    simpa [hj] using hslice'
+  have hdef :
+      encodeRawLoop data rowBytes h y raw =
+        encodeRawLoop data rowBytes h (y + 1) raw' := by
+    have hdef' :=
+      encodeRawLoop.eq_1 (data := data) (rowBytes := rowBytes) (h := h) (y := y) (raw := raw)
+    simpa [raw', hy] using hdef'
+  calc
+    (encodeRawLoop data rowBytes h y raw).extract (y * (rowBytes + 1) + 1)
+        (y * (rowBytes + 1) + 1 + rowBytes) =
+          (encodeRawLoop data rowBytes h (y + 1) raw').extract
+            (y * (rowBytes + 1) + 1) (y * (rowBytes + 1) + 1 + rowBytes) := by
+              simp [hdef]
+    _ = raw'.extract (y * (rowBytes + 1) + 1) (y * (rowBytes + 1) + 1 + rowBytes) := hslice
+    _ = data.extract (y * rowBytes) (y * rowBytes + rowBytes) := hmid
+
+-- The `encodeRaw` output yields the original row slice.
+lemma encodeRaw_row_extract (bmp : BitmapRGB8) (y : Nat) (hy : y < bmp.size.height) :
+    let w := bmp.size.width
+    let rowBytes := w * bytesPerPixel
+    (encodeRaw bmp).extract (y * (rowBytes + 1) + 1) (y * (rowBytes + 1) + 1 + rowBytes) =
+      bmp.data.extract (y * rowBytes) (y * rowBytes + rowBytes) := by
+  let w := bmp.size.width
+  let h := bmp.size.height
+  let rowBytes := w * bytesPerPixel
+  let rawSize := h * (rowBytes + 1)
+  let raw0 := ByteArray.mk (Array.replicate rawSize 0)
+  have hdata : bmp.data.size = h * rowBytes := by
+    calc
+      bmp.data.size = w * h * bytesPerPixel := bmp.valid
+      _ = h * (w * bytesPerPixel) := by
+            simp [Nat.mul_left_comm, Nat.mul_comm]
+      _ = h * rowBytes := by simp [rowBytes]
+  have hraw0 : raw0.size = h * (rowBytes + 1) := by
+    simp [raw0, rawSize, ByteArray.size, Array.size_replicate]
+  have hy' : y ≤ h := Nat.le_of_lt hy
+  have hprefix :
+      encodeRawLoop bmp.data rowBytes h 0 raw0 =
+        encodeRawLoop bmp.data rowBytes h y (encodeRawPrefix bmp.data rowBytes y raw0) := by
+    exact encodeRawLoop_eq_prefix (data := bmp.data) (rowBytes := rowBytes) (h := h) (y := y)
+      (raw := raw0) hy'
+  have hraw' :
+      (encodeRawPrefix bmp.data rowBytes y raw0).size = raw0.size := by
+    exact encodeRawPrefix_size (data := bmp.data) (rowBytes := rowBytes) (h := h) (y := y)
+      (raw := raw0) hdata hraw0 hy'
+  have hrow :
+      (encodeRawLoop bmp.data rowBytes h y (encodeRawPrefix bmp.data rowBytes y raw0)).extract
+          (y * (rowBytes + 1) + 1) (y * (rowBytes + 1) + 1 + rowBytes) =
+        bmp.data.extract (y * rowBytes) (y * rowBytes + rowBytes) := by
+    have hraw'': (encodeRawPrefix bmp.data rowBytes y raw0).size = h * (rowBytes + 1) := by
+      simpa [hraw0] using hraw'
+    exact
+      encodeRawLoop_row_extract (data := bmp.data) (rowBytes := rowBytes) (h := h) (y := y)
+        (raw := encodeRawPrefix bmp.data rowBytes y raw0) hdata hraw'' hy
+  unfold encodeRaw
+  have hdef : encodeRawLoop bmp.data rowBytes h 0 raw0 =
+      encodeRawLoop bmp.data rowBytes h y (encodeRawPrefix bmp.data rowBytes y raw0) := hprefix
+  calc
+    (encodeRawLoop bmp.data rowBytes h 0 raw0).extract (y * (rowBytes + 1) + 1)
+        (y * (rowBytes + 1) + 1 + rowBytes) =
+        (encodeRawLoop bmp.data rowBytes h y (encodeRawPrefix bmp.data rowBytes y raw0)).extract
+          (y * (rowBytes + 1) + 1) (y * (rowBytes + 1) + 1 + rowBytes) := by
+            simp [hdef]
+    _ = bmp.data.extract (y * rowBytes) (y * rowBytes + rowBytes) := hrow
+
+-- Prefix encoding does not touch indices at or beyond the next row boundary.
+lemma encodeRawPrefix_get_of_ge (data : ByteArray) (rowBytes h y i : Nat) (raw : ByteArray)
+    (hdata : data.size = h * rowBytes) (hraw : raw.size = h * (rowBytes + 1))
+    (hy : y ≤ h) (hi : y * (rowBytes + 1) ≤ i) (hi' : i < raw.size) :
+    (encodeRawPrefix data rowBytes y raw)[i]'(by
+        have hsize :=
+          encodeRawPrefix_size (data := data) (rowBytes := rowBytes) (h := h) (y := y)
+            (raw := raw) hdata hraw hy
+        simpa [hsize] using hi') = raw[i]'hi' := by
+  induction y with
+  | zero =>
+      simp [encodeRawPrefix]
+  | succ y ih =>
+      have hy' : y ≤ h := Nat.le_of_succ_le hy
+      have hsrc : y * rowBytes + rowBytes ≤ data.size := by
+        have hmul : (y + 1) * rowBytes ≤ h * rowBytes :=
+          Nat.mul_le_mul_right rowBytes hy
+        have hmul' : (y + 1) * rowBytes ≤ data.size := by
+          simpa [hdata] using hmul
+        simpa [Nat.add_mul, Nat.one_mul, Nat.add_assoc, Nat.add_comm] using hmul'
+      have hdest : y * (rowBytes + 1) + 1 + rowBytes ≤ raw.size := by
+        have hmul : (y + 1) * (rowBytes + 1) ≤ h * (rowBytes + 1) :=
+          Nat.mul_le_mul_right (rowBytes + 1) hy
+        have hmul' : (y + 1) * (rowBytes + 1) ≤ raw.size := by
+          simpa [hraw] using hmul
+        have hcalc : y * (rowBytes + 1) + 1 + rowBytes = (y + 1) * (rowBytes + 1) := by
+          calc
+            y * (rowBytes + 1) + 1 + rowBytes =
+                y * (rowBytes + 1) + (rowBytes + 1) := by omega
+            _ = (y + 1) * (rowBytes + 1) := by
+                  simp [Nat.add_mul, Nat.one_mul, Nat.add_assoc, Nat.add_comm]
+        simpa [hcalc] using hmul'
+      have hi'' : (y + 1) * (rowBytes + 1) ≤ i := by
+        exact Nat.le_trans (by omega) hi
+      have hraw' :
+          (encodeRawPrefix data rowBytes y raw).size = raw.size :=
+        encodeRawPrefix_size (data := data) (rowBytes := rowBytes) (h := h) (y := y)
+          (raw := raw) hdata hraw hy'
+      have hi_dest : i < (encodeRawPrefix data rowBytes y raw).size := by
+        simpa [hraw'] using hi'
+      have hcopy :
+          (data.copySlice (y * rowBytes) (encodeRawPrefix data rowBytes y raw)
+              (y * (rowBytes + 1) + 1) rowBytes)[i]'(by
+                have hsize :=
+                  byteArray_copySlice_size (src := data) (dest := encodeRawPrefix data rowBytes y raw)
+                    (srcOff := y * rowBytes) (destOff := y * (rowBytes + 1) + 1) (len := rowBytes)
+                    hsrc (by simpa [hraw'] using hdest)
+                simpa [hsize] using hi_dest) =
+            (encodeRawPrefix data rowBytes y raw)[i]'hi_dest := by
+        have hge : y * (rowBytes + 1) + 1 + rowBytes ≤ i := by
+          have hcalc : y * (rowBytes + 1) + 1 + rowBytes = (y + 1) * (rowBytes + 1) := by
+            calc
+              y * (rowBytes + 1) + 1 + rowBytes =
+                  y * (rowBytes + 1) + (rowBytes + 1) := by omega
+              _ = (y + 1) * (rowBytes + 1) := by
+                    simp [Nat.add_mul, Nat.one_mul, Nat.add_assoc, Nat.add_comm]
+          simpa [hcalc] using hi''
+        exact
+          byteArray_copySlice_get_of_ge (src := data) (dest := encodeRawPrefix data rowBytes y raw)
+            (srcOff := y * rowBytes) (destOff := y * (rowBytes + 1) + 1) (len := rowBytes)
+            (i := i) hsrc (by simpa [hraw'] using hdest) hge hi_dest
+      have hle :
+          y * (rowBytes + 1) ≤ (y + 1) * (rowBytes + 1) := by
+        calc
+          y * (rowBytes + 1) ≤ y * (rowBytes + 1) + (rowBytes + 1) := Nat.le_add_right _ _
+          _ = (y + 1) * (rowBytes + 1) := by
+                simp [Nat.add_mul, Nat.one_mul, Nat.add_assoc, Nat.add_comm]
+      have hrec :=
+        ih hy' (Nat.le_trans hle hi)
+      have hrec' :
+          (encodeRawPrefix data rowBytes y raw)[i]'hi_dest = raw[i]'hi' := by
+        simpa [hraw'] using hrec
+      simp [encodeRawPrefix, hcopy, hrec']
+
+-- Filter bytes in the raw encoding are zero.
+lemma encodeRaw_filter_zero (bmp : BitmapRGB8) (y : Nat) (hy : y < bmp.size.height) :
+    let w := bmp.size.width
+    let rowBytes := w * bytesPerPixel
+    (encodeRaw bmp).get! (y * (rowBytes + 1)) = 0 := by
+  let w := bmp.size.width
+  let h := bmp.size.height
+  let rowBytes := w * bytesPerPixel
+  let rawSize := h * (rowBytes + 1)
+  let raw0 := ByteArray.mk (Array.replicate rawSize 0)
+  have hdata : bmp.data.size = h * rowBytes := by
+    calc
+      bmp.data.size = w * h * bytesPerPixel := bmp.valid
+      _ = h * (w * bytesPerPixel) := by
+            simp [Nat.mul_left_comm, Nat.mul_comm]
+      _ = h * rowBytes := by simp [rowBytes]
+  have hraw0 : raw0.size = h * (rowBytes + 1) := by
+    simp [raw0, rawSize, ByteArray.size, Array.size_replicate]
+  have hy' : y ≤ h := Nat.le_of_lt hy
+  let outOff := y * (rowBytes + 1)
+  let rawPrefix := encodeRawPrefix bmp.data rowBytes y raw0
+  have hrawPrefixSize : rawPrefix.size = h * (rowBytes + 1) := by
+    have hsize :=
+      encodeRawPrefix_size (data := bmp.data) (rowBytes := rowBytes) (h := h) (y := y)
+        (raw := raw0) hdata hraw0 hy'
+    simpa [hraw0] using hsize
+  have hdef :
+      encodeRawLoop bmp.data rowBytes h 0 raw0 =
+        encodeRawLoop bmp.data rowBytes h y rawPrefix := by
+    exact encodeRawLoop_eq_prefix (data := bmp.data) (rowBytes := rowBytes) (h := h) (y := y)
+      (raw := raw0) hy'
+  have hoff' : outOff < h * (rowBytes + 1) := by
+    have hmul : y * (rowBytes + 1) < h * (rowBytes + 1) :=
+      Nat.mul_lt_mul_of_pos_right hy (by omega)
+    simpa [outOff] using hmul
+  have hoff : outOff < rawPrefix.size := by
+    simpa [hrawPrefixSize] using hoff'
+  have hlen : outOff + 1 ≤ rawPrefix.size := Nat.succ_le_of_lt hoff
+  have hsize_loop :
+      (encodeRawLoop bmp.data rowBytes h y rawPrefix).size = rawPrefix.size := by
+    exact
+      encodeRawLoop_size (data := bmp.data) (rowBytes := rowBytes) (h := h) (y := y)
+        (raw := rawPrefix) hdata hrawPrefixSize
+  have hlen_loop : outOff + 1 ≤ (encodeRawLoop bmp.data rowBytes h y rawPrefix).size := by
+    simpa [hsize_loop] using hlen
+  have hprefix' :
+      (encodeRawLoop bmp.data rowBytes h y rawPrefix).extract 0 (outOff + 1) =
+        rawPrefix.extract 0 (outOff + 1) := by
+    have hle : outOff + 1 ≤ outOff + 1 := by omega
+    simpa [outOff] using
+      (encodeRawLoop_preserve_prefix (data := bmp.data) (rowBytes := rowBytes) (h := h) (y := y)
+        (raw := rawPrefix) hdata hrawPrefixSize (outOff + 1) hle)
+  have hslice :
+      (encodeRawLoop bmp.data rowBytes h y rawPrefix).extract outOff (outOff + 1) =
+        rawPrefix.extract outOff (outOff + 1) := by
+    exact
+      byteArray_extract_eq_of_prefix_eq
+        (a := encodeRawLoop bmp.data rowBytes h y rawPrefix) (b := rawPrefix)
+        (n := outOff + 1) (i := outOff) (j := outOff + 1) hprefix' (by omega)
+  have hget_left! :
+      (encodeRawLoop bmp.data rowBytes h y rawPrefix).get! outOff = rawPrefix.get! outOff := by
+    have hslice0 := congrArg (fun b => b.get! 0) hslice
+    calc
+      (encodeRawLoop bmp.data rowBytes h y rawPrefix).get! outOff =
+          ((encodeRawLoop bmp.data rowBytes h y rawPrefix).extract outOff (outOff + 1)).get! 0 := by
+            simpa using
+              (byteArray_get!_extract0 (a := encodeRawLoop bmp.data rowBytes h y rawPrefix)
+                (start := outOff) hlen_loop).symm
+      _ = (rawPrefix.extract outOff (outOff + 1)).get! 0 := by
+            simpa using hslice0
+      _ = rawPrefix.get! outOff := by
+            simpa using (byteArray_get!_extract0 (a := rawPrefix) (start := outOff) hlen)
+  have hoff0 : outOff < raw0.size := by
+    simpa [hraw0, outOff] using hoff'
+  have hpre :
+      rawPrefix.get! outOff = raw0.get! outOff := by
+    have hpre' :=
+      encodeRawPrefix_get_of_ge (data := bmp.data) (rowBytes := rowBytes) (h := h) (y := y)
+        (i := outOff) (raw := raw0) hdata hraw0 hy' (by omega) hoff0
+    calc
+      rawPrefix.get! outOff = rawPrefix[outOff]'hoff := by
+        simpa using (byteArray_get!_eq_get (a := rawPrefix) (i := outOff) hoff)
+      _ = raw0[outOff]'hoff0 := by
+        simpa [rawPrefix] using hpre'
+      _ = raw0.get! outOff := by
+        simpa using (byteArray_get!_eq_get (a := raw0) (i := outOff) hoff0).symm
+  have hraw0get : raw0.get! outOff = 0 := by
+    have hraw0get' : raw0[outOff]'hoff0 = 0 := by
+      have hoff0' : outOff < (Array.replicate rawSize (0 : UInt8)).size := by
+        simpa [raw0, ByteArray.size, Array.size_replicate] using hoff0
+      simp [raw0, outOff, -Array.getElem_replicate]
+      exact Array.getElem_replicate (n := rawSize) (v := (0 : UInt8)) (i := outOff) hoff0'
+    calc
+      raw0.get! outOff = raw0[outOff]'hoff0 := by
+        simpa using (byteArray_get!_eq_get (a := raw0) (i := outOff) hoff0)
+      _ = 0 := hraw0get'
+  have hresult :
+      (encodeRawLoop bmp.data rowBytes h y rawPrefix).get! outOff = 0 := by
+    calc
+      (encodeRawLoop bmp.data rowBytes h y rawPrefix).get! outOff = rawPrefix.get! outOff := hget_left!
+      _ = raw0.get! outOff := hpre
+      _ = 0 := hraw0get
+  have hresult0 :
+      (encodeRawLoop bmp.data rowBytes h 0 raw0).get! outOff = 0 := by
+    simpa [hdef] using hresult
+  simpa [encodeRaw, outOff, raw0, rawSize] using hresult0
+
+-- Decoding the raw encoding reconstructs the original pixels.
+lemma decodeRowsLoop_encodeRaw (bmp : BitmapRGB8) :
+    let w := bmp.size.width
+    let h := bmp.size.height
+    let rowBytes := w * bytesPerPixel
+    let raw := encodeRaw bmp
+    let pixels0 := ByteArray.mk <| Array.replicate (h * rowBytes) 0
+    decodeRowsLoop raw w h bytesPerPixel rowBytes 0 0 ByteArray.empty pixels0 = some bmp.data := by
+  let w := bmp.size.width
+  let h := bmp.size.height
+  let rowBytes := w * bytesPerPixel
+  let raw := encodeRaw bmp
+  let pixels0 := ByteArray.mk <| Array.replicate (h * rowBytes) 0
+  have hdata : bmp.data.size = h * rowBytes := by
+    calc
+      bmp.data.size = w * h * bytesPerPixel := bmp.valid
+      _ = h * (w * bytesPerPixel) := by
+            simp [Nat.mul_left_comm, Nat.mul_comm]
+      _ = h * rowBytes := by simp [rowBytes]
+  have hraw : raw.size = h * (rowBytes + 1) := by
+    simpa [w, h, rowBytes] using encodeRaw_size bmp
+  have hpixels0 : pixels0.size = h * rowBytes := by
+    simp [pixels0, ByteArray.size, Array.size_replicate]
+  have hk :
+      ∀ k, ∀ y offset prevRow pixels,
+        h - y = k →
+        offset = y * (rowBytes + 1) →
+        pixels.size = h * rowBytes →
+        pixels.extract 0 (y * rowBytes) = bmp.data.extract 0 (y * rowBytes) →
+        decodeRowsLoop raw w h bytesPerPixel rowBytes y offset prevRow pixels = some bmp.data := by
+    intro k
+    induction k with
+    | zero =>
+        intro y offset prevRow pixels hk hoff hpix hprefix
+        have hy : h ≤ y := Nat.le_of_sub_eq_zero hk
+        have hlt : ¬ y < h := not_lt_of_ge hy
+        have hsize : pixels.size = bmp.data.size := by
+          simpa [hdata] using hpix
+        have hle : pixels.size ≤ y * rowBytes := by
+          have hmul : h * rowBytes ≤ y * rowBytes :=
+            Nat.mul_le_mul_right rowBytes hy
+          simpa [hpix] using hmul
+        have hprefix' :
+            pixels.extract 0 pixels.size = bmp.data.extract 0 pixels.size := by
+          have hpre :=
+            byteArray_extract_eq_of_prefix_eq
+              (a := pixels) (b := bmp.data) (n := y * rowBytes) (i := 0) (j := pixels.size)
+              hprefix (by simpa [hsize] using hle)
+          simpa using hpre
+        have hpix_eq : pixels = bmp.data := by
+          have hpix0 : pixels.extract 0 pixels.size = pixels := by
+            simp [ByteArray.extract_zero_size]
+          have hdata0 : bmp.data.extract 0 pixels.size = bmp.data := by
+            have hdata0' : bmp.data.extract 0 bmp.data.size = bmp.data := by
+              simp [ByteArray.extract_zero_size]
+            simp [hsize, hdata0']
+          simpa [hpix0, hdata0] using hprefix'
+        simp [decodeRowsLoop, hlt, hpix_eq]
+    | succ k ih =>
+        intro y offset prevRow pixels hk hoff hpix hprefix
+        have hlt : y < h := Nat.lt_of_sub_eq_succ hk
+        have hy : y + 1 ≤ h := Nat.succ_le_of_lt hlt
+        have hofflt : offset < raw.size := by
+          have hmul : y * (rowBytes + 1) < h * (rowBytes + 1) :=
+            Nat.mul_lt_mul_of_pos_right hlt (by omega)
+          simpa [hoff, hraw] using hmul
+        have hfilter0 : raw.get! offset = 0 := by
+          simpa [raw, w, h, rowBytes, hoff] using
+            (encodeRaw_filter_zero (bmp := bmp) (y := y) hlt)
+        have hfilter : (raw.get! offset).toNat ≤ 4 := by
+          simp [hfilter0]
+        have hrowData :
+            raw.extract (offset + 1) (offset + 1 + rowBytes) =
+              bmp.data.extract (y * rowBytes) (y * rowBytes + rowBytes) := by
+          simpa [w, h, rowBytes, hoff] using
+            (encodeRaw_row_extract (bmp := bmp) (y := y) hlt)
+        let rowData := raw.extract (offset + 1) (offset + 1 + rowBytes)
+        have hrowData' :
+            rowData = bmp.data.extract (y * rowBytes) (y * rowBytes + rowBytes) := by
+          simpa [rowData] using hrowData
+        have hrowDataSize : rowData.size = rowBytes := by
+          have hdest : offset + 1 + rowBytes ≤ raw.size := by
+            have hmul : (y + 1) * (rowBytes + 1) ≤ h * (rowBytes + 1) :=
+              Nat.mul_le_mul_right (rowBytes + 1) hy
+            have hmul' : (y + 1) * (rowBytes + 1) ≤ raw.size := by
+              simpa [hraw] using hmul
+            have hcalc : offset + 1 + rowBytes = (y + 1) * (rowBytes + 1) := by
+              simp [hoff, Nat.add_mul, Nat.one_mul, Nat.add_assoc, Nat.add_comm]
+            simpa [hcalc] using hmul'
+          simp [rowData, ByteArray.size_extract, Nat.min_eq_left hdest]
+        have hdestPix : y * rowBytes + rowBytes ≤ pixels.size := by
+          have hmul : (y + 1) * rowBytes ≤ h * rowBytes :=
+            Nat.mul_le_mul_right rowBytes hy
+          have hmul' : (y + 1) * rowBytes ≤ pixels.size := by
+            simpa [hpix] using hmul
+          simpa [Nat.add_mul, Nat.one_mul, Nat.add_assoc, Nat.add_comm] using hmul'
+        let rowOffset := y * rowBytes
+        let pixels' := rowData.copySlice 0 pixels rowOffset rowBytes
+        have hmid :
+            pixels'.extract rowOffset (rowOffset + rowBytes) =
+              bmp.data.extract (y * rowBytes) (y * rowBytes + rowBytes) := by
+          have hsrc : 0 + rowBytes ≤ rowData.size := by
+            simp [hrowDataSize]
+          have hdest : rowOffset + rowBytes ≤ pixels.size := hdestPix
+          have hrowData0 : rowData.extract 0 rowBytes = rowData := by
+            have hsize : rowData.size = rowBytes := hrowDataSize
+            have hzero :
+                rowData.extract 0 rowData.size = rowData := by
+              simp [ByteArray.extract_zero_size]
+            simpa [hsize] using hzero
+          calc
+            pixels'.extract rowOffset (rowOffset + rowBytes) =
+                rowData.extract 0 rowBytes := by
+                  simpa [pixels', rowOffset] using
+                    byteArray_copySlice_extract_mid (src := rowData) (dest := pixels)
+                      (srcOff := 0) (destOff := rowOffset) (len := rowBytes) hsrc hdest
+            _ = rowData := hrowData0
+            _ = bmp.data.extract (y * rowBytes) (y * rowBytes + rowBytes) := hrowData'
+        have hpre' :
+            pixels'.extract 0 rowOffset = pixels.extract 0 rowOffset := by
+          have hdest : rowOffset + rowBytes ≤ pixels.size := hdestPix
+          simpa [pixels', rowOffset] using
+            byteArray_copySlice_extract_prefix (src := rowData) (dest := pixels)
+              (srcOff := 0) (destOff := rowOffset) (len := rowBytes) hdest
+        have hprefix' :
+            pixels'.extract 0 ((y + 1) * rowBytes) =
+              bmp.data.extract 0 ((y + 1) * rowBytes) := by
+          have hnm : rowOffset ≤ rowOffset + rowBytes := by omega
+          have ha : rowOffset + rowBytes ≤ pixels'.size := by
+            have hsize : pixels'.size = pixels.size := by
+              have hsrc : 0 + rowBytes ≤ rowData.size := by
+                simp [hrowDataSize]
+              have hdest : rowOffset + rowBytes ≤ pixels.size := hdestPix
+              simpa [pixels'] using
+                byteArray_copySlice_size (src := rowData) (dest := pixels) (srcOff := 0)
+                  (destOff := rowOffset) (len := rowBytes) hsrc hdest
+            simpa [hsize] using hdestPix
+          have hb : rowOffset + rowBytes ≤ bmp.data.size := by
+            have hmul : (y + 1) * rowBytes ≤ h * rowBytes :=
+              Nat.mul_le_mul_right rowBytes hy
+            simpa [hdata, rowOffset, Nat.add_mul, Nat.one_mul, Nat.add_assoc, Nat.add_comm] using hmul
+          have hpref :
+              pixels'.extract 0 rowOffset = bmp.data.extract 0 rowOffset := by
+            simpa [rowOffset] using hpre'.trans hprefix
+          have hprefix'' :
+              pixels'.extract 0 (rowOffset + rowBytes) =
+                bmp.data.extract 0 (rowOffset + rowBytes) := by
+            exact
+              byteArray_extract_prefix_extend (a := pixels') (b := bmp.data) (n := rowOffset)
+                (m := rowOffset + rowBytes) hnm ha hb hpref hmid
+          simpa [rowOffset, Nat.add_mul, Nat.one_mul, Nat.add_assoc, Nat.add_comm] using hprefix''
+        have hk' : h - (y + 1) = k := by
+          have hsum : h = Nat.succ k + y := Nat.eq_add_of_sub_eq (Nat.le_of_lt hlt) hk
+          calc
+            h - (y + 1) = (Nat.succ k + y) - (y + 1) := by simp [hsum]
+            _ = k := by omega
+        have hoff' : offset + 1 + rowBytes = (y + 1) * (rowBytes + 1) := by
+          simp [hoff, Nat.add_mul, Nat.one_mul, Nat.add_assoc, Nat.add_comm]
+        have hoff'' : offset + 1 + rowBytes = (y + 1) * (rowBytes + 1) := hoff'
+        have hnext :
+            decodeRowsLoop raw w h bytesPerPixel rowBytes (y + 1) (offset + 1 + rowBytes)
+                rowData pixels' = some bmp.data := by
+          have hsize' : pixels'.size = h * rowBytes := by
+            have hsrc : 0 + rowBytes ≤ rowData.size := by
+              simp [hrowDataSize]
+            have hdest : rowOffset + rowBytes ≤ pixels.size := hdestPix
+            have hsize'' : pixels'.size = pixels.size := by
+              simpa [pixels'] using
+                byteArray_copySlice_size (src := rowData) (dest := pixels)
+                  (srcOff := 0) (destOff := rowOffset) (len := rowBytes) hsrc hdest
+            simpa [hpix] using hsize''
+          have hoffn : offset + 1 + rowBytes = (y + 1) * (rowBytes + 1) := hoff''
+          exact ih (y := y + 1) (offset := offset + 1 + rowBytes) (prevRow := rowData)
+            (pixels := pixels') hk' hoffn hsize' hprefix'
+        have hgoal :
+            decodeRowsLoop raw w h bytesPerPixel rowBytes y offset prevRow pixels =
+              decodeRowsLoop raw w h bytesPerPixel rowBytes (y + 1) (offset + 1 + rowBytes)
+                rowData pixels' := by
+          conv =>
+            lhs
+            rw [decodeRowsLoop.eq_1]
+            simp [hlt, hfilter, hfilter0, bytesPerPixel, rowData, rowOffset, pixels']
+          rfl
+        exact hgoal.trans hnext
+  have hstart :=
+    hk (h - 0) (y := 0) (offset := 0) (prevRow := ByteArray.empty) (pixels := pixels0)
+      rfl (by simp) hpixels0 (by simp)
+  simpa using hstart
+
+-- Round-trip PNG encode/decode for bitmap payloads.
+lemma decodeBitmap_encodeBitmap (bmp : BitmapRGB8)
+    (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (hidat : (zlibCompressStored (encodeRaw bmp)).size < 2 ^ 32) :
+    Png.decodeBitmap (Png.encodeBitmap bmp) = some bmp := by
+  have hsize : 8 ≤ (encodeBitmap bmp).size := by
+    have hmin : 6 ≤ (zlibCompressStored (encodeRaw bmp)).size :=
+      zlibCompressStored_size_ge (encodeRaw bmp)
+    have hsize' : (encodeBitmap bmp).size = (zlibCompressStored (encodeRaw bmp)).size + 57 := by
+      simpa using encodeBitmap_size bmp
+    omega
+  have hmin : 2 ≤ (zlibCompressStored (encodeRaw bmp)).size := by
+    have hmin' : 6 ≤ (zlibCompressStored (encodeRaw bmp)).size :=
+      zlibCompressStored_size_ge (encodeRaw bmp)
+    omega
+  have hparse := parsePng_encodeBitmap (bmp := bmp) hw hh hidat hsize
+  have hraw : (encodeRaw bmp).size =
+      bmp.size.height * (bmp.size.width * bytesPerPixel + 1) := by
+    simpa using encodeRaw_size bmp
+  have hrows := decodeRowsLoop_encodeRaw (bmp := bmp)
+  have hvalid : bmp.data.size = bmp.size.width * bmp.size.height * bytesPerPixel := by
+    simpa [Nat.mul_left_comm, Nat.mul_comm, Nat.mul_assoc] using bmp.valid
+  have hrows' :
+      decodeRowsLoop (encodeRaw bmp) bmp.size.width bmp.size.height bytesPerPixel
+          (bmp.size.width * bytesPerPixel) 0 0 ByteArray.empty
+          (ByteArray.mk <| Array.replicate (bmp.size.height * (bmp.size.width * bytesPerPixel)) 0) =
+        some bmp.data := by
+    simpa [bytesPerPixel] using hrows
+  have hrows'' :
+      decodeRowsLoop (encodeRaw bmp) bmp.size.width bmp.size.height 3 (bmp.size.width * 3) 0 0
+          ByteArray.empty { data := Array.replicate (bmp.size.height * (bmp.size.width * 3)) 0 } =
+        some bmp.data := by
+    simpa [bytesPerPixel] using hrows'
+  have hrows''' :
+      decodeRowsLoop (encodeRaw bmp) bmp.size.width bmp.size.height 3 (bmp.size.width * 3) 0 0
+          ByteArray.empty { data := Array.replicate (bmp.size.width * bmp.size.height * 3) 0 } =
+        some bmp.data := by
+    simpa [Nat.mul_left_comm, Nat.mul_comm, Nat.mul_assoc] using hrows''
+  have hvalid' : bmp.data.size = bmp.size.width * bmp.size.height * 3 := by
+    simpa [bytesPerPixel] using hvalid
+  unfold Png.decodeBitmap
+  -- Parse and header checks.
+  simp [hsize, hparse, bytesPerPixel]
+  -- Decompression path.
+  simp [hmin, zlibDecompressStored_zlibCompressStored]
+  -- Raw size check and row decoding.
+  simp [hraw, hrows''', hvalid', bytesPerPixel]
+
 -- Re-export: static Huffman length base table size.
 lemma lengthBases_size : lengthBases.size = 29 := Png.lengthBases_size
 -- Re-export: static Huffman length extra table size.
