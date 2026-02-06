@@ -851,31 +851,36 @@ partial def zlibDecompress (data : ByteArray) (hsize : 2 <= data.size) : Option 
 
 -- Parse stored (uncompressed) deflate blocks from a deflated byte stream.
 -- Returns the decoded payload and any remaining suffix.
-def inflateStoredAux (data : ByteArray) : Option (ByteArray × ByteArray) := do
-  if h : 0 < data.size then
-    let header := data.get 0 h
-    let bfinal := header &&& (0x01 : UInt8)
-    let btype := (header >>> 1) &&& (0x03 : UInt8)
-    if btype != (0 : UInt8) then
+def inflateStoredAux (data : ByteArray) (h : 0 < data.size) : Option (ByteArray × ByteArray) := do
+  let header := data.get 0 h
+  let bfinal := header &&& (0x01 : UInt8)
+  let btype := (header >>> 1) &&& (0x03 : UInt8)
+  if btype != (0 : UInt8) then
+    none
+  if hlen : 1 + 3 < data.size then
+    let len := readU16LE data 1 (by omega)
+    let nlen := readU16LE data 3 (by omega)
+    if len + nlen != 0xFFFF then
       none
-    if hlen : 1 + 3 < data.size then
-      let len := readU16LE data 1 (by omega)
-      let nlen := readU16LE data 3 (by omega)
-      if len + nlen != 0xFFFF then
-        none
-      let start := 5
-      if hbad : start + len > data.size then
-        none
-      else
-        let payload := data.extract start (start + len)
-        let next := data.extract (start + len) data.size
-        if bfinal == (1 : UInt8) then
-          return (payload, next)
-        else
-          let (tail, rest) ← inflateStoredAux next
-          return (payload ++ tail, rest)
+    let start := 5
+    if hbad : start + len > data.size then
+      none
     else
-      none
+      let payload := data.extract start (start + len)
+      let next := data.extract (start + len) data.size
+      if bfinal == (1 : UInt8) then
+        return (payload, next)
+      else
+        if hnext : start + len < data.size then
+          have hnextsize : next.size = data.size - (start + len) := by
+            simp [next, ByteArray.size_extract]
+          have hnext' : 0 < next.size := by
+            have hpos : 0 < data.size - (start + len) := Nat.sub_pos_of_lt hnext
+            simpa [hnextsize] using hpos
+          let (tail, rest) ← inflateStoredAux next hnext'
+          return (payload ++ tail, rest)
+        else
+          none
   else
     none
 termination_by data.size
@@ -890,18 +895,19 @@ decreasing_by
 
 -- Inflate stored blocks and require the stream to end exactly at the final block.
 partial def inflateStored (data : ByteArray) : Option ByteArray := do
-  let (payload, rest) ← inflateStoredAux data
-  if rest.size == 0 then
-    return payload
+  if h : 0 < data.size then
+    let (payload, rest) ← inflateStoredAux data h
+    if rest.size == 0 then
+      return payload
+    else
+      none
   else
     none
 
 -- Fast path for zlib streams that use only stored (uncompressed) deflate blocks.
 partial def zlibDecompressStored (data : ByteArray) (hsize : 2 <= data.size) : Option ByteArray := do
-  let h0 : 0 < data.size := by omega
-  let h1 : 1 < data.size := by omega
-  let cmf := data.get 0 h0
-  let flg := data.get 1 h1
+  let cmf := data.get 0 (by omega)
+  let flg := data.get 1 (by omega)
   if ((cmf.toNat <<< 8) + flg.toNat) % 31 != 0 then
     none
   if (cmf &&& (0x0F : UInt8)) != (8 : UInt8) then
