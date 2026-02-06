@@ -1,6 +1,7 @@
 import Bitmap.Basic
 import Init.Data.Nat.Bitwise.Basic
 import Init.Data.ByteArray.Lemmas
+import Init.Data.Range.Lemmas
 import Init.Data.UInt.Lemmas
 import Batteries.Data.ByteArray
 
@@ -1932,8 +1933,9 @@ lemma encodeBitmap_size (bmp : BitmapRGB8) :
   omega
 
 -- Reading the IHDR chunk from an encoded bitmap yields its header payload.
-lemma readChunk_encodeBitmap_ihdr (bmp : BitmapRGB8) :
-    readChunk (encodeBitmap bmp) 8 =
+lemma readChunk_encodeBitmap_ihdr (bmp : BitmapRGB8)
+    (hLen : 8 + 3 < (encodeBitmap bmp).size) :
+    readChunk (encodeBitmap bmp) 8 hLen =
       some ("IHDR".toUTF8,
         u32be bmp.size.width ++ u32be bmp.size.height ++
           ByteArray.mk #[u8 8, u8 2, u8 0, u8 0, u8 0],
@@ -1942,74 +1944,62 @@ lemma readChunk_encodeBitmap_ihdr (bmp : BitmapRGB8) :
     u32be bmp.size.width ++ u32be bmp.size.height ++
       ByteArray.mk #[u8 8, u8 2, u8 0, u8 0, u8 0]
   let idat := zlibCompressStored (encodeRaw bmp)
+  have hlenval : readU32BE (encodeBitmap bmp) 8 hLen = 13 := by
+    exact readU32BE_encodeBitmap_ihdr_len (bmp := bmp) (h := hLen)
   have hsize : (encodeBitmap bmp).size = idat.size + 57 := by
     simpa [idat] using encodeBitmap_size bmp
-  have hlen : 8 + 3 < (encodeBitmap bmp).size := by
-    simp [hsize]
-  have hcrc : ¬ (33 > (encodeBitmap bmp).size) := by
-    have hsz : 33 ≤ (encodeBitmap bmp).size := by
-      simp [hsize]
-    exact not_lt_of_ge hsz
+  have hcrc : 33 ≤ (encodeBitmap bmp).size := by
+    have hsz' : 33 ≤ idat.size + 57 := by omega
+    simp [hsize, hsz']
+  have hcrcEnd : 8 + 8 + 13 + 4 = 33 := by omega
   unfold readChunk
-  simp [hlen, hcrc,
-    readU32BE_encodeBitmap_ihdr_len (bmp := bmp) (h := hlen),
-    encodeBitmap_extract_ihdr_type, encodeBitmap_extract_ihdr_data]
+  simp [hlenval, hcrc, hcrcEnd, encodeBitmap_extract_ihdr_type, encodeBitmap_extract_ihdr_data]
 
 -- Reading the IDAT chunk from an encoded bitmap yields the compressed payload.
 lemma readChunk_encodeBitmap_idat (bmp : BitmapRGB8)
-    (hidat : (zlibCompressStored (encodeRaw bmp)).size < 2 ^ 32) :
-    readChunk (encodeBitmap bmp) 33 =
+    (hidat : (zlibCompressStored (encodeRaw bmp)).size < 2 ^ 32)
+    (hLen : 33 + 3 < (encodeBitmap bmp).size) :
+    readChunk (encodeBitmap bmp) 33 hLen =
       some ("IDAT".toUTF8, zlibCompressStored (encodeRaw bmp),
         45 + (zlibCompressStored (encodeRaw bmp)).size) := by
   let idat := zlibCompressStored (encodeRaw bmp)
+  have hlenval : readU32BE (encodeBitmap bmp) 33 hLen = idat.size := by
+    simpa [idat] using
+      (readU32BE_encodeBitmap_idat_len (bmp := bmp) (h := hLen) (hidat := hidat))
   have hsize : (encodeBitmap bmp).size = idat.size + 57 := by
     simpa [idat] using encodeBitmap_size bmp
-  have hlen : 33 + 3 < (encodeBitmap bmp).size := by
-    simp [hsize]
-  have hlenval : readU32BE (encodeBitmap bmp) 33 hlen = idat.size := by
-    simpa [idat] using
-      (readU32BE_encodeBitmap_idat_len (bmp := bmp) (h := hlen) (hidat := hidat))
-  have htype : 33 + 4 = 37 := by omega
-  have hdataStart : 33 + 8 = 41 := by omega
-  have hcrcEnd : 41 + idat.size + 4 = 45 + idat.size := by omega
-  have hcrc : ¬ (45 + idat.size > (encodeBitmap bmp).size) := by
-    have hsz : 45 + idat.size ≤ (encodeBitmap bmp).size := by
-      simp [hsize]; omega
-    exact not_lt_of_ge hsz
+  have hcrc : 45 + idat.size ≤ (encodeBitmap bmp).size := by
+    have hsz' : 45 + idat.size ≤ idat.size + 57 := by omega
+    simpa [hsize] using hsz'
+  have hcrcEnd : 33 + 8 + idat.size + 4 = 45 + idat.size := by omega
   unfold readChunk
-  simp [hlen, hlenval, hcrc, htype, hdataStart, hcrcEnd,
-    encodeBitmap_extract_idat_type, encodeBitmap_extract_idat_data, idat]
+  simp [hlenval, hcrc, hcrcEnd, encodeBitmap_extract_idat_type, encodeBitmap_extract_idat_data, idat]
 
 -- Reading the IEND chunk from an encoded bitmap yields an empty payload.
-lemma readChunk_encodeBitmap_iend (bmp : BitmapRGB8) :
+lemma readChunk_encodeBitmap_iend (bmp : BitmapRGB8)
+    (hLen :
+      45 + (zlibCompressStored (encodeRaw bmp)).size + 3 < (encodeBitmap bmp).size) :
     readChunk (encodeBitmap bmp)
-        (45 + (zlibCompressStored (encodeRaw bmp)).size) =
+        (45 + (zlibCompressStored (encodeRaw bmp)).size) hLen =
       some ("IEND".toUTF8, ByteArray.empty,
         57 + (zlibCompressStored (encodeRaw bmp)).size) := by
   let idat := zlibCompressStored (encodeRaw bmp)
+  have hlenval : readU32BE (encodeBitmap bmp) (45 + idat.size) hLen = 0 := by
+    simpa [idat, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm] using
+      (readU32BE_encodeBitmap_iend_len (bmp := bmp) (h := hLen))
   have hsize : (encodeBitmap bmp).size = idat.size + 57 := by
     simpa [idat] using encodeBitmap_size bmp
-  have hlen : 45 + idat.size + 3 < (encodeBitmap bmp).size := by
-    simp [hsize]; omega
-  have hlenval : readU32BE (encodeBitmap bmp) (45 + idat.size) hlen = 0 := by
-    simpa [idat, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm] using
-      (readU32BE_encodeBitmap_iend_len (bmp := bmp) (h := hlen))
+  have hcrc : 57 + idat.size ≤ (encodeBitmap bmp).size := by
+    have hsz' : 57 + idat.size ≤ idat.size + 57 := by omega
+    simpa [hsize] using hsz'
   have htype : 45 + idat.size + 4 = 49 + idat.size := by omega
   have htypeEnd : 49 + idat.size + 4 = 53 + idat.size := by omega
-  have hdataStart : 45 + idat.size + 8 = 53 + idat.size := by omega
-  have hcrcEnd : 53 + idat.size + 4 = 57 + idat.size := by omega
-  have hcrc : ¬ (53 + idat.size + 4 > (encodeBitmap bmp).size) := by
-    have hsz : 53 + idat.size + 4 ≤ (encodeBitmap bmp).size := by
-      simp [hsize]; omega
-    exact not_lt_of_ge hsz
-  have hpos : 57 + idat.size ≤ (encodeBitmap bmp).size := by
-    simp [hsize]; omega
+  have hcrcEnd : 45 + idat.size + 8 + 4 = 57 + idat.size := by omega
   unfold readChunk
-  simp [hlen, hlenval, hcrcEnd, htype, htypeEnd, hdataStart,
-    encodeBitmap_extract_iend_type, idat, hpos]
+  simp [hlenval, hcrc, htype, htypeEnd, hcrcEnd, encodeBitmap_extract_iend_type, idat]
 
 -- Parsing an encoded bitmap with the simple PNG parser recovers the header and payload.
-set_option maxHeartbeats 1000000 in
+set_option maxHeartbeats 5000000 in
 lemma parsePngSimple_encodeBitmap (bmp : BitmapRGB8)
     (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
     (hidat : (zlibCompressStored (encodeRaw bmp)).size < 2 ^ 32)
@@ -2061,17 +2051,31 @@ lemma parsePngSimple_encodeBitmap (bmp : BitmapRGB8)
       readU32BE_proof_irrel (bytes := ihdr) (pos := 4)
         (h1 := by simp [hlen']) (h2 := hpos4)
     exact hproof.trans hheight0
+  have hsize : (encodeBitmap bmp).size = idat.size + 57 := by
+    simpa [idat] using encodeBitmap_size bmp
+  have hlen1 : 8 + 3 < (encodeBitmap bmp).size := by
+    simp [hsize]
+  have hlen2 : 33 + 3 < (encodeBitmap bmp).size := by
+    simp [hsize]
+  have hlen3 :
+      45 + idat.size + 3 < (encodeBitmap bmp).size := by
+    simp [hsize]; omega
   -- Unfold and simplify the parser using the chunk-level lemmas.
   unfold parsePngSimple
-  simp [encodeBitmap_signature,
-    readChunk_encodeBitmap_ihdr,
-    readChunk_encodeBitmap_idat (bmp := bmp) (hidat := hidat),
-    readChunk_encodeBitmap_iend]
-  refine And.intro hsigNe ?_
-  refine And.intro hihdrNe ?_
-  refine And.intro htailNe ?_
-  refine And.intro hidatNe ?_
-  refine And.intro hiendNe ?_
+  simp [encodeBitmap_signature, hsigNe, hlen1, hlen2,
+    readChunk_encodeBitmap_ihdr (bmp := bmp) (hLen := hlen1),
+    readChunk_encodeBitmap_idat (bmp := bmp) (hidat := hidat) (hLen := hlen2),
+    readChunk_encodeBitmap_iend (bmp := bmp) (hLen := hlen3)]
+  refine And.intro ?_ ?_
+  · simpa using hihdrNe
+  refine And.intro ?_ ?_
+  · simpa [ihdr] using htailNe
+  refine And.intro ?_ ?_
+  · simpa using hidatNe
+  refine And.intro ?_ ?_
+  · exact hlen3
+  refine And.intro ?_ ?_
+  · simpa using hiendNe
   exact ⟨hlen', hwidth, hheight⟩
 
 -- Parsing an encoded bitmap with the full PNG parser yields the header and payload.
@@ -2850,6 +2854,213 @@ lemma encodeRaw_filter_zero (bmp : BitmapRGB8) (y : Nat) (hy : y < bmp.size.heig
       (encodeRawLoop bmp.data rowBytes h 0 raw0).get! outOff = 0 := by
     simpa [hdef] using hresult
   simpa [encodeRaw, outOff, raw0, rawSize] using hresult0
+
+-- Unfiltering a row preserves its length.
+lemma unfilterRow_size (filter : UInt8) (row prev : ByteArray) (bpp : Nat)
+    (hfilter : filter.toNat ≤ 4) :
+    (unfilterRow filter row prev bpp hfilter).size = row.size := by
+  -- Rewrite the loop to a fold over the range list.
+  unfold unfilterRow
+  simp [Std.Legacy.Range.forIn_eq_forIn_range']
+  -- Folding with `push` adds one element per iteration.
+  have hfold :
+      ∀ (xs : List Nat) (f : ByteArray → Nat → UInt8) (out : ByteArray),
+        (List.foldl (fun out i => out.push (f out i)) out xs).size = out.size + xs.length := by
+    intro xs f out
+    induction xs generalizing out with
+    | nil => simp
+    | cons i xs ih =>
+        have ih' := ih (out := out.push (f out i))
+        simpa [ByteArray.size_push, Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using ih'
+  -- Apply the generic fold-size lemma and reduce the range length.
+  simpa using hfold (List.range' 0 row.size 1) (fun out i =>
+    let raw := row.get! i
+    let a := if i >= bpp then out.get! (i - bpp) else (0 : UInt8)
+    let b := if i < prev.size then prev.get! i else (0 : UInt8)
+    let c := if i >= bpp && i < prev.size then prev.get! (i - bpp) else (0 : UInt8)
+    let recon :=
+      match filter.toNat with
+      | 0 => raw
+      | 1 => u8 (raw.toNat + a.toNat)
+      | 2 => u8 (raw.toNat + b.toNat)
+      | 3 => u8 (raw.toNat + ((a.toNat + b.toNat) / 2))
+      | 4 => u8 (raw.toNat + paethPredictor a.toNat b.toNat c.toNat)
+      | _ => raw
+    recon) ByteArray.empty
+
+-- Decoding helpers: raw offsets stay in bounds.
+lemma decodeRowsLoop_offset_lt_raw
+    (raw : ByteArray) (rowBytes h y : Nat)
+    (hraw : raw.size = h * (rowBytes + 1)) (hy : y < h) :
+    y * (rowBytes + 1) < raw.size := by
+  have hmul : y * (rowBytes + 1) < h * (rowBytes + 1) :=
+    Nat.mul_lt_mul_of_pos_right hy (by omega)
+  simpa [hraw] using hmul
+
+-- Decoding helpers: per-row slice fits in the raw buffer.
+lemma decodeRowsLoop_rowData_bound
+    (raw : ByteArray) (rowBytes h y : Nat)
+    (hraw : raw.size = h * (rowBytes + 1)) (hy : y < h) :
+    y * (rowBytes + 1) + 1 + rowBytes ≤ raw.size := by
+  have hy' : y + 1 ≤ h := Nat.succ_le_of_lt hy
+  have hmul : (y + 1) * (rowBytes + 1) ≤ h * (rowBytes + 1) :=
+    Nat.mul_le_mul_right (rowBytes + 1) hy'
+  have hmul' : (y + 1) * (rowBytes + 1) ≤ raw.size := by
+    simpa [hraw] using hmul
+  have hcalc : y * (rowBytes + 1) + 1 + rowBytes = (y + 1) * (rowBytes + 1) := by
+    simp [Nat.add_mul, Nat.one_mul, Nat.add_assoc, Nat.add_comm]
+  simpa [hcalc] using hmul'
+
+-- Decoding helpers: the extracted row slice has the expected length.
+lemma decodeRowsLoop_rowData_size
+    (raw : ByteArray) (rowBytes h y : Nat)
+    (hraw : raw.size = h * (rowBytes + 1)) (hy : y < h) :
+    (raw.extract (y * (rowBytes + 1) + 1) (y * (rowBytes + 1) + 1 + rowBytes)).size = rowBytes := by
+  have hdest :
+      y * (rowBytes + 1) + 1 + rowBytes ≤ raw.size :=
+    decodeRowsLoop_rowData_bound (raw := raw) (rowBytes := rowBytes) (h := h) (y := y) hraw hy
+  simp [ByteArray.size_extract, Nat.min_eq_left hdest]
+
+-- Decoding helpers: per-row destination offset fits in the pixel buffer.
+lemma decodeRowsLoop_rowOffset_le_pixels
+    (pixels : ByteArray) (rowBytes h y : Nat)
+    (hpixels : pixels.size = h * rowBytes) (hy : y < h) :
+    y * rowBytes + rowBytes ≤ pixels.size := by
+  have hy' : y + 1 ≤ h := Nat.succ_le_of_lt hy
+  have hmul : (y + 1) * rowBytes ≤ h * rowBytes :=
+    Nat.mul_le_mul_right rowBytes hy'
+  have hmul' : (y + 1) * rowBytes ≤ pixels.size := by
+    simpa [hpixels] using hmul
+  have hcalc : y * rowBytes + rowBytes = (y + 1) * rowBytes := by
+    simp [Nat.add_mul, Nat.one_mul, Nat.add_comm]
+  simpa [hcalc] using hmul'
+
+-- Decoding helpers: per-row index is within bounds for RGB/RGBA rows.
+lemma decodeRowsLoop_rowIndex_bound
+    (w bpp x : Nat) (hx : x < w) (hbpp : bpp = 3 ∨ bpp = 4) :
+    x * bpp + 2 < w * bpp := by
+  cases hbpp with
+  | inl hbpp =>
+      subst hbpp
+      omega
+  | inr hbpp =>
+      subst hbpp
+      omega
+
+-- Decoding helpers: pixel buffer index is within the RGB output size.
+lemma decodeRowsLoop_pixBase_bound
+    (pixels : ByteArray) (w h x y : Nat)
+    (hx : x < w) (hy : y < h)
+    (hpixels : pixels.size = w * h * bytesPerPixel) :
+    (y * w + x) * bytesPerPixel + 2 < pixels.size := by
+  have hPix0 :
+      x + y * w < w * h :=
+    arrayCoordSize_nat (i := x + y * w) (x := x) (y := y) (w := w) (h := h) hx hy rfl
+  have hPix :
+      y * w + x < w * h := by
+    simpa [Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using hPix0
+  have hPix' :
+      (y * w + x) * bytesPerPixel + 2 < w * h * bytesPerPixel := by
+    simp [bytesPerPixel] at hPix ⊢
+    omega
+  simpa [hpixels] using hPix'
+
+-- Bounds used by `decodeRowsLoop` for byte accesses on a given row.
+lemma decodeRowsLoop_bounds
+    (raw pixels : ByteArray) (w h bpp rowBytes y offset : Nat)
+    (hraw : raw.size = h * (rowBytes + 1))
+    (hrowBytes : rowBytes = w * bpp)
+    (hbpp : bpp = 3 ∨ bpp = 4)
+    (hpixels : pixels.size = w * h * bytesPerPixel)
+    (hoff : offset = y * (rowBytes + 1))
+    (hy : y < h) :
+    offset < raw.size ∧
+    offset + 1 + rowBytes ≤ raw.size ∧
+    (raw.extract (offset + 1) (offset + 1 + rowBytes)).size = rowBytes ∧
+    (∀ x < w, x * bpp + 2 < rowBytes) ∧
+    (∀ x < w, (y * w + x) * bytesPerPixel + 2 < pixels.size) ∧
+    (bpp = 3 → y * rowBytes + rowBytes ≤ pixels.size) := by
+  have hofflt : offset < raw.size := by
+    have h := decodeRowsLoop_offset_lt_raw (raw := raw) (rowBytes := rowBytes) (h := h) (y := y) hraw hy
+    simpa [hoff] using h
+  have hrowBound : offset + 1 + rowBytes ≤ raw.size := by
+    have h := decodeRowsLoop_rowData_bound (raw := raw) (rowBytes := rowBytes) (h := h) (y := y) hraw hy
+    simpa [hoff] using h
+  have hrowSize :
+      (raw.extract (offset + 1) (offset + 1 + rowBytes)).size = rowBytes := by
+    have h := decodeRowsLoop_rowData_size (raw := raw) (rowBytes := rowBytes) (h := h) (y := y) hraw hy
+    simpa [hoff] using h
+  have hrowIndex : ∀ x < w, x * bpp + 2 < rowBytes := by
+    intro x hx
+    have h := decodeRowsLoop_rowIndex_bound (w := w) (bpp := bpp) (x := x) hx hbpp
+    simpa [hrowBytes] using h
+  have hpixBase : ∀ x < w, (y * w + x) * bytesPerPixel + 2 < pixels.size := by
+    intro x hx
+    exact decodeRowsLoop_pixBase_bound (pixels := pixels) (w := w) (h := h) (x := x) (y := y) hx hy hpixels
+  have hrowOffset : bpp = 3 → y * rowBytes + rowBytes ≤ pixels.size := by
+    intro hbpp3
+    subst hbpp3
+    have hrowBytes' : rowBytes = w * 3 := by
+      simpa using hrowBytes
+    have hpixels' : pixels.size = h * rowBytes := by
+      calc
+        pixels.size = w * h * bytesPerPixel := hpixels
+        _ = w * h * 3 := by simp [bytesPerPixel]
+        _ = h * (w * 3) := by
+              simp [Nat.mul_left_comm, Nat.mul_assoc]
+        _ = h * rowBytes := by simp [hrowBytes']
+    exact decodeRowsLoop_rowOffset_le_pixels (pixels := pixels) (rowBytes := rowBytes) (h := h) (y := y) hpixels' hy
+  exact ⟨hofflt, hrowBound, hrowSize, hrowIndex, hpixBase, hrowOffset⟩
+
+-- The initial `decodeRowsLoop` call in `decodeBitmap` satisfies the bounds required for safe access.
+lemma decodeBitmap_decodeRowsLoop_bounds
+    (hdr : PngHeader) (raw : ByteArray)
+    (hbpp : hdr.colorType = 2 ∨ hdr.colorType = 6)
+    (hraw : raw.size = hdr.height * (hdr.width * (if hdr.colorType == 2 then 3 else 4) + 1)) :
+    let bpp := if hdr.colorType == 2 then 3 else 4
+    let rowBytes := hdr.width * bpp
+    let pixels0 := ByteArray.mk <| Array.replicate (hdr.width * hdr.height * bytesPerPixel) 0
+    ∀ y < hdr.height,
+      let offset := y * (rowBytes + 1)
+      offset < raw.size ∧
+      offset + 1 + rowBytes ≤ raw.size ∧
+      (raw.extract (offset + 1) (offset + 1 + rowBytes)).size = rowBytes ∧
+      (∀ x < hdr.width, x * bpp + 2 < rowBytes) ∧
+      (∀ x < hdr.width, (y * hdr.width + x) * bytesPerPixel + 2 < pixels0.size) ∧
+      (bpp = 3 → y * rowBytes + rowBytes ≤ pixels0.size) := by
+  intro bpp rowBytes pixels0 y hy offset
+  have hbpp' : bpp = 3 ∨ bpp = 4 := by
+    cases hbpp with
+    | inl h2 => simp [bpp, h2]
+    | inr h6 => simp [bpp, h6]
+  have hrowBytes : rowBytes = hdr.width * bpp := by rfl
+  have hpixels : pixels0.size = hdr.width * hdr.height * bytesPerPixel := by
+    simp [pixels0, ByteArray.size, Array.size_replicate]
+  have hraw' : raw.size = hdr.height * (rowBytes + 1) := by
+    simpa [rowBytes, bpp] using hraw
+  have h :=
+    decodeRowsLoop_bounds (raw := raw) (pixels := pixels0) (w := hdr.width) (h := hdr.height)
+      (bpp := bpp) (rowBytes := rowBytes) (y := y) (offset := offset)
+      hraw' hrowBytes hbpp' hpixels rfl hy
+  simpa using h
+
+-- No overflow: `decodeBitmap` passes bounds that keep `decodeRowsLoop` index-safe.
+lemma decodeBitmap_no_overflow
+    (hdr : PngHeader) (raw : ByteArray)
+    (hbpp : hdr.colorType = 2 ∨ hdr.colorType = 6)
+    (hraw : raw.size = hdr.height * (hdr.width * (if hdr.colorType == 2 then 3 else 4) + 1)) :
+    let bpp := if hdr.colorType == 2 then 3 else 4
+    let rowBytes := hdr.width * bpp
+    let pixels0 := ByteArray.mk <| Array.replicate (hdr.width * hdr.height * bytesPerPixel) 0
+    ∀ y < hdr.height,
+      let offset := y * (rowBytes + 1)
+      offset < raw.size ∧
+      offset + 1 + rowBytes ≤ raw.size ∧
+      (raw.extract (offset + 1) (offset + 1 + rowBytes)).size = rowBytes ∧
+      (∀ x < hdr.width, x * bpp + 2 < rowBytes) ∧
+      (∀ x < hdr.width, (y * hdr.width + x) * bytesPerPixel + 2 < pixels0.size) ∧
+      (bpp = 3 → y * rowBytes + rowBytes ≤ pixels0.size) := by
+  simpa using decodeBitmap_decodeRowsLoop_bounds (hdr := hdr) (raw := raw) hbpp hraw
 
 -- Decoding the raw encoding reconstructs the original pixels.
 lemma decodeRowsLoop_encodeRaw (bmp : BitmapRGB8) :
