@@ -120,7 +120,7 @@ lemma byteArray_get_set_ne'
 
 -- Writing a pixel then reading it back yields the same pixel.
 lemma getPixel_putPixel_eq
-    (img : Bitmap) (x y : Nat) (pixel : PixelRGB8)
+    (img : BitmapRGB8) (x y : Nat) (pixel : PixelRGB8)
     (hx : x < img.size.width) (hy : y < img.size.height) :
     getPixel (putPixel img x y pixel hx hy) x y
       (by simpa using hx) (by simpa using hy) = pixel := by

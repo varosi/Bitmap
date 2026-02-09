@@ -43,7 +43,7 @@ def pngRoundTripProperty (trials : Nat) : IO Bool := do
 private def perfFillRead (w h : Nat) : IO (Nat × Nat) := do
   let t0 <- IO.monoNanosNow
   let mut img := mkBlankBitmap w h { r := 0, g := 0, b := 0 }
-  let putPixelChecked (bmp : Bitmap) (x y : Nat) (px : PixelRGB8) : Bitmap :=
+  let putPixelChecked (bmp : BitmapRGB8) (x y : Nat) (px : PixelRGB8) : BitmapRGB8 :=
     if hx : x < bmp.size.width then
       if hy : y < bmp.size.height then
         putPixel bmp x y px hx hy
@@ -51,7 +51,7 @@ private def perfFillRead (w h : Nat) : IO (Nat × Nat) := do
         bmp
     else
       bmp
-  let getPixelChecked (bmp : Bitmap) (x y : Nat) : PixelRGB8 :=
+  let getPixelChecked (bmp : BitmapRGB8) (x y : Nat) : PixelRGB8 :=
     if hx : x < bmp.size.width then
       if hy : y < bmp.size.height then
         getPixel bmp x y hx hy

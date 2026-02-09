@@ -13,6 +13,7 @@ structure BitmapWidgetProps where
   width : Nat
   height : Nat
   bytes : ByteArray
+  bytesPerPixel : Nat := bytesPerPixel
   pixelSize : Nat := 10
   showGrid : Bool := true
   background : String := "#070a16"
@@ -28,6 +29,22 @@ def BitmapRGB8.widgetProps (bmp : BitmapRGB8)
   { width := bmp.size.width
     height := bmp.size.height
     bytes := bmp.data
+    bytesPerPixel := bytesPerPixel
+    pixelSize := max pixelSize 1
+    showGrid
+    background
+    caption }
+
+def BitmapRGBA8.widgetProps (bmp : BitmapRGBA8)
+    (pixelSize : Nat := 12)
+    (showGrid : Bool := true)
+    (background : String := "#050914")
+    (caption : Option String := none) :
+    BitmapWidgetProps :=
+  { width := bmp.size.width
+    height := bmp.size.height
+    bytes := bmp.data
+    bytesPerPixel := bytesPerPixelRGBA
     pixelSize := max pixelSize 1
     showGrid
     background
@@ -115,7 +132,7 @@ def bitmapWidget : Lean.Widget.Module where
           return
         }
         const bytes = props.bytes ?? []
-        const stride = 3
+        const stride = Math.max(props.bytesPerPixel ?? 3, 1)
         const image = ctx.createImageData(width, height)
         for (let i = 0; i < width * height; i++) {
           const offset = i * 4
@@ -123,10 +140,11 @@ def bitmapWidget : Lean.Widget.Module where
           const r = bytes[base] ?? 0
           const g = bytes[base + 1] ?? 0
           const b = bytes[base + 2] ?? 0
+          const a = stride >= 4 ? (bytes[base + 3] ?? 255) : 255
           image.data[offset + 0] = r
           image.data[offset + 1] = g
           image.data[offset + 2] = b
-          image.data[offset + 3] = 255
+          image.data[offset + 3] = a
         }
         ctx.putImageData(image, 0, 0)
       }, [width, height, props.bytes])
