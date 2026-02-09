@@ -72,10 +72,21 @@ def auroraBitmap : BitmapRGB8 :=
 def testPngPath : FilePath :=
   FilePath.mk "test.png"
 
+def testPngRgbaPath : FilePath :=
+  FilePath.mk "test_rgba.png"
+
 def testPngBitmapResult : Except String BitmapRGB8 :=
   match unsafe unsafeIO (IO.FS.readBinFile testPngPath) with
   | Except.ok bytes =>
       match Png.decodeBitmap bytes with
+      | some bmp => Except.ok bmp
+      | none => Except.error "invalid PNG bitmap"
+  | Except.error err => Except.error err.toString
+
+def testPngRgbaBitmapResult : Except String BitmapRGBA8 :=
+  match unsafe unsafeIO (IO.FS.readBinFile testPngRgbaPath) with
+  | Except.ok bytes =>
+      match Png.decodeBitmap (px := PixelRGBA8) bytes with
       | some bmp => Except.ok bmp
       | none => Except.error "invalid PNG bitmap"
   | Except.error err => Except.error err.toString
@@ -92,6 +103,19 @@ def testPngWidgetProps : BitmapWidgetProps :=
         (pixelSize := 2)
         (background := "#1b0b0b")
         (caption := some s!"PNG load failed: {err}")
+
+def testPngRgbaWidgetProps : BitmapWidgetProps :=
+  match testPngRgbaBitmapResult with
+  | Except.ok bmp =>
+      BitmapRGBA8.widgetProps bmp
+        (pixelSize := 18)
+        (background := "#0b0b12")
+        (caption := some "test_rgba.png (4×4) with alpha")
+  | Except.error err =>
+      BitmapRGBA8.widgetProps (mkBlankBitmapRGBA 1 1 { r := 0, g := 0, b := 0, a := 0 })
+        (pixelSize := 18)
+        (background := "#1b0b0b")
+        (caption := some s!"PNG RGBA load failed: {err}")
 
 @[widget_module]
 def bitmapWidget : Lean.Widget.Module where
@@ -215,3 +239,6 @@ open Bitmaps.Widget
 
 #widget bitmapWidget with
   (testPngWidgetProps)
+
+#widget bitmapWidget with
+  (testPngRgbaWidgetProps)
