@@ -17,9 +17,5 @@ rev = "v4.27.0"
 name = "Bitmap"
 
 [[lean_exe]]
-name = "bitmap"
-root = "BitmapMain"
-
-[[lean_exe]]
 name = "bitmap_tests"
 root = "Bitmap.Tests"
