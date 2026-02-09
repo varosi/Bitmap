@@ -1597,14 +1597,18 @@ def encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px) : Byte
 
 end Png
 
-def BitmapRGB8.readPng (path : FilePath) : IO (Except String BitmapRGB8) := do
+def Bitmap.readPng {px : Type u} [Pixel px] [Png.PngPixel px]
+    (path : FilePath) : IO (Except String (Bitmap px)) := do
   let bytesOrErr <- ioToExcept (IO.FS.readBinFile path)
   match bytesOrErr with
   | Except.error err => pure (Except.error err)
   | Except.ok bytes =>
-      match Png.decodeBitmap bytes with
+      match Png.decodeBitmap (px := px) bytes with
       | some bmp => pure (Except.ok bmp)
       | none => pure (Except.error "invalid PNG bitmap")
+
+def BitmapRGB8.readPng (path : FilePath) : IO (Except String BitmapRGB8) :=
+  Bitmap.readPng (px := PixelRGB8) path
 
 def BitmapRGB8.writePng (path : FilePath) (bmp : BitmapRGB8) : IO (Except String Unit) :=
   ioToExcept (IO.FS.writeBinFile path (Png.encodeBitmap bmp))
@@ -1615,14 +1619,8 @@ instance : FileWritable BitmapRGB8 where
 instance : FileReadable BitmapRGB8 where
   read := BitmapRGB8.readPng
 
-def BitmapRGBA8.readPng (path : FilePath) : IO (Except String BitmapRGBA8) := do
-  let bytesOrErr <- ioToExcept (IO.FS.readBinFile path)
-  match bytesOrErr with
-  | Except.error err => pure (Except.error err)
-  | Except.ok bytes =>
-      match Png.decodeBitmap (px := PixelRGBA8) bytes with
-      | some bmp => pure (Except.ok bmp)
-      | none => pure (Except.error "invalid PNG bitmap")
+def BitmapRGBA8.readPng (path : FilePath) : IO (Except String BitmapRGBA8) :=
+  Bitmap.readPng (px := PixelRGBA8) path
 
 def BitmapRGBA8.writePng (path : FilePath) (bmp : BitmapRGBA8) : IO (Except String Unit) :=
   ioToExcept (IO.FS.writeBinFile path (Png.encodeBitmap bmp))
