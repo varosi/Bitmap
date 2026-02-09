@@ -134,6 +134,11 @@ class Pixel (α : Type u) where
   write_size : ∀ (data : ByteArray) (base : Nat)
     (h : base + (bytesPerPixel - 1) < data.size) (px : α),
     (write data base h px).size = data.size
+  read_write :
+    ∀ (data : ByteArray) (base : Nat)
+      (h : base + (bytesPerPixel - 1) < data.size) (px : α),
+      read (write data base h px) base
+        (by simpa [write_size (data := data) (base := base) (h := h) (px := px)] using h) = px
 
 def bytesPerPixel : Nat := 3
 def bytesPerPixelRGBA : Nat := 4
@@ -143,6 +148,23 @@ def bytesPerPixelRGBA : Nat := 4
   cases bs with
   | mk data =>
       simp [ByteArray.set, ByteArray.size, Array.size_set]
+
+@[simp] lemma byteArray_get_set_self'
+    {bs : ByteArray} {i : Nat} (h : i < bs.size) {v : UInt8}
+    {h' : i < (bs.set i v h).size} :
+    (bs.set i v h).get i h' = v := by
+  cases bs with
+  | mk data =>
+      simp [ByteArray.set, ByteArray.get]
+
+lemma byteArray_get_set_ne'
+    {bs : ByteArray} {i j : Nat} (hi : i < bs.size) (hj : j < bs.size)
+    (hij : i ≠ j) {v : UInt8} {h' : j < (bs.set i v hi).size} :
+    (bs.set i v hi).get j h' = bs.get j hj := by
+  cases bs with
+  | mk data =>
+      simpa [ByteArray.set, ByteArray.get] using
+        (Array.getElem_set_ne (xs := data) (i := i) (j := j) (h' := hi) (pj := hj) (h := hij))
 
 def pixelReadRGB8 (data : ByteArray) (base : Nat) (h : base + 2 < data.size) : PixelRGB8 := by
   have h1 : base + 1 < data.size := by omega
@@ -203,6 +225,56 @@ lemma pixelWriteRGBA8_size (data : ByteArray) (base : Nat) (h : base + 3 < data.
 instance instPixelRGB8 : Pixel PixelRGB8 where
   bytesPerPixel := bytesPerPixel
   bytesPerPixel_pos := by decide
+  read_write := by
+    intro data base h px
+    cases px with
+    | mk r g b =>
+        have h2 : base + 2 < data.size := by
+          simpa [bytesPerPixel] using h
+        have h1 : base + 1 < data.size := by omega
+        have h0 : base < data.size := by omega
+        let data1 := data.set base r h0
+        have h1d1 : base + 1 < data1.size := by
+          simpa [data1, byteArray_size_set] using h1
+        let data2 := data1.set (base + 1) g h1d1
+        have h2d2 : base + 2 < data2.size := by
+          simpa [data2, data1, byteArray_size_set] using h2
+        let data3 := data2.set (base + 2) b h2d2
+        have h0d1 : base < data1.size := by
+          simpa [data1, byteArray_size_set] using h0
+        have h0d2 : base < data2.size := by
+          simpa [data2, data1, byteArray_size_set] using h0
+        have h0d3 : base < data3.size := by
+          simpa [data3, data2, data1, byteArray_size_set] using h0
+        have h1d2 : base + 1 < data2.size := by
+          simpa [data2, data1, byteArray_size_set] using h1
+        have h1d3 : base + 1 < data3.size := by
+          simpa [data3, data2, data1, byteArray_size_set] using h1
+        have h2d3 : base + 2 < data3.size := by
+          simpa [data3, data2, data1, byteArray_size_set] using h2
+        have hr : data3.get base h0d3 = r := by
+          have hr1 : data3.get base h0d3 = data2.get base h0d2 := by
+            simpa [data3] using
+              (byteArray_get_set_ne' (bs := data2) (i := base + 2) (j := base)
+                (hi := h2d2) (hj := h0d2) (hij := by omega) (v := b) (h' := h0d3))
+          have hr2 : data2.get base h0d2 = data1.get base h0d1 := by
+            simpa [data2] using
+              (byteArray_get_set_ne' (bs := data1) (i := base + 1) (j := base)
+                (hi := h1d1) (hj := h0d1) (hij := by omega) (v := g) (h' := h0d2))
+          have hr3 : data1.get base h0d1 = r := by
+            simp [data1]
+          simp [hr1, hr2, hr3]
+        have hg : data3.get (base + 1) h1d3 = g := by
+          have hg1 : data3.get (base + 1) h1d3 = data2.get (base + 1) h1d2 := by
+            simpa [data3] using
+              (byteArray_get_set_ne' (bs := data2) (i := base + 2) (j := base + 1)
+                (hi := h2d2) (hj := h1d2) (hij := by omega) (v := b) (h' := h1d3))
+          have hg2 : data2.get (base + 1) h1d2 = g := by
+            simp [data2]
+          simp [hg1, hg2]
+        have hb : data3.get (base + 2) h2d3 = b := by
+          simp [data3]
+        simp [pixelReadRGB8, pixelWriteRGB8, data1, data2, data3, hr, hg, hb]
   read := fun data base h =>
     pixelReadRGB8 data base (by simpa [bytesPerPixel] using h)
   write := fun data base h px =>
@@ -216,6 +288,84 @@ instance instPixelRGB8 : Pixel PixelRGB8 where
 instance instPixelRGBA8 : Pixel PixelRGBA8 where
   bytesPerPixel := bytesPerPixelRGBA
   bytesPerPixel_pos := by decide
+  read_write := by
+    intro data base h px
+    cases px with
+    | mk r g b a =>
+        have h3 : base + 3 < data.size := by
+          simpa [bytesPerPixelRGBA] using h
+        have h2 : base + 2 < data.size := by omega
+        have h1 : base + 1 < data.size := by omega
+        have h0 : base < data.size := by omega
+        let data1 := data.set base r h0
+        have h1d1 : base + 1 < data1.size := by
+          simpa [data1, byteArray_size_set] using h1
+        let data2 := data1.set (base + 1) g h1d1
+        have h2d2 : base + 2 < data2.size := by
+          simpa [data2, data1, byteArray_size_set] using h2
+        let data3 := data2.set (base + 2) b h2d2
+        have h3d3 : base + 3 < data3.size := by
+          simpa [data3, data2, data1, byteArray_size_set] using h3
+        let data4 := data3.set (base + 3) a h3d3
+        have h0d1 : base < data1.size := by
+          simpa [data1, byteArray_size_set] using h0
+        have h0d2 : base < data2.size := by
+          simpa [data2, data1, byteArray_size_set] using h0
+        have h0d3 : base < data3.size := by
+          simpa [data3, data2, data1, byteArray_size_set] using h0
+        have h0d4 : base < data4.size := by
+          simpa [data4, data3, data2, data1, byteArray_size_set] using h0
+        have h1d2 : base + 1 < data2.size := by
+          simpa [data2, data1, byteArray_size_set] using h1
+        have h1d3 : base + 1 < data3.size := by
+          simpa [data3, data2, data1, byteArray_size_set] using h1
+        have h1d4 : base + 1 < data4.size := by
+          simpa [data4, data3, data2, data1, byteArray_size_set] using h1
+        have h2d3 : base + 2 < data3.size := by
+          simpa [data3, data2, data1, byteArray_size_set] using h2
+        have h2d4 : base + 2 < data4.size := by
+          simpa [data4, data3, data2, data1, byteArray_size_set] using h2
+        have h3d4 : base + 3 < data4.size := by
+          simpa [data4, data3, data2, data1, byteArray_size_set] using h3
+        have hr : data4.get base h0d4 = r := by
+          have hr1 : data4.get base h0d4 = data3.get base h0d3 := by
+            simpa [data4] using
+              (byteArray_get_set_ne' (bs := data3) (i := base + 3) (j := base)
+                (hi := h3d3) (hj := h0d3) (hij := by omega) (v := a) (h' := h0d4))
+          have hr2 : data3.get base h0d3 = data2.get base h0d2 := by
+            simpa [data3] using
+              (byteArray_get_set_ne' (bs := data2) (i := base + 2) (j := base)
+                (hi := h2d2) (hj := h0d2) (hij := by omega) (v := b) (h' := h0d3))
+          have hr3 : data2.get base h0d2 = data1.get base h0d1 := by
+            simpa [data2] using
+              (byteArray_get_set_ne' (bs := data1) (i := base + 1) (j := base)
+                (hi := h1d1) (hj := h0d1) (hij := by omega) (v := g) (h' := h0d2))
+          have hr4 : data1.get base h0d1 = r := by
+            simp [data1]
+          simp [hr1, hr2, hr3, hr4]
+        have hg : data4.get (base + 1) h1d4 = g := by
+          have hg1 : data4.get (base + 1) h1d4 = data3.get (base + 1) h1d3 := by
+            simpa [data4] using
+              (byteArray_get_set_ne' (bs := data3) (i := base + 3) (j := base + 1)
+                (hi := h3d3) (hj := h1d3) (hij := by omega) (v := a) (h' := h1d4))
+          have hg2 : data3.get (base + 1) h1d3 = data2.get (base + 1) h1d2 := by
+            simpa [data3] using
+              (byteArray_get_set_ne' (bs := data2) (i := base + 2) (j := base + 1)
+                (hi := h2d2) (hj := h1d2) (hij := by omega) (v := b) (h' := h1d3))
+          have hg3 : data2.get (base + 1) h1d2 = g := by
+            simp [data2]
+          simp [hg1, hg2, hg3]
+        have hb : data4.get (base + 2) h2d4 = b := by
+          have hb1 : data4.get (base + 2) h2d4 = data3.get (base + 2) h2d3 := by
+            simpa [data4] using
+              (byteArray_get_set_ne' (bs := data3) (i := base + 3) (j := base + 2)
+                (hi := h3d3) (hj := h2d3) (hij := by omega) (v := a) (h' := h2d4))
+          have hb2 : data3.get (base + 2) h2d3 = b := by
+            simp [data3]
+          simp [hb1, hb2]
+        have ha : data4.get (base + 3) h3d4 = a := by
+          simp [data4]
+        simp [pixelReadRGBA8, pixelWriteRGBA8, data1, data2, data3, data4, hr, hg, hb, ha]
   read := fun data base h =>
     pixelReadRGBA8 data base (by simpa [bytesPerPixelRGBA] using h)
   write := fun data base h px =>

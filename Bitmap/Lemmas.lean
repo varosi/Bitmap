@@ -79,29 +79,6 @@ lemma arrayCoordSize_u32
       simp [ByteArray.set, ByteArray.get]
 
 -- Getting the byte just set yields the new value (alternate proof of bounds).
-@[simp] lemma byteArray_get_set_self'
-    {bs : ByteArray} {i : Nat} (h : i < bs.size) {v : UInt8}
-    {h' : i < (bs.set i v h).size} :
-    (bs.set i v h).get i h' = v := by
-  simp [byteArray_get_set_self (bs := bs) (i := i) (h := h) (v := v)]
-
--- Setting one index does not affect other indices.
-lemma byteArray_get_set_ne
-    {bs : ByteArray} {i j : Nat} (hi : i < bs.size) (hj : j < bs.size)
-    (hij : i ≠ j) {v : UInt8} :
-    (bs.set i v hi).get j (by simpa [byteArray_size_set] using hj) = bs.get j hj := by
-  cases bs with
-  | mk arr =>
-      simpa [ByteArray.set, ByteArray.get] using
-        (Array.getElem_set_ne (xs := arr) (i := i) (j := j) (h' := hi) (pj := hj) (h := hij))
-
--- Setting one index does not affect other indices (alternate proof of bounds).
-lemma byteArray_get_set_ne'
-    {bs : ByteArray} {i j : Nat} (hi : i < bs.size) (hj : j < bs.size)
-    (hij : i ≠ j) {v : UInt8} {h' : j < (bs.set i v hi).size} :
-    (bs.set i v hi).get j h' = bs.get j hj := by
-  simpa using (byteArray_get_set_ne (bs := bs) (i := i) (j := j) (hi := hi) (hj := hj) (hij := hij) (v := v))
-
 -- `getElem` is proof-irrelevant for ByteArrays.
 @[simp] lemma byteArray_getElem_eq {bs : ByteArray} {i : Nat} (h1 h2 : i < bs.size) :
     bs[i]'h1 = bs[i]'h2 := by
@@ -112,78 +89,12 @@ lemma byteArray_get_set_ne'
 
 -- Writing a pixel then reading it back yields the same pixel.
 lemma getPixel_putPixel_eq
-    (img : BitmapRGB8) (x y : Nat) (pixel : PixelRGB8)
+    {px : Type} [Pixel px]
+    (img : Bitmap px) (x y : Nat) (pixel : px)
     (hx : x < img.size.width) (hy : y < img.size.height) :
     getPixel (putPixel img x y pixel hx hy) x y
       (by simpa using hx) (by simpa using hy) = pixel := by
-  cases pixel with
-  | mk r g b =>
-      let pixIdx := x + y * img.size.width
-      have hPix : pixIdx < img.size.width * img.size.height := by
-        simpa [pixIdx] using
-          (arrayCoordSize_nat (i := pixIdx) (w := img.size.width) (h := img.size.height)
-            (x := x) (y := y) hx hy rfl)
-
-      let base := pixIdx * bytesPerPixel
-      have h2 : base + 2 < img.data.size := by
-        have : pixIdx * bytesPerPixel + 2 < img.size.width * img.size.height * bytesPerPixel := by
-          have hPix' := hPix
-          simp [bytesPerPixel] at hPix' ⊢
-          omega
-        simpa [base, img.valid] using this
-      have h1 : base + 1 < img.data.size := by omega
-      have h0 : base < img.data.size := by omega
-
-      let data1 := img.data.set base r h0
-      have h1d1 : base + 1 < data1.size := by
-        simpa [data1, byteArray_size_set] using h1
-      let data2 := data1.set (base + 1) g h1d1
-      have h2d2 : base + 2 < data2.size := by
-        simpa [data2, data1, byteArray_size_set] using h2
-      let data3 := data2.set (base + 2) b h2d2
-
-      have h0d1 : base < data1.size := by
-        simpa [data1, byteArray_size_set] using h0
-      have h0d2 : base < data2.size := by
-        simpa [data2, data1, byteArray_size_set] using h0
-      have h0d3 : base < data3.size := by
-        simpa [data3, data2, data1, byteArray_size_set] using h0
-      have h1d2 : base + 1 < data2.size := by
-        simpa [data2, data1, byteArray_size_set] using h1
-      have h1d3 : base + 1 < data3.size := by
-        simpa [data3, data2, data1, byteArray_size_set] using h1
-      have h2d3 : base + 2 < data3.size := by
-        simpa [data3, data2, data1, byteArray_size_set] using h2
-
-      have hr : data3.get base h0d3 = r := by
-        have hr1 : data3.get base h0d3 = data2.get base h0d2 := by
-          simpa [data3] using
-            (byteArray_get_set_ne' (bs := data2) (i := base + 2) (j := base)
-              (hi := h2d2) (hj := h0d2) (hij := by omega) (v := b) (h' := h0d3))
-        have hr2 : data2.get base h0d2 = data1.get base h0d1 := by
-          simpa [data2] using
-            (byteArray_get_set_ne' (bs := data1) (i := base + 1) (j := base)
-              (hi := h1d1) (hj := h0d1) (hij := by omega) (v := g) (h' := h0d2))
-        have hr3 : data1.get base h0d1 = r := by
-          simp [data1]
-        simp [hr1, hr2, hr3]
-
-      have hg : data3.get (base + 1) h1d3 = g := by
-        have hg1 : data3.get (base + 1) h1d3 = data2.get (base + 1) h1d2 := by
-          simpa [data3] using
-            (byteArray_get_set_ne' (bs := data2) (i := base + 2) (j := base + 1)
-              (hi := h2d2) (hj := h1d2) (hij := by omega) (v := b) (h' := h1d3))
-        have hg2 : data2.get (base + 1) h1d2 = g := by
-          simp [data2]
-        simp [hg1, hg2]
-
-      have hb : data3.get (base + 2) h2d3 = b := by
-        simp [data3]
-
-      -- Now unfold putPixel/getPixel and rewrite with computed fields.
-      simp [getPixel, putPixel, Pixel.read, Pixel.write, instPixelRGB8,
-        pixelReadRGB8, pixelWriteRGB8, bytesPerPixel_rgb,
-        pixIdx, base, data1, data2, data3, hr, hg, hb]
+  simp [getPixel, putPixel, Pixel.read_write]
 
 open Png
 
