@@ -107,33 +107,46 @@ private def pngDecodeFixedHuffmanFixtures : IO Unit := do
 -- Returns elapsed time in nanoseconds and a checksum to prevent dead-code elimination.
 private def perfFillRead (w h : Nat) : IO (Nat × Nat) := do
   let t0 <- IO.monoNanosNow
-  let mut img := mkBlankBitmap w h { r := 0, g := 0, b := 0 }
-  let putPixelChecked (bmp : BitmapRGB8) (x y : Nat) (px : PixelRGB8) : BitmapRGB8 :=
-    if hx : x < bmp.size.width then
-      if hy : y < bmp.size.height then
-        putPixel bmp x y px hx hy
-      else
-        bmp
-    else
-      bmp
-  let getPixelChecked (bmp : BitmapRGB8) (x y : Nat) : PixelRGB8 :=
-    if hx : x < bmp.size.width then
-      if hy : y < bmp.size.height then
-        getPixel bmp x y hx hy
-      else
-        { r := 0, g := 0, b := 0 }
-    else
-      { r := 0, g := 0, b := 0 }
-  for y in [0:h] do
-    for x in [0:w] do
-      let r := UInt8.ofNat ((x + y) % 256)
-      let g := UInt8.ofNat ((x * 3 + y) % 256)
-      let b := UInt8.ofNat ((x + 2 * y) % 256)
-      img := putPixelChecked img x y { r := r, g := g, b := b }
+  let xs : Array (Fin w) := Array.finRange w
+  let ys : Array (Fin h) := Array.finRange h
+  let img0 := mkBlankBitmap w h { r := 0, g := 0, b := 0 }
+  let acc0 :
+      { img : BitmapRGB8 // img.size.width = w ∧ img.size.height = h } :=
+    ⟨img0, by rfl, by rfl⟩
+  let accFilled :=
+    ys.foldl (init := acc0)
+      (fun (acc : { img : BitmapRGB8 // img.size.width = w ∧ img.size.height = h }) (y : Fin h) =>
+        xs.foldl (init := acc)
+          (fun (acc : { img : BitmapRGB8 // img.size.width = w ∧ img.size.height = h }) (x : Fin w) =>
+            let img := acc.1
+            have hwidth : img.size.width = w := acc.2.1
+            have hheight : img.size.height = h := acc.2.2
+            have hx : x.val < img.size.width := by
+              simp [hwidth]
+            have hy : y.val < img.size.height := by
+              simp [hheight]
+            let r := UInt8.ofNat ((x.val + y.val) % 256)
+            let g := UInt8.ofNat ((x.val * 3 + y.val) % 256)
+            let b := UInt8.ofNat ((x.val + 2 * y.val) % 256)
+            let img' := putPixel img x.val y.val { r := r, g := g, b := b } hx hy
+            have hwidth' : img'.size.width = w := by
+              have hsame : img'.size.width = img.size.width := by rfl
+              exact hsame.trans hwidth
+            have hheight' : img'.size.height = h := by
+              have hsame : img'.size.height = img.size.height := by rfl
+              exact hsame.trans hheight
+            ⟨img', hwidth', hheight'⟩))
+  let img := accFilled.1
+  let hwidth : img.size.width = w := accFilled.2.1
+  let hheight : img.size.height = h := accFilled.2.2
   let mut checksum : Nat := 0
-  for y in [0:h] do
-    for x in [0:w] do
-      let px := getPixelChecked img x y
+  for y in ys do
+    for x in xs do
+      have hx : x.val < img.size.width := by
+        simp [hwidth]
+      have hy : y.val < img.size.height := by
+        simp [hheight]
+      let px := getPixel img x.val y.val hx hy
       checksum := checksum + px.r.toNat + px.g.toNat + px.b.toNat
   let t1 <- IO.monoNanosNow
   return (t1 - t0, checksum)
@@ -154,8 +167,8 @@ private def perfPngRoundTrip (w h : Nat) : IO (Nat × Bool) := do
 -- Fixed-size performance test for putPixel/getPixel on this machine.
 -- Chosen so 10 runs total about 5 seconds here.
 private def runPerfTest : IO Unit := do
-  let w : Nat := 448
-  let h : Nat := 448
+  let w : Nat := 2688
+  let h : Nat := 2688
   let iters : Nat := 10
   let mut totalNs : Nat := 0
   let mut totalChecksum : Nat := 0
@@ -170,8 +183,8 @@ private def runPerfTest : IO Unit := do
 -- Fixed-size performance test for PNG encode/decode on this machine.
 -- Chosen so 10 runs total about 5 seconds here.
 private def runPngPerfTest : IO Unit := do
-  let w : Nat := 352
-  let h : Nat := 352
+  let w : Nat := 1600
+  let h : Nat := 1600
   let iters : Nat := 10
   let mut totalNs : Nat := 0
   for _ in [0:iters] do
