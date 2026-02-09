@@ -50,6 +50,21 @@ def BitmapRGBA8.widgetProps (bmp : BitmapRGBA8)
     background
     caption }
 
+def BitmapGray8.widgetProps (bmp : BitmapGray8)
+    (pixelSize : Nat := 12)
+    (showGrid : Bool := true)
+    (background : String := "#050914")
+    (caption : Option String := none) :
+    BitmapWidgetProps :=
+  { width := bmp.size.width
+    height := bmp.size.height
+    bytes := bmp.data
+    bytesPerPixel := bytesPerPixelGray
+    pixelSize := max pixelSize 1
+    showGrid
+    background
+    caption }
+
 -------------------------------------------------------------------------------
 -- Sample bitmap and widget integration
 
@@ -75,6 +90,9 @@ def testPngPath : FilePath :=
 def testPngRgbaPath : FilePath :=
   FilePath.mk "test_rgba.png"
 
+def testPngGrayPath : FilePath :=
+  FilePath.mk "test_gray.png"
+
 def testPngBitmapResult : Except String BitmapRGB8 :=
   match unsafe unsafeIO (IO.FS.readBinFile testPngPath) with
   | Except.ok bytes =>
@@ -87,6 +105,14 @@ def testPngRgbaBitmapResult : Except String BitmapRGBA8 :=
   match unsafe unsafeIO (IO.FS.readBinFile testPngRgbaPath) with
   | Except.ok bytes =>
       match Png.decodeBitmap (px := PixelRGBA8) bytes with
+      | some bmp => Except.ok bmp
+      | none => Except.error "invalid PNG bitmap"
+  | Except.error err => Except.error err.toString
+
+def testPngGrayBitmapResult : Except String BitmapGray8 :=
+  match unsafe unsafeIO (IO.FS.readBinFile testPngGrayPath) with
+  | Except.ok bytes =>
+      match Png.decodeBitmap (px := PixelGray8) bytes with
       | some bmp => Except.ok bmp
       | none => Except.error "invalid PNG bitmap"
   | Except.error err => Except.error err.toString
@@ -116,6 +142,19 @@ def testPngRgbaWidgetProps : BitmapWidgetProps :=
         (pixelSize := 18)
         (background := "#1b0b0b")
         (caption := some s!"PNG RGBA load failed: {err}")
+
+def testPngGrayWidgetProps : BitmapWidgetProps :=
+  match testPngGrayBitmapResult with
+  | Except.ok bmp =>
+      BitmapGray8.widgetProps bmp
+        (pixelSize := 18)
+        (background := "#0b0b12")
+        (caption := some "test_gray.png (8×8) grayscale")
+  | Except.error err =>
+      BitmapGray8.widgetProps (mkBlankBitmapGray 1 1 { v := 0 })
+        (pixelSize := 18)
+        (background := "#1b0b0b")
+        (caption := some s!"PNG Gray load failed: {err}")
 
 @[widget_module]
 def bitmapWidget : Lean.Widget.Module where
@@ -161,10 +200,10 @@ def bitmapWidget : Lean.Widget.Module where
         for (let i = 0; i < width * height; i++) {
           const offset = i * 4
           const base = i * stride
-          const r = bytes[base] ?? 0
-          const g = bytes[base + 1] ?? 0
-          const b = bytes[base + 2] ?? 0
-          const a = stride >= 4 ? (bytes[base + 3] ?? 255) : 255
+        const r = bytes[base] ?? 0
+        const g = stride === 1 ? r : (bytes[base + 1] ?? 0)
+        const b = stride === 1 ? r : (bytes[base + 2] ?? 0)
+        const a = stride >= 4 ? (bytes[base + 3] ?? 255) : 255
           image.data[offset + 0] = r
           image.data[offset + 1] = g
           image.data[offset + 2] = b

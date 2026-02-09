@@ -130,6 +130,14 @@ lemma pixelWriteRGBA8_size
   | mk arr =>
       simp [pixelWriteRGBA8, ByteArray.set, ByteArray.size, Array.size_set]
 
+-- Writing a grayscale pixel does not change the buffer size.
+lemma pixelWriteGray8_size
+    (data : ByteArray) (base : Nat) (h : base < data.size) (px : PixelGray8) :
+    (pixelWriteGray8 data base h px).size = data.size := by
+  cases data with
+  | mk arr =>
+      simp [pixelWriteGray8, ByteArray.set, ByteArray.size, Array.size_set]
+
 instance instPixelRGB8 : Pixel PixelRGB8 where
   bytesPerPixel := bytesPerPixelRGB
   bytesPerPixel_pos := by decide
@@ -337,12 +345,36 @@ instance instPixelRGBA8 : Pixel PixelRGBA8 where
     | mk arr =>
         simp [pixelWriteRGBA8, ByteArray.set, ByteArray.size, Array.size_set]
 
+instance instPixelGray8 : Pixel PixelGray8 where
+  bytesPerPixel := bytesPerPixelGray
+  bytesPerPixel_pos := by decide
+  read_write := by
+    intro data base h px
+    cases px with
+    | mk v =>
+        have h0 : base < data.size := by
+          simpa [bytesPerPixelGray] using h
+        simp [pixelReadGray8, pixelWriteGray8, ByteArray.set, ByteArray.get]
+  read := fun data base h =>
+    pixelReadGray8 data base (by simpa [bytesPerPixelGray] using h)
+  write := fun data base h px =>
+    pixelWriteGray8 data base (by simpa [bytesPerPixelGray] using h) px
+  write_size := by
+    intro data base h px
+    cases data with
+    | mk arr =>
+        simp [pixelWriteGray8, ByteArray.set, ByteArray.size, Array.size_set]
+
 -- Bytes per pixel for RGB8.
 lemma bytesPerPixel_rgb : Pixel.bytesPerPixel (α := PixelRGB8) = bytesPerPixelRGB := by
   rfl
 
 -- Bytes per pixel for RGBA8.
 lemma bytesPerPixel_rgba : Pixel.bytesPerPixel (α := PixelRGBA8) = bytesPerPixelRGBA := by
+  rfl
+
+-- Bytes per pixel for Gray8.
+lemma bytesPerPixel_gray : Pixel.bytesPerPixel (α := PixelGray8) = bytesPerPixelGray := by
   rfl
 
 instance : PngPixel PixelRGB8 where
@@ -355,12 +387,21 @@ instance : PngPixel PixelRGBA8 where
   colorType := u8 6
   decodeRowsLoop := decodeRowsLoopRGBA
 
+instance : PngPixel PixelGray8 where
+  encodeRaw := encodeRaw
+  colorType := u8 0
+  decodeRowsLoop := decodeRowsLoopGray
+
 -- PNG color type for RGB8.
 @[simp] lemma pngPixel_colorType_rgb : PngPixel.colorType (α := PixelRGB8) = u8 2 := by
   rfl
 
 -- PNG color type for RGBA8.
 @[simp] lemma pngPixel_colorType_rgba : PngPixel.colorType (α := PixelRGBA8) = u8 6 := by
+  rfl
+
+-- PNG color type for Gray8.
+@[simp] lemma pngPixel_colorType_gray : PngPixel.colorType (α := PixelGray8) = u8 0 := by
   rfl
 
 -- PNG raw encoding for RGB8.
@@ -371,6 +412,10 @@ instance : PngPixel PixelRGBA8 where
 @[simp] lemma pngPixel_encodeRaw_rgba : PngPixel.encodeRaw (α := PixelRGBA8) = encodeRaw := by
   rfl
 
+-- PNG raw encoding for Gray8.
+@[simp] lemma pngPixel_encodeRaw_gray : PngPixel.encodeRaw (α := PixelGray8) = encodeRaw := by
+  rfl
+
 -- PNG row decoder for RGB8.
 @[simp] lemma pngPixel_decodeRowsLoop_rgb :
     PngPixel.decodeRowsLoop (α := PixelRGB8) = decodeRowsLoop := by
@@ -379,6 +424,11 @@ instance : PngPixel PixelRGBA8 where
 -- PNG row decoder for RGBA8.
 @[simp] lemma pngPixel_decodeRowsLoop_rgba :
     PngPixel.decodeRowsLoop (α := PixelRGBA8) = decodeRowsLoopRGBA := by
+  rfl
+
+-- PNG row decoder for Gray8.
+@[simp] lemma pngPixel_decodeRowsLoop_gray :
+    PngPixel.decodeRowsLoop (α := PixelGray8) = decodeRowsLoopGray := by
   rfl
 
 -------------------------------------------------------------------------------

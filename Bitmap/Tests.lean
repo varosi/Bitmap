@@ -16,8 +16,15 @@ private def pixelOfSeed (seed idx : Nat) : PixelRGB8 :=
   let s3 := prngStep (s2 + 1)
   { r := randByte s1, g := randByte s2, b := randByte s3 }
 
+private def pixelGrayOfSeed (seed idx : Nat) : PixelGray8 :=
+  let s1 := prngStep (seed + idx)
+  { v := randByte s1 }
+
 def bitmapOfSeed (seed w h : Nat) : BitmapRGB8 :=
   Bitmap.ofPixelFn w h (fun i : Fin (w * h) => pixelOfSeed seed i.val)
+
+def bitmapGrayOfSeed (seed w h : Nat) : BitmapGray8 :=
+  BitmapGray8.ofPixelFn w h (fun i : Fin (w * h) => pixelGrayOfSeed seed i.val)
 
 def pngRoundTripOk (bmp : BitmapRGB8) : Bool :=
   match Png.decodeBitmap (Png.encodeBitmap bmp) with
@@ -26,6 +33,11 @@ def pngRoundTripOk (bmp : BitmapRGB8) : Bool :=
 
 def pngRoundTripOkRGBA (bmp : BitmapRGBA8) : Bool :=
   match Png.decodeBitmap (px := PixelRGBA8) (Png.encodeBitmap bmp) with
+  | some bmp' => decide (bmp' = bmp)
+  | none => false
+
+def pngRoundTripOkGray (bmp : BitmapGray8) : Bool :=
+  match Png.decodeBitmap (px := PixelGray8) (Png.encodeBitmap bmp) with
   | some bmp' => decide (bmp' = bmp)
   | none => false
 
@@ -55,6 +67,20 @@ def pngRoundTripPropertyRGBA (trials : Nat) : IO Bool := do
       let a := randByte (prngStep (seed + idx.val + 7))
       { r := px.r, g := px.g, b := px.b, a := a })
     if pngRoundTripOkRGBA bmp then
+      i := i + 1
+    else
+      ok := false
+  return ok
+
+def pngRoundTripPropertyGray (trials : Nat) : IO Bool := do
+  let mut ok := true
+  let mut i := 0
+  while i < trials && ok do
+    let w <- IO.rand 1 16
+    let h <- IO.rand 1 16
+    let seed <- IO.rand 0 1000000
+    let bmp := bitmapGrayOfSeed seed w h
+    if pngRoundTripOkGray bmp then
       i := i + 1
     else
       ok := false
@@ -151,6 +177,11 @@ def run : IO Unit := do
     IO.println "png round-trip RGBA property: ok"
   else
     throw (IO.userError "png round-trip RGBA property failed")
+  let okGray <- pngRoundTripPropertyGray 20
+  if okGray then
+    IO.println "png round-trip Gray property: ok"
+  else
+    throw (IO.userError "png round-trip Gray property failed")
   runPerfTest
   runPngPerfTest
 

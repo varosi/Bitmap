@@ -112,6 +112,36 @@ instance {α : Type} [Mul α] : Mul (PixelRGBA α) where
 
 def PixelRGBA8  := PixelRGBA UInt8
 
+-------------------------------------------------------------------------------
+-- A single grayscale pixel of any type
+structure PixelGray (RangeT : Type u) where
+  mk ::
+  v : RangeT
+deriving Repr, BEq, DecidableEq, ReflBEq, LawfulBEq
+
+instance instInhabitedPixelGray (RangeT) [Inhabited RangeT] : Inhabited (PixelGray RangeT) where
+  default := { v := default }
+
+instance instToJsonPixelGray (RangeT) [ToJson RangeT] : ToJson (PixelGray RangeT) where
+  toJson
+    | ⟨v⟩ =>
+      Json.mkObj [
+        ("v", toJson v)
+      ]
+
+instance instFromJsonPixelGray (RangeT) [FromJson RangeT] : FromJson (PixelGray RangeT) where
+  fromJson? j := do
+    let v ← j.getObjValAs? RangeT "v"
+    return { v }
+
+instance {α : Type} [Add α] : Add (PixelGray α) where
+  add p1 p2 := { v := p1.v + p2.v }
+
+instance {α : Type} [Mul α] : Mul (PixelGray α) where
+  mul p1 p2 := { v := p1.v * p2.v }
+
+def PixelGray8 := PixelGray UInt8
+
 instance : Inhabited PixelRGB8 := instInhabitedPixelRGB _
 instance : DecidableEq PixelRGB8 := by
   unfold PixelRGB8
@@ -120,6 +150,11 @@ instance : DecidableEq PixelRGB8 := by
 instance : Inhabited PixelRGBA8 := instInhabitedPixelRGBA _
 instance : DecidableEq PixelRGBA8 := by
   unfold PixelRGBA8
+  infer_instance
+
+instance : Inhabited PixelGray8 := instInhabitedPixelGray _
+instance : DecidableEq PixelGray8 := by
+  unfold PixelGray8
   infer_instance
 
 -------------------------------------------------------------------------------
@@ -142,6 +177,7 @@ class Pixel (α : Type u) where
 
 def bytesPerPixelRGB : Nat := 3
 def bytesPerPixelRGBA : Nat := 4
+def bytesPerPixelGray : Nat := 1
 
 def pixelReadRGB8 (data : ByteArray) (base : Nat) (h : base + 2 < data.size) : PixelRGB8 := by
   have h1 : base + 1 < data.size := by omega
@@ -216,6 +252,13 @@ def pixelWriteRGBA8 (data : ByteArray) (base : Nat) (h : base + 3 < data.size)
   let data4 := data3.set (base + 3) px.a h3'
   exact data4
 
+def pixelReadGray8 (data : ByteArray) (base : Nat) (h : base < data.size) : PixelGray8 := by
+  exact { v := data.get base h }
+
+def pixelWriteGray8 (data : ByteArray) (base : Nat) (h : base < data.size)
+    (px : PixelGray8) : ByteArray :=
+  data.set base px.v h
+
 
 structure Bitmap (px : Type u) [Pixel px] where
   mk ::
@@ -229,11 +272,15 @@ deriving Repr, DecidableEq
 
 abbrev BitmapRGB8 [Pixel PixelRGB8] := Bitmap PixelRGB8
 abbrev BitmapRGBA8 [Pixel PixelRGBA8] := Bitmap PixelRGBA8
+abbrev BitmapGray8 [Pixel PixelGray8] := Bitmap PixelGray8
 
 instance [Pixel PixelRGB8] : DecidableEq BitmapRGB8 := by
   infer_instance
 
 instance [Pixel PixelRGBA8] : DecidableEq BitmapRGBA8 := by
+  infer_instance
+
+instance [Pixel PixelGray8] : DecidableEq BitmapGray8 := by
   infer_instance
 
 def putPixel {px : Type u} [Pixel px] (img : Bitmap px) (x y : Nat) (pixel : px)
@@ -381,6 +428,13 @@ def BitmapRGBA8.ofPixelFn (w h : Nat) (f : Fin (w * h) → PixelRGBA8) [Pixel Pi
 
 def mkBlankBitmapRGBA (w h : ℕ) (color : PixelRGBA8) [Pixel PixelRGBA8] : BitmapRGBA8 :=
   BitmapRGBA8.ofPixelFn w h (fun _ => color)
+
+def BitmapGray8.ofPixelFn (w h : Nat) (f : Fin (w * h) → PixelGray8) [Pixel PixelGray8] :
+    BitmapGray8 :=
+  Bitmap.ofPixelFn w h f
+
+def mkBlankBitmapGray (w h : ℕ) (color : PixelGray8) [Pixel PixelGray8] : BitmapGray8 :=
+  BitmapGray8.ofPixelFn w h (fun _ => color)
 
 class FileWritable (α : Type) where
   write : FilePath -> α -> IO (Except String Unit)
@@ -1238,8 +1292,8 @@ def decodeRowDropAlpha (row : ByteArray) (w y bpp : Nat) (pixels : ByteArray) : 
     for x in [0:w] do
       let base := x * bpp
       let r := row.get! base
-      let g := row.get! (base + 1)
-      let b := row.get! (base + 2)
+      let g := if bpp == 1 then r else row.get! (base + 1)
+      let b := if bpp == 1 then r else row.get! (base + 2)
       let pixBase := (y * w + x) * bytesPerPixelRGB
       pixels := pixels.set! pixBase r
       pixels := pixels.set! (pixBase + 1) g
@@ -1252,13 +1306,26 @@ def decodeRowAddAlpha (row : ByteArray) (w y bpp : Nat) (pixels : ByteArray) : B
     for x in [0:w] do
       let base := x * bpp
       let r := row.get! base
-      let g := row.get! (base + 1)
-      let b := row.get! (base + 2)
+      let g := if bpp == 1 then r else row.get! (base + 1)
+      let b := if bpp == 1 then r else row.get! (base + 2)
       let pixBase := (y * w + x) * bytesPerPixelRGBA
       pixels := pixels.set! pixBase r
       pixels := pixels.set! (pixBase + 1) g
       pixels := pixels.set! (pixBase + 2) b
       pixels := pixels.set! (pixBase + 3) (u8 255)
+    return pixels
+
+def decodeRowGray (row : ByteArray) (w y bpp : Nat) (pixels : ByteArray) : ByteArray :=
+  Id.run do
+    let mut pixels := pixels
+    for x in [0:w] do
+      let base := x * bpp
+      let r := row.get! base
+      let g := if bpp == 1 then r else row.get! (base + 1)
+      let b := if bpp == 1 then r else row.get! (base + 2)
+      let gray := u8 ((r.toNat + g.toNat + b.toNat) / 3)
+      let pixBase := (y * w + x) * bytesPerPixelGray
+      pixels := pixels.set! pixBase gray
     return pixels
 
 def decodeRowsLoopCore (raw : ByteArray) (w h bpp rowBytes outBpp : Nat)
@@ -1302,6 +1369,11 @@ def decodeRowsLoopRGBA (raw : ByteArray) (w h bpp rowBytes : Nat)
   decodeRowsLoopCore raw w h bpp rowBytes bytesPerPixelRGBA decodeRowAddAlpha
     y offset prevRow pixels
 
+def decodeRowsLoopGray (raw : ByteArray) (w h bpp rowBytes : Nat)
+    (y offset : Nat) (prevRow pixels : ByteArray) : Option ByteArray :=
+  decodeRowsLoopCore raw w h bpp rowBytes bytesPerPixelGray decodeRowGray
+    y offset prevRow pixels
+
 class PngPixel (α : Type u) [Pixel α] where
   encodeRaw : Bitmap α -> ByteArray
   colorType : UInt8
@@ -1318,9 +1390,9 @@ partial def decodeBitmap {px : Type u} [Pixel px] [PngPixel px]
       none
   if hdr.bitDepth != 8 then
     none
-  if hdr.colorType != 2 && hdr.colorType != 6 then
+  if hdr.colorType != 0 && hdr.colorType != 2 && hdr.colorType != 6 then
     none
-  let bpp := if hdr.colorType == 2 then 3 else 4
+  let bpp := if hdr.colorType == 0 then 1 else if hdr.colorType == 2 then 3 else 4
   let raw ←
     if hsize : 2 <= idat.size then
       match zlibDecompressStored idat hsize with
@@ -1407,6 +1479,14 @@ def BitmapRGBA8.writePng [Pixel PixelRGBA8] [PngPixel PixelRGBA8]
     (path : FilePath) (bmp : BitmapRGBA8) : IO (Except String Unit) :=
   ioToExcept (IO.FS.writeBinFile path (encodeBitmap bmp))
 
+def BitmapGray8.readPng [Pixel PixelGray8] [PngPixel PixelGray8]
+    (path : FilePath) : IO (Except String BitmapGray8) :=
+  Bitmap.readPng (px := PixelGray8) path
+
+def BitmapGray8.writePng [Pixel PixelGray8] [PngPixel PixelGray8]
+    (path : FilePath) (bmp : BitmapGray8) : IO (Except String Unit) :=
+  ioToExcept (IO.FS.writeBinFile path (encodeBitmap bmp))
+
 end Png
 
 instance [Pixel PixelRGB8] [Png.PngPixel PixelRGB8] : FileWritable BitmapRGB8 where
@@ -1420,5 +1500,11 @@ instance [Pixel PixelRGBA8] [Png.PngPixel PixelRGBA8] : FileWritable BitmapRGBA8
 
 instance [Pixel PixelRGBA8] [Png.PngPixel PixelRGBA8] : FileReadable BitmapRGBA8 where
   read := Png.BitmapRGBA8.readPng
+
+instance [Pixel PixelGray8] [Png.PngPixel PixelGray8] : FileWritable BitmapGray8 where
+  write := Png.BitmapGray8.writePng
+
+instance [Pixel PixelGray8] [Png.PngPixel PixelGray8] : FileReadable BitmapGray8 where
+  read := Png.BitmapGray8.readPng
 
 end Bitmaps
