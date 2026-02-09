@@ -7,14 +7,6 @@ import Batteries.Data.ByteArray
 
 namespace Bitmaps
 
--- Setting a byte does not change the ByteArray size.
-lemma byteArray_size_set {bs : ByteArray} {i : Nat} {h : i < bs.size} {b : UInt8} :
-    (bs.set i b h).size = bs.size := by
-  cases bs with
-  | mk data =>
-      simp [ByteArray.set, ByteArray.size, Array.size_set]
-
-
 namespace Png
 
 -- Reading one bit advances the bit index by one.
@@ -55,6 +47,8 @@ end Png
 
 namespace Lemmas
 
+open Png
+
 -- Linear index from (x,y) is within bounds for Nat coordinates.
 lemma arrayCoordSize_nat
     {i x y w h : Nat}
@@ -78,6 +72,14 @@ lemma arrayCoordSize_u32
     arrayCoordSize_nat (i := x.toNat + y.toNat * w) hx hy rfl
   simpa [hi] using hlt
 
+-- Setting a byte does not change the buffer size.
+@[simp] lemma byteArray_size_set
+    {bs : ByteArray} {i : Nat} (h : i < bs.size) {v : UInt8} :
+    (bs.set i v h).size = bs.size := by
+  cases bs with
+  | mk arr =>
+      simp [ByteArray.set, ByteArray.size, Array.size_set]
+
 -- Getting the byte just set yields the new value.
 @[simp] lemma byteArray_get_set_self
     {bs : ByteArray} {i : Nat} (h : i < bs.size) {v : UInt8} :
@@ -86,96 +88,321 @@ lemma arrayCoordSize_u32
   | mk arr =>
       simp [ByteArray.set, ByteArray.get]
 
--- Getting the byte just set yields the new value (alternate proof of bounds).
+-- Getting the byte just set yields the new value (explicit bounds).
 @[simp] lemma byteArray_get_set_self'
     {bs : ByteArray} {i : Nat} (h : i < bs.size) {v : UInt8}
-    {h' : i < (bs.set i v h).size} :
+    (h' : i < (bs.set i v h).size) :
     (bs.set i v h).get i h' = v := by
-  simp [byteArray_get_set_self (bs := bs) (i := i) (h := h) (v := v)]
+  cases bs with
+  | mk arr =>
+      simp [ByteArray.set, ByteArray.get]
 
--- Setting one index does not affect other indices.
-lemma byteArray_get_set_ne
+-- Getting a different index after setting preserves the old value (explicit bounds).
+lemma byteArray_get_set_ne'
     {bs : ByteArray} {i j : Nat} (hi : i < bs.size) (hj : j < bs.size)
-    (hij : i ≠ j) {v : UInt8} :
-    (bs.set i v hi).get j (by simpa [byteArray_size_set] using hj) = bs.get j hj := by
+    (hij : i ≠ j) {v : UInt8} (h' : j < (bs.set i v hi).size) :
+    (bs.set i v hi).get j h' = bs.get j hj := by
   cases bs with
   | mk arr =>
       simpa [ByteArray.set, ByteArray.get] using
         (Array.getElem_set_ne (xs := arr) (i := i) (j := j) (h' := hi) (pj := hj) (h := hij))
 
--- Setting one index does not affect other indices (alternate proof of bounds).
-lemma byteArray_get_set_ne'
-    {bs : ByteArray} {i j : Nat} (hi : i < bs.size) (hj : j < bs.size)
-    (hij : i ≠ j) {v : UInt8} {h' : j < (bs.set i v hi).size} :
-    (bs.set i v hi).get j h' = bs.get j hj := by
-  simpa using (byteArray_get_set_ne (bs := bs) (i := i) (j := j) (hi := hi) (hj := hj) (hij := hij) (v := v))
-
+-- Getting the byte just set yields the new value (alternate proof of bounds).
 -- `getElem` is proof-irrelevant for ByteArrays.
 @[simp] lemma byteArray_getElem_eq {bs : ByteArray} {i : Nat} (h1 h2 : i < bs.size) :
     bs[i]'h1 = bs[i]'h2 := by
   rfl
 
 
- 
+-- Writing an RGB8 pixel does not change the buffer size.
+lemma pixelWriteRGB8_size
+    (data : ByteArray) (base : Nat) (h : base + 2 < data.size) (px : PixelRGB8) :
+    (pixelWriteRGB8 data base h px).size = data.size := by
+  cases data with
+  | mk arr =>
+      simp [pixelWriteRGB8, ByteArray.set, ByteArray.size, Array.size_set]
+
+-- Writing an RGBA8 pixel does not change the buffer size.
+lemma pixelWriteRGBA8_size
+    (data : ByteArray) (base : Nat) (h : base + 3 < data.size) (px : PixelRGBA8) :
+    (pixelWriteRGBA8 data base h px).size = data.size := by
+  cases data with
+  | mk arr =>
+      simp [pixelWriteRGBA8, ByteArray.set, ByteArray.size, Array.size_set]
+
+instance instPixelRGB8 : Pixel PixelRGB8 where
+  bytesPerPixel := bytesPerPixelRGB
+  bytesPerPixel_pos := by decide
+  read_write := by
+    intro data base h px
+    cases px with
+    | mk r g b =>
+        have h2 : base + 2 < data.size := by
+          simpa [bytesPerPixelRGB] using h
+        have h1 : base + 1 < data.size := by omega
+        have h0 : base < data.size := by omega
+        have size_set {bs : ByteArray} {i : Nat} (hi : i < bs.size) {v : UInt8} :
+            (bs.set i v hi).size = bs.size := by
+          cases bs with
+          | mk arr =>
+              simp [ByteArray.set, ByteArray.size, Array.size_set]
+        let data1 := data.set base r h0
+        have hsize1 : data1.size = data.size := by
+          simp [data1, size_set]
+        have h1d1 : base + 1 < data1.size := by
+          simpa [hsize1] using h1
+        let data2 := data1.set (base + 1) g h1d1
+        have hsize2 : data2.size = data.size := by
+          have hsize2' : data2.size = data1.size := by
+            simp [data2, size_set]
+          simpa [hsize1] using hsize2'
+        have h2d2 : base + 2 < data2.size := by
+          simpa [hsize2] using h2
+        let data3 := data2.set (base + 2) b h2d2
+        have hsize3 : data3.size = data.size := by
+          have hsize3' : data3.size = data2.size := by
+            simp [data3, size_set]
+          simpa [hsize2] using hsize3'
+        have h0d1 : base < data1.size := by
+          simpa [hsize1] using h0
+        have h0d2 : base < data2.size := by
+          simpa [hsize2] using h0
+        have h0d3 : base < data3.size := by
+          simpa [hsize3] using h0
+        have h1d2 : base + 1 < data2.size := by
+          simpa [hsize2] using h1
+        have h1d3 : base + 1 < data3.size := by
+          simpa [hsize3] using h1
+        have h2d3 : base + 2 < data3.size := by
+          simpa [hsize3] using h2
+        have get_set_ne :
+            ∀ {bs : ByteArray} {i j : Nat} (hi : i < bs.size) (hj : j < bs.size)
+              (hij : i ≠ j) {v : UInt8} {h' : j < (bs.set i v hi).size},
+              (bs.set i v hi).get j h' = bs.get j hj := by
+          intro bs i j hi hj hij v h'
+          cases bs with
+          | mk arr =>
+              simpa [ByteArray.set, ByteArray.get] using
+                (Array.getElem_set_ne (xs := arr) (i := i) (j := j) (h' := hi) (pj := hj)
+                  (h := hij))
+        have hr : data3.get base h0d3 = r := by
+          have hr1 : data3.get base h0d3 = data2.get base h0d2 := by
+            simpa [data3] using
+              (get_set_ne (bs := data2) (i := base + 2) (j := base)
+                (hi := h2d2) (hj := h0d2) (hij := by omega) (v := b) (h' := h0d3))
+          have hr2 : data2.get base h0d2 = data1.get base h0d1 := by
+            simpa [data2] using
+              (get_set_ne (bs := data1) (i := base + 1) (j := base)
+                (hi := h1d1) (hj := h0d1) (hij := by omega) (v := g) (h' := h0d2))
+          have hr3 : data1.get base h0d1 = r := by
+            simp [data1, ByteArray.set, ByteArray.get]
+          simp [hr1, hr2, hr3]
+        have hg : data3.get (base + 1) h1d3 = g := by
+          have hg1 : data3.get (base + 1) h1d3 = data2.get (base + 1) h1d2 := by
+            simpa [data3] using
+              (get_set_ne (bs := data2) (i := base + 2) (j := base + 1)
+                (hi := h2d2) (hj := h1d2) (hij := by omega) (v := b) (h' := h1d3))
+          have hg2 : data2.get (base + 1) h1d2 = g := by
+            simp [data2, ByteArray.set, ByteArray.get]
+          simp [hg1, hg2]
+        have hb : data3.get (base + 2) h2d3 = b := by
+          simp [data3, ByteArray.set, ByteArray.get]
+        simp [pixelReadRGB8, pixelWriteRGB8, data1, data2, data3, hr, hg, hb]
+  read := fun data base h =>
+    pixelReadRGB8 data base (by simpa [bytesPerPixelRGB] using h)
+  write := fun data base h px =>
+    pixelWriteRGB8 data base (by simpa [bytesPerPixelRGB] using h) px
+  write_size := by
+    intro data base h px
+    cases data with
+    | mk arr =>
+        simp [pixelWriteRGB8, ByteArray.set, ByteArray.size, Array.size_set]
+
+instance instPixelRGBA8 : Pixel PixelRGBA8 where
+  bytesPerPixel := bytesPerPixelRGBA
+  bytesPerPixel_pos := by decide
+  read_write := by
+    intro data base h px
+    cases px with
+    | mk r g b a =>
+        have h3 : base + 3 < data.size := by
+          simpa [bytesPerPixelRGBA] using h
+        have h2 : base + 2 < data.size := by omega
+        have h1 : base + 1 < data.size := by omega
+        have h0 : base < data.size := by omega
+        have size_set {bs : ByteArray} {i : Nat} (hi : i < bs.size) {v : UInt8} :
+            (bs.set i v hi).size = bs.size := by
+          cases bs with
+          | mk arr =>
+              simp [ByteArray.set, ByteArray.size, Array.size_set]
+        let data1 := data.set base r h0
+        have hsize1 : data1.size = data.size := by
+          simp [data1, size_set]
+        have h1d1 : base + 1 < data1.size := by
+          simpa [hsize1] using h1
+        let data2 := data1.set (base + 1) g h1d1
+        have hsize2 : data2.size = data.size := by
+          have hsize2' : data2.size = data1.size := by
+            simp [data2, size_set]
+          simpa [hsize1] using hsize2'
+        have h2d2 : base + 2 < data2.size := by
+          simpa [hsize2] using h2
+        let data3 := data2.set (base + 2) b h2d2
+        have hsize3 : data3.size = data.size := by
+          have hsize3' : data3.size = data2.size := by
+            simp [data3, size_set]
+          simpa [hsize2] using hsize3'
+        have h3d3 : base + 3 < data3.size := by
+          simpa [hsize3] using h3
+        let data4 := data3.set (base + 3) a h3d3
+        have hsize4 : data4.size = data.size := by
+          have hsize4' : data4.size = data3.size := by
+            simp [data4, size_set]
+          simpa [hsize3] using hsize4'
+        have h0d1 : base < data1.size := by
+          simpa [hsize1] using h0
+        have h0d2 : base < data2.size := by
+          simpa [hsize2] using h0
+        have h0d3 : base < data3.size := by
+          simpa [hsize3] using h0
+        have h0d4 : base < data4.size := by
+          simpa [hsize4] using h0
+        have h1d2 : base + 1 < data2.size := by
+          simpa [hsize2] using h1
+        have h1d3 : base + 1 < data3.size := by
+          simpa [hsize3] using h1
+        have h1d4 : base + 1 < data4.size := by
+          simpa [hsize4] using h1
+        have h2d3 : base + 2 < data3.size := by
+          simpa [hsize3] using h2
+        have h2d4 : base + 2 < data4.size := by
+          simpa [hsize4] using h2
+        have h3d4 : base + 3 < data4.size := by
+          simpa [hsize4] using h3
+        have get_set_ne {bs : ByteArray} {i j : Nat}
+            (hi : i < bs.size) (hj : j < bs.size) (hij : i ≠ j) {v : UInt8}
+            (h' : j < (bs.set i v hi).size) :
+            (bs.set i v hi).get j h' = bs.get j hj := by
+          cases bs with
+          | mk arr =>
+              simpa [ByteArray.set, ByteArray.get] using
+                (Array.getElem_set_ne (xs := arr) (i := i) (j := j) (h' := hi) (pj := hj)
+                  (h := hij))
+        have hr : data4.get base h0d4 = r := by
+          have hr1 : data4.get base h0d4 = data3.get base h0d3 := by
+            simpa [data4] using
+              (get_set_ne (bs := data3) (i := base + 3) (j := base)
+                (hi := h3d3) (hj := h0d3) (hij := by omega) (v := a) (h' := h0d4))
+          have hr2 : data3.get base h0d3 = data2.get base h0d2 := by
+            simpa [data3] using
+              (get_set_ne (bs := data2) (i := base + 2) (j := base)
+                (hi := h2d2) (hj := h0d2) (hij := by omega) (v := b) (h' := h0d3))
+          have hr3 : data2.get base h0d2 = data1.get base h0d1 := by
+            simpa [data2] using
+              (get_set_ne (bs := data1) (i := base + 1) (j := base)
+                (hi := h1d1) (hj := h0d1) (hij := by omega) (v := g) (h' := h0d2))
+          have hr4 : data1.get base h0d1 = r := by
+            simp [data1, ByteArray.set, ByteArray.get]
+          simp [hr1, hr2, hr3, hr4]
+        have hg : data4.get (base + 1) h1d4 = g := by
+          have hg1 : data4.get (base + 1) h1d4 = data3.get (base + 1) h1d3 := by
+            simpa [data4] using
+              (get_set_ne (bs := data3) (i := base + 3) (j := base + 1)
+                (hi := h3d3) (hj := h1d3) (hij := by omega) (v := a) (h' := h1d4))
+          have hg2 : data3.get (base + 1) h1d3 = data2.get (base + 1) h1d2 := by
+            simpa [data3] using
+              (get_set_ne (bs := data2) (i := base + 2) (j := base + 1)
+                (hi := h2d2) (hj := h1d2) (hij := by omega) (v := b) (h' := h1d3))
+          have hg3 : data2.get (base + 1) h1d2 = g := by
+            simp [data2, ByteArray.set, ByteArray.get]
+          simp [hg1, hg2, hg3]
+        have hb : data4.get (base + 2) h2d4 = b := by
+          have hb1 : data4.get (base + 2) h2d4 = data3.get (base + 2) h2d3 := by
+            simpa [data4] using
+              (get_set_ne (bs := data3) (i := base + 3) (j := base + 2)
+                (hi := h3d3) (hj := h2d3) (hij := by omega) (v := a) (h' := h2d4))
+          have hb2 : data3.get (base + 2) h2d3 = b := by
+            simp [data3, ByteArray.set, ByteArray.get]
+          simp [hb1, hb2]
+        have ha : data4.get (base + 3) h3d4 = a := by
+          simp [data4, ByteArray.set, ByteArray.get]
+        simp [pixelReadRGBA8, pixelWriteRGBA8, data1, data2, data3, data4, hr, hg, hb, ha]
+  read := fun data base h =>
+    pixelReadRGBA8 data base (by simpa [bytesPerPixelRGBA] using h)
+  write := fun data base h px =>
+    pixelWriteRGBA8 data base (by simpa [bytesPerPixelRGBA] using h) px
+  write_size := by
+    intro data base h px
+    cases data with
+    | mk arr =>
+        simp [pixelWriteRGBA8, ByteArray.set, ByteArray.size, Array.size_set]
+
+-- Bytes per pixel for RGB8.
+lemma bytesPerPixel_rgb : Pixel.bytesPerPixel (α := PixelRGB8) = bytesPerPixelRGB := by
+  rfl
+
+-- Bytes per pixel for RGBA8.
+lemma bytesPerPixel_rgba : Pixel.bytesPerPixel (α := PixelRGBA8) = bytesPerPixelRGBA := by
+  rfl
+
+instance : PngPixel PixelRGB8 where
+  encodeRaw := encodeRaw
+  colorType := u8 2
+  decodeRowsLoop := decodeRowsLoop
+
+instance : PngPixel PixelRGBA8 where
+  encodeRaw := encodeRaw
+  colorType := u8 6
+  decodeRowsLoop := decodeRowsLoopRGBA
+
+-- PNG color type for RGB8.
+@[simp] lemma pngPixel_colorType_rgb : PngPixel.colorType (α := PixelRGB8) = u8 2 := by
+  rfl
+
+-- PNG color type for RGBA8.
+@[simp] lemma pngPixel_colorType_rgba : PngPixel.colorType (α := PixelRGBA8) = u8 6 := by
+  rfl
+
+-- PNG raw encoding for RGB8.
+@[simp] lemma pngPixel_encodeRaw_rgb : PngPixel.encodeRaw (α := PixelRGB8) = encodeRaw := by
+  rfl
+
+-- PNG raw encoding for RGBA8.
+@[simp] lemma pngPixel_encodeRaw_rgba : PngPixel.encodeRaw (α := PixelRGBA8) = encodeRaw := by
+  rfl
+
+-- PNG row decoder for RGB8.
+@[simp] lemma pngPixel_decodeRowsLoop_rgb :
+    PngPixel.decodeRowsLoop (α := PixelRGB8) = decodeRowsLoop := by
+  rfl
+
+-- PNG row decoder for RGBA8.
+@[simp] lemma pngPixel_decodeRowsLoop_rgba :
+    PngPixel.decodeRowsLoop (α := PixelRGBA8) = decodeRowsLoopRGBA := by
+  rfl
+
+-------------------------------------------------------------------------------
+-- Verification. Converting tests into proofs.
+-- https://lean-lang.org/theorem_proving_in_lean4/tactics.html
+
+variable (aPixel : PixelRGB8)
+
+example [Pixel PixelRGB8] :
+    (mkBlankBitmap 1 1 aPixel).data.size =
+      (mkBlankBitmap 1 1 aPixel).size.width *
+        (mkBlankBitmap 1 1 aPixel).size.height *
+        Pixel.bytesPerPixel (α := PixelRGB8) := by
+  simpa using (mkBlankBitmap 1 1 aPixel).valid
+
 
 -- Writing a pixel then reading it back yields the same pixel.
 lemma getPixel_putPixel_eq
-    (img : Bitmap) (x y : Nat) (pixel : PixelRGB8)
+    {px : Type} [Pixel px]
+    (img : Bitmap px) (x y : Nat) (pixel : px)
     (hx : x < img.size.width) (hy : y < img.size.height) :
     getPixel (putPixel img x y pixel hx hy) x y
       (by simpa using hx) (by simpa using hy) = pixel := by
-  cases pixel with
-  | mk r g b =>
-      let pixIdx := x + y * img.size.width
-      have hPix : pixIdx < img.size.width * img.size.height := by
-        simpa [pixIdx] using
-          (arrayCoordSize_nat (i := pixIdx) (w := img.size.width) (h := img.size.height)
-            (x := x) (y := y) hx hy rfl)
-
-      let base := pixIdx * bytesPerPixel
-      have h2 : base + 2 < img.data.size := by
-        have : pixIdx * bytesPerPixel + 2 < img.size.width * img.size.height * bytesPerPixel := by
-          have hPix' := hPix
-          simp [bytesPerPixel] at hPix' ⊢
-          omega
-        simpa [base, img.valid] using this
-      have h1 : base + 1 < img.data.size := by omega
-      have h0 : base < img.data.size := by omega
-
-      let data1 := img.data.set base r h0
-      have h1d1 : base + 1 < data1.size := by
-        simpa [data1, byteArray_size_set] using h1
-      let data2 := data1.set (base + 1) g h1d1
-      have h2d2 : base + 2 < data2.size := by
-        simpa [data2, data1, byteArray_size_set] using h2
-      let data3 := data2.set (base + 2) b h2d2
-
-      have h0d1 : base < data1.size := by
-        simpa [data1, byteArray_size_set] using h0
-      have h0d2 : base < data2.size := by
-        simpa [data2, data1, byteArray_size_set] using h0
-      have h0d3 : base < data3.size := by
-        simpa [data3, data2, data1, byteArray_size_set] using h0
-      have h1d2 : base + 1 < data2.size := by
-        simpa [data2, data1, byteArray_size_set] using h1
-      have h1d3 : base + 1 < data3.size := by
-        simpa [data3, data2, data1, byteArray_size_set] using h1
-      have h2d3 : base + 2 < data3.size := by
-        simpa [data3, data2, data1, byteArray_size_set] using h2
-
-      have hr : data3.get base h0d3 = r := by
-        simp [data3, data2, data1, byteArray_get_set_ne', h0d2, h0d1]
-
-      have hg : data3.get (base + 1) h1d3 = g := by
-        simp [data3, data2, data1, byteArray_get_set_ne', h1d2]
-
-      have hb : data3.get (base + 2) h2d3 = b := by
-        simp [data3, data2, data1]
-
-      -- Now unfold putPixel/getPixel and rewrite with computed fields.
-      simp [getPixel, putPixel, pixIdx, base, data1, data2, data3, hr, hg, hb]
-
-open Png
+  simp [getPixel, putPixel, Pixel.read_write]
 
 -- Little-endian 16-bit encoding has length 2.
 lemma u16le_size (n : Nat) : (u16le n).size = 2 := by
@@ -2228,15 +2455,15 @@ lemma encodeRawLoop_size (data : ByteArray) (rowBytes h y : Nat) (raw : ByteArra
 -- Raw encoding size equals height times (row bytes + filter byte).
 lemma encodeRaw_size (bmp : BitmapRGB8) :
     (encodeRaw bmp).size =
-      bmp.size.height * (bmp.size.width * bytesPerPixel + 1) := by
+      bmp.size.height * (bmp.size.width * bytesPerPixelRGB + 1) := by
   let w := bmp.size.width
   let h := bmp.size.height
-  let rowBytes := w * bytesPerPixel
+  let rowBytes := w * bytesPerPixelRGB
   let rawSize := h * (rowBytes + 1)
   have hdata : bmp.data.size = h * rowBytes := by
     calc
-      bmp.data.size = w * h * bytesPerPixel := bmp.valid
-      _ = h * (w * bytesPerPixel) := by
+      bmp.data.size = w * h * bytesPerPixelRGB := bmp.valid
+      _ = h * (w * bytesPerPixelRGB) := by
             simp [Nat.mul_left_comm, Nat.mul_comm]
       _ = h * rowBytes := by simp [rowBytes]
   have hraw : (ByteArray.mk (Array.replicate rawSize 0)).size = h * (rowBytes + 1) := by
@@ -2683,18 +2910,18 @@ lemma encodeRawLoop_row_extract (data : ByteArray) (rowBytes h y : Nat) (raw : B
 -- The `encodeRaw` output yields the original row slice.
 lemma encodeRaw_row_extract (bmp : BitmapRGB8) (y : Nat) (hy : y < bmp.size.height) :
     let w := bmp.size.width
-    let rowBytes := w * bytesPerPixel
+    let rowBytes := w * bytesPerPixelRGB
     (encodeRaw bmp).extract (y * (rowBytes + 1) + 1) (y * (rowBytes + 1) + 1 + rowBytes) =
       bmp.data.extract (y * rowBytes) (y * rowBytes + rowBytes) := by
   let w := bmp.size.width
   let h := bmp.size.height
-  let rowBytes := w * bytesPerPixel
+  let rowBytes := w * bytesPerPixelRGB
   let rawSize := h * (rowBytes + 1)
   let raw0 := ByteArray.mk (Array.replicate rawSize 0)
   have hdata : bmp.data.size = h * rowBytes := by
     calc
-      bmp.data.size = w * h * bytesPerPixel := bmp.valid
-      _ = h * (w * bytesPerPixel) := by
+      bmp.data.size = w * h * bytesPerPixelRGB := bmp.valid
+      _ = h * (w * bytesPerPixelRGB) := by
             simp [Nat.mul_left_comm, Nat.mul_comm]
       _ = h * rowBytes := by simp [rowBytes]
   have hraw0 : raw0.size = h * (rowBytes + 1) := by
@@ -2806,17 +3033,17 @@ lemma encodeRawPrefix_get_of_ge (data : ByteArray) (rowBytes h y i : Nat) (raw :
 -- Filter bytes in the raw encoding are zero.
 lemma encodeRaw_filter_zero (bmp : BitmapRGB8) (y : Nat) (hy : y < bmp.size.height) :
     let w := bmp.size.width
-    let rowBytes := w * bytesPerPixel
+    let rowBytes := w * bytesPerPixelRGB
     (encodeRaw bmp).get! (y * (rowBytes + 1)) = 0 := by
   let w := bmp.size.width
   let h := bmp.size.height
-  let rowBytes := w * bytesPerPixel
+  let rowBytes := w * bytesPerPixelRGB
   let rawSize := h * (rowBytes + 1)
   let raw0 := ByteArray.mk (Array.replicate rawSize 0)
   have hdata : bmp.data.size = h * rowBytes := by
     calc
-      bmp.data.size = w * h * bytesPerPixel := bmp.valid
-      _ = h * (w * bytesPerPixel) := by
+      bmp.data.size = w * h * bytesPerPixelRGB := bmp.valid
+      _ = h * (w * bytesPerPixelRGB) := by
             simp [Nat.mul_left_comm, Nat.mul_comm]
       _ = h * rowBytes := by simp [rowBytes]
   have hraw0 : raw0.size = h * (rowBytes + 1) := by
@@ -3006,8 +3233,8 @@ lemma decodeRowsLoop_rowIndex_bound
 lemma decodeRowsLoop_pixBase_bound
     (pixels : ByteArray) (w h x y : Nat)
     (hx : x < w) (hy : y < h)
-    (hpixels : pixels.size = w * h * bytesPerPixel) :
-    (y * w + x) * bytesPerPixel + 2 < pixels.size := by
+    (hpixels : pixels.size = w * h * bytesPerPixelRGB) :
+    (y * w + x) * bytesPerPixelRGB + 2 < pixels.size := by
   have hPix0 :
       x + y * w < w * h :=
     arrayCoordSize_nat (i := x + y * w) (x := x) (y := y) (w := w) (h := h) hx hy rfl
@@ -3015,8 +3242,8 @@ lemma decodeRowsLoop_pixBase_bound
       y * w + x < w * h := by
     simpa [Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using hPix0
   have hPix' :
-      (y * w + x) * bytesPerPixel + 2 < w * h * bytesPerPixel := by
-    simp [bytesPerPixel] at hPix ⊢
+      (y * w + x) * bytesPerPixelRGB + 2 < w * h * bytesPerPixelRGB := by
+    simp [bytesPerPixelRGB] at hPix ⊢
     omega
   simpa [hpixels] using hPix'
 
@@ -3026,14 +3253,14 @@ lemma decodeRowsLoop_bounds
     (hraw : raw.size = h * (rowBytes + 1))
     (hrowBytes : rowBytes = w * bpp)
     (hbpp : bpp = 3 ∨ bpp = 4)
-    (hpixels : pixels.size = w * h * bytesPerPixel)
+    (hpixels : pixels.size = w * h * bytesPerPixelRGB)
     (hoff : offset = y * (rowBytes + 1))
     (hy : y < h) :
     offset < raw.size ∧
     offset + 1 + rowBytes ≤ raw.size ∧
     (raw.extract (offset + 1) (offset + 1 + rowBytes)).size = rowBytes ∧
     (∀ x < w, x * bpp + 2 < rowBytes) ∧
-    (∀ x < w, (y * w + x) * bytesPerPixel + 2 < pixels.size) ∧
+    (∀ x < w, (y * w + x) * bytesPerPixelRGB + 2 < pixels.size) ∧
     (bpp = 3 → y * rowBytes + rowBytes ≤ pixels.size) := by
   have hofflt : offset < raw.size := by
     have h := decodeRowsLoop_offset_lt_raw (raw := raw) (rowBytes := rowBytes) (h := h) (y := y) hraw hy
@@ -3049,7 +3276,7 @@ lemma decodeRowsLoop_bounds
     intro x hx
     have h := decodeRowsLoop_rowIndex_bound (w := w) (bpp := bpp) (x := x) hx hbpp
     simpa [hrowBytes] using h
-  have hpixBase : ∀ x < w, (y * w + x) * bytesPerPixel + 2 < pixels.size := by
+  have hpixBase : ∀ x < w, (y * w + x) * bytesPerPixelRGB + 2 < pixels.size := by
     intro x hx
     exact decodeRowsLoop_pixBase_bound (pixels := pixels) (w := w) (h := h) (x := x) (y := y) hx hy hpixels
   have hrowOffset : bpp = 3 → y * rowBytes + rowBytes ≤ pixels.size := by
@@ -3059,8 +3286,8 @@ lemma decodeRowsLoop_bounds
       simpa using hrowBytes
     have hpixels' : pixels.size = h * rowBytes := by
       calc
-        pixels.size = w * h * bytesPerPixel := hpixels
-        _ = w * h * 3 := by simp [bytesPerPixel]
+        pixels.size = w * h * bytesPerPixelRGB := hpixels
+        _ = w * h * 3 := by simp [bytesPerPixelRGB]
         _ = h * (w * 3) := by
               simp [Nat.mul_left_comm, Nat.mul_assoc]
         _ = h * rowBytes := by simp [hrowBytes']
@@ -3074,14 +3301,14 @@ lemma decodeBitmap_decodeRowsLoop_bounds
     (hraw : raw.size = hdr.height * (hdr.width * (if hdr.colorType == 2 then 3 else 4) + 1)) :
     let bpp := if hdr.colorType == 2 then 3 else 4
     let rowBytes := hdr.width * bpp
-    let pixels0 := ByteArray.mk <| Array.replicate (hdr.width * hdr.height * bytesPerPixel) 0
+    let pixels0 := ByteArray.mk <| Array.replicate (hdr.width * hdr.height * bytesPerPixelRGB) 0
     ∀ y < hdr.height,
       let offset := y * (rowBytes + 1)
       offset < raw.size ∧
       offset + 1 + rowBytes ≤ raw.size ∧
       (raw.extract (offset + 1) (offset + 1 + rowBytes)).size = rowBytes ∧
       (∀ x < hdr.width, x * bpp + 2 < rowBytes) ∧
-      (∀ x < hdr.width, (y * hdr.width + x) * bytesPerPixel + 2 < pixels0.size) ∧
+      (∀ x < hdr.width, (y * hdr.width + x) * bytesPerPixelRGB + 2 < pixels0.size) ∧
       (bpp = 3 → y * rowBytes + rowBytes ≤ pixels0.size) := by
   intro bpp rowBytes pixels0 y hy offset
   have hbpp' : bpp = 3 ∨ bpp = 4 := by
@@ -3089,7 +3316,7 @@ lemma decodeBitmap_decodeRowsLoop_bounds
     | inl h2 => simp [bpp, h2]
     | inr h6 => simp [bpp, h6]
   have hrowBytes : rowBytes = hdr.width * bpp := by rfl
-  have hpixels : pixels0.size = hdr.width * hdr.height * bytesPerPixel := by
+  have hpixels : pixels0.size = hdr.width * hdr.height * bytesPerPixelRGB := by
     simp [pixels0, ByteArray.size, Array.size_replicate]
   have hraw' : raw.size = hdr.height * (rowBytes + 1) := by
     simpa [rowBytes, bpp] using hraw
@@ -3106,14 +3333,14 @@ lemma decodeBitmap_no_overflow
     (hraw : raw.size = hdr.height * (hdr.width * (if hdr.colorType == 2 then 3 else 4) + 1)) :
     let bpp := if hdr.colorType == 2 then 3 else 4
     let rowBytes := hdr.width * bpp
-    let pixels0 := ByteArray.mk <| Array.replicate (hdr.width * hdr.height * bytesPerPixel) 0
+    let pixels0 := ByteArray.mk <| Array.replicate (hdr.width * hdr.height * bytesPerPixelRGB) 0
     ∀ y < hdr.height,
       let offset := y * (rowBytes + 1)
       offset < raw.size ∧
       offset + 1 + rowBytes ≤ raw.size ∧
       (raw.extract (offset + 1) (offset + 1 + rowBytes)).size = rowBytes ∧
       (∀ x < hdr.width, x * bpp + 2 < rowBytes) ∧
-      (∀ x < hdr.width, (y * hdr.width + x) * bytesPerPixel + 2 < pixels0.size) ∧
+      (∀ x < hdr.width, (y * hdr.width + x) * bytesPerPixelRGB + 2 < pixels0.size) ∧
       (bpp = 3 → y * rowBytes + rowBytes ≤ pixels0.size) := by
   simpa using decodeBitmap_decodeRowsLoop_bounds (hdr := hdr) (raw := raw) hbpp hraw
 
@@ -3121,19 +3348,19 @@ lemma decodeBitmap_no_overflow
 lemma decodeRowsLoop_encodeRaw (bmp : BitmapRGB8) :
     let w := bmp.size.width
     let h := bmp.size.height
-    let rowBytes := w * bytesPerPixel
+    let rowBytes := w * bytesPerPixelRGB
     let raw := encodeRaw bmp
     let pixels0 := ByteArray.mk <| Array.replicate (h * rowBytes) 0
-    decodeRowsLoop raw w h bytesPerPixel rowBytes 0 0 ByteArray.empty pixels0 = some bmp.data := by
+    decodeRowsLoop raw w h bytesPerPixelRGB rowBytes 0 0 ByteArray.empty pixels0 = some bmp.data := by
   let w := bmp.size.width
   let h := bmp.size.height
-  let rowBytes := w * bytesPerPixel
+  let rowBytes := w * bytesPerPixelRGB
   let raw := encodeRaw bmp
   let pixels0 := ByteArray.mk <| Array.replicate (h * rowBytes) 0
   have hdata : bmp.data.size = h * rowBytes := by
     calc
-      bmp.data.size = w * h * bytesPerPixel := bmp.valid
-      _ = h * (w * bytesPerPixel) := by
+      bmp.data.size = w * h * bytesPerPixelRGB := bmp.valid
+      _ = h * (w * bytesPerPixelRGB) := by
             simp [Nat.mul_left_comm, Nat.mul_comm]
       _ = h * rowBytes := by simp [rowBytes]
   have hraw : raw.size = h * (rowBytes + 1) := by
@@ -3146,7 +3373,7 @@ lemma decodeRowsLoop_encodeRaw (bmp : BitmapRGB8) :
         offset = y * (rowBytes + 1) →
         pixels.size = h * rowBytes →
         pixels.extract 0 (y * rowBytes) = bmp.data.extract 0 (y * rowBytes) →
-        decodeRowsLoop raw w h bytesPerPixel rowBytes y offset prevRow pixels = some bmp.data := by
+        decodeRowsLoop raw w h bytesPerPixelRGB rowBytes y offset prevRow pixels = some bmp.data := by
     intro k
     induction k with
     | zero =>
@@ -3174,7 +3401,7 @@ lemma decodeRowsLoop_encodeRaw (bmp : BitmapRGB8) :
               simp [ByteArray.extract_zero_size]
             simp [hsize, hdata0']
           simpa [hpix0, hdata0] using hprefix'
-        simp [decodeRowsLoop, hlt, hpix_eq]
+        simp [decodeRowsLoop, decodeRowsLoopCore, hlt, hpix_eq]
     | succ k ih =>
         intro y offset prevRow pixels hk hoff hpix hprefix
         have hlt : y < h := Nat.lt_of_sub_eq_succ hk
@@ -3277,7 +3504,7 @@ lemma decodeRowsLoop_encodeRaw (bmp : BitmapRGB8) :
           simp [hoff, Nat.add_mul, Nat.one_mul, Nat.add_assoc, Nat.add_comm]
         have hoff'' : offset + 1 + rowBytes = (y + 1) * (rowBytes + 1) := hoff'
         have hnext :
-            decodeRowsLoop raw w h bytesPerPixel rowBytes (y + 1) (offset + 1 + rowBytes)
+            decodeRowsLoop raw w h bytesPerPixelRGB rowBytes (y + 1) (offset + 1 + rowBytes)
                 rowData pixels' = some bmp.data := by
           have hsize' : pixels'.size = h * rowBytes := by
             have hsrc : 0 + rowBytes ≤ rowData.size := by
@@ -3292,14 +3519,12 @@ lemma decodeRowsLoop_encodeRaw (bmp : BitmapRGB8) :
           exact ih (y := y + 1) (offset := offset + 1 + rowBytes) (prevRow := rowData)
             (pixels := pixels') hk' hoffn hsize' hprefix'
         have hgoal :
-            decodeRowsLoop raw w h bytesPerPixel rowBytes y offset prevRow pixels =
-              decodeRowsLoop raw w h bytesPerPixel rowBytes (y + 1) (offset + 1 + rowBytes)
+            decodeRowsLoop raw w h bytesPerPixelRGB rowBytes y offset prevRow pixels =
+              decodeRowsLoop raw w h bytesPerPixelRGB rowBytes (y + 1) (offset + 1 + rowBytes)
                 rowData pixels' := by
-          conv =>
-            lhs
-            rw [decodeRowsLoop.eq_1]
-            simp [hlt, hfilter, hfilter0, bytesPerPixel, rowData, rowOffset, pixels']
-          rfl
+          dsimp [decodeRowsLoop]
+          rw [decodeRowsLoopCore.eq_1]
+          simp [hlt, hfilter0, bytesPerPixelRGB, rowData, rowOffset, pixels']
         exact hgoal.trans hnext
   have hstart :=
     hk (h - 0) (y := 0) (offset := 0) (prevRow := ByteArray.empty) (pixels := pixels0)
@@ -3323,36 +3548,39 @@ lemma decodeBitmap_encodeBitmap (bmp : BitmapRGB8)
     omega
   have hparse := parsePng_encodeBitmap (bmp := bmp) hw hh hidat hsize
   have hraw : (encodeRaw bmp).size =
-      bmp.size.height * (bmp.size.width * bytesPerPixel + 1) := by
+      bmp.size.height * (bmp.size.width * bytesPerPixelRGB + 1) := by
     simpa using encodeRaw_size bmp
+  have hraw' : (encodeRaw bmp).size =
+      bmp.size.height * (bmp.size.width * 3 + 1) := by
+    simpa [bytesPerPixelRGB] using hraw
   have hrows := decodeRowsLoop_encodeRaw (bmp := bmp)
-  have hvalid : bmp.data.size = bmp.size.width * bmp.size.height * bytesPerPixel := by
-    simpa [Nat.mul_left_comm, Nat.mul_comm, Nat.mul_assoc] using bmp.valid
+  have hvalid : bmp.data.size = bmp.size.width * bmp.size.height * bytesPerPixelRGB := by
+    simpa [bytesPerPixel_rgb, Nat.mul_left_comm, Nat.mul_comm, Nat.mul_assoc] using bmp.valid
   have hrows' :
-      decodeRowsLoop (encodeRaw bmp) bmp.size.width bmp.size.height bytesPerPixel
-          (bmp.size.width * bytesPerPixel) 0 0 ByteArray.empty
-          (ByteArray.mk <| Array.replicate (bmp.size.height * (bmp.size.width * bytesPerPixel)) 0) =
+      decodeRowsLoop (encodeRaw bmp) bmp.size.width bmp.size.height bytesPerPixelRGB
+          (bmp.size.width * bytesPerPixelRGB) 0 0 ByteArray.empty
+          (ByteArray.mk <| Array.replicate (bmp.size.height * (bmp.size.width * bytesPerPixelRGB)) 0) =
         some bmp.data := by
-    simpa [bytesPerPixel] using hrows
+    simpa [bytesPerPixelRGB] using hrows
   have hrows'' :
       decodeRowsLoop (encodeRaw bmp) bmp.size.width bmp.size.height 3 (bmp.size.width * 3) 0 0
           ByteArray.empty { data := Array.replicate (bmp.size.height * (bmp.size.width * 3)) 0 } =
         some bmp.data := by
-    simpa [bytesPerPixel] using hrows'
+    simpa [bytesPerPixelRGB] using hrows'
   have hrows''' :
       decodeRowsLoop (encodeRaw bmp) bmp.size.width bmp.size.height 3 (bmp.size.width * 3) 0 0
           ByteArray.empty { data := Array.replicate (bmp.size.width * bmp.size.height * 3) 0 } =
         some bmp.data := by
     simpa [Nat.mul_left_comm, Nat.mul_comm, Nat.mul_assoc] using hrows''
   have hvalid' : bmp.data.size = bmp.size.width * bmp.size.height * 3 := by
-    simpa [bytesPerPixel] using hvalid
+    simpa [bytesPerPixelRGB] using hvalid
   unfold Png.decodeBitmap
   -- Parse and header checks.
-  simp [hsize, hparse, bytesPerPixel]
+  simp [hsize, hparse]
   -- Decompression path.
   simp [hmin, zlibDecompressStored_zlibCompressStored]
   -- Raw size check and row decoding.
-  simp [hraw, hrows''', hvalid', bytesPerPixel]
+  simp [hraw', hrows''', hvalid', bytesPerPixel_rgb, bytesPerPixelRGB]
 
 -- Re-export: static Huffman length base table size.
 lemma lengthBases_size : lengthBases.size = 29 := Png.lengthBases_size

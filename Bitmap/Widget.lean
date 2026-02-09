@@ -1,4 +1,4 @@
-import Bitmap.Basic
+import Bitmap
 import Lean
 
 open Lean Widget
@@ -13,6 +13,7 @@ structure BitmapWidgetProps where
   width : Nat
   height : Nat
   bytes : ByteArray
+  bytesPerPixel : Nat := bytesPerPixelRGB
   pixelSize : Nat := 10
   showGrid : Bool := true
   background : String := "#070a16"
@@ -28,6 +29,22 @@ def BitmapRGB8.widgetProps (bmp : BitmapRGB8)
   { width := bmp.size.width
     height := bmp.size.height
     bytes := bmp.data
+    bytesPerPixel := bytesPerPixelRGB
+    pixelSize := max pixelSize 1
+    showGrid
+    background
+    caption }
+
+def BitmapRGBA8.widgetProps (bmp : BitmapRGBA8)
+    (pixelSize : Nat := 12)
+    (showGrid : Bool := true)
+    (background : String := "#050914")
+    (caption : Option String := none) :
+    BitmapWidgetProps :=
+  { width := bmp.size.width
+    height := bmp.size.height
+    bytes := bmp.data
+    bytesPerPixel := bytesPerPixelRGBA
     pixelSize := max pixelSize 1
     showGrid
     background
@@ -55,10 +72,21 @@ def auroraBitmap : BitmapRGB8 :=
 def testPngPath : FilePath :=
   FilePath.mk "test.png"
 
+def testPngRgbaPath : FilePath :=
+  FilePath.mk "test_rgba.png"
+
 def testPngBitmapResult : Except String BitmapRGB8 :=
   match unsafe unsafeIO (IO.FS.readBinFile testPngPath) with
   | Except.ok bytes =>
       match Png.decodeBitmap bytes with
+      | some bmp => Except.ok bmp
+      | none => Except.error "invalid PNG bitmap"
+  | Except.error err => Except.error err.toString
+
+def testPngRgbaBitmapResult : Except String BitmapRGBA8 :=
+  match unsafe unsafeIO (IO.FS.readBinFile testPngRgbaPath) with
+  | Except.ok bytes =>
+      match Png.decodeBitmap (px := PixelRGBA8) bytes with
       | some bmp => Except.ok bmp
       | none => Except.error "invalid PNG bitmap"
   | Except.error err => Except.error err.toString
@@ -75,6 +103,19 @@ def testPngWidgetProps : BitmapWidgetProps :=
         (pixelSize := 2)
         (background := "#1b0b0b")
         (caption := some s!"PNG load failed: {err}")
+
+def testPngRgbaWidgetProps : BitmapWidgetProps :=
+  match testPngRgbaBitmapResult with
+  | Except.ok bmp =>
+      BitmapRGBA8.widgetProps bmp
+        (pixelSize := 18)
+        (background := "#0b0b12")
+        (caption := some "test_rgba.png (4×4) with alpha")
+  | Except.error err =>
+      BitmapRGBA8.widgetProps (mkBlankBitmapRGBA 1 1 { r := 0, g := 0, b := 0, a := 0 })
+        (pixelSize := 18)
+        (background := "#1b0b0b")
+        (caption := some s!"PNG RGBA load failed: {err}")
 
 @[widget_module]
 def bitmapWidget : Lean.Widget.Module where
@@ -115,7 +156,7 @@ def bitmapWidget : Lean.Widget.Module where
           return
         }
         const bytes = props.bytes ?? []
-        const stride = 3
+        const stride = Math.max(props.bytesPerPixel ?? 3, 1)
         const image = ctx.createImageData(width, height)
         for (let i = 0; i < width * height; i++) {
           const offset = i * 4
@@ -123,10 +164,11 @@ def bitmapWidget : Lean.Widget.Module where
           const r = bytes[base] ?? 0
           const g = bytes[base + 1] ?? 0
           const b = bytes[base + 2] ?? 0
+          const a = stride >= 4 ? (bytes[base + 3] ?? 255) : 255
           image.data[offset + 0] = r
           image.data[offset + 1] = g
           image.data[offset + 2] = b
-          image.data[offset + 3] = 255
+          image.data[offset + 3] = a
         }
         ctx.putImageData(image, 0, 0)
       }, [width, height, props.bytes])
@@ -197,3 +239,6 @@ open Bitmaps.Widget
 
 #widget bitmapWidget with
   (testPngWidgetProps)
+
+#widget bitmapWidget with
+  (testPngRgbaWidgetProps)

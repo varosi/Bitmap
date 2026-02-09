@@ -1,4 +1,4 @@
-import Bitmap.Basic
+import Bitmap
 
 open Bitmaps
 
@@ -24,6 +24,11 @@ def pngRoundTripOk (bmp : BitmapRGB8) : Bool :=
   | some bmp' => decide (bmp' = bmp)
   | none => false
 
+def pngRoundTripOkRGBA (bmp : BitmapRGBA8) : Bool :=
+  match Png.decodeBitmap (px := PixelRGBA8) (Png.encodeBitmap bmp) with
+  | some bmp' => decide (bmp' = bmp)
+  | none => false
+
 def pngRoundTripProperty (trials : Nat) : IO Bool := do
   let mut ok := true
   let mut i := 0
@@ -38,12 +43,29 @@ def pngRoundTripProperty (trials : Nat) : IO Bool := do
       ok := false
   return ok
 
+def pngRoundTripPropertyRGBA (trials : Nat) : IO Bool := do
+  let mut ok := true
+  let mut i := 0
+  while i < trials && ok do
+    let w <- IO.rand 1 16
+    let h <- IO.rand 1 16
+    let seed <- IO.rand 0 1000000
+    let bmp := BitmapRGBA8.ofPixelFn w h (fun idx : Fin (w * h) =>
+      let px := pixelOfSeed seed idx.val
+      let a := randByte (prngStep (seed + idx.val + 7))
+      { r := px.r, g := px.g, b := px.b, a := a })
+    if pngRoundTripOkRGBA bmp then
+      i := i + 1
+    else
+      ok := false
+  return ok
+
 -- Fill a bitmap with deterministic pixels using putPixel, then read all pixels back.
 -- Returns elapsed time in nanoseconds and a checksum to prevent dead-code elimination.
 private def perfFillRead (w h : Nat) : IO (Nat × Nat) := do
   let t0 <- IO.monoNanosNow
   let mut img := mkBlankBitmap w h { r := 0, g := 0, b := 0 }
-  let putPixelChecked (bmp : Bitmap) (x y : Nat) (px : PixelRGB8) : Bitmap :=
+  let putPixelChecked (bmp : BitmapRGB8) (x y : Nat) (px : PixelRGB8) : BitmapRGB8 :=
     if hx : x < bmp.size.width then
       if hy : y < bmp.size.height then
         putPixel bmp x y px hx hy
@@ -51,7 +73,7 @@ private def perfFillRead (w h : Nat) : IO (Nat × Nat) := do
         bmp
     else
       bmp
-  let getPixelChecked (bmp : Bitmap) (x y : Nat) : PixelRGB8 :=
+  let getPixelChecked (bmp : BitmapRGB8) (x y : Nat) : PixelRGB8 :=
     if hx : x < bmp.size.width then
       if hy : y < bmp.size.height then
         getPixel bmp x y hx hy
@@ -124,6 +146,11 @@ def run : IO Unit := do
     IO.println "png round-trip property: ok"
   else
     throw (IO.userError "png round-trip property failed")
+  let okRgba <- pngRoundTripPropertyRGBA 20
+  if okRgba then
+    IO.println "png round-trip RGBA property: ok"
+  else
+    throw (IO.userError "png round-trip RGBA property failed")
   runPerfTest
   runPngPerfTest
 
