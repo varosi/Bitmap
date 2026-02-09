@@ -24,6 +24,11 @@ def pngRoundTripOk (bmp : BitmapRGB8) : Bool :=
   | some bmp' => decide (bmp' = bmp)
   | none => false
 
+def pngRoundTripOkRGBA (bmp : BitmapRGBA8) : Bool :=
+  match Png.decodeBitmap (px := PixelRGBA8) (Png.encodeBitmap bmp) with
+  | some bmp' => decide (bmp' = bmp)
+  | none => false
+
 def pngRoundTripProperty (trials : Nat) : IO Bool := do
   let mut ok := true
   let mut i := 0
@@ -33,6 +38,23 @@ def pngRoundTripProperty (trials : Nat) : IO Bool := do
     let seed <- IO.rand 0 1000000
     let bmp := bitmapOfSeed seed w h
     if pngRoundTripOk bmp then
+      i := i + 1
+    else
+      ok := false
+  return ok
+
+def pngRoundTripPropertyRGBA (trials : Nat) : IO Bool := do
+  let mut ok := true
+  let mut i := 0
+  while i < trials && ok do
+    let w <- IO.rand 1 16
+    let h <- IO.rand 1 16
+    let seed <- IO.rand 0 1000000
+    let bmp := BitmapRGBA8.ofPixelFn w h (fun idx : Fin (w * h) =>
+      let px := pixelOfSeed seed idx.val
+      let a := randByte (prngStep (seed + idx.val + 7))
+      { r := px.r, g := px.g, b := px.b, a := a })
+    if pngRoundTripOkRGBA bmp then
       i := i + 1
     else
       ok := false
@@ -124,6 +146,11 @@ def run : IO Unit := do
     IO.println "png round-trip property: ok"
   else
     throw (IO.userError "png round-trip property failed")
+  let okRgba <- pngRoundTripPropertyRGBA 20
+  if okRgba then
+    IO.println "png round-trip RGBA property: ok"
+  else
+    throw (IO.userError "png round-trip RGBA property failed")
   runPerfTest
   runPngPerfTest
 
