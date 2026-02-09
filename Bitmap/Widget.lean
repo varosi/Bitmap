@@ -281,3 +281,6 @@ open Bitmaps.Widget
 
 #widget bitmapWidget with
   (testPngRgbaWidgetProps)
+
+#widget bitmapWidget with
+  (testPngGrayWidgetProps)

@@ -795,6 +795,16 @@ def distExtra : Array Nat :=
     12, 12,
     13, 13]
 
+def copyDistance (out : ByteArray) (distance : Nat) : Nat → Option ByteArray
+  | 0 => some out
+  | n + 1 =>
+      if distance == 0 || distance > out.size then
+        none
+      else
+        let idx := out.size - distance
+        let b := out.get! idx
+        copyDistance (out.push b) distance n
+
 def decodeLength (sym : Nat) (br : BitReader)
     (h : 257 ≤ sym ∧ sym ≤ 285)
     (hbits : br.bitIndex + (lengthExtra[(sym - 257)]'
@@ -842,19 +852,20 @@ def decodeDistance (sym : Nat) (br : BitReader)
 
 partial def decodeCompressedBlock (litLen dist : Huffman) (br : BitReader) (out : ByteArray) :
     Option (BitReader × ByteArray) := do
-  let mut br := br
-  let mut out := out
   let hLengthExtraSize : lengthExtra.size = 29 := by decide
   let hDistBasesSize : distBases.size = 30 := by decide
   let hDistExtraSize : distExtra.size = 30 := by decide
-  while true do
+  let mut br := br
+  let mut out := out
+  let mut done := false
+  while !done do
     let (sym, br') ← litLen.decode br
     br := br'
     if sym < 256 then
       out := out.push (u8 sym)
     else if sym == 256 then
-      return (br, out)
-    if hlen : 257 ≤ sym ∧ sym ≤ 285 then
+      done := true
+    else if hlen : 257 ≤ sym ∧ sym ≤ 285 then
       let idx := sym - 257
       have hidxle : idx ≤ 28 := by
         dsimp [idx]
@@ -873,14 +884,8 @@ partial def decodeCompressedBlock (litLen dist : Huffman) (br : BitReader) (out 
           if hbitsD : br.bitIndex + extraD <= br.data.size * 8 then
             let (distance, br'''') := decodeDistance distSym br hdist (by simpa using hbitsD)
             br := br''''
-            if distance == 0 || distance > out.size then
-              none
-            let mut i := 0
-            while i < len do
-              let idx := out.size - distance
-              let b := out.get! idx
-              out := out.push b
-              i := i + 1
+            let out' ← copyDistance out distance len
+            out := out'
           else
             none
         else

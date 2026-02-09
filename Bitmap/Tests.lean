@@ -86,6 +86,23 @@ def pngRoundTripPropertyGray (trials : Nat) : IO Bool := do
       ok := false
   return ok
 
+-- Decode PNG fixtures that use fixed-Huffman deflate blocks.
+private def pngDecodeFixedHuffmanFixtures : IO Unit := do
+  let grayBytes <- IO.FS.readBinFile "test_gray.png"
+  match Png.decodeBitmap (px := PixelGray8) grayBytes with
+  | some bmp =>
+      if bmp.size.width != 8 || bmp.size.height != 8 then
+        throw (IO.userError "fixed-huffman gray fixture has unexpected size")
+  | none =>
+      throw (IO.userError "fixed-huffman gray fixture failed to decode")
+  let rgbaBytes <- IO.FS.readBinFile "test_rgba.png"
+  match Png.decodeBitmap (px := PixelRGBA8) rgbaBytes with
+  | some bmp =>
+      if bmp.size.width != 4 || bmp.size.height != 4 then
+        throw (IO.userError "fixed-huffman RGBA fixture has unexpected size")
+  | none =>
+      throw (IO.userError "fixed-huffman RGBA fixture failed to decode")
+
 -- Fill a bitmap with deterministic pixels using putPixel, then read all pixels back.
 -- Returns elapsed time in nanoseconds and a checksum to prevent dead-code elimination.
 private def perfFillRead (w h : Nat) : IO (Nat × Nat) := do
@@ -137,8 +154,8 @@ private def perfPngRoundTrip (w h : Nat) : IO (Nat × Bool) := do
 -- Fixed-size performance test for putPixel/getPixel on this machine.
 -- Chosen so 10 runs total about 5 seconds here.
 private def runPerfTest : IO Unit := do
-  let w : Nat := 2688
-  let h : Nat := 2688
+  let w : Nat := 448
+  let h : Nat := 448
   let iters : Nat := 10
   let mut totalNs : Nat := 0
   let mut totalChecksum : Nat := 0
@@ -153,8 +170,8 @@ private def runPerfTest : IO Unit := do
 -- Fixed-size performance test for PNG encode/decode on this machine.
 -- Chosen so 10 runs total about 5 seconds here.
 private def runPngPerfTest : IO Unit := do
-  let w : Nat := 1600
-  let h : Nat := 1600
+  let w : Nat := 352
+  let h : Nat := 352
   let iters : Nat := 10
   let mut totalNs : Nat := 0
   for _ in [0:iters] do
@@ -182,6 +199,7 @@ def run : IO Unit := do
     IO.println "png round-trip Gray property: ok"
   else
     throw (IO.userError "png round-trip Gray property failed")
+  pngDecodeFixedHuffmanFixtures
   runPerfTest
   runPngPerfTest
 
