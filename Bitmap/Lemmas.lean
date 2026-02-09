@@ -151,7 +151,17 @@ lemma bytesPerPixel_rgba : Pixel.bytesPerPixel (α := PixelRGBA8) = bytesPerPixe
   rfl
 
 -- PNG raw encoding for RGBA8.
-@[simp] lemma pngPixel_encodeRaw_rgba : PngPixel.encodeRaw (α := PixelRGBA8) = encodeRawRGBA := by
+@[simp] lemma pngPixel_encodeRaw_rgba : PngPixel.encodeRaw (α := PixelRGBA8) = encodeRaw := by
+  rfl
+
+-- PNG row decoder for RGB8.
+@[simp] lemma pngPixel_decodeRowsLoop_rgb :
+    PngPixel.decodeRowsLoop (α := PixelRGB8) = decodeRowsLoop := by
+  rfl
+
+-- PNG row decoder for RGBA8.
+@[simp] lemma pngPixel_decodeRowsLoop_rgba :
+    PngPixel.decodeRowsLoop (α := PixelRGBA8) = decodeRowsLoopRGBA := by
   rfl
 
 
@@ -3161,7 +3171,7 @@ lemma decodeRowsLoop_encodeRaw (bmp : BitmapRGB8) :
               simp [ByteArray.extract_zero_size]
             simp [hsize, hdata0']
           simpa [hpix0, hdata0] using hprefix'
-        simp [decodeRowsLoop, hlt, hpix_eq]
+        simp [decodeRowsLoop, decodeRowsLoopCore, hlt, hpix_eq]
     | succ k ih =>
         intro y offset prevRow pixels hk hoff hpix hprefix
         have hlt : y < h := Nat.lt_of_sub_eq_succ hk
@@ -3282,11 +3292,9 @@ lemma decodeRowsLoop_encodeRaw (bmp : BitmapRGB8) :
             decodeRowsLoop raw w h bytesPerPixelRGB rowBytes y offset prevRow pixels =
               decodeRowsLoop raw w h bytesPerPixelRGB rowBytes (y + 1) (offset + 1 + rowBytes)
                 rowData pixels' := by
-          conv =>
-            lhs
-            rw [decodeRowsLoop.eq_1]
-            simp [hlt, hfilter, hfilter0, bytesPerPixelRGB, rowData, rowOffset, pixels']
-          rfl
+          dsimp [decodeRowsLoop]
+          rw [decodeRowsLoopCore.eq_1]
+          simp [hlt, hfilter0, bytesPerPixelRGB, rowData, rowOffset, pixels']
         exact hgoal.trans hnext
   have hstart :=
     hk (h - 0) (y := 0) (offset := 0) (prevRow := ByteArray.empty) (pixels := pixels0)
@@ -3312,6 +3320,9 @@ lemma decodeBitmap_encodeBitmap (bmp : BitmapRGB8)
   have hraw : (encodeRaw bmp).size =
       bmp.size.height * (bmp.size.width * bytesPerPixelRGB + 1) := by
     simpa using encodeRaw_size bmp
+  have hraw' : (encodeRaw bmp).size =
+      bmp.size.height * (bmp.size.width * 3 + 1) := by
+    simpa [bytesPerPixelRGB] using hraw
   have hrows := decodeRowsLoop_encodeRaw (bmp := bmp)
   have hvalid : bmp.data.size = bmp.size.width * bmp.size.height * bytesPerPixelRGB := by
     simpa [bytesPerPixel_rgb, Nat.mul_left_comm, Nat.mul_comm, Nat.mul_assoc] using bmp.valid
@@ -3335,11 +3346,11 @@ lemma decodeBitmap_encodeBitmap (bmp : BitmapRGB8)
     simpa [bytesPerPixelRGB] using hvalid
   unfold Png.decodeBitmap
   -- Parse and header checks.
-  simp [hsize, hparse, bytesPerPixelRGB]
+  simp [hsize, hparse]
   -- Decompression path.
   simp [hmin, zlibDecompressStored_zlibCompressStored]
   -- Raw size check and row decoding.
-  simp [hraw, hrows''', hvalid', bytesPerPixelRGB]
+  simp [hraw', hrows''', hvalid', bytesPerPixel_rgb, bytesPerPixelRGB]
 
 -- Re-export: static Huffman length base table size.
 lemma lengthBases_size : lengthBases.size = 29 := Png.lengthBases_size
