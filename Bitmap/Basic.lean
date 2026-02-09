@@ -1597,13 +1597,15 @@ def encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px) : Byte
 
 end Png
 
-def Bitmap.readPng {px : Type u} [Pixel px] [Png.PngPixel px]
+namespace Png
+
+def Bitmap.readPng {px : Type u} [Pixel px] [PngPixel px]
     (path : FilePath) : IO (Except String (Bitmap px)) := do
   let bytesOrErr <- ioToExcept (IO.FS.readBinFile path)
   match bytesOrErr with
   | Except.error err => pure (Except.error err)
   | Except.ok bytes =>
-      match Png.decodeBitmap (px := px) bytes with
+      match decodeBitmap (px := px) bytes with
       | some bmp => pure (Except.ok bmp)
       | none => pure (Except.error "invalid PNG bitmap")
 
@@ -1611,25 +1613,27 @@ def BitmapRGB8.readPng (path : FilePath) : IO (Except String BitmapRGB8) :=
   Bitmap.readPng (px := PixelRGB8) path
 
 def BitmapRGB8.writePng (path : FilePath) (bmp : BitmapRGB8) : IO (Except String Unit) :=
-  ioToExcept (IO.FS.writeBinFile path (Png.encodeBitmap bmp))
-
-instance : FileWritable BitmapRGB8 where
-  write := BitmapRGB8.writePng
-
-instance : FileReadable BitmapRGB8 where
-  read := BitmapRGB8.readPng
+  ioToExcept (IO.FS.writeBinFile path (encodeBitmap bmp))
 
 def BitmapRGBA8.readPng (path : FilePath) : IO (Except String BitmapRGBA8) :=
   Bitmap.readPng (px := PixelRGBA8) path
 
 def BitmapRGBA8.writePng (path : FilePath) (bmp : BitmapRGBA8) : IO (Except String Unit) :=
-  ioToExcept (IO.FS.writeBinFile path (Png.encodeBitmap bmp))
+  ioToExcept (IO.FS.writeBinFile path (encodeBitmap bmp))
+
+end Png
+
+instance : FileWritable BitmapRGB8 where
+  write := Png.BitmapRGB8.writePng
+
+instance : FileReadable BitmapRGB8 where
+  read := Png.BitmapRGB8.readPng
 
 instance : FileWritable BitmapRGBA8 where
-  write := BitmapRGBA8.writePng
+  write := Png.BitmapRGBA8.writePng
 
 instance : FileReadable BitmapRGBA8 where
-  read := BitmapRGBA8.readPng
+  read := Png.BitmapRGBA8.readPng
 
 -------------------------------------------------------------------------------
 -------------------------------------------------------------------------------
