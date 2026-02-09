@@ -7,14 +7,6 @@ import Batteries.Data.ByteArray
 
 namespace Bitmaps
 
--- Setting a byte does not change the ByteArray size.
-lemma byteArray_size_set {bs : ByteArray} {i : Nat} {h : i < bs.size} {b : UInt8} :
-    (bs.set i b h).size = bs.size := by
-  cases bs with
-  | mk data =>
-      simp [ByteArray.set, ByteArray.size, Array.size_set]
-
-
 namespace Png
 
 -- Reading one bit advances the bit index by one.
@@ -164,16 +156,34 @@ lemma getPixel_putPixel_eq
         simpa [data3, data2, data1, byteArray_size_set] using h2
 
       have hr : data3.get base h0d3 = r := by
-        simp [data3, data2, data1, byteArray_get_set_ne', h0d2, h0d1]
+        have hr1 : data3.get base h0d3 = data2.get base h0d2 := by
+          simpa [data3] using
+            (byteArray_get_set_ne' (bs := data2) (i := base + 2) (j := base)
+              (hi := h2d2) (hj := h0d2) (hij := by omega) (v := b) (h' := h0d3))
+        have hr2 : data2.get base h0d2 = data1.get base h0d1 := by
+          simpa [data2] using
+            (byteArray_get_set_ne' (bs := data1) (i := base + 1) (j := base)
+              (hi := h1d1) (hj := h0d1) (hij := by omega) (v := g) (h' := h0d2))
+        have hr3 : data1.get base h0d1 = r := by
+          simp [data1]
+        simp [hr1, hr2, hr3]
 
       have hg : data3.get (base + 1) h1d3 = g := by
-        simp [data3, data2, data1, byteArray_get_set_ne', h1d2]
+        have hg1 : data3.get (base + 1) h1d3 = data2.get (base + 1) h1d2 := by
+          simpa [data3] using
+            (byteArray_get_set_ne' (bs := data2) (i := base + 2) (j := base + 1)
+              (hi := h2d2) (hj := h1d2) (hij := by omega) (v := b) (h' := h1d3))
+        have hg2 : data2.get (base + 1) h1d2 = g := by
+          simp [data2]
+        simp [hg1, hg2]
 
       have hb : data3.get (base + 2) h2d3 = b := by
-        simp [data3, data2, data1]
+        simp [data3]
 
       -- Now unfold putPixel/getPixel and rewrite with computed fields.
-      simp [getPixel, putPixel, pixIdx, base, data1, data2, data3, hr, hg, hb]
+      simp [getPixel, putPixel, Pixel.read, Pixel.write, instPixelRGB8,
+        pixelReadRGB8, pixelWriteRGB8, bytesPerPixel_rgb,
+        pixIdx, base, data1, data2, data3, hr, hg, hb]
 
 open Png
 

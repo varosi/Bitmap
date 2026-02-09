@@ -126,15 +126,105 @@ instance : DecidableEq PixelRGBA8 := by
 -- Pixel metadata for byte layout.
 class Pixel (α : Type u) where
   bytesPerPixel : Nat
+  bytesPerPixel_pos : 0 < bytesPerPixel
+  read : (data : ByteArray) -> (base : Nat) ->
+    (h : base + (bytesPerPixel - 1) < data.size) -> α
+  write : (data : ByteArray) -> (base : Nat) ->
+    (h : base + (bytesPerPixel - 1) < data.size) -> α -> ByteArray
+  write_size : ∀ (data : ByteArray) (base : Nat)
+    (h : base + (bytesPerPixel - 1) < data.size) (px : α),
+    (write data base h px).size = data.size
 
 def bytesPerPixel : Nat := 3
 def bytesPerPixelRGBA : Nat := 4
 
-instance : Pixel PixelRGB8 where
-  bytesPerPixel := bytesPerPixel
+@[simp] lemma byteArray_size_set {bs : ByteArray} {i : Nat} {h : i < bs.size} {b : UInt8} :
+    (bs.set i b h).size = bs.size := by
+  cases bs with
+  | mk data =>
+      simp [ByteArray.set, ByteArray.size, Array.size_set]
 
-instance : Pixel PixelRGBA8 where
+def pixelReadRGB8 (data : ByteArray) (base : Nat) (h : base + 2 < data.size) : PixelRGB8 := by
+  have h1 : base + 1 < data.size := by omega
+  have h0 : base < data.size := by omega
+  exact { r := data.get base h0
+          g := data.get (base + 1) h1
+          b := data.get (base + 2) h }
+
+def pixelWriteRGB8 (data : ByteArray) (base : Nat) (h : base + 2 < data.size)
+    (px : PixelRGB8) : ByteArray := by
+  have h1 : base + 1 < data.size := by omega
+  have h0 : base < data.size := by omega
+  let data1 := data.set base px.r h0
+  have h1' : base + 1 < data1.size := by
+    simpa [data1] using h1
+  let data2 := data1.set (base + 1) px.g h1'
+  have h2' : base + 2 < data2.size := by
+    simpa [data2, data1] using h
+  let data3 := data2.set (base + 2) px.b h2'
+  exact data3
+
+lemma pixelWriteRGB8_size (data : ByteArray) (base : Nat) (h : base + 2 < data.size)
+    (px : PixelRGB8) : (pixelWriteRGB8 data base h px).size = data.size := by
+  unfold pixelWriteRGB8
+  simp
+
+def pixelReadRGBA8 (data : ByteArray) (base : Nat) (h : base + 3 < data.size) : PixelRGBA8 := by
+  have h2 : base + 2 < data.size := by omega
+  have h1 : base + 1 < data.size := by omega
+  have h0 : base < data.size := by omega
+  exact { r := data.get base h0
+          g := data.get (base + 1) h1
+          b := data.get (base + 2) h2
+          a := data.get (base + 3) h }
+
+def pixelWriteRGBA8 (data : ByteArray) (base : Nat) (h : base + 3 < data.size)
+    (px : PixelRGBA8) : ByteArray := by
+  have h2 : base + 2 < data.size := by omega
+  have h1 : base + 1 < data.size := by omega
+  have h0 : base < data.size := by omega
+  let data1 := data.set base px.r h0
+  have h1' : base + 1 < data1.size := by
+    simpa [data1] using h1
+  let data2 := data1.set (base + 1) px.g h1'
+  have h2' : base + 2 < data2.size := by
+    simpa [data2, data1] using h2
+  let data3 := data2.set (base + 2) px.b h2'
+  have h3' : base + 3 < data3.size := by
+    simpa [data3, data2, data1] using h
+  let data4 := data3.set (base + 3) px.a h3'
+  exact data4
+
+lemma pixelWriteRGBA8_size (data : ByteArray) (base : Nat) (h : base + 3 < data.size)
+    (px : PixelRGBA8) : (pixelWriteRGBA8 data base h px).size = data.size := by
+  unfold pixelWriteRGBA8
+  simp
+
+instance instPixelRGB8 : Pixel PixelRGB8 where
+  bytesPerPixel := bytesPerPixel
+  bytesPerPixel_pos := by decide
+  read := fun data base h =>
+    pixelReadRGB8 data base (by simpa [bytesPerPixel] using h)
+  write := fun data base h px =>
+    pixelWriteRGB8 data base (by simpa [bytesPerPixel] using h) px
+  write_size := by
+    intro data base h px
+    simpa [bytesPerPixel] using
+      (pixelWriteRGB8_size (data := data) (base := base)
+        (h := by simpa [bytesPerPixel] using h) (px := px))
+
+instance instPixelRGBA8 : Pixel PixelRGBA8 where
   bytesPerPixel := bytesPerPixelRGBA
+  bytesPerPixel_pos := by decide
+  read := fun data base h =>
+    pixelReadRGBA8 data base (by simpa [bytesPerPixelRGBA] using h)
+  write := fun data base h px =>
+    pixelWriteRGBA8 data base (by simpa [bytesPerPixelRGBA] using h) px
+  write_size := by
+    intro data base h px
+    simpa [bytesPerPixelRGBA] using
+      (pixelWriteRGBA8_size (data := data) (base := base)
+        (h := by simpa [bytesPerPixelRGBA] using h) (px := px))
 
 @[simp] lemma bytesPerPixel_rgb : (Pixel.bytesPerPixel (α := PixelRGB8)) = bytesPerPixel := rfl
 @[simp] lemma bytesPerPixel_rgba : (Pixel.bytesPerPixel (α := PixelRGBA8)) = bytesPerPixelRGBA := rfl
@@ -158,8 +248,8 @@ instance : DecidableEq BitmapRGB8 := by
 instance : DecidableEq BitmapRGBA8 := by
   infer_instance
 
-def putPixel (img : BitmapRGB8) (x y : Nat) (pixel : PixelRGB8)
-    (h1 : x < img.size.width) (h2: y < img.size.height) : BitmapRGB8 := by
+def putPixel {px : Type u} [Pixel px] (img : Bitmap px) (x y : Nat) (pixel : px)
+    (h1 : x < img.size.width) (h2: y < img.size.height) : Bitmap px := by
   let pixIdx := x + y * img.size.width
   have hPix : pixIdx < img.size.width * img.size.height := by
     have hx' :
@@ -183,43 +273,33 @@ def putPixel (img : BitmapRGB8) (x y : Nat) (pixel : PixelRGB8)
           img.size.width * img.size.height := lt_of_lt_of_le hx'' hy'
     simpa [pixIdx] using hlt
 
-  let base := pixIdx * bytesPerPixel
-  have h2' : base + 2 < img.data.size := by
-    have : pixIdx * bytesPerPixel + 2 < img.size.width * img.size.height * bytesPerPixel := by
-      have hPix' := hPix
-      simp [bytesPerPixel] at hPix' ⊢
-      omega
-    simpa [base, img.valid] using this
-  have h1' : base + 1 < img.data.size := by
-    omega
-  have h0' : base < img.data.size := by
-    omega
+  let bpp := Pixel.bytesPerPixel (α := px)
+  let base := pixIdx * bpp
+  have hlast : base + (bpp - 1) < img.data.size := by
+    have hbpp : 0 < bpp := Pixel.bytesPerPixel_pos (α := px)
+    have hlt1 : base + (bpp - 1) < base + bpp := by
+      have hltbpp : bpp - 1 < bpp := by
+        exact Nat.sub_one_lt (Nat.ne_of_gt hbpp)
+      exact Nat.add_lt_add_left hltbpp base
+    have hle2 : base + bpp ≤ img.size.width * img.size.height * bpp := by
+      have hle : pixIdx + 1 ≤ img.size.width * img.size.height := Nat.succ_le_of_lt hPix
+      have hle' : (pixIdx + 1) * bpp ≤ img.size.width * img.size.height * bpp :=
+        Nat.mul_le_mul_right bpp hle
+      have hbase : base + bpp = (pixIdx + 1) * bpp := by
+        simp [base, Nat.add_mul, Nat.add_comm]
+      simpa [hbase] using hle'
+    have hlt : base + (bpp - 1) < img.size.width * img.size.height * bpp :=
+      lt_of_lt_of_le hlt1 hle2
+    simpa [base, img.valid] using hlt
 
-  let data1 := img.data.set base pixel.r h0'
-  have hsize1 : data1.size = img.data.size := by
-    cases hdata : img.data with
-    | mk data =>
-        simp [data1, ByteArray.set, ByteArray.size, Array.size_set, -ByteArray.size_data, hdata]
-  have h1'' : base + 1 < data1.size := by
-    simpa [hsize1] using h1'
-  let data2 := data1.set (base + 1) pixel.g h1''
-  have hsize2 : data2.size = img.data.size := by
-    cases hdata : img.data with
-    | mk data =>
-        simp [data2, data1, ByteArray.set, ByteArray.size, Array.size_set, -ByteArray.size_data, hdata]
-  have h2'' : base + 2 < data2.size := by
-    simpa [hsize2] using h2'
-  let data3 := data2.set (base + 2) pixel.b h2''
-  have hsize3 : data3.size = img.data.size := by
-    cases hdata : img.data with
-    | mk data =>
-        simp [data3, data2, data1, ByteArray.set, ByteArray.size, Array.size_set, -ByteArray.size_data, hdata]
+  let data' := Pixel.write img.data base hlast pixel
+  have hsize : data'.size = img.data.size := by
+    simpa using Pixel.write_size (data := img.data) (base := base) (h := hlast) (px := pixel)
+  exact { img with data := data', valid := by simpa [hsize] using img.valid }
 
-  exact { img with data := data3, valid := by simpa [hsize3] using img.valid }
-
-def getPixel (img : BitmapRGB8) (x y : Nat)
+def getPixel {px : Type u} [Pixel px] (img : Bitmap px) (x y : Nat)
     (hx : x < img.size.width)
-    (hy : y < img.size.height) : PixelRGB8 := by
+    (hy : y < img.size.height) : px := by
   let pixIdx := x + y * img.size.width
   have hPix : pixIdx < img.size.width * img.size.height := by
     have hx' :
@@ -243,134 +323,26 @@ def getPixel (img : BitmapRGB8) (x y : Nat)
           img.size.width * img.size.height := lt_of_lt_of_le hx'' hy'
     simpa [pixIdx] using hlt
 
-  let base := pixIdx * bytesPerPixel
-  have h2' : base + 2 < img.data.size := by
-    have : pixIdx * bytesPerPixel + 2 < img.size.width * img.size.height * bytesPerPixel := by
-      have hPix' := hPix
-      simp [bytesPerPixel] at hPix' ⊢
-      omega
-    simpa [base, img.valid] using this
-  have h1' : base + 1 < img.data.size := by
-    omega
-  have h0' : base < img.data.size := by
-    omega
+  let bpp := Pixel.bytesPerPixel (α := px)
+  let base := pixIdx * bpp
+  have hlast : base + (bpp - 1) < img.data.size := by
+    have hbpp : 0 < bpp := Pixel.bytesPerPixel_pos (α := px)
+    have hlt1 : base + (bpp - 1) < base + bpp := by
+      have hltbpp : bpp - 1 < bpp := by
+        exact Nat.sub_one_lt (Nat.ne_of_gt hbpp)
+      exact Nat.add_lt_add_left hltbpp base
+    have hle2 : base + bpp ≤ img.size.width * img.size.height * bpp := by
+      have hle : pixIdx + 1 ≤ img.size.width * img.size.height := Nat.succ_le_of_lt hPix
+      have hle' : (pixIdx + 1) * bpp ≤ img.size.width * img.size.height * bpp :=
+        Nat.mul_le_mul_right bpp hle
+      have hbase : base + bpp = (pixIdx + 1) * bpp := by
+        simp [base, Nat.add_mul, Nat.add_comm]
+      simpa [hbase] using hle'
+    have hlt : base + (bpp - 1) < img.size.width * img.size.height * bpp :=
+      lt_of_lt_of_le hlt1 hle2
+    simpa [base, img.valid] using hlt
 
-  exact { r := img.data.get base h0'
-          g := img.data.get (base + 1) h1'
-          b := img.data.get (base + 2) h2' }
-
-def putPixelRGBA (img : BitmapRGBA8) (x y : Nat) (pixel : PixelRGBA8)
-    (h1 : x < img.size.width) (h2: y < img.size.height) : BitmapRGBA8 := by
-  let pixIdx := x + y * img.size.width
-  have hPix : pixIdx < img.size.width * img.size.height := by
-    have hx' :
-        x + y * img.size.width <
-          img.size.width + y * img.size.width := Nat.add_lt_add_right h1 _
-    have hx'' :
-        x + y * img.size.width <
-          img.size.width * (1 + y) := by
-      calc
-        x + y * img.size.width <
-            img.size.width + y * img.size.width := hx'
-        _ = img.size.width * (1 + y) := by
-            simp [Nat.mul_add, Nat.mul_one, Nat.mul_comm]
-    have hy' :
-        img.size.width * (1 + y) ≤ img.size.width * img.size.height := by
-      apply Nat.mul_le_mul_left
-      have hyle : y + 1 ≤ img.size.height := Nat.succ_le_of_lt h2
-      simpa [Nat.add_comm] using hyle
-    have hlt :
-        x + y * img.size.width <
-          img.size.width * img.size.height := lt_of_lt_of_le hx'' hy'
-    simpa [pixIdx] using hlt
-
-  let base := pixIdx * bytesPerPixelRGBA
-  have h3' : base + 3 < img.data.size := by
-    have : pixIdx * bytesPerPixelRGBA + 3 < img.size.width * img.size.height * bytesPerPixelRGBA := by
-      have hPix' := hPix
-      simp [bytesPerPixelRGBA] at hPix' ⊢
-      omega
-    simpa [base, img.valid] using this
-  have h2' : base + 2 < img.data.size := by
-    omega
-  have h1' : base + 1 < img.data.size := by
-    omega
-  have h0' : base < img.data.size := by
-    omega
-
-  let data1 := img.data.set base pixel.r h0'
-  have hsize1 : data1.size = img.data.size := by
-    cases hdata : img.data with
-    | mk data =>
-        simp [data1, ByteArray.set, ByteArray.size, Array.size_set, -ByteArray.size_data, hdata]
-  have h1'' : base + 1 < data1.size := by
-    simpa [hsize1] using h1'
-  let data2 := data1.set (base + 1) pixel.g h1''
-  have hsize2 : data2.size = img.data.size := by
-    cases hdata : img.data with
-    | mk data =>
-        simp [data2, data1, ByteArray.set, ByteArray.size, Array.size_set, -ByteArray.size_data, hdata]
-  have h2'' : base + 2 < data2.size := by
-    simpa [hsize2] using h2'
-  let data3 := data2.set (base + 2) pixel.b h2''
-  have hsize3 : data3.size = img.data.size := by
-    cases hdata : img.data with
-    | mk data =>
-        simp [data3, data2, data1, ByteArray.set, ByteArray.size, Array.size_set, -ByteArray.size_data, hdata]
-  have h3'' : base + 3 < data3.size := by
-    simpa [hsize3] using h3'
-  let data4 := data3.set (base + 3) pixel.a h3''
-  have hsize4 : data4.size = img.data.size := by
-    cases hdata : img.data with
-    | mk data =>
-        simp [data4, data3, data2, data1, ByteArray.set, ByteArray.size, Array.size_set, -ByteArray.size_data, hdata]
-
-  exact { img with data := data4, valid := by simpa [hsize4] using img.valid }
-
-def getPixelRGBA (img : BitmapRGBA8) (x y : Nat)
-    (hx : x < img.size.width)
-    (hy : y < img.size.height) : PixelRGBA8 := by
-  let pixIdx := x + y * img.size.width
-  have hPix : pixIdx < img.size.width * img.size.height := by
-    have hx' :
-        x + y * img.size.width <
-          img.size.width + y * img.size.width := Nat.add_lt_add_right hx _
-    have hx'' :
-        x + y * img.size.width <
-          img.size.width * (1 + y) := by
-      calc
-        x + y * img.size.width <
-            img.size.width + y * img.size.width := hx'
-        _ = img.size.width * (1 + y) := by
-            simp [Nat.mul_add, Nat.mul_one, Nat.mul_comm]
-    have hy' :
-        img.size.width * (1 + y) ≤ img.size.width * img.size.height := by
-      apply Nat.mul_le_mul_left
-      have hyle : y + 1 ≤ img.size.height := Nat.succ_le_of_lt hy
-      simpa [Nat.add_comm] using hyle
-    have hlt :
-        x + y * img.size.width <
-          img.size.width * img.size.height := lt_of_lt_of_le hx'' hy'
-    simpa [pixIdx] using hlt
-
-  let base := pixIdx * bytesPerPixelRGBA
-  have h3' : base + 3 < img.data.size := by
-    have : pixIdx * bytesPerPixelRGBA + 3 < img.size.width * img.size.height * bytesPerPixelRGBA := by
-      have hPix' := hPix
-      simp [bytesPerPixelRGBA] at hPix' ⊢
-      omega
-    simpa [base, img.valid] using this
-  have h2' : base + 2 < img.data.size := by
-    omega
-  have h1' : base + 1 < img.data.size := by
-    omega
-  have h0' : base < img.data.size := by
-    omega
-
-  exact { r := img.data.get base h0'
-          g := img.data.get (base + 1) h1'
-          b := img.data.get (base + 2) h2'
-          a := img.data.get (base + 3) h3' }
+  exact Pixel.read img.data base hlast
 
 def Bitmap.ofPixelFn (w h : Nat) (f : Fin (w * h) → PixelRGB8) : BitmapRGB8 := by
   refine
