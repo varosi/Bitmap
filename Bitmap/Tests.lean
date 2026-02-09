@@ -1,4 +1,4 @@
-import Bitmap.Basic
+import Bitmap
 
 open Bitmaps
 
