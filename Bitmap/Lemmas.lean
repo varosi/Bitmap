@@ -47,6 +47,8 @@ end Png
 
 namespace Lemmas
 
+open Png
+
 -- Linear index from (x,y) is within bounds for Nat coordinates.
 lemma arrayCoordSize_nat
     {i x y w h : Nat}
@@ -136,6 +138,22 @@ lemma bytesPerPixel_rgb : Pixel.bytesPerPixel (α := PixelRGB8) = bytesPerPixelR
 lemma bytesPerPixel_rgba : Pixel.bytesPerPixel (α := PixelRGBA8) = bytesPerPixelRGBA := by
   rfl
 
+-- PNG color type for RGB8.
+@[simp] lemma pngPixel_colorType_rgb : PngPixel.colorType (α := PixelRGB8) = u8 2 := by
+  rfl
+
+-- PNG color type for RGBA8.
+@[simp] lemma pngPixel_colorType_rgba : PngPixel.colorType (α := PixelRGBA8) = u8 6 := by
+  rfl
+
+-- PNG raw encoding for RGB8.
+@[simp] lemma pngPixel_encodeRaw_rgb : PngPixel.encodeRaw (α := PixelRGB8) = encodeRaw := by
+  rfl
+
+-- PNG raw encoding for RGBA8.
+@[simp] lemma pngPixel_encodeRaw_rgba : PngPixel.encodeRaw (α := PixelRGBA8) = encodeRawRGBA := by
+  rfl
+
 
 -- Writing a pixel then reading it back yields the same pixel.
 lemma getPixel_putPixel_eq
@@ -145,8 +163,6 @@ lemma getPixel_putPixel_eq
     getPixel (putPixel img x y pixel hx hy) x y
       (by simpa using hx) (by simpa using hy) = pixel := by
   simp [getPixel, putPixel, Pixel.read_write]
-
-open Png
 
 -- Little-endian 16-bit encoding has length 2.
 lemma u16le_size (n : Nat) : (u16le n).size = 2 := by

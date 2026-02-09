@@ -1613,24 +1613,25 @@ def encodeRawRGBA (bmp : BitmapRGBA8) : ByteArray :=
   let raw := ByteArray.mk <| Array.replicate rawSize 0
   encodeRawLoop bmp.data rowBytes h 0 raw
 
-def encodeBitmap (bmp : BitmapRGB8) : ByteArray :=
-  Id.run do
-    let w := bmp.size.width
-    let h := bmp.size.height
-    let raw := encodeRaw bmp
-    let ihdr := u32be w ++ u32be h ++ ByteArray.mk #[u8 8, u8 2, u8 0, u8 0, u8 0]
-    let idat := zlibCompressStored raw
-    pngSignature
-      ++ mkChunk "IHDR" ihdr
-      ++ mkChunk "IDAT" idat
-      ++ mkChunk "IEND" ByteArray.empty
+class PngPixel (α : Type u) [Pixel α] where
+  encodeRaw : Bitmap α -> ByteArray
+  colorType : UInt8
 
-def encodeBitmapRGBA (bmp : BitmapRGBA8) : ByteArray :=
+instance : PngPixel PixelRGB8 where
+  encodeRaw := encodeRaw
+  colorType := u8 2
+
+instance : PngPixel PixelRGBA8 where
+  encodeRaw := encodeRawRGBA
+  colorType := u8 6
+
+def encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px) : ByteArray :=
   Id.run do
     let w := bmp.size.width
     let h := bmp.size.height
-    let raw := encodeRawRGBA bmp
-    let ihdr := u32be w ++ u32be h ++ ByteArray.mk #[u8 8, u8 6, u8 0, u8 0, u8 0]
+    let raw := PngPixel.encodeRaw (α := px) bmp
+    let ihdr := u32be w ++ u32be h ++
+      ByteArray.mk #[u8 8, PngPixel.colorType (α := px), u8 0, u8 0, u8 0]
     let idat := zlibCompressStored raw
     pngSignature
       ++ mkChunk "IHDR" ihdr
@@ -1667,7 +1668,7 @@ def BitmapRGBA8.readPng (path : FilePath) : IO (Except String BitmapRGBA8) := do
       | none => pure (Except.error "invalid PNG bitmap")
 
 def BitmapRGBA8.writePng (path : FilePath) (bmp : BitmapRGBA8) : IO (Except String Unit) :=
-  ioToExcept (IO.FS.writeBinFile path (Png.encodeBitmapRGBA bmp))
+  ioToExcept (IO.FS.writeBinFile path (Png.encodeBitmap bmp))
 
 instance : FileWritable BitmapRGBA8 where
   write := BitmapRGBA8.writePng
