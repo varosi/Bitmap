@@ -13,7 +13,7 @@ structure BitmapWidgetProps where
   width : Nat
   height : Nat
   bytes : ByteArray
-  bytesPerPixel : Nat := bytesPerPixel
+  bytesPerPixel : Nat := bytesPerPixelRGB
   pixelSize : Nat := 10
   showGrid : Bool := true
   background : String := "#070a16"
@@ -29,7 +29,7 @@ def BitmapRGB8.widgetProps (bmp : BitmapRGB8)
   { width := bmp.size.width
     height := bmp.size.height
     bytes := bmp.data
-    bytesPerPixel := bytesPerPixel
+    bytesPerPixel := bytesPerPixelRGB
     pixelSize := max pixelSize 1
     showGrid
     background

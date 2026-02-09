@@ -70,6 +70,14 @@ lemma arrayCoordSize_u32
     arrayCoordSize_nat (i := x.toNat + y.toNat * w) hx hy rfl
   simpa [hi] using hlt
 
+-- Setting a byte does not change the buffer size.
+@[simp] lemma byteArray_size_set
+    {bs : ByteArray} {i : Nat} (h : i < bs.size) {v : UInt8} :
+    (bs.set i v h).size = bs.size := by
+  cases bs with
+  | mk arr =>
+      simp [ByteArray.set, ByteArray.size, Array.size_set]
+
 -- Getting the byte just set yields the new value.
 @[simp] lemma byteArray_get_set_self
     {bs : ByteArray} {i : Nat} (h : i < bs.size) {v : UInt8} :
@@ -78,6 +86,25 @@ lemma arrayCoordSize_u32
   | mk arr =>
       simp [ByteArray.set, ByteArray.get]
 
+-- Getting the byte just set yields the new value (explicit bounds).
+@[simp] lemma byteArray_get_set_self'
+    {bs : ByteArray} {i : Nat} (h : i < bs.size) {v : UInt8}
+    (h' : i < (bs.set i v h).size) :
+    (bs.set i v h).get i h' = v := by
+  cases bs with
+  | mk arr =>
+      simp [ByteArray.set, ByteArray.get]
+
+-- Getting a different index after setting preserves the old value (explicit bounds).
+lemma byteArray_get_set_ne'
+    {bs : ByteArray} {i j : Nat} (hi : i < bs.size) (hj : j < bs.size)
+    (hij : i ≠ j) {v : UInt8} (h' : j < (bs.set i v hi).size) :
+    (bs.set i v hi).get j h' = bs.get j hj := by
+  cases bs with
+  | mk arr =>
+      simpa [ByteArray.set, ByteArray.get] using
+        (Array.getElem_set_ne (xs := arr) (i := i) (j := j) (h' := hi) (pj := hj) (h := hij))
+
 -- Getting the byte just set yields the new value (alternate proof of bounds).
 -- `getElem` is proof-irrelevant for ByteArrays.
 @[simp] lemma byteArray_getElem_eq {bs : ByteArray} {i : Nat} (h1 h2 : i < bs.size) :
@@ -85,7 +112,30 @@ lemma arrayCoordSize_u32
   rfl
 
 
- 
+-- Writing an RGB8 pixel does not change the buffer size.
+lemma pixelWriteRGB8_size
+    (data : ByteArray) (base : Nat) (h : base + 2 < data.size) (px : PixelRGB8) :
+    (pixelWriteRGB8 data base h px).size = data.size := by
+  cases data with
+  | mk arr =>
+      simp [pixelWriteRGB8, ByteArray.set, ByteArray.size, Array.size_set]
+
+-- Writing an RGBA8 pixel does not change the buffer size.
+lemma pixelWriteRGBA8_size
+    (data : ByteArray) (base : Nat) (h : base + 3 < data.size) (px : PixelRGBA8) :
+    (pixelWriteRGBA8 data base h px).size = data.size := by
+  cases data with
+  | mk arr =>
+      simp [pixelWriteRGBA8, ByteArray.set, ByteArray.size, Array.size_set]
+
+-- Bytes per pixel for RGB8.
+lemma bytesPerPixel_rgb : Pixel.bytesPerPixel (α := PixelRGB8) = bytesPerPixelRGB := by
+  rfl
+
+-- Bytes per pixel for RGBA8.
+lemma bytesPerPixel_rgba : Pixel.bytesPerPixel (α := PixelRGBA8) = bytesPerPixelRGBA := by
+  rfl
+
 
 -- Writing a pixel then reading it back yields the same pixel.
 lemma getPixel_putPixel_eq
@@ -2149,15 +2199,15 @@ lemma encodeRawLoop_size (data : ByteArray) (rowBytes h y : Nat) (raw : ByteArra
 -- Raw encoding size equals height times (row bytes + filter byte).
 lemma encodeRaw_size (bmp : BitmapRGB8) :
     (encodeRaw bmp).size =
-      bmp.size.height * (bmp.size.width * bytesPerPixel + 1) := by
+      bmp.size.height * (bmp.size.width * bytesPerPixelRGB + 1) := by
   let w := bmp.size.width
   let h := bmp.size.height
-  let rowBytes := w * bytesPerPixel
+  let rowBytes := w * bytesPerPixelRGB
   let rawSize := h * (rowBytes + 1)
   have hdata : bmp.data.size = h * rowBytes := by
     calc
-      bmp.data.size = w * h * bytesPerPixel := bmp.valid
-      _ = h * (w * bytesPerPixel) := by
+      bmp.data.size = w * h * bytesPerPixelRGB := bmp.valid
+      _ = h * (w * bytesPerPixelRGB) := by
             simp [Nat.mul_left_comm, Nat.mul_comm]
       _ = h * rowBytes := by simp [rowBytes]
   have hraw : (ByteArray.mk (Array.replicate rawSize 0)).size = h * (rowBytes + 1) := by
@@ -2604,18 +2654,18 @@ lemma encodeRawLoop_row_extract (data : ByteArray) (rowBytes h y : Nat) (raw : B
 -- The `encodeRaw` output yields the original row slice.
 lemma encodeRaw_row_extract (bmp : BitmapRGB8) (y : Nat) (hy : y < bmp.size.height) :
     let w := bmp.size.width
-    let rowBytes := w * bytesPerPixel
+    let rowBytes := w * bytesPerPixelRGB
     (encodeRaw bmp).extract (y * (rowBytes + 1) + 1) (y * (rowBytes + 1) + 1 + rowBytes) =
       bmp.data.extract (y * rowBytes) (y * rowBytes + rowBytes) := by
   let w := bmp.size.width
   let h := bmp.size.height
-  let rowBytes := w * bytesPerPixel
+  let rowBytes := w * bytesPerPixelRGB
   let rawSize := h * (rowBytes + 1)
   let raw0 := ByteArray.mk (Array.replicate rawSize 0)
   have hdata : bmp.data.size = h * rowBytes := by
     calc
-      bmp.data.size = w * h * bytesPerPixel := bmp.valid
-      _ = h * (w * bytesPerPixel) := by
+      bmp.data.size = w * h * bytesPerPixelRGB := bmp.valid
+      _ = h * (w * bytesPerPixelRGB) := by
             simp [Nat.mul_left_comm, Nat.mul_comm]
       _ = h * rowBytes := by simp [rowBytes]
   have hraw0 : raw0.size = h * (rowBytes + 1) := by
@@ -2727,17 +2777,17 @@ lemma encodeRawPrefix_get_of_ge (data : ByteArray) (rowBytes h y i : Nat) (raw :
 -- Filter bytes in the raw encoding are zero.
 lemma encodeRaw_filter_zero (bmp : BitmapRGB8) (y : Nat) (hy : y < bmp.size.height) :
     let w := bmp.size.width
-    let rowBytes := w * bytesPerPixel
+    let rowBytes := w * bytesPerPixelRGB
     (encodeRaw bmp).get! (y * (rowBytes + 1)) = 0 := by
   let w := bmp.size.width
   let h := bmp.size.height
-  let rowBytes := w * bytesPerPixel
+  let rowBytes := w * bytesPerPixelRGB
   let rawSize := h * (rowBytes + 1)
   let raw0 := ByteArray.mk (Array.replicate rawSize 0)
   have hdata : bmp.data.size = h * rowBytes := by
     calc
-      bmp.data.size = w * h * bytesPerPixel := bmp.valid
-      _ = h * (w * bytesPerPixel) := by
+      bmp.data.size = w * h * bytesPerPixelRGB := bmp.valid
+      _ = h * (w * bytesPerPixelRGB) := by
             simp [Nat.mul_left_comm, Nat.mul_comm]
       _ = h * rowBytes := by simp [rowBytes]
   have hraw0 : raw0.size = h * (rowBytes + 1) := by
@@ -2927,8 +2977,8 @@ lemma decodeRowsLoop_rowIndex_bound
 lemma decodeRowsLoop_pixBase_bound
     (pixels : ByteArray) (w h x y : Nat)
     (hx : x < w) (hy : y < h)
-    (hpixels : pixels.size = w * h * bytesPerPixel) :
-    (y * w + x) * bytesPerPixel + 2 < pixels.size := by
+    (hpixels : pixels.size = w * h * bytesPerPixelRGB) :
+    (y * w + x) * bytesPerPixelRGB + 2 < pixels.size := by
   have hPix0 :
       x + y * w < w * h :=
     arrayCoordSize_nat (i := x + y * w) (x := x) (y := y) (w := w) (h := h) hx hy rfl
@@ -2936,8 +2986,8 @@ lemma decodeRowsLoop_pixBase_bound
       y * w + x < w * h := by
     simpa [Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using hPix0
   have hPix' :
-      (y * w + x) * bytesPerPixel + 2 < w * h * bytesPerPixel := by
-    simp [bytesPerPixel] at hPix ⊢
+      (y * w + x) * bytesPerPixelRGB + 2 < w * h * bytesPerPixelRGB := by
+    simp [bytesPerPixelRGB] at hPix ⊢
     omega
   simpa [hpixels] using hPix'
 
@@ -2947,14 +2997,14 @@ lemma decodeRowsLoop_bounds
     (hraw : raw.size = h * (rowBytes + 1))
     (hrowBytes : rowBytes = w * bpp)
     (hbpp : bpp = 3 ∨ bpp = 4)
-    (hpixels : pixels.size = w * h * bytesPerPixel)
+    (hpixels : pixels.size = w * h * bytesPerPixelRGB)
     (hoff : offset = y * (rowBytes + 1))
     (hy : y < h) :
     offset < raw.size ∧
     offset + 1 + rowBytes ≤ raw.size ∧
     (raw.extract (offset + 1) (offset + 1 + rowBytes)).size = rowBytes ∧
     (∀ x < w, x * bpp + 2 < rowBytes) ∧
-    (∀ x < w, (y * w + x) * bytesPerPixel + 2 < pixels.size) ∧
+    (∀ x < w, (y * w + x) * bytesPerPixelRGB + 2 < pixels.size) ∧
     (bpp = 3 → y * rowBytes + rowBytes ≤ pixels.size) := by
   have hofflt : offset < raw.size := by
     have h := decodeRowsLoop_offset_lt_raw (raw := raw) (rowBytes := rowBytes) (h := h) (y := y) hraw hy
@@ -2970,7 +3020,7 @@ lemma decodeRowsLoop_bounds
     intro x hx
     have h := decodeRowsLoop_rowIndex_bound (w := w) (bpp := bpp) (x := x) hx hbpp
     simpa [hrowBytes] using h
-  have hpixBase : ∀ x < w, (y * w + x) * bytesPerPixel + 2 < pixels.size := by
+  have hpixBase : ∀ x < w, (y * w + x) * bytesPerPixelRGB + 2 < pixels.size := by
     intro x hx
     exact decodeRowsLoop_pixBase_bound (pixels := pixels) (w := w) (h := h) (x := x) (y := y) hx hy hpixels
   have hrowOffset : bpp = 3 → y * rowBytes + rowBytes ≤ pixels.size := by
@@ -2980,8 +3030,8 @@ lemma decodeRowsLoop_bounds
       simpa using hrowBytes
     have hpixels' : pixels.size = h * rowBytes := by
       calc
-        pixels.size = w * h * bytesPerPixel := hpixels
-        _ = w * h * 3 := by simp [bytesPerPixel]
+        pixels.size = w * h * bytesPerPixelRGB := hpixels
+        _ = w * h * 3 := by simp [bytesPerPixelRGB]
         _ = h * (w * 3) := by
               simp [Nat.mul_left_comm, Nat.mul_assoc]
         _ = h * rowBytes := by simp [hrowBytes']
@@ -2995,14 +3045,14 @@ lemma decodeBitmap_decodeRowsLoop_bounds
     (hraw : raw.size = hdr.height * (hdr.width * (if hdr.colorType == 2 then 3 else 4) + 1)) :
     let bpp := if hdr.colorType == 2 then 3 else 4
     let rowBytes := hdr.width * bpp
-    let pixels0 := ByteArray.mk <| Array.replicate (hdr.width * hdr.height * bytesPerPixel) 0
+    let pixels0 := ByteArray.mk <| Array.replicate (hdr.width * hdr.height * bytesPerPixelRGB) 0
     ∀ y < hdr.height,
       let offset := y * (rowBytes + 1)
       offset < raw.size ∧
       offset + 1 + rowBytes ≤ raw.size ∧
       (raw.extract (offset + 1) (offset + 1 + rowBytes)).size = rowBytes ∧
       (∀ x < hdr.width, x * bpp + 2 < rowBytes) ∧
-      (∀ x < hdr.width, (y * hdr.width + x) * bytesPerPixel + 2 < pixels0.size) ∧
+      (∀ x < hdr.width, (y * hdr.width + x) * bytesPerPixelRGB + 2 < pixels0.size) ∧
       (bpp = 3 → y * rowBytes + rowBytes ≤ pixels0.size) := by
   intro bpp rowBytes pixels0 y hy offset
   have hbpp' : bpp = 3 ∨ bpp = 4 := by
@@ -3010,7 +3060,7 @@ lemma decodeBitmap_decodeRowsLoop_bounds
     | inl h2 => simp [bpp, h2]
     | inr h6 => simp [bpp, h6]
   have hrowBytes : rowBytes = hdr.width * bpp := by rfl
-  have hpixels : pixels0.size = hdr.width * hdr.height * bytesPerPixel := by
+  have hpixels : pixels0.size = hdr.width * hdr.height * bytesPerPixelRGB := by
     simp [pixels0, ByteArray.size, Array.size_replicate]
   have hraw' : raw.size = hdr.height * (rowBytes + 1) := by
     simpa [rowBytes, bpp] using hraw
@@ -3027,14 +3077,14 @@ lemma decodeBitmap_no_overflow
     (hraw : raw.size = hdr.height * (hdr.width * (if hdr.colorType == 2 then 3 else 4) + 1)) :
     let bpp := if hdr.colorType == 2 then 3 else 4
     let rowBytes := hdr.width * bpp
-    let pixels0 := ByteArray.mk <| Array.replicate (hdr.width * hdr.height * bytesPerPixel) 0
+    let pixels0 := ByteArray.mk <| Array.replicate (hdr.width * hdr.height * bytesPerPixelRGB) 0
     ∀ y < hdr.height,
       let offset := y * (rowBytes + 1)
       offset < raw.size ∧
       offset + 1 + rowBytes ≤ raw.size ∧
       (raw.extract (offset + 1) (offset + 1 + rowBytes)).size = rowBytes ∧
       (∀ x < hdr.width, x * bpp + 2 < rowBytes) ∧
-      (∀ x < hdr.width, (y * hdr.width + x) * bytesPerPixel + 2 < pixels0.size) ∧
+      (∀ x < hdr.width, (y * hdr.width + x) * bytesPerPixelRGB + 2 < pixels0.size) ∧
       (bpp = 3 → y * rowBytes + rowBytes ≤ pixels0.size) := by
   simpa using decodeBitmap_decodeRowsLoop_bounds (hdr := hdr) (raw := raw) hbpp hraw
 
@@ -3042,19 +3092,19 @@ lemma decodeBitmap_no_overflow
 lemma decodeRowsLoop_encodeRaw (bmp : BitmapRGB8) :
     let w := bmp.size.width
     let h := bmp.size.height
-    let rowBytes := w * bytesPerPixel
+    let rowBytes := w * bytesPerPixelRGB
     let raw := encodeRaw bmp
     let pixels0 := ByteArray.mk <| Array.replicate (h * rowBytes) 0
-    decodeRowsLoop raw w h bytesPerPixel rowBytes 0 0 ByteArray.empty pixels0 = some bmp.data := by
+    decodeRowsLoop raw w h bytesPerPixelRGB rowBytes 0 0 ByteArray.empty pixels0 = some bmp.data := by
   let w := bmp.size.width
   let h := bmp.size.height
-  let rowBytes := w * bytesPerPixel
+  let rowBytes := w * bytesPerPixelRGB
   let raw := encodeRaw bmp
   let pixels0 := ByteArray.mk <| Array.replicate (h * rowBytes) 0
   have hdata : bmp.data.size = h * rowBytes := by
     calc
-      bmp.data.size = w * h * bytesPerPixel := bmp.valid
-      _ = h * (w * bytesPerPixel) := by
+      bmp.data.size = w * h * bytesPerPixelRGB := bmp.valid
+      _ = h * (w * bytesPerPixelRGB) := by
             simp [Nat.mul_left_comm, Nat.mul_comm]
       _ = h * rowBytes := by simp [rowBytes]
   have hraw : raw.size = h * (rowBytes + 1) := by
@@ -3067,7 +3117,7 @@ lemma decodeRowsLoop_encodeRaw (bmp : BitmapRGB8) :
         offset = y * (rowBytes + 1) →
         pixels.size = h * rowBytes →
         pixels.extract 0 (y * rowBytes) = bmp.data.extract 0 (y * rowBytes) →
-        decodeRowsLoop raw w h bytesPerPixel rowBytes y offset prevRow pixels = some bmp.data := by
+        decodeRowsLoop raw w h bytesPerPixelRGB rowBytes y offset prevRow pixels = some bmp.data := by
     intro k
     induction k with
     | zero =>
@@ -3198,7 +3248,7 @@ lemma decodeRowsLoop_encodeRaw (bmp : BitmapRGB8) :
           simp [hoff, Nat.add_mul, Nat.one_mul, Nat.add_assoc, Nat.add_comm]
         have hoff'' : offset + 1 + rowBytes = (y + 1) * (rowBytes + 1) := hoff'
         have hnext :
-            decodeRowsLoop raw w h bytesPerPixel rowBytes (y + 1) (offset + 1 + rowBytes)
+            decodeRowsLoop raw w h bytesPerPixelRGB rowBytes (y + 1) (offset + 1 + rowBytes)
                 rowData pixels' = some bmp.data := by
           have hsize' : pixels'.size = h * rowBytes := by
             have hsrc : 0 + rowBytes ≤ rowData.size := by
@@ -3213,13 +3263,13 @@ lemma decodeRowsLoop_encodeRaw (bmp : BitmapRGB8) :
           exact ih (y := y + 1) (offset := offset + 1 + rowBytes) (prevRow := rowData)
             (pixels := pixels') hk' hoffn hsize' hprefix'
         have hgoal :
-            decodeRowsLoop raw w h bytesPerPixel rowBytes y offset prevRow pixels =
-              decodeRowsLoop raw w h bytesPerPixel rowBytes (y + 1) (offset + 1 + rowBytes)
+            decodeRowsLoop raw w h bytesPerPixelRGB rowBytes y offset prevRow pixels =
+              decodeRowsLoop raw w h bytesPerPixelRGB rowBytes (y + 1) (offset + 1 + rowBytes)
                 rowData pixels' := by
           conv =>
             lhs
             rw [decodeRowsLoop.eq_1]
-            simp [hlt, hfilter, hfilter0, bytesPerPixel, rowData, rowOffset, pixels']
+            simp [hlt, hfilter, hfilter0, bytesPerPixelRGB, rowData, rowOffset, pixels']
           rfl
         exact hgoal.trans hnext
   have hstart :=
@@ -3244,36 +3294,36 @@ lemma decodeBitmap_encodeBitmap (bmp : BitmapRGB8)
     omega
   have hparse := parsePng_encodeBitmap (bmp := bmp) hw hh hidat hsize
   have hraw : (encodeRaw bmp).size =
-      bmp.size.height * (bmp.size.width * bytesPerPixel + 1) := by
+      bmp.size.height * (bmp.size.width * bytesPerPixelRGB + 1) := by
     simpa using encodeRaw_size bmp
   have hrows := decodeRowsLoop_encodeRaw (bmp := bmp)
-  have hvalid : bmp.data.size = bmp.size.width * bmp.size.height * bytesPerPixel := by
-    simpa [Nat.mul_left_comm, Nat.mul_comm, Nat.mul_assoc] using bmp.valid
+  have hvalid : bmp.data.size = bmp.size.width * bmp.size.height * bytesPerPixelRGB := by
+    simpa [bytesPerPixel_rgb, Nat.mul_left_comm, Nat.mul_comm, Nat.mul_assoc] using bmp.valid
   have hrows' :
-      decodeRowsLoop (encodeRaw bmp) bmp.size.width bmp.size.height bytesPerPixel
-          (bmp.size.width * bytesPerPixel) 0 0 ByteArray.empty
-          (ByteArray.mk <| Array.replicate (bmp.size.height * (bmp.size.width * bytesPerPixel)) 0) =
+      decodeRowsLoop (encodeRaw bmp) bmp.size.width bmp.size.height bytesPerPixelRGB
+          (bmp.size.width * bytesPerPixelRGB) 0 0 ByteArray.empty
+          (ByteArray.mk <| Array.replicate (bmp.size.height * (bmp.size.width * bytesPerPixelRGB)) 0) =
         some bmp.data := by
-    simpa [bytesPerPixel] using hrows
+    simpa [bytesPerPixelRGB] using hrows
   have hrows'' :
       decodeRowsLoop (encodeRaw bmp) bmp.size.width bmp.size.height 3 (bmp.size.width * 3) 0 0
           ByteArray.empty { data := Array.replicate (bmp.size.height * (bmp.size.width * 3)) 0 } =
         some bmp.data := by
-    simpa [bytesPerPixel] using hrows'
+    simpa [bytesPerPixelRGB] using hrows'
   have hrows''' :
       decodeRowsLoop (encodeRaw bmp) bmp.size.width bmp.size.height 3 (bmp.size.width * 3) 0 0
           ByteArray.empty { data := Array.replicate (bmp.size.width * bmp.size.height * 3) 0 } =
         some bmp.data := by
     simpa [Nat.mul_left_comm, Nat.mul_comm, Nat.mul_assoc] using hrows''
   have hvalid' : bmp.data.size = bmp.size.width * bmp.size.height * 3 := by
-    simpa [bytesPerPixel] using hvalid
+    simpa [bytesPerPixelRGB] using hvalid
   unfold Png.decodeBitmap
   -- Parse and header checks.
-  simp [hsize, hparse, bytesPerPixel]
+  simp [hsize, hparse, bytesPerPixelRGB]
   -- Decompression path.
   simp [hmin, zlibDecompressStored_zlibCompressStored]
   -- Raw size check and row decoding.
-  simp [hraw, hrows''', hvalid', bytesPerPixel]
+  simp [hraw, hrows''', hvalid', bytesPerPixelRGB]
 
 -- Re-export: static Huffman length base table size.
 lemma lengthBases_size : lengthBases.size = 29 := Png.lengthBases_size
