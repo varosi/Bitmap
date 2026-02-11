@@ -1262,9 +1262,18 @@ def parsePngSimple (bytes : ByteArray) (_hsize : 8 <= bytes.size) :
           let w := readU32BE data1 0 (by simp [hlen'])
           let h := readU32BE data1 4 (by simp [hlen'])
           let tail := data1.extract 8 13
-          if tail != ByteArray.mk #[u8 8, u8 2, u8 0, u8 0, u8 0] then
+          let bitDepth := (tail.get! 0).toNat
+          let colorType := (tail.get! 1).toNat
+          let comp := (tail.get! 2).toNat
+          let filter := (tail.get! 3).toNat
+          let interlace := (tail.get! 4).toNat
+          if bitDepth != 8 then
             none
-          let hdr : PngHeader := { width := w, height := h, colorType := 2, bitDepth := 8 }
+          if colorType != 0 && colorType != 2 && colorType != 6 then
+            none
+          if comp != 0 || filter != 0 || interlace != 0 then
+            none
+          let hdr : PngHeader := { width := w, height := h, colorType, bitDepth }
           if hLen2 : pos2 + 3 < bytes.size then
             match readChunk bytes pos2 hLen2 with
             | some (typ2, data2, pos3) =>
