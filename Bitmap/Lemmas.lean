@@ -5,6 +5,8 @@ import Init.Data.Range.Lemmas
 import Init.Data.UInt.Lemmas
 import Batteries.Data.ByteArray
 
+universe u
+
 namespace Bitmaps
 
 namespace Png
@@ -720,12 +722,35 @@ lemma pngSignature_size : pngSignature.size = 8 := by
     simp [pngSignature]
   simpa [ByteArray.size_data] using h
 
+@[simp] lemma emptyWithCapacity_eq_empty (c : Nat) :
+    ByteArray.emptyWithCapacity c = ByteArray.empty := by
+  rfl
+
+attribute [simp] ByteArray.empty_append ByteArray.append_empty
+
+lemma mkChunkBytes_def (typBytes data : ByteArray) :
+    mkChunkBytes typBytes data =
+      u32be data.size ++ typBytes ++ data ++ u32be (crc32Chunk typBytes data).toNat := by
+  simp [mkChunkBytes, emptyWithCapacity_eq_empty, ByteArray.empty_append]
+
+@[simp] lemma mkChunkBytes_ihdr (data : ByteArray) :
+    mkChunkBytes ihdrTypeBytes data = mkChunk "IHDR" data := by
+  rfl
+
+@[simp] lemma mkChunkBytes_idat (data : ByteArray) :
+    mkChunkBytes idatTypeBytes data = mkChunk "IDAT" data := by
+  rfl
+
+@[simp] lemma mkChunkBytes_iend (data : ByteArray) :
+    mkChunkBytes iendTypeBytes data = mkChunk "IEND" data := by
+  rfl
+
 -- Chunk size = payload + type tag + length field + CRC field.
 lemma mkChunk_size (typ : String) (data : ByteArray) :
     (mkChunk typ data).size = data.size + typ.utf8ByteSize + 8 := by
   calc
     (mkChunk typ data).size = data.size + typ.utf8ByteSize + 4 + 4 := by
-      simp [mkChunk, u32be_size, Nat.add_left_comm, Nat.add_comm]
+      simp [mkChunk, mkChunkBytes_def, u32be_size, Nat.add_left_comm, Nat.add_comm]
     _ = data.size + typ.utf8ByteSize + (4 + 4) := by
       simp [Nat.add_assoc]
     _ = data.size + typ.utf8ByteSize + 8 := by
@@ -921,6 +946,98 @@ lemma storedBlock_size (payload : ByteArray) (final : Bool) :
   let header : ByteArray := ByteArray.mk #[if final then u8 0x01 else u8 0x00]
   have hheader : header.size = 1 := by rfl
   simp [storedBlock, header, ByteArray.size_append, u16le_size, hheader, Nat.add_comm]
+
+-- Fast deflate-stored with an accumulator equals the specification.
+lemma deflateStoredFastAux_correct (raw out : ByteArray) :
+    deflateStoredFastAux raw out = out ++ deflateStored raw := by
+  classical
+  refine
+    (Nat.strong_induction_on (n := raw.size)
+      (p := fun n =>
+        ∀ raw' out, raw'.size = n → deflateStoredFastAux raw' out = out ++ deflateStored raw')
+      (fun n ih raw out hsize => by
+        by_cases hzero : raw.size = 0
+        · simp [deflateStoredFastAux, deflateStored, hzero]
+        · have hpos_raw : 0 < raw.size := Nat.pos_of_ne_zero hzero
+          let blockLen := if 65535 < raw.size then 65535 else raw.size
+          let payload := raw.extract 0 blockLen
+          let block := storedBlock payload (blockLen == raw.size)
+          by_cases hfinal' : blockLen == raw.size
+          ·
+            have hblock : block = storedBlock (raw.extract 0 blockLen) true := by
+              simp [block, payload, hfinal']
+            have hfast :
+                deflateStoredFastAux raw out =
+                  out ++ storedBlock (raw.extract 0 blockLen) true := by
+              rw [deflateStoredFastAux.eq_1]
+              simp [hzero, blockLen, hfinal']
+            have hslow :
+                deflateStored raw = storedBlock (raw.extract 0 blockLen) true := by
+              rw [deflateStored.eq_1]
+              simp [hzero, blockLen, hfinal']
+            have hfast' : deflateStoredFastAux raw out = out ++ block := by
+              simpa [hblock] using hfast
+            have hslow' : deflateStored raw = block := by
+              simpa [hblock] using hslow
+            simp [hfast', hslow']
+          · have hle : blockLen ≤ raw.size := by
+              by_cases hlarge : 65535 < raw.size
+              · have : (65535 : Nat) ≤ raw.size := Nat.le_of_lt hlarge
+                simpa [blockLen, hlarge] using this
+              · simp [blockLen, hlarge]
+            have hpos : 0 < blockLen := by
+              by_cases hlarge : 65535 < raw.size
+              · simp [blockLen, hlarge]
+              · simp [blockLen, hlarge, hpos_raw]
+            have hrest_size :
+                (raw.extract blockLen raw.size).size < raw.size := by
+              have hrest_size' :
+                  (raw.extract blockLen raw.size).size = raw.size - blockLen := by
+                simp [ByteArray.size_extract]
+              have hsub : raw.size - blockLen < raw.size := Nat.sub_lt_self hpos hle
+              simpa [hrest_size'] using hsub
+            have hrest_size' : (raw.extract blockLen raw.size).size < n := by
+              simpa [hsize] using hrest_size
+            have hrec :=
+              ih (raw.extract blockLen raw.size).size hrest_size'
+                (raw.extract blockLen raw.size) (out ++ block) rfl
+            have hfast :
+                deflateStoredFastAux raw out =
+                  deflateStoredFastAux (raw.extract blockLen raw.size)
+                    (out ++ storedBlock (raw.extract 0 blockLen) false) := by
+              rw [deflateStoredFastAux.eq_1]
+              simp [hzero, blockLen, hfinal']
+            have hslow :
+                deflateStored raw =
+                  storedBlock (raw.extract 0 blockLen) false ++
+                    deflateStored (raw.extract blockLen raw.size) := by
+              rw [deflateStored.eq_1]
+              simp [hzero, blockLen, hfinal']
+            have hblock : block = storedBlock (raw.extract 0 blockLen) false := by
+              simp [block, payload, hfinal']
+            have hfast' :
+                deflateStoredFastAux raw out =
+                  deflateStoredFastAux (raw.extract blockLen raw.size) (out ++ block) := by
+              simpa [hblock] using hfast
+            have hslow' :
+                deflateStored raw =
+                  block ++ deflateStored (raw.extract blockLen raw.size) := by
+              simpa [hblock] using hslow
+            calc
+              deflateStoredFastAux raw out =
+                  deflateStoredFastAux (raw.extract blockLen raw.size) (out ++ block) := hfast'
+              _ = (out ++ block) ++ deflateStored (raw.extract blockLen raw.size) := hrec
+              _ = out ++ (block ++ deflateStored (raw.extract blockLen raw.size)) := by
+                  simp [ByteArray.append_assoc]
+              _ = out ++ deflateStored raw := by
+                  simp [hslow']
+      )) raw out rfl
+
+-- Fast deflate-stored equals the specification.
+lemma deflateStoredFast_eq (raw : ByteArray) :
+    deflateStoredFast raw = deflateStored raw := by
+  unfold deflateStoredFast
+  simpa using (deflateStoredFastAux_correct raw ByteArray.empty)
 
 -- Deflate-stored output is always non-empty.
 lemma deflateStored_pos (raw : ByteArray) : 0 < (deflateStored raw).size := by
@@ -1779,10 +1896,10 @@ lemma encodeBitmap_signature (bmp : BitmapRGB8) :
 lemma mkChunk_extract_len (typ : String) (data : ByteArray) :
     (mkChunk typ data).extract 0 4 = u32be data.size := by
   have hlen : (u32be data.size).size = 4 := u32be_size _
-  simpa [mkChunk, hlen] using
+  simpa [mkChunk, mkChunkBytes_def, hlen] using
     (ByteArray.extract_append_eq_left
       (a := u32be data.size)
-      (b := typ.toUTF8 ++ data ++ u32be (crc32 (typ.toUTF8 ++ data)).toNat)
+      (b := typ.toUTF8 ++ data ++ u32be (crc32Chunk typ.toUTF8 data).toNat)
       (i := (u32be data.size).size) rfl)
 
 -- The next 4 bytes of a chunk encode the type tag.
@@ -1793,22 +1910,22 @@ lemma mkChunk_extract_type (typ : String) (data : ByteArray) (htyp : typ.utf8Byt
     simpa [String.toUTF8_eq_toByteArray, String.size_toByteArray] using htyp
   have h1 :
       (mkChunk typ data).extract 4 8 =
-        (typ.toUTF8 ++ data ++ u32be (crc32 (typ.toUTF8 ++ data)).toNat).extract 0 4 := by
-    simpa [mkChunk, hlen, ByteArray.append_assoc, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using
+        (typ.toUTF8 ++ data ++ u32be (crc32Chunk typ.toUTF8 data).toNat).extract 0 4 := by
+    simpa [mkChunk, mkChunkBytes_def, hlen, ByteArray.append_assoc, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using
       (ByteArray.extract_append_size_add
         (a := u32be data.size)
-        (b := typ.toUTF8 ++ data ++ u32be (crc32 (typ.toUTF8 ++ data)).toNat)
+        (b := typ.toUTF8 ++ data ++ u32be (crc32Chunk typ.toUTF8 data).toNat)
         (i := 0) (j := 4))
   have h2' :
-      (typ.toUTF8 ++ data ++ u32be (crc32 (typ.toUTF8 ++ data)).toNat).extract 0
+      (typ.toUTF8 ++ data ++ u32be (crc32Chunk typ.toUTF8 data).toNat).extract 0
           typ.toUTF8.size = typ.toUTF8 := by
     simpa [ByteArray.append_assoc] using
       (ByteArray.extract_append_eq_left
         (a := typ.toUTF8)
-        (b := data ++ u32be (crc32 (typ.toUTF8 ++ data)).toNat)
+        (b := data ++ u32be (crc32Chunk typ.toUTF8 data).toNat)
         (i := typ.toUTF8.size) rfl)
   have h2 :
-      (typ.toUTF8 ++ data ++ u32be (crc32 (typ.toUTF8 ++ data)).toNat).extract 0 4 = typ.toUTF8 := by
+      (typ.toUTF8 ++ data ++ u32be (crc32Chunk typ.toUTF8 data).toNat).extract 0 4 = typ.toUTF8 := by
     simpa [String.toUTF8_eq_toByteArray, String.size_toByteArray, htyp] using h2'
   simpa [h1, h2]
 
@@ -1822,19 +1939,19 @@ lemma mkChunk_extract_data (typ : String) (data : ByteArray) (htyp : typ.utf8Byt
     simp [ByteArray.size_append, hlen, String.toUTF8_eq_toByteArray, String.size_toByteArray, htyp]
   have h1 :
       (mkChunk typ data).extract 8 (8 + data.size) =
-        (data ++ u32be (crc32 (typ.toUTF8 ++ data)).toNat).extract 0 data.size := by
-    simpa [mkChunk, hprefix, ByteArray.append_assoc, String.toUTF8_eq_toByteArray,
+        (data ++ u32be (crc32Chunk typ.toUTF8 data).toNat).extract 0 data.size := by
+    simpa [mkChunk, mkChunkBytes_def, hprefix, ByteArray.append_assoc, String.toUTF8_eq_toByteArray,
       String.size_toByteArray, htyp, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using
       (ByteArray.extract_append_size_add
         (a := u32be data.size ++ typ.toUTF8)
-        (b := data ++ u32be (crc32 (typ.toUTF8 ++ data)).toNat)
+        (b := data ++ u32be (crc32Chunk typ.toUTF8 data).toNat)
         (i := 0) (j := data.size))
   have h2 :
-      (data ++ u32be (crc32 (typ.toUTF8 ++ data)).toNat).extract 0 data.size = data := by
+      (data ++ u32be (crc32Chunk typ.toUTF8 data).toNat).extract 0 data.size = data := by
     simpa using
       (ByteArray.extract_append_eq_left
         (a := data)
-        (b := u32be (crc32 (typ.toUTF8 ++ data)).toNat)
+        (b := u32be (crc32Chunk typ.toUTF8 data).toNat)
         (i := data.size) rfl)
   simpa [h1, h2]
 
@@ -2804,15 +2921,6 @@ lemma encodeRawLoop_preserve_prefix (data : ByteArray) (rowBytes h y : Nat) (raw
           _ = raw.extract 0 n := hprefix
   exact hk (h - y) y raw rfl hraw hn
 
--- Helper: apply the first `y` copySlice steps of the raw encoder.
-private def encodeRawPrefix (data : ByteArray) (rowBytes : Nat) : Nat → ByteArray → ByteArray
-  | 0, raw => raw
-  | y + 1, raw =>
-      let raw' := encodeRawPrefix data rowBytes y raw
-      let outOff := y * (rowBytes + 1)
-      let start := y * rowBytes
-      data.copySlice start raw' (outOff + 1) rowBytes
-
 -- Applying the prefix encoder preserves the buffer size.
 lemma encodeRawPrefix_size (data : ByteArray) (rowBytes h y : Nat) (raw : ByteArray)
     (hdata : data.size = h * rowBytes) (hraw : raw.size = h * (rowBytes + 1))
@@ -2876,8 +2984,36 @@ lemma encodeRawLoop_eq_prefix (data : ByteArray) (rowBytes h y : Nat) (raw : Byt
             else encodeRawPrefix data rowBytes y raw) := by
               simpa using hdef
         _ = encodeRawLoop data rowBytes h (y + 1)
+              (data.copySlice (y * rowBytes) (encodeRawPrefix data rowBytes y raw)
+                (y * (rowBytes + 1) + 1) rowBytes) := by
+              simp [hlt]
+        _ = encodeRawLoop data rowBytes h (y + 1)
               (encodeRawPrefix data rowBytes (y + 1) raw) := by
-              simp [encodeRawPrefix, hlt]
+              rfl
+
+-- Running the encoder for all rows equals the prefix encoder at height `h`.
+lemma encodeRawLoop_eq_prefix_full (data : ByteArray) (rowBytes h : Nat) (raw : ByteArray) :
+    encodeRawLoop data rowBytes h 0 raw = encodeRawPrefix data rowBytes h raw := by
+  have hprefix :=
+    encodeRawLoop_eq_prefix (data := data) (rowBytes := rowBytes) (h := h) (y := h) (raw := raw) (hy := Nat.le_refl h)
+  have hlt : ¬ h < h := Nat.lt_irrefl h
+  have hstep :
+      encodeRawLoop data rowBytes h h (encodeRawPrefix data rowBytes h raw) =
+        encodeRawPrefix data rowBytes h raw := by
+      rw [encodeRawLoop.eq_1]
+      simp [hlt]
+  exact hprefix.trans hstep
+
+-- Fast raw encoding equals the specification.
+lemma encodeRawFast_eq {px : Type u} [Pixel px] (bmp : Bitmap px) :
+    encodeRawFast bmp = encodeRaw bmp := by
+  unfold encodeRawFast encodeRaw
+  dsimp
+  exact (encodeRawLoop_eq_prefix_full (data := bmp.data)
+    (rowBytes := bmp.size.width * Pixel.bytesPerPixel (α := px))
+    (h := bmp.size.height)
+    (raw := ByteArray.mk <| Array.replicate (bmp.size.height *
+      (bmp.size.width * Pixel.bytesPerPixel (α := px) + 1)) 0)).symm
 
 -- The raw encoding loop writes row `y` into its destination slice.
 lemma encodeRawLoop_row_extract (data : ByteArray) (rowBytes h y : Nat) (raw : ByteArray)
