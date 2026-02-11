@@ -5,6 +5,8 @@ import Init.Data.Range.Lemmas
 import Init.Data.UInt.Lemmas
 import Batteries.Data.ByteArray
 
+universe u
+
 namespace Bitmaps
 
 namespace Png
@@ -720,12 +722,47 @@ lemma pngSignature_size : pngSignature.size = 8 := by
     simp [pngSignature]
   simpa [ByteArray.size_data] using h
 
+@[simp] lemma emptyWithCapacity_eq_empty (c : Nat) :
+    ByteArray.emptyWithCapacity c = ByteArray.empty := by
+  rfl
+
+attribute [simp] ByteArray.empty_append ByteArray.append_empty
+
+lemma mkChunkBytes_def (typBytes data : ByteArray) :
+    mkChunkBytes typBytes data =
+      u32be data.size ++ typBytes ++ data ++ u32be (crc32Chunk typBytes data).toNat := by
+  simp [mkChunkBytes, emptyWithCapacity_eq_empty, ByteArray.empty_append]
+
+@[simp] lemma mkChunkBytes_ihdr (data : ByteArray) :
+    mkChunkBytes ihdrTypeBytes data = mkChunk "IHDR" data := by
+  rfl
+
+@[simp] lemma mkChunkBytes_idat (data : ByteArray) :
+    mkChunkBytes idatTypeBytes data = mkChunk "IDAT" data := by
+  rfl
+
+@[simp] lemma mkChunkBytes_iend (data : ByteArray) :
+    mkChunkBytes iendTypeBytes data = mkChunk "IEND" data := by
+  rfl
+
+@[simp] lemma adler32Fast_eq (bytes : ByteArray) :
+    adler32Fast bytes = adler32 bytes := by
+  rfl
+
+@[simp] lemma deflateStoredFast_eq (raw : ByteArray) :
+    deflateStoredFast raw = deflateStored raw := by
+  rfl
+
+@[simp] lemma encodeRawFast_eq {px : Type u} [Pixel px] (bmp : Bitmap px) :
+    encodeRawFast bmp = encodeRaw bmp := by
+  rfl
+
 -- Chunk size = payload + type tag + length field + CRC field.
 lemma mkChunk_size (typ : String) (data : ByteArray) :
     (mkChunk typ data).size = data.size + typ.utf8ByteSize + 8 := by
   calc
     (mkChunk typ data).size = data.size + typ.utf8ByteSize + 4 + 4 := by
-      simp [mkChunk, u32be_size, Nat.add_left_comm, Nat.add_comm]
+      simp [mkChunk, mkChunkBytes_def, u32be_size, Nat.add_left_comm, Nat.add_comm]
     _ = data.size + typ.utf8ByteSize + (4 + 4) := by
       simp [Nat.add_assoc]
     _ = data.size + typ.utf8ByteSize + 8 := by
@@ -1779,10 +1816,10 @@ lemma encodeBitmap_signature (bmp : BitmapRGB8) :
 lemma mkChunk_extract_len (typ : String) (data : ByteArray) :
     (mkChunk typ data).extract 0 4 = u32be data.size := by
   have hlen : (u32be data.size).size = 4 := u32be_size _
-  simpa [mkChunk, hlen] using
+  simpa [mkChunk, mkChunkBytes_def, hlen] using
     (ByteArray.extract_append_eq_left
       (a := u32be data.size)
-      (b := typ.toUTF8 ++ data ++ u32be (crc32 (typ.toUTF8 ++ data)).toNat)
+      (b := typ.toUTF8 ++ data ++ u32be (crc32Chunk typ.toUTF8 data).toNat)
       (i := (u32be data.size).size) rfl)
 
 -- The next 4 bytes of a chunk encode the type tag.
@@ -1793,22 +1830,22 @@ lemma mkChunk_extract_type (typ : String) (data : ByteArray) (htyp : typ.utf8Byt
     simpa [String.toUTF8_eq_toByteArray, String.size_toByteArray] using htyp
   have h1 :
       (mkChunk typ data).extract 4 8 =
-        (typ.toUTF8 ++ data ++ u32be (crc32 (typ.toUTF8 ++ data)).toNat).extract 0 4 := by
-    simpa [mkChunk, hlen, ByteArray.append_assoc, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using
+        (typ.toUTF8 ++ data ++ u32be (crc32Chunk typ.toUTF8 data).toNat).extract 0 4 := by
+    simpa [mkChunk, mkChunkBytes_def, hlen, ByteArray.append_assoc, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using
       (ByteArray.extract_append_size_add
         (a := u32be data.size)
-        (b := typ.toUTF8 ++ data ++ u32be (crc32 (typ.toUTF8 ++ data)).toNat)
+        (b := typ.toUTF8 ++ data ++ u32be (crc32Chunk typ.toUTF8 data).toNat)
         (i := 0) (j := 4))
   have h2' :
-      (typ.toUTF8 ++ data ++ u32be (crc32 (typ.toUTF8 ++ data)).toNat).extract 0
+      (typ.toUTF8 ++ data ++ u32be (crc32Chunk typ.toUTF8 data).toNat).extract 0
           typ.toUTF8.size = typ.toUTF8 := by
     simpa [ByteArray.append_assoc] using
       (ByteArray.extract_append_eq_left
         (a := typ.toUTF8)
-        (b := data ++ u32be (crc32 (typ.toUTF8 ++ data)).toNat)
+        (b := data ++ u32be (crc32Chunk typ.toUTF8 data).toNat)
         (i := typ.toUTF8.size) rfl)
   have h2 :
-      (typ.toUTF8 ++ data ++ u32be (crc32 (typ.toUTF8 ++ data)).toNat).extract 0 4 = typ.toUTF8 := by
+      (typ.toUTF8 ++ data ++ u32be (crc32Chunk typ.toUTF8 data).toNat).extract 0 4 = typ.toUTF8 := by
     simpa [String.toUTF8_eq_toByteArray, String.size_toByteArray, htyp] using h2'
   simpa [h1, h2]
 
@@ -1822,19 +1859,19 @@ lemma mkChunk_extract_data (typ : String) (data : ByteArray) (htyp : typ.utf8Byt
     simp [ByteArray.size_append, hlen, String.toUTF8_eq_toByteArray, String.size_toByteArray, htyp]
   have h1 :
       (mkChunk typ data).extract 8 (8 + data.size) =
-        (data ++ u32be (crc32 (typ.toUTF8 ++ data)).toNat).extract 0 data.size := by
-    simpa [mkChunk, hprefix, ByteArray.append_assoc, String.toUTF8_eq_toByteArray,
+        (data ++ u32be (crc32Chunk typ.toUTF8 data).toNat).extract 0 data.size := by
+    simpa [mkChunk, mkChunkBytes_def, hprefix, ByteArray.append_assoc, String.toUTF8_eq_toByteArray,
       String.size_toByteArray, htyp, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using
       (ByteArray.extract_append_size_add
         (a := u32be data.size ++ typ.toUTF8)
-        (b := data ++ u32be (crc32 (typ.toUTF8 ++ data)).toNat)
+        (b := data ++ u32be (crc32Chunk typ.toUTF8 data).toNat)
         (i := 0) (j := data.size))
   have h2 :
-      (data ++ u32be (crc32 (typ.toUTF8 ++ data)).toNat).extract 0 data.size = data := by
+      (data ++ u32be (crc32Chunk typ.toUTF8 data).toNat).extract 0 data.size = data := by
     simpa using
       (ByteArray.extract_append_eq_left
         (a := data)
-        (b := u32be (crc32 (typ.toUTF8 ++ data)).toNat)
+        (b := u32be (crc32Chunk typ.toUTF8 data).toNat)
         (i := data.size) rfl)
   simpa [h1, h2]
 

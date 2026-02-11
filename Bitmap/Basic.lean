@@ -493,13 +493,19 @@ def crc32Table : Array UInt32 :=
       table := table.push c
     return table
 
-def crc32 (bytes : ByteArray) : UInt32 :=
+def crc32Update (c : UInt32) (bytes : ByteArray) : UInt32 :=
   Id.run do
-    let mut c : UInt32 := 0xFFFFFFFF
+    let mut c : UInt32 := c
     for b in bytes do
       let idx : Nat := ((c ^^^ (UInt32.ofNat b.toNat)) &&& (0xFF : UInt32)).toNat
       c := crc32Table[idx]! ^^^ (c >>> 8)
-    return c ^^^ 0xFFFFFFFF
+    return c
+
+def crc32 (bytes : ByteArray) : UInt32 :=
+  (crc32Update 0xFFFFFFFF bytes) ^^^ 0xFFFFFFFF
+
+def crc32Chunk (typBytes data : ByteArray) : UInt32 :=
+  (crc32Update (crc32Update 0xFFFFFFFF typBytes) data) ^^^ 0xFFFFFFFF
 
 def adler32 (bytes : ByteArray) : UInt32 :=
   Id.run do
@@ -511,17 +517,28 @@ def adler32 (bytes : ByteArray) : UInt32 :=
       b := (b + a) % mod
     return UInt32.ofNat ((b <<< 16) + a)
 
+def adler32Fast (bytes : ByteArray) : UInt32 :=
+  adler32 bytes
+
 def pngSignature : ByteArray :=
   ByteArray.mk #[
     u8 0x89, u8 0x50, u8 0x4E, u8 0x47,
     u8 0x0D, u8 0x0A, u8 0x1A, u8 0x0A
   ]
 
-def mkChunk (typ : String) (data : ByteArray) : ByteArray :=
-  let typBytes := typ.toUTF8
+def ihdrTypeBytes : ByteArray := "IHDR".toUTF8
+def idatTypeBytes : ByteArray := "IDAT".toUTF8
+def iendTypeBytes : ByteArray := "IEND".toUTF8
+
+def mkChunkBytes (typBytes : ByteArray) (data : ByteArray) : ByteArray :=
   let lenBytes := u32be data.size
-  let crc := crc32 (typBytes ++ data)
-  lenBytes ++ typBytes ++ data ++ u32be crc.toNat
+  let crc := crc32Chunk typBytes data
+  let outSize := lenBytes.size + typBytes.size + data.size + 4
+  let out := ByteArray.emptyWithCapacity outSize
+  out ++ lenBytes ++ typBytes ++ data ++ u32be crc.toNat
+
+def mkChunk (typ : String) (data : ByteArray) : ByteArray :=
+  mkChunkBytes typ.toUTF8 data
 
 def storedBlock (payload : ByteArray) (final : Bool) : ByteArray :=
   let len := payload.size
@@ -555,11 +572,41 @@ decreasing_by
   simp [ByteArray.size_extract]
   exact Nat.sub_lt_self hpos hle
 
+def deflateStoredFast (raw : ByteArray) : ByteArray :=
+  deflateStored raw
+
+def deflateStoredFastImpl (raw : ByteArray) : ByteArray :=
+  if _hzero : raw.size = 0 then
+    storedBlock ByteArray.empty true
+  else
+    let blockSize : Nat := 65535
+    let rawSize := raw.size
+    let blocks := (rawSize + blockSize - 1) / blockSize
+    let outSize := rawSize + blocks * 5
+    Id.run do
+      let mut out := ByteArray.emptyWithCapacity outSize
+      let mut pos : Nat := 0
+      while pos < rawSize do
+        let remaining := rawSize - pos
+        let len := if remaining > blockSize then blockSize else remaining
+        let final := pos + len == rawSize
+        let header :=
+          ByteArray.mk #[if final then u8 0x01 else u8 0x00]
+            ++ u16le len ++ u16le (0xFFFF - len)
+        out := out ++ header
+        out := raw.copySlice pos out out.size len
+        pos := pos + len
+      return out
+
+attribute [implemented_by deflateStoredFastImpl] deflateStored
+
 def zlibCompressStored (raw : ByteArray) : ByteArray :=
   let header := ByteArray.mk #[u8 0x78, u8 0x01]
   let deflated := deflateStored raw
   let adler := u32be (adler32 raw).toNat
-  header ++ deflated ++ adler
+  let outSize := header.size + deflated.size + adler.size
+  let out := ByteArray.emptyWithCapacity outSize
+  out ++ header ++ deflated ++ adler
 
 structure BitReader where
   data : ByteArray
@@ -1441,6 +1488,30 @@ def encodeRaw {px : Type u} [Pixel px] (bmp : Bitmap px) : ByteArray :=
   let raw := ByteArray.mk <| Array.replicate rawSize 0
   encodeRawLoop bmp.data rowBytes h 0 raw
 
+def encodeRawFast {px : Type u} [Pixel px] (bmp : Bitmap px) : ByteArray :=
+  encodeRaw bmp
+
+def encodeRawFastImpl {px : Type u} [Pixel px] (bmp : Bitmap px) : ByteArray :=
+  Id.run do
+    let w := bmp.size.width
+    let h := bmp.size.height
+    let rowBytes := w * Pixel.bytesPerPixel (α := px)
+    let rowStride := rowBytes + 1
+    let rawSize := h * rowStride
+    let mut raw := ByteArray.mk <| Array.replicate rawSize 0
+    let data := bmp.data
+    let mut y : Nat := 0
+    let mut srcOff : Nat := 0
+    let mut dstOff : Nat := 1
+    while y < h do
+      raw := data.copySlice srcOff raw dstOff rowBytes
+      y := y + 1
+      srcOff := srcOff + rowBytes
+      dstOff := dstOff + rowStride
+    return raw
+
+attribute [implemented_by encodeRawFastImpl] encodeRaw
+
 def encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px) : ByteArray :=
   Id.run do
     let w := bmp.size.width
@@ -1449,10 +1520,12 @@ def encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px) : Byte
     let ihdr := u32be w ++ u32be h ++
       ByteArray.mk #[u8 8, PngPixel.colorType (α := px), u8 0, u8 0, u8 0]
     let idat := zlibCompressStored raw
-    pngSignature
-      ++ mkChunk "IHDR" ihdr
-      ++ mkChunk "IDAT" idat
-      ++ mkChunk "IEND" ByteArray.empty
+    let ihdrChunk := mkChunkBytes ihdrTypeBytes ihdr
+    let idatChunk := mkChunkBytes idatTypeBytes idat
+    let iendChunk := mkChunkBytes iendTypeBytes ByteArray.empty
+    let outSize := pngSignature.size + ihdrChunk.size + idatChunk.size + iendChunk.size
+    let out := ByteArray.emptyWithCapacity outSize
+    out ++ pngSignature ++ ihdrChunk ++ idatChunk ++ iendChunk
 
 end Png
 
