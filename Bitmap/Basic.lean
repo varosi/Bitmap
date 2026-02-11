@@ -1566,10 +1566,6 @@ def encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px) : Byte
     let out := ByteArray.emptyWithCapacity outSize
     out ++ pngSignature ++ ihdrChunk ++ idatChunk ++ iendChunk
 
-end Png
-
-namespace Png
-
 def Bitmap.readPng {px : Type u} [Pixel px] [PngPixel px]
     (path : FilePath) : IO (Except String (Bitmap px)) := do
   let bytesOrErr <- ioToExcept (IO.FS.readBinFile path)
