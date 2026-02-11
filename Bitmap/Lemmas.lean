@@ -2592,9 +2592,9 @@ lemma parsePngSimple_encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : 
       readU32BE_proof_irrel
         (bytes := u32be w ++ u32be h ++ ihdrTailColor ct)
         (pos := 0)
-        (h1 := hpos0') (h2 := by simpa [ihdr] using hpos0)
+        (h1 := hpos0') (h2 := by exact hpos0)
     have hwidth0' :
-        readU32BE (u32be w ++ u32be h ++ ihdrTailColor ct) 0 (by simpa [ihdr] using hpos0) = w := by
+        readU32BE (u32be w ++ u32be h ++ ihdrTailColor ct) 0 (by exact hpos0) = w := by
       simpa [ihdr] using hwidth0
     exact hproof.trans hwidth0'
   have hheight' :
@@ -2603,9 +2603,9 @@ lemma parsePngSimple_encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : 
       readU32BE_proof_irrel
         (bytes := u32be w ++ u32be h ++ ihdrTailColor ct)
         (pos := 4)
-        (h1 := hpos4') (h2 := by simpa [ihdr] using hpos4)
+        (h1 := hpos4') (h2 := by exact hpos4)
     have hheight0' :
-        readU32BE (u32be w ++ u32be h ++ ihdrTailColor ct) 4 (by simpa [ihdr] using hpos4) = h := by
+        readU32BE (u32be w ++ u32be h ++ ihdrTailColor ct) 4 (by exact hpos4) = h := by
       simpa [ihdr] using hheight0
     exact hproof.trans hheight0'
   have hsize8 : (u32be w).size + (u32be h).size = 8 := by

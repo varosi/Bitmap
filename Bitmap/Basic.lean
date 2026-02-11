@@ -599,6 +599,61 @@ decreasing_by
 def deflateStoredFast (raw : ByteArray) : ByteArray :=
   deflateStoredFastAux raw ByteArray.empty
 
+structure BitWriter where
+  out : ByteArray
+  cur : UInt8
+  bitPos : Nat
+deriving Repr
+
+def BitWriter.empty : BitWriter :=
+  { out := ByteArray.empty, cur := 0, bitPos := 0 }
+
+def BitWriter.writeBit (bw : BitWriter) (bit : Nat) : BitWriter :=
+  let cur := bw.cur ||| UInt8.ofNat ((bit % 2) <<< bw.bitPos)
+  if bw.bitPos == 7 then
+    { out := bw.out.push cur, cur := 0, bitPos := 0 }
+  else
+    { bw with cur := cur, bitPos := bw.bitPos + 1 }
+
+def BitWriter.writeBits (bw : BitWriter) (bits len : Nat) : BitWriter :=
+  Id.run do
+    let mut bw := bw
+    let mut i := 0
+    while i < len do
+      bw := bw.writeBit ((bits >>> i) % 2)
+      i := i + 1
+    return bw
+
+def BitWriter.flush (bw : BitWriter) : ByteArray :=
+  if bw.bitPos == 0 then
+    bw.out
+  else
+    bw.out.push bw.cur
+
+-- Fixed Huffman literal/length code (code, bit-length).
+def fixedLitLenCode (sym : Nat) : Nat × Nat :=
+  if sym ≤ 143 then
+    (sym + 48, 8)
+  else if sym ≤ 255 then
+    (sym - 144 + 400, 9)
+  else if sym ≤ 279 then
+    (sym - 256, 7)
+  else
+    (sym - 280 + 192, 8)
+
+def deflateFixed (raw : ByteArray) : ByteArray :=
+  Id.run do
+    let mut bw := BitWriter.empty
+    -- Final block, fixed Huffman coding.
+    bw := bw.writeBits 1 1
+    bw := bw.writeBits 1 2
+    for b in raw.data do
+      let (code, len) := fixedLitLenCode b.toNat
+      bw := bw.writeBits code len
+    let (eobCode, eobLen) := fixedLitLenCode 256
+    bw := bw.writeBits eobCode eobLen
+    return bw.flush
+
 def deflateStoredFastImpl (raw : ByteArray) : ByteArray :=
   if _hzero : raw.size = 0 then
     storedBlock ByteArray.empty true
@@ -624,6 +679,14 @@ def deflateStoredFastImpl (raw : ByteArray) : ByteArray :=
 
 attribute [implemented_by deflateStoredFastImpl] deflateStoredFast
 attribute [implemented_by deflateStoredFast] deflateStored
+
+def zlibCompressFixed (raw : ByteArray) : ByteArray :=
+  let header := ByteArray.mk #[u8 0x78, u8 0x01]
+  let deflated := deflateFixed raw
+  let adler := u32be (adler32 raw).toNat
+  let outSize := header.size + deflated.size + adler.size
+  let out := ByteArray.emptyWithCapacity outSize
+  out ++ header ++ deflated ++ adler
 
 def zlibCompressStored (raw : ByteArray) : ByteArray :=
   let header := ByteArray.mk #[u8 0x78, u8 0x01]
@@ -1568,6 +1631,22 @@ def encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px) : Byte
     let ihdr := u32be w ++ u32be h ++
       ByteArray.mk #[u8 8, PngPixel.colorType (α := px), u8 0, u8 0, u8 0]
     let idat := zlibCompressStored raw
+    let ihdrChunk := mkChunkBytes ihdrTypeBytes ihdr
+    let idatChunk := mkChunkBytes idatTypeBytes idat
+    let iendChunk := mkChunkBytes iendTypeBytes ByteArray.empty
+    let outSize := pngSignature.size + ihdrChunk.size + idatChunk.size + iendChunk.size
+    let out := ByteArray.emptyWithCapacity outSize
+    out ++ pngSignature ++ ihdrChunk ++ idatChunk ++ iendChunk
+
+-- Encode a bitmap using fixed-Huffman deflate blocks.
+def encodeBitmapFixed {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px) : ByteArray :=
+  Id.run do
+    let w := bmp.size.width
+    let h := bmp.size.height
+    let raw := PngPixel.encodeRaw (α := px) bmp
+    let ihdr := u32be w ++ u32be h ++
+      ByteArray.mk #[u8 8, PngPixel.colorType (α := px), u8 0, u8 0, u8 0]
+    let idat := zlibCompressFixed raw
     let ihdrChunk := mkChunkBytes ihdrTypeBytes ihdr
     let idatChunk := mkChunkBytes idatTypeBytes idat
     let iendChunk := mkChunkBytes iendTypeBytes ByteArray.empty
