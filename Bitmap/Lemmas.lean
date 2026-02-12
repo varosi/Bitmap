@@ -518,6 +518,29 @@ lemma readBit_readerAt_writeBit (bw : BitWriter) (bit : Nat)
       apply BitReader.ext <;> simp [BitWriter.readerAt, BitWriter.writeBit, h7]
     simp [hread, hreader]
 
+-- Decompose the low bits of a number into its LSB and the shifted remainder.
+lemma mod_two_pow_decomp (bits n : Nat) :
+    bits % 2 ^ (n + 1) =
+      (bits % 2) ||| (((bits >>> 1) % 2 ^ n) <<< 1) := by
+  apply Nat.eq_of_testBit_eq
+  intro i
+  cases i with
+  | zero =>
+      -- low bit comes from `bits % 2`; the shifted remainder has bit 0 cleared.
+      simp
+  | succ k =>
+      -- higher bits come from the shifted remainder.
+      have hbit0 : (bits % 2).testBit (k + 1) = false := by
+        have hlt : ¬k + 1 < 1 := by omega
+        have h := (Nat.testBit_mod_two_pow bits 1 (k + 1))
+        simpa [hlt] using h
+      by_cases hk : k < n
+      · have hk' : k + 1 < n + 1 := Nat.succ_lt_succ hk
+        simp [hk, hk', hbit0, Nat.add_comm]
+      · have hk' : ¬k + 1 < n + 1 := by
+          exact not_lt_of_ge (Nat.succ_le_succ (Nat.le_of_not_gt hk))
+        simp [hk, hk', hbit0, Nat.add_comm]
+
 lemma shiftLeft_bit (b : Bool) (res n : Nat) :
     (Nat.bit b res) <<< n = (res <<< (n + 1)) + (b.toNat <<< n) := by
   -- Expand `bit` and shift-left as multiplication.
