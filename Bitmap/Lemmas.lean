@@ -127,6 +127,43 @@ lemma reverseBitsAux_eq_add (code len res : Nat) :
                             simp [Nat.bit_val, Nat.shiftLeft_eq]
                 simp [hrev, Nat.add_comm]
 
+lemma reverseBits_succ (code n : Nat) :
+    reverseBits code (n + 1) =
+      reverseBits (code >>> 1) n + ((code.testBit 0).toNat <<< n) := by
+  calc
+    reverseBits code (n + 1)
+        = reverseBitsAux (code >>> 1) n (Nat.bit (code.testBit 0) 0) := by
+            simp [reverseBits, reverseBitsAux]
+    _ = reverseBits (code >>> 1) n + ((Nat.bit (code.testBit 0) 0) <<< n) := by
+            exact (reverseBitsAux_eq_add (code := code >>> 1) (len := n) (res := Nat.bit (code.testBit 0) 0))
+    _ = reverseBits (code >>> 1) n + ((code.testBit 0).toNat <<< n) := by
+            simp [Nat.bit_val, Nat.shiftLeft_eq]
+
+lemma reverseBits_lt (code len : Nat) : reverseBits code len < 2 ^ len := by
+  induction len generalizing code with
+  | zero =>
+      simp [reverseBits, reverseBitsAux]
+  | succ n ih =>
+      have hfirst : reverseBits (code >>> 1) n < 2 ^ n := ih _
+      have hbit : (code.testBit 0).toNat ≤ 1 := by
+        cases h : code.testBit 0 <;> simp
+      have hsecond : (code.testBit 0).toNat <<< n ≤ 2 ^ n := by
+        -- shift-left by `n` is multiplication by `2^n`.
+        simpa [Nat.shiftLeft_eq] using
+          (Nat.mul_le_mul_right (2 ^ n) hbit)
+      have hsum : reverseBits code (n + 1) < 2 ^ n + 2 ^ n := by
+        have hdef := reverseBits_succ code n
+        -- combine the bounds on the two summands
+        calc
+          reverseBits code (n + 1)
+              = reverseBits (code >>> 1) n + ((code.testBit 0).toNat <<< n) := hdef
+          _ < 2 ^ n + 2 ^ n := by
+              exact Nat.add_lt_add_of_lt_of_le hfirst hsecond
+      have hsum' : reverseBits code (n + 1) < 2 ^ n * 2 := by
+        simpa [Nat.mul_two] using hsum
+      -- `2^n * 2 = 2^(n+1)`
+      simpa [Nat.pow_succ] using hsum'
+
 -- Static Huffman length base table size.
 lemma lengthBases_size : lengthBases.size = 29 := by decide
 -- Static Huffman length extra table size.
