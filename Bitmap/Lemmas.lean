@@ -413,6 +413,43 @@ lemma fixedLitLenCode_row_hi2 (sym : Nat) (hsym : 280 ≤ sym) (hsym' : sym ≤ 
   have hcalc1 : sym - 280 + 192 - 192 + 280 = sym - 280 + 280 := by omega
   have hcalc2 : sym - 280 + 280 = sym := Nat.sub_add_cancel hsym
   simpa [hcalc1, hcalc2] using hrow
+
+lemma fixedLitLenCode_lookup (sym : Nat) (hsym : sym < 288) :
+    let (code, len) := fixedLitLenCode sym
+    if _ : len = 7 then
+      fixedLitLenRow7[reverseBits code 7]'(by
+        simpa [fixedLitLenRow7_size, Nat.shiftLeft_eq] using (reverseBits_lt code 7)) = some sym
+    else if _ : len = 8 then
+      fixedLitLenRow8[reverseBits code 8]'(by
+        simpa [fixedLitLenRow8_size, Nat.shiftLeft_eq] using (reverseBits_lt code 8)) = some sym
+    else
+      fixedLitLenRow9[reverseBits code 9]'(by
+        simpa [fixedLitLenRow9_size, Nat.shiftLeft_eq] using (reverseBits_lt code 9)) = some sym := by
+  -- split by the fixed Huffman ranges
+  by_cases h143 : sym ≤ 143
+  · -- 8-bit codes, low range
+    have hrow := fixedLitLenCode_row_lo (sym := sym) h143
+    -- rewrite through the pair
+    dsimp
+    simp [fixedLitLenCode, h143, hrow]
+  · have h144 : 144 ≤ sym := by omega
+    by_cases h255 : sym ≤ 255
+    · -- 9-bit codes, mid range
+      have hrow := fixedLitLenCode_row_mid (sym := sym) h144 h255
+      dsimp
+      simp [fixedLitLenCode, h143, h255, hrow]
+    · have h256 : 256 ≤ sym := by omega
+      by_cases h279 : sym ≤ 279
+      · -- 7-bit codes
+        have hrow := fixedLitLenCode_row_hi (sym := sym) h256 h279
+        dsimp
+        simp [fixedLitLenCode, h143, h255, h279, hrow]
+      · -- 8-bit codes, high range
+        have h280 : 280 ≤ sym := by omega
+        have h287 : sym ≤ 287 := by omega
+        have hrow := fixedLitLenCode_row_hi2 (sym := sym) h280 h287
+        dsimp
+        simp [fixedLitLenCode, h143, h255, h279, hrow]
 -- Static Huffman length base table size.
 lemma lengthBases_size : lengthBases.size = 29 := by decide
 -- Static Huffman length extra table size.
