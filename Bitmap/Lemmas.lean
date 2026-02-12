@@ -36,6 +36,49 @@ lemma readBit_data (br : BitReader) (h : br.bytePos < br.data.size) :
   have hne : br.bytePos ≠ br.data.size := ne_of_lt h
   by_cases hnext : br.bitPos + 1 = 8 <;> simp [hne, hnext]
 
+def BitWriter.bitCount (bw : BitWriter) : Nat :=
+  bw.out.size * 8 + bw.bitPos
+
+@[simp] lemma bitCount_empty : BitWriter.bitCount BitWriter.empty = 0 := by
+  simp [BitWriter.bitCount, BitWriter.empty]
+
+lemma bitCount_writeBit (bw : BitWriter) (bit : Nat) :
+    (BitWriter.writeBit bw bit).bitCount = bw.bitCount + 1 := by
+  unfold BitWriter.writeBit BitWriter.bitCount
+  by_cases h : bw.bitPos = 7
+  · simp [h, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm]
+  · have hlt : bw.bitPos + 1 < 8 := by
+      have hle : bw.bitPos + 1 ≤ 8 := Nat.succ_le_of_lt bw.hbit
+      exact lt_of_le_of_ne hle h
+    simp [h, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm, hlt, Nat.mul_add]
+
+lemma bitCount_writeBits (bw : BitWriter) (bits len : Nat) :
+    (BitWriter.writeBits bw bits len).bitCount = bw.bitCount + len := by
+  induction len generalizing bw bits with
+  | zero =>
+      simp [BitWriter.writeBits]
+  | succ n ih =>
+      simp [BitWriter.writeBits, ih, bitCount_writeBit, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm]
+
+lemma flush_size (bw : BitWriter) :
+    bw.flush.size = bw.out.size + (if bw.bitPos = 0 then 0 else 1) := by
+  by_cases h : bw.bitPos = 0 <;> simp [BitWriter.flush, h]
+
+lemma flush_size_mul_ge_bitCount (bw : BitWriter) :
+    bw.flush.size * 8 ≥ bw.bitCount := by
+  unfold BitWriter.bitCount
+  by_cases h : bw.bitPos = 0
+  · simp [flush_size, h, Nat.mul_add, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc]
+  · have hsize : bw.flush.size = bw.out.size + 1 := by
+      simp [flush_size, h]
+    calc
+      bw.flush.size * 8 = (bw.out.size + 1) * 8 := by
+        simp [hsize]
+      _ = bw.out.size * 8 + 8 := by
+        omega
+      _ ≥ bw.out.size * 8 + bw.bitPos := by
+        omega
+
 -- Static Huffman length base table size.
 lemma lengthBases_size : lengthBases.size = 29 := by decide
 -- Static Huffman length extra table size.
@@ -50,6 +93,12 @@ end Png
 namespace Lemmas
 
 open Png
+
+def encodeBitmapIdat {px : Type u} [Pixel px] [PngPixel px]
+    (bmp : Bitmap px) (mode : PngEncodeMode) : ByteArray :=
+  match mode with
+  | .stored => zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)
+  | .fixed => zlibCompressFixed (PngPixel.encodeRaw (α := px) bmp)
 
 -- Linear index from (x,y) is within bounds for Nat coordinates.
 lemma arrayCoordSize_nat
@@ -1528,6 +1577,143 @@ lemma zlibCompressStored_size_ge (raw : ByteArray) :
   rw [hsz]
   exact h6
 
+set_option maxHeartbeats 1000000 in
+-- The zlib fixed-compression header bytes are fixed.
+lemma zlibCompressFixed_header (raw : ByteArray) :
+    (zlibCompressFixed raw).extract 0 2 = ByteArray.mk #[u8 0x78, u8 0x01] := by
+  let header : ByteArray := ByteArray.mk #[u8 0x78, u8 0x01]
+  let deflated := deflateFixed raw
+  let adler := u32be (adler32 raw).toNat
+  have hsize : header.size = 2 := by decide
+  have hprefix :
+      (header ++ deflated ++ adler).extract 0 2 = header.extract 0 2 := by
+    apply byteArray_extract_append_prefix (a := header) (b := deflated ++ adler) (n := 2)
+    simp [hsize]
+  have hheader : header.extract 0 2 = header := by
+    rw [← hsize, ByteArray.extract_zero_size]
+  simp [zlibCompressFixed, header, deflated, adler, hprefix, hheader]
+
+set_option maxHeartbeats 1000000 in
+-- Size of zlib fixed-compression output (header + deflate + adler32).
+lemma zlibCompressFixed_size (raw : ByteArray) :
+    (zlibCompressFixed raw).size = (deflateFixed raw).size + 6 := by
+  unfold zlibCompressFixed
+  have hheader : (ByteArray.mk #[u8 0x78, u8 0x01]).size = 2 := by decide
+  simp [ByteArray.size_append, u32be_size, hheader]
+  omega
+
+set_option maxHeartbeats 1000000 in
+-- Zlib fixed-compression output has at least the 2-byte header and 4-byte Adler32.
+lemma zlibCompressFixed_size_ge (raw : ByteArray) :
+    6 ≤ (zlibCompressFixed raw).size := by
+  have hsz : (zlibCompressFixed raw).size = (deflateFixed raw).size + 6 :=
+    zlibCompressFixed_size raw
+  have h6 : 6 ≤ (deflateFixed raw).size + 6 := Nat.le_add_left _ _
+  rw [hsz]
+  exact h6
+
+set_option maxHeartbeats 1000000 in
+-- Zlib header bytes in fixed-compression output match the expected constants.
+lemma zlibCompressFixed_cmf_flg (raw : ByteArray) :
+    let bytes := zlibCompressFixed raw
+    let h0 : 0 < bytes.size := by
+      exact lt_of_lt_of_le (by decide : 0 < 6) (zlibCompressFixed_size_ge raw)
+    let h1 : 1 < bytes.size := by
+      exact lt_of_lt_of_le (by decide : 1 < 6) (zlibCompressFixed_size_ge raw)
+    bytes[0]'h0 = u8 0x78 ∧ bytes[1]'h1 = u8 0x01 := by
+  let bytes := zlibCompressFixed raw
+  let header : ByteArray := ByteArray.mk #[u8 0x78, u8 0x01]
+  let deflated := deflateFixed raw
+  let adler := u32be (adler32 raw).toNat
+  have h0h : 0 < header.size := by decide
+  have h1h : 1 < header.size := by decide
+  have h0 : 0 < bytes.size := by
+    exact lt_of_lt_of_le (by decide : 0 < 6) (zlibCompressFixed_size_ge raw)
+  have h1 : 1 < bytes.size := by
+    exact lt_of_lt_of_le (by decide : 1 < 6) (zlibCompressFixed_size_ge raw)
+  have hle : header.size ≤ (header ++ deflated ++ adler).size := by
+    simp [ByteArray.size_append]
+    omega
+  have h0' : 0 < (header ++ deflated ++ adler).size := lt_of_lt_of_le h0h hle
+  have h1' : 1 < (header ++ deflated ++ adler).size := lt_of_lt_of_le h1h hle
+  have hget0 :
+      (header ++ deflated ++ adler)[0]'h0' = header[0]'h0h := by
+    have hget := ByteArray.get_append_left (a := header) (b := deflated ++ adler) (i := 0) h0h
+    simpa [ByteArray.append_assoc] using hget
+  have hget1 :
+      (header ++ deflated ++ adler)[1]'h1' = header[1]'h1h := by
+    have hget := ByteArray.get_append_left (a := header) (b := deflated ++ adler) (i := 1) h1h
+    simpa [ByteArray.append_assoc] using hget
+  have hheader0 : header[0]'h0h = u8 0x78 := by
+    rfl
+  have hheader1 : header[1]'h1h = u8 0x01 := by
+    rfl
+  have hget0' : bytes[0]'h0 = u8 0x78 := by
+    simpa [bytes, zlibCompressFixed, hget0, hheader0]
+  have hget1' : bytes[1]'h1 = u8 0x01 := by
+    simpa [bytes, zlibCompressFixed, hget1, hheader1]
+  exact ⟨hget0', hget1'⟩
+
+-- Extracting the deflated payload from zlib fixed-compression output.
+lemma zlibCompressFixed_extract_deflated (raw : ByteArray) :
+    (zlibCompressFixed raw).extract 2 ((zlibCompressFixed raw).size - 4) = deflateFixed raw := by
+  let header : ByteArray := ByteArray.mk #[u8 0x78, u8 0x01]
+  let deflated := deflateFixed raw
+  let adler := u32be (adler32 raw).toNat
+  have hheader : header.size = 2 := by decide
+  have hadler : adler.size = 4 := by
+    simpa using (u32be_size (adler32 raw).toNat)
+  have hsize'' : header.size + deflated.size + adler.size - 4 = deflated.size + 2 := by
+    simp [hheader, hadler]
+    omega
+  calc
+    (zlibCompressFixed raw).extract 2 ((zlibCompressFixed raw).size - 4)
+        = (header ++ deflated ++ adler).extract 2 (header.size + deflated.size + adler.size - 4) := by
+            simp [zlibCompressFixed, header, deflated, adler, ByteArray.size_append, hheader, hadler]
+    _ = (header ++ deflated ++ adler).extract 2 (deflated.size + 2) := by
+          simp [hsize'']
+    _ = (deflated ++ adler).extract 0 deflated.size := by
+          have h :=
+            (ByteArray.extract_append_size_add
+              (a := header) (b := deflated ++ adler) (i := 0) (j := deflated.size))
+          simpa [hheader, ByteArray.append_assoc, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using h
+    _ = deflated := by
+          have hprefix :
+              (deflated ++ adler).extract 0 deflated.size = deflated.extract 0 deflated.size := by
+            exact byteArray_extract_append_prefix (a := deflated) (b := adler) (n := deflated.size) (by exact le_rfl)
+          simp [hprefix, ByteArray.extract_zero_size]
+
+-- Extracting the Adler32 trailer from zlib fixed-compression output.
+lemma zlibCompressFixed_extract_adler (raw : ByteArray) :
+    (zlibCompressFixed raw).extract ((zlibCompressFixed raw).size - 4)
+        ((zlibCompressFixed raw).size - 4 + 4) = u32be (adler32 raw).toNat := by
+  let header : ByteArray := ByteArray.mk #[u8 0x78, u8 0x01]
+  let deflated := deflateFixed raw
+  let adler := u32be (adler32 raw).toNat
+  have hheader : header.size = 2 := by decide
+  have hadler : adler.size = 4 := by
+    simpa using (u32be_size (adler32 raw).toNat)
+  have hsize'' : header.size + deflated.size + adler.size - 4 = deflated.size + 2 := by
+    simp [hheader, hadler]
+    omega
+  have hprefix : (header ++ deflated).size = deflated.size + 2 := by
+    simp [ByteArray.size_append, hheader, Nat.add_comm]
+  calc
+    (zlibCompressFixed raw).extract ((zlibCompressFixed raw).size - 4)
+        ((zlibCompressFixed raw).size - 4 + 4)
+        = (header ++ deflated ++ adler).extract (header.size + deflated.size + adler.size - 4)
+            (header.size + deflated.size + adler.size - 4 + 4) := by
+              simp [zlibCompressFixed, header, deflated, adler, ByteArray.size_append, hheader, hadler]
+    _ = (header ++ deflated ++ adler).extract (deflated.size + 2) (deflated.size + 2 + 4) := by
+          simp [hsize'']
+    _ = adler.extract 0 adler.size := by
+          have h :=
+            (ByteArray.extract_append_size_add
+              (a := header ++ deflated) (b := adler) (i := 0) (j := adler.size))
+          simpa [hprefix, hadler, ByteArray.append_assoc, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using h
+    _ = adler := by
+          simp [ByteArray.extract_zero_size]
+
 -- Zlib header bytes in stored-compression output match the expected constants.
 lemma zlibCompressStored_cmf_flg (raw : ByteArray) :
     let bytes := zlibCompressStored raw
@@ -1897,16 +2083,19 @@ lemma idat_utf8ByteSize : ("IDAT".utf8ByteSize) = 4 := by decide
 lemma iend_utf8ByteSize : ("IEND".utf8ByteSize) = 4 := by decide
 
 -- Encoded PNG starts with the PNG signature.
-lemma encodeBitmap_signature {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px) :
-    (encodeBitmap bmp).extract 0 8 = pngSignature := by
+lemma encodeBitmap_signature {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
+    (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (mode : PngEncodeMode := .stored) :
+    (encodeBitmap bmp hw hh mode).extract 0 8 = pngSignature := by
   have hsig : pngSignature.size = 8 := pngSignature_size
-  simpa [encodeBitmap, hsig, ByteArray.append_assoc] using
+  let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
+  simpa [encodeBitmap, encodeBitmapUnchecked, hsig, ByteArray.append_assoc, idat, encodeBitmapIdat] using
     (ByteArray.extract_append_eq_left
       (a := pngSignature)
       (b := mkChunk "IHDR"
             (u32be bmp.size.width ++ u32be bmp.size.height ++
               ihdrTailColor (PngPixel.colorType (α := px))) ++
-          mkChunk "IDAT" (zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)) ++
+          mkChunk "IDAT" idat ++
           mkChunk "IEND" ByteArray.empty)
       (i := pngSignature.size) rfl)
 
@@ -1974,12 +2163,14 @@ lemma mkChunk_extract_data (typ : String) (data : ByteArray) (htyp : typ.utf8Byt
   simpa [h1, h2]
 
 -- The IHDR length field in the encoded PNG is 13.
-lemma encodeBitmap_extract_ihdr_len {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px) :
-    (encodeBitmap bmp).extract 8 12 = u32be 13 := by
+lemma encodeBitmap_extract_ihdr_len {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
+    (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (mode : PngEncodeMode := .stored) :
+    (encodeBitmap bmp hw hh mode).extract 8 12 = u32be 13 := by
   let ihdr :=
     u32be bmp.size.width ++ u32be bmp.size.height ++
       ihdrTailColor (PngPixel.colorType (α := px))
-  let idat := zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)
+  let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
   have hsig : pngSignature.size = 8 := pngSignature_size
   have hihdr : ihdr.size = 13 := by
     simpa [ihdr] using ihdr_payload_size bmp.size.width bmp.size.height (PngPixel.colorType (α := px))
@@ -1991,9 +2182,9 @@ lemma encodeBitmap_extract_ihdr_len {px : Type u} [Pixel px] [PngPixel px] (bmp 
       _ = (mkChunk "IHDR" ihdr).size := by
         simp [hsize]
   have hshift :
-      (encodeBitmap bmp).extract 8 12 =
+      (encodeBitmap bmp hw hh mode).extract 8 12 =
         (mkChunk "IHDR" ihdr ++ mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty).extract 0 4 := by
-    simpa [encodeBitmap, hsig] using
+    simpa [encodeBitmap, encodeBitmapUnchecked, hsig, idat, encodeBitmapIdat] using
       (ByteArray.extract_append_size_add
         (a := pngSignature)
         (b := mkChunk "IHDR" ihdr ++ mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty)
@@ -2012,18 +2203,22 @@ lemma encodeBitmap_extract_ihdr_len {px : Type u} [Pixel px] [PngPixel px] (bmp 
 
 -- Reading the IHDR length from the encoded PNG yields 13.
 lemma readU32BE_encodeBitmap_ihdr_len {px : Type u} [Pixel px] [PngPixel px]
-    (bmp : Bitmap px) (h : 8 + 3 < (encodeBitmap bmp).size) :
-    readU32BE (encodeBitmap bmp) 8 h = 13 := by
-  exact readU32BE_of_extract_eq (bytes := encodeBitmap bmp) (pos := 8) (n := 13) h
-    (encodeBitmap_extract_ihdr_len bmp) (by decide)
+    (bmp : Bitmap px) (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (mode : PngEncodeMode := .stored)
+    (h : 8 + 3 < (encodeBitmap bmp hw hh mode).size) :
+    readU32BE (encodeBitmap bmp hw hh mode) 8 h = 13 := by
+  exact readU32BE_of_extract_eq (bytes := encodeBitmap bmp hw hh mode) (pos := 8) (n := 13) h
+    (encodeBitmap_extract_ihdr_len bmp hw hh mode) (by decide)
 
 -- The IHDR type field in the encoded PNG is "IHDR".
-lemma encodeBitmap_extract_ihdr_type {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px) :
-    (encodeBitmap bmp).extract 12 16 = "IHDR".toUTF8 := by
+lemma encodeBitmap_extract_ihdr_type {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
+    (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (mode : PngEncodeMode := .stored) :
+    (encodeBitmap bmp hw hh mode).extract 12 16 = "IHDR".toUTF8 := by
   let ihdr :=
     u32be bmp.size.width ++ u32be bmp.size.height ++
       ihdrTailColor (PngPixel.colorType (α := px))
-  let idat := zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)
+  let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
   have hsig : pngSignature.size = 8 := pngSignature_size
   have hchunk_ge : 8 ≤ (mkChunk "IHDR" ihdr).size := by
     have hsize : (mkChunk "IHDR" ihdr).size = ihdr.size + "IHDR".utf8ByteSize + 8 :=
@@ -2033,9 +2228,9 @@ lemma encodeBitmap_extract_ihdr_type {px : Type u} [Pixel px] [PngPixel px] (bmp
       _ = (mkChunk "IHDR" ihdr).size := by
         simp [hsize]
   have hshift :
-      (encodeBitmap bmp).extract 12 16 =
+      (encodeBitmap bmp hw hh mode).extract 12 16 =
         (mkChunk "IHDR" ihdr ++ mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty).extract 4 8 := by
-    simpa [encodeBitmap, hsig] using
+    simpa [encodeBitmap, encodeBitmapUnchecked, hsig, idat, encodeBitmapIdat] using
       (ByteArray.extract_append_size_add
         (a := pngSignature)
         (b := mkChunk "IHDR" ihdr ++ mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty)
@@ -2054,14 +2249,16 @@ lemma encodeBitmap_extract_ihdr_type {px : Type u} [Pixel px] [PngPixel px] (bmp
   simp [hshift, hleft, htyp]
 
 -- The IHDR payload bytes in the encoded PNG match the constructed IHDR payload.
-lemma encodeBitmap_extract_ihdr_data {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px) :
-    (encodeBitmap bmp).extract 16 29 =
+lemma encodeBitmap_extract_ihdr_data {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
+    (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (mode : PngEncodeMode := .stored) :
+    (encodeBitmap bmp hw hh mode).extract 16 29 =
       (u32be bmp.size.width ++ u32be bmp.size.height ++
         ihdrTailColor (PngPixel.colorType (α := px))) := by
   let ihdr :=
     u32be bmp.size.width ++ u32be bmp.size.height ++
       ihdrTailColor (PngPixel.colorType (α := px))
-  let idat := zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)
+  let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
   have hsig : pngSignature.size = 8 := pngSignature_size
   have hihdr : ihdr.size = 13 := by
     simpa [ihdr] using ihdr_payload_size bmp.size.width bmp.size.height (PngPixel.colorType (α := px))
@@ -2073,9 +2270,9 @@ lemma encodeBitmap_extract_ihdr_data {px : Type u} [Pixel px] [PngPixel px] (bmp
       _ = (mkChunk "IHDR" ihdr).size := by
         simp [hsize, hihdr]
   have hshift :
-      (encodeBitmap bmp).extract 16 29 =
+      (encodeBitmap bmp hw hh mode).extract 16 29 =
         (mkChunk "IHDR" ihdr ++ mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty).extract 8 21 := by
-    simpa [encodeBitmap, hsig] using
+    simpa [encodeBitmap, encodeBitmapUnchecked, hsig, idat, encodeBitmapIdat] using
       (ByteArray.extract_append_size_add
         (a := pngSignature)
         (b := mkChunk "IHDR" ihdr ++ mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty)
@@ -2116,19 +2313,21 @@ lemma encodeBitmap_sig_ihdr_size {px : Type u} [Pixel px] [PngPixel px] (bmp : B
             simp [hihdr, ihdr_utf8ByteSize, Nat.add_comm]
 
 -- The IDAT length field in the encoded PNG matches the compressed payload size.
-lemma encodeBitmap_extract_idat_len {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px) :
-    (encodeBitmap bmp).extract 33 37 =
-      u32be (zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)).size := by
+lemma encodeBitmap_extract_idat_len {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
+    (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (mode : PngEncodeMode := .stored) :
+    (encodeBitmap bmp hw hh mode).extract 33 37 =
+      u32be (encodeBitmapIdat (bmp := bmp) (mode := mode)).size := by
   let ihdr :=
     u32be bmp.size.width ++ u32be bmp.size.height ++
       ihdrTailColor (PngPixel.colorType (α := px))
-  let idat := zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)
+  let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
   have hsig : (pngSignature ++ mkChunk "IHDR" ihdr).size = 33 := by
     simpa [ihdr] using encodeBitmap_sig_ihdr_size (bmp := bmp)
   have hshift :
-      (encodeBitmap bmp).extract 33 37 =
+      (encodeBitmap bmp hw hh mode).extract 33 37 =
         (mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty).extract 0 4 := by
-    simpa [encodeBitmap, hsig, ByteArray.append_assoc] using
+    simpa [encodeBitmap, encodeBitmapUnchecked, hsig, idat, encodeBitmapIdat, ByteArray.append_assoc] using
       (ByteArray.extract_append_size_add
         (a := pngSignature ++ mkChunk "IHDR" ihdr)
         (b := mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty)
@@ -2154,29 +2353,33 @@ lemma encodeBitmap_extract_idat_len {px : Type u} [Pixel px] [PngPixel px] (bmp 
 
 -- Reading the IDAT length from the encoded PNG yields the compressed payload size.
 lemma readU32BE_encodeBitmap_idat_len {px : Type u} [Pixel px] [PngPixel px]
-    (bmp : Bitmap px) (h : 33 + 3 < (encodeBitmap bmp).size)
-    (hidat : (zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)).size < 2 ^ 32) :
-    readU32BE (encodeBitmap bmp) 33 h =
-      (zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)).size := by
-  let idat := zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)
-  have hextract : (encodeBitmap bmp).extract 33 37 = u32be idat.size := by
-    simpa [idat] using encodeBitmap_extract_idat_len (bmp := bmp)
-  exact readU32BE_of_extract_eq (bytes := encodeBitmap bmp) (pos := 33) (n := idat.size) h
+    (bmp : Bitmap px) (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (mode : PngEncodeMode := .stored)
+    (h : 33 + 3 < (encodeBitmap bmp hw hh mode).size)
+    (hidat : (encodeBitmapIdat (bmp := bmp) (mode := mode)).size < 2 ^ 32) :
+    readU32BE (encodeBitmap bmp hw hh mode) 33 h =
+      (encodeBitmapIdat (bmp := bmp) (mode := mode)).size := by
+  let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
+  have hextract : (encodeBitmap bmp hw hh mode).extract 33 37 = u32be idat.size := by
+    simpa [idat] using encodeBitmap_extract_idat_len (bmp := bmp) (hw := hw) (hh := hh) (mode := mode)
+  exact readU32BE_of_extract_eq (bytes := encodeBitmap bmp hw hh mode) (pos := 33) (n := idat.size) h
     hextract hidat
 
 -- The IDAT type field in the encoded PNG is "IDAT".
-lemma encodeBitmap_extract_idat_type {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px) :
-    (encodeBitmap bmp).extract 37 41 = "IDAT".toUTF8 := by
+lemma encodeBitmap_extract_idat_type {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
+    (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (mode : PngEncodeMode := .stored) :
+    (encodeBitmap bmp hw hh mode).extract 37 41 = "IDAT".toUTF8 := by
   let ihdr :=
     u32be bmp.size.width ++ u32be bmp.size.height ++
       ihdrTailColor (PngPixel.colorType (α := px))
-  let idat := zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)
+  let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
   have hsig : (pngSignature ++ mkChunk "IHDR" ihdr).size = 33 := by
     simpa [ihdr] using encodeBitmap_sig_ihdr_size (bmp := bmp)
   have hshift :
-      (encodeBitmap bmp).extract 37 41 =
+      (encodeBitmap bmp hw hh mode).extract 37 41 =
         (mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty).extract 4 8 := by
-    simpa [encodeBitmap, hsig, ByteArray.append_assoc] using
+    simpa [encodeBitmap, encodeBitmapUnchecked, hsig, idat, encodeBitmapIdat, ByteArray.append_assoc] using
       (ByteArray.extract_append_size_add
         (a := pngSignature ++ mkChunk "IHDR" ihdr)
         (b := mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty)
@@ -2202,21 +2405,25 @@ lemma encodeBitmap_extract_idat_type {px : Type u} [Pixel px] [PngPixel px] (bmp
   simp [hshift, hleft, htyp]
 
 -- The IDAT payload bytes in the encoded PNG are the compressed bitmap bytes.
-lemma encodeBitmap_extract_idat_data {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px) :
-    (encodeBitmap bmp).extract 41 (41 + (zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)).size) =
-      zlibCompressStored (PngPixel.encodeRaw (α := px) bmp) := by
+lemma encodeBitmap_extract_idat_data {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
+    (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (mode : PngEncodeMode := .stored) :
+    (encodeBitmap bmp hw hh mode).extract
+        41 (41 + (encodeBitmapIdat (bmp := bmp) (mode := mode)).size) =
+      encodeBitmapIdat (bmp := bmp) (mode := mode) := by
   let ihdr :=
     u32be bmp.size.width ++ u32be bmp.size.height ++
       ihdrTailColor (PngPixel.colorType (α := px))
-  let idat := zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)
+  let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
   let sigIhdr := pngSignature ++ mkChunk "IHDR" ihdr
   let tail := mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty
   have hsig : sigIhdr.size = 33 := by
     simpa [sigIhdr, ihdr] using encodeBitmap_sig_ihdr_size (bmp := bmp)
-  have hdef : encodeBitmap bmp = sigIhdr ++ tail := by
-    simp [encodeBitmap, sigIhdr, tail, ihdr, idat, ihdrTailColor, ByteArray.append_assoc, Id.run]
+  have hdef : encodeBitmap bmp hw hh mode = sigIhdr ++ tail := by
+    simp [encodeBitmap, encodeBitmapUnchecked, sigIhdr, tail, ihdr, idat, ihdrTailColor,
+      encodeBitmapIdat, ByteArray.append_assoc, Id.run]
   have hshift' :
-      (encodeBitmap bmp).extract (sigIhdr.size + 8) (sigIhdr.size + (8 + idat.size)) =
+      (encodeBitmap bmp hw hh mode).extract (sigIhdr.size + 8) (sigIhdr.size + (8 + idat.size)) =
         tail.extract 8 (8 + idat.size) := by
     simpa [hdef] using
       (ByteArray.extract_append_size_add
@@ -2228,7 +2435,7 @@ lemma encodeBitmap_extract_idat_data {px : Type u} [Pixel px] [PngPixel px] (bmp
   have h41' : sigIhdr.size + (8 + idat.size) = 41 + idat.size := by
     omega
   have hshift :
-      (encodeBitmap bmp).extract 41 (41 + idat.size) =
+      (encodeBitmap bmp hw hh mode).extract 41 (41 + idat.size) =
         tail.extract 8 (8 + idat.size) := by
     simpa [h41, h41'] using hshift'
   have hleft :
@@ -2250,20 +2457,22 @@ lemma encodeBitmap_extract_idat_data {px : Type u} [Pixel px] [PngPixel px] (bmp
   have hdata : (mkChunk "IDAT" idat).extract 8 (8 + idat.size) = idat := by
     simpa using mkChunk_extract_data "IDAT" idat idat_utf8ByteSize
   calc
-    (encodeBitmap bmp).extract 41 (41 + idat.size)
+    (encodeBitmap bmp hw hh mode).extract 41 (41 + idat.size)
         = tail.extract 8 (8 + idat.size) := hshift
     _ = (mkChunk "IDAT" idat).extract 8 (8 + idat.size) := hleft
     _ = idat := hdata
 
 -- The IEND length field in the encoded PNG is zero.
-lemma encodeBitmap_extract_iend_len {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px) :
-    (encodeBitmap bmp).extract
-        (45 + (zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)).size)
-        (49 + (zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)).size) = u32be 0 := by
+lemma encodeBitmap_extract_iend_len {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
+    (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (mode : PngEncodeMode := .stored) :
+    (encodeBitmap bmp hw hh mode).extract
+        (45 + (encodeBitmapIdat (bmp := bmp) (mode := mode)).size)
+        (49 + (encodeBitmapIdat (bmp := bmp) (mode := mode)).size) = u32be 0 := by
   let ihdr :=
     u32be bmp.size.width ++ u32be bmp.size.height ++
       ihdrTailColor (PngPixel.colorType (α := px))
-  let idat := zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)
+  let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
   let sigIhdr := pngSignature ++ mkChunk "IHDR" ihdr
   let tail := mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty
   have hsig : sigIhdr.size = 33 := by
@@ -2276,10 +2485,11 @@ lemma encodeBitmap_extract_iend_len {px : Type u} [Pixel px] [PngPixel px] (bmp 
           = idat.size + "IDAT".utf8ByteSize + 8 := hsize
       _ = idat.size + 12 := by
           simp [idat_utf8ByteSize]
-  have hdef : encodeBitmap bmp = sigIhdr ++ tail := by
-    simp [encodeBitmap, sigIhdr, tail, ihdr, idat, ihdrTailColor, ByteArray.append_assoc, Id.run]
+  have hdef : encodeBitmap bmp hw hh mode = sigIhdr ++ tail := by
+    simp [encodeBitmap, encodeBitmapUnchecked, sigIhdr, tail, ihdr, idat, ihdrTailColor,
+      encodeBitmapIdat, ByteArray.append_assoc, Id.run]
   have hshift' :
-      (encodeBitmap bmp).extract
+      (encodeBitmap bmp hw hh mode).extract
           (sigIhdr.size + (mkChunk "IDAT" idat).size)
           (sigIhdr.size + (mkChunk "IDAT" idat).size + 4) =
         tail.extract (mkChunk "IDAT" idat).size ((mkChunk "IDAT" idat).size + 4) := by
@@ -2294,7 +2504,7 @@ lemma encodeBitmap_extract_iend_len {px : Type u} [Pixel px] [PngPixel px] (bmp 
   have hpos' : sigIhdr.size + (mkChunk "IDAT" idat).size + 4 = 49 + idat.size := by
     omega
   have hshift :
-      (encodeBitmap bmp).extract (45 + idat.size) (49 + idat.size) =
+      (encodeBitmap bmp hw hh mode).extract (45 + idat.size) (49 + idat.size) =
         tail.extract (mkChunk "IDAT" idat).size ((mkChunk "IDAT" idat).size + 4) := by
     have hshift := hshift'
     rw [hpos', hpos] at hshift
@@ -2310,7 +2520,7 @@ lemma encodeBitmap_extract_iend_len {px : Type u} [Pixel px] [PngPixel px] (bmp 
   have hlen : (mkChunk "IEND" ByteArray.empty).extract 0 4 = u32be 0 :=
     mkChunk_extract_len _ _
   calc
-    (encodeBitmap bmp).extract (45 + idat.size) (49 + idat.size)
+    (encodeBitmap bmp hw hh mode).extract (45 + idat.size) (49 + idat.size)
         = tail.extract (mkChunk "IDAT" idat).size ((mkChunk "IDAT" idat).size + 4) := hshift
     _ = (mkChunk "IEND" ByteArray.empty).extract 0 4 := hleft
     _ = u32be 0 := hlen
@@ -2318,28 +2528,34 @@ lemma encodeBitmap_extract_iend_len {px : Type u} [Pixel px] [PngPixel px] (bmp 
 -- Reading the IEND length from the encoded PNG yields zero.
 set_option maxHeartbeats 1000000 in
 lemma readU32BE_encodeBitmap_iend_len {px : Type u} [Pixel px] [PngPixel px]
-    (bmp : Bitmap px)
-    (h : 45 + (zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)).size + 3 < (encodeBitmap bmp).size) :
-    readU32BE (encodeBitmap bmp) (45 + (zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)).size) h = 0 := by
-  let idat := zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)
-  have hpos : 45 + idat.size + 3 < (encodeBitmap bmp).size := by
+    (bmp : Bitmap px) (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (mode : PngEncodeMode := .stored)
+    (h : 45 + (encodeBitmapIdat (bmp := bmp) (mode := mode)).size + 3 <
+      (encodeBitmap bmp hw hh mode).size) :
+    readU32BE (encodeBitmap bmp hw hh mode)
+      (45 + (encodeBitmapIdat (bmp := bmp) (mode := mode)).size) h = 0 := by
+  let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
+  have hpos : 45 + idat.size + 3 < (encodeBitmap bmp hw hh mode).size := by
     simpa [idat] using h
   have hextract :
-      (encodeBitmap bmp).extract (45 + idat.size) (45 + idat.size + 4) = u32be 0 := by
+      (encodeBitmap bmp hw hh mode).extract (45 + idat.size) (45 + idat.size + 4) = u32be 0 := by
     have hshift : 45 + idat.size + 4 = 49 + idat.size := by omega
-    simpa [idat, hshift] using encodeBitmap_extract_iend_len (bmp := bmp)
-  exact readU32BE_of_extract_eq (bytes := encodeBitmap bmp) (pos := 45 + idat.size) (n := 0) hpos
+    simpa [idat, hshift] using encodeBitmap_extract_iend_len (bmp := bmp) (hw := hw) (hh := hh)
+      (mode := mode)
+  exact readU32BE_of_extract_eq (bytes := encodeBitmap bmp hw hh mode) (pos := 45 + idat.size) (n := 0) hpos
     hextract (by decide)
 
 -- The IEND type field in the encoded PNG is "IEND".
-lemma encodeBitmap_extract_iend_type {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px) :
-    (encodeBitmap bmp).extract
-        (49 + (zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)).size)
-        (53 + (zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)).size) = "IEND".toUTF8 := by
+lemma encodeBitmap_extract_iend_type {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
+    (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (mode : PngEncodeMode := .stored) :
+    (encodeBitmap bmp hw hh mode).extract
+        (49 + (encodeBitmapIdat (bmp := bmp) (mode := mode)).size)
+        (53 + (encodeBitmapIdat (bmp := bmp) (mode := mode)).size) = "IEND".toUTF8 := by
   let ihdr :=
     u32be bmp.size.width ++ u32be bmp.size.height ++
       ihdrTailColor (PngPixel.colorType (α := px))
-  let idat := zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)
+  let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
   let sigIhdr := pngSignature ++ mkChunk "IHDR" ihdr
   let tail := mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty
   have hsig : sigIhdr.size = 33 := by
@@ -2352,10 +2568,11 @@ lemma encodeBitmap_extract_iend_type {px : Type u} [Pixel px] [PngPixel px] (bmp
           = idat.size + "IDAT".utf8ByteSize + 8 := hsize
       _ = idat.size + 12 := by
           simp [idat_utf8ByteSize]
-  have hdef : encodeBitmap bmp = sigIhdr ++ tail := by
-    simp [encodeBitmap, sigIhdr, tail, ihdr, idat, ihdrTailColor, ByteArray.append_assoc, Id.run]
+  have hdef : encodeBitmap bmp hw hh mode = sigIhdr ++ tail := by
+    simp [encodeBitmap, encodeBitmapUnchecked, sigIhdr, tail, ihdr, idat, ihdrTailColor,
+      encodeBitmapIdat, ByteArray.append_assoc, Id.run]
   have hshift' :
-      (encodeBitmap bmp).extract
+      (encodeBitmap bmp hw hh mode).extract
           (sigIhdr.size + (mkChunk "IDAT" idat).size + 4)
           (sigIhdr.size + (mkChunk "IDAT" idat).size + 8) =
         tail.extract ((mkChunk "IDAT" idat).size + 4) ((mkChunk "IDAT" idat).size + 8) := by
@@ -2375,7 +2592,7 @@ lemma encodeBitmap_extract_iend_type {px : Type u} [Pixel px] [PngPixel px] (bmp
       omega
     simpa [hsig, hidat, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm] using this
   have hshift :
-      (encodeBitmap bmp).extract (49 + idat.size) (53 + idat.size) =
+      (encodeBitmap bmp hw hh mode).extract (49 + idat.size) (53 + idat.size) =
         tail.extract ((mkChunk "IDAT" idat).size + 4) ((mkChunk "IDAT" idat).size + 8) := by
     have hshift := hshift'
     rw [hpos', hpos] at hshift
@@ -2391,15 +2608,18 @@ lemma encodeBitmap_extract_iend_type {px : Type u} [Pixel px] [PngPixel px] (bmp
   have htyp : (mkChunk "IEND" ByteArray.empty).extract 4 8 = "IEND".toUTF8 := by
     simpa using mkChunk_extract_type "IEND" ByteArray.empty iend_utf8ByteSize
   calc
-    (encodeBitmap bmp).extract (49 + idat.size) (53 + idat.size)
+    (encodeBitmap bmp hw hh mode).extract (49 + idat.size) (53 + idat.size)
         = tail.extract ((mkChunk "IDAT" idat).size + 4) ((mkChunk "IDAT" idat).size + 8) := hshift
     _ = (mkChunk "IEND" ByteArray.empty).extract 4 8 := hleft
     _ = "IEND".toUTF8 := htyp
 
 -- Closed-form size of PNG produced by encodeBitmap.
-lemma encodeBitmap_size {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px) :
-    (encodeBitmap bmp).size = (zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)).size + 57 := by
-  unfold encodeBitmap
+lemma encodeBitmap_size {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
+    (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (mode : PngEncodeMode := .stored) :
+    (encodeBitmap bmp hw hh mode).size =
+      (encodeBitmapIdat (bmp := bmp) (mode := mode)).size + 57 := by
+  cases mode <;> unfold encodeBitmap encodeBitmapUnchecked encodeBitmapIdat
   have htail :
       (ByteArray.mk #[u8 8, PngPixel.colorType (α := px), u8 0, u8 0, u8 0]).size = 5 := by
     simp [ByteArray.size]
@@ -2410,8 +2630,10 @@ lemma encodeBitmap_size {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
 
 -- Reading the IHDR chunk from an encoded bitmap yields its header payload.
 lemma readChunk_encodeBitmap_ihdr {px : Type u} [Pixel px] [PngPixel px]
-    (bmp : Bitmap px) (hLen : 8 + 3 < (encodeBitmap bmp).size) :
-    readChunk (encodeBitmap bmp) 8 hLen =
+    (bmp : Bitmap px) (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (mode : PngEncodeMode := .stored)
+    (hLen : 8 + 3 < (encodeBitmap bmp hw hh mode).size) :
+    readChunk (encodeBitmap bmp hw hh mode) 8 hLen =
       some ("IHDR".toUTF8,
         u32be bmp.size.width ++ u32be bmp.size.height ++
           ihdrTailColor (PngPixel.colorType (α := px)),
@@ -2419,81 +2641,95 @@ lemma readChunk_encodeBitmap_ihdr {px : Type u} [Pixel px] [PngPixel px]
   let ihdr :=
     u32be bmp.size.width ++ u32be bmp.size.height ++
       ihdrTailColor (PngPixel.colorType (α := px))
-  let idat := zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)
-  have hlenval : readU32BE (encodeBitmap bmp) 8 hLen = 13 := by
-    exact readU32BE_encodeBitmap_ihdr_len (bmp := bmp) (h := hLen)
-  have hsize : (encodeBitmap bmp).size = idat.size + 57 := by
-    simpa [idat] using encodeBitmap_size (bmp := bmp)
-  have hcrc : 33 ≤ (encodeBitmap bmp).size := by
+  let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
+  have hlenval : readU32BE (encodeBitmap bmp hw hh mode) 8 hLen = 13 := by
+    exact readU32BE_encodeBitmap_ihdr_len (bmp := bmp) (hw := hw) (hh := hh) (h := hLen)
+      (mode := mode)
+  have hsize : (encodeBitmap bmp hw hh mode).size = idat.size + 57 := by
+    simpa [idat] using encodeBitmap_size (bmp := bmp) (hw := hw) (hh := hh) (mode := mode)
+  have hcrc : 33 ≤ (encodeBitmap bmp hw hh mode).size := by
     have hsz' : 33 ≤ idat.size + 57 := by omega
     simp [hsize, hsz']
   have hcrcEnd : 8 + 8 + 13 + 4 = 33 := by omega
   unfold readChunk
-  simp [hlenval, hcrc, hcrcEnd, encodeBitmap_extract_ihdr_type, encodeBitmap_extract_ihdr_data]
+  simp [hlenval, hcrc, hcrcEnd,
+    encodeBitmap_extract_ihdr_type (bmp := bmp) (hw := hw) (hh := hh) (mode := mode),
+    encodeBitmap_extract_ihdr_data (bmp := bmp) (hw := hw) (hh := hh) (mode := mode)]
 
 -- Reading the IDAT chunk from an encoded bitmap yields the compressed payload.
 lemma readChunk_encodeBitmap_idat {px : Type u} [Pixel px] [PngPixel px]
-    (bmp : Bitmap px)
-    (hidat : (zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)).size < 2 ^ 32)
-    (hLen : 33 + 3 < (encodeBitmap bmp).size) :
-    readChunk (encodeBitmap bmp) 33 hLen =
-      some ("IDAT".toUTF8, zlibCompressStored (PngPixel.encodeRaw (α := px) bmp),
-        45 + (zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)).size) := by
-  let idat := zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)
-  have hlenval : readU32BE (encodeBitmap bmp) 33 hLen = idat.size := by
+    (bmp : Bitmap px) (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (mode : PngEncodeMode := .stored)
+    (hidat : (encodeBitmapIdat (bmp := bmp) (mode := mode)).size < 2 ^ 32)
+    (hLen : 33 + 3 < (encodeBitmap bmp hw hh mode).size) :
+    readChunk (encodeBitmap bmp hw hh mode) 33 hLen =
+      some ("IDAT".toUTF8, encodeBitmapIdat (bmp := bmp) (mode := mode),
+        45 + (encodeBitmapIdat (bmp := bmp) (mode := mode)).size) := by
+  let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
+  have hlenval : readU32BE (encodeBitmap bmp hw hh mode) 33 hLen = idat.size := by
     simpa [idat] using
-      (readU32BE_encodeBitmap_idat_len (bmp := bmp) (h := hLen) (hidat := hidat))
-  have hsize : (encodeBitmap bmp).size = idat.size + 57 := by
-    simpa [idat] using encodeBitmap_size (bmp := bmp)
-  have hcrc : 45 + idat.size ≤ (encodeBitmap bmp).size := by
+      (readU32BE_encodeBitmap_idat_len (bmp := bmp) (hw := hw) (hh := hh)
+        (mode := mode) (h := hLen) (hidat := hidat))
+  have hsize : (encodeBitmap bmp hw hh mode).size = idat.size + 57 := by
+    simpa [idat] using encodeBitmap_size (bmp := bmp) (hw := hw) (hh := hh) (mode := mode)
+  have hcrc : 45 + idat.size ≤ (encodeBitmap bmp hw hh mode).size := by
     have hsz' : 45 + idat.size ≤ idat.size + 57 := by omega
     simpa [hsize] using hsz'
   have hcrcEnd : 33 + 8 + idat.size + 4 = 45 + idat.size := by omega
   unfold readChunk
-  simp [hlenval, hcrc, hcrcEnd, encodeBitmap_extract_idat_type, encodeBitmap_extract_idat_data, idat]
+  simp [hlenval, hcrc, hcrcEnd,
+    encodeBitmap_extract_idat_type (bmp := bmp) (hw := hw) (hh := hh) (mode := mode),
+    encodeBitmap_extract_idat_data (bmp := bmp) (hw := hw) (hh := hh) (mode := mode),
+    idat]
 
 -- Reading the IEND chunk from an encoded bitmap yields an empty payload.
 lemma readChunk_encodeBitmap_iend {px : Type u} [Pixel px] [PngPixel px]
-    (bmp : Bitmap px)
+    (bmp : Bitmap px) (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (mode : PngEncodeMode := .stored)
     (hLen :
-      45 + (zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)).size + 3 < (encodeBitmap bmp).size) :
-    readChunk (encodeBitmap bmp)
-        (45 + (zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)).size) hLen =
+      45 + (encodeBitmapIdat (bmp := bmp) (mode := mode)).size + 3 <
+        (encodeBitmap bmp hw hh mode).size) :
+    readChunk (encodeBitmap bmp hw hh mode)
+        (45 + (encodeBitmapIdat (bmp := bmp) (mode := mode)).size) hLen =
       some ("IEND".toUTF8, ByteArray.empty,
-        57 + (zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)).size) := by
-  let idat := zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)
-  have hlenval : readU32BE (encodeBitmap bmp) (45 + idat.size) hLen = 0 := by
+        57 + (encodeBitmapIdat (bmp := bmp) (mode := mode)).size) := by
+  let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
+  have hlenval : readU32BE (encodeBitmap bmp hw hh mode) (45 + idat.size) hLen = 0 := by
     simpa [idat, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm] using
-      (readU32BE_encodeBitmap_iend_len (bmp := bmp) (h := hLen))
-  have hsize : (encodeBitmap bmp).size = idat.size + 57 := by
-    simpa [idat] using encodeBitmap_size (bmp := bmp)
-  have hcrc : 57 + idat.size ≤ (encodeBitmap bmp).size := by
+      (readU32BE_encodeBitmap_iend_len (bmp := bmp) (hw := hw) (hh := hh)
+        (mode := mode) (h := hLen))
+  have hsize : (encodeBitmap bmp hw hh mode).size = idat.size + 57 := by
+    simpa [idat] using encodeBitmap_size (bmp := bmp) (hw := hw) (hh := hh) (mode := mode)
+  have hcrc : 57 + idat.size ≤ (encodeBitmap bmp hw hh mode).size := by
     have hsz' : 57 + idat.size ≤ idat.size + 57 := by omega
     simpa [hsize] using hsz'
   have htype : 45 + idat.size + 4 = 49 + idat.size := by omega
   have htypeEnd : 49 + idat.size + 4 = 53 + idat.size := by omega
   have hcrcEnd : 45 + idat.size + 8 + 4 = 57 + idat.size := by omega
   unfold readChunk
-  simp [hlenval, hcrc, htype, htypeEnd, hcrcEnd, encodeBitmap_extract_iend_type, idat]
+  simp [hlenval, hcrc, htype, htypeEnd, hcrcEnd,
+    encodeBitmap_extract_iend_type (bmp := bmp) (hw := hw) (hh := hh) (mode := mode),
+    idat]
 
 -- Parsing an encoded bitmap with the simple PNG parser recovers the header and payload.
 set_option maxHeartbeats 5000000 in
 lemma parsePngSimple_encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
     (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
-    (hidat : (zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)).size < 2 ^ 32)
-    (hsize : 8 <= (encodeBitmap bmp).size)
+    (mode : PngEncodeMode := .stored)
+    (hidat : (encodeBitmapIdat (bmp := bmp) (mode := mode)).size < 2 ^ 32)
+    (hsize : 8 <= (encodeBitmap bmp hw hh mode).size)
     (hct : (PngPixel.colorType (α := px)).toNat = 0 ∨
       (PngPixel.colorType (α := px)).toNat = 2 ∨
       (PngPixel.colorType (α := px)).toNat = 6) :
-    parsePngSimple (encodeBitmap bmp) hsize =
+    parsePngSimple (encodeBitmap bmp hw hh mode) hsize =
       some ({ width := bmp.size.width, height := bmp.size.height
             , colorType := (PngPixel.colorType (α := px)).toNat, bitDepth := 8 },
-            zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)) := by
+            encodeBitmapIdat (bmp := bmp) (mode := mode)) := by
   let w := bmp.size.width
   let h := bmp.size.height
   let ct := PngPixel.colorType (α := px)
   let ihdr := u32be w ++ u32be h ++ ihdrTailColor ct
-  let idat := zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)
+  let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
   have hlen' : ihdr.size = 13 := by
     simpa [ihdr] using ihdr_payload_size w h ct
   have hsigNe : (pngSignature != pngSignature) = false := by
@@ -2623,22 +2859,24 @@ lemma parsePngSimple_encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : 
     exact bne_self_eq_false' (a := "IDAT".toByteArray)
   have hiendNeBA : ("IEND".toByteArray != "IEND".toByteArray) = false := by
     exact bne_self_eq_false' (a := "IEND".toByteArray)
-  have hsize : (encodeBitmap bmp).size = idat.size + 57 := by
-    simpa [idat] using encodeBitmap_size (bmp := bmp)
-  have hlen1 : 8 + 3 < (encodeBitmap bmp).size := by
+  have hsize : (encodeBitmap bmp hw hh mode).size = idat.size + 57 := by
+    simpa [idat] using encodeBitmap_size (bmp := bmp) (hw := hw) (hh := hh) (mode := mode)
+  have hlen1 : 8 + 3 < (encodeBitmap bmp hw hh mode).size := by
     simp [hsize]
-  have hlen2 : 33 + 3 < (encodeBitmap bmp).size := by
+  have hlen2 : 33 + 3 < (encodeBitmap bmp hw hh mode).size := by
     simp [hsize]
   have hlen3 :
-      45 + idat.size + 3 < (encodeBitmap bmp).size := by
+      45 + idat.size + 3 < (encodeBitmap bmp hw hh mode).size := by
     simp [hsize]; omega
   -- Unfold and simplify the parser using the chunk-level lemmas.
   unfold parsePngSimple
-  simp [encodeBitmap_signature, hsigNe, hihdrNeBA, hidatNeBA, hiendNeBA,
+  simp [encodeBitmap_signature (bmp := bmp) (hw := hw) (hh := hh) (mode := mode),
+    hsigNe, hihdrNeBA, hidatNeBA, hiendNeBA,
     hlen1, hlen2,
-    readChunk_encodeBitmap_ihdr (bmp := bmp) (hLen := hlen1),
-    readChunk_encodeBitmap_idat (bmp := bmp) (hidat := hidat) (hLen := hlen2),
-    readChunk_encodeBitmap_iend (bmp := bmp) (hLen := hlen3)]
+    readChunk_encodeBitmap_ihdr (bmp := bmp) (hw := hw) (hh := hh) (mode := mode) (hLen := hlen1),
+    readChunk_encodeBitmap_idat (bmp := bmp) (hw := hw) (hh := hh) (mode := mode)
+      (hidat := hidat) (hLen := hlen2),
+    readChunk_encodeBitmap_iend (bmp := bmp) (hw := hw) (hh := hh) (mode := mode) (hLen := hlen3)]
   refine And.intro hbitDepth' ?_
   refine And.intro hctProp' ?_
   refine And.intro ?_ ?_
@@ -2650,16 +2888,17 @@ lemma parsePngSimple_encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : 
 -- Parsing an encoded bitmap with the full PNG parser yields the header and payload.
 lemma parsePng_encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
     (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
-    (hidat : (zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)).size < 2 ^ 32)
-    (hsize : 8 <= (encodeBitmap bmp).size)
+    (mode : PngEncodeMode := .stored)
+    (hidat : (encodeBitmapIdat (bmp := bmp) (mode := mode)).size < 2 ^ 32)
+    (hsize : 8 <= (encodeBitmap bmp hw hh mode).size)
     (hct : (PngPixel.colorType (α := px)).toNat = 0 ∨
       (PngPixel.colorType (α := px)).toNat = 2 ∨
       (PngPixel.colorType (α := px)).toNat = 6) :
-    parsePng (encodeBitmap bmp) hsize =
+    parsePng (encodeBitmap bmp hw hh mode) hsize =
       some ({ width := bmp.size.width, height := bmp.size.height
             , colorType := (PngPixel.colorType (α := px)).toNat, bitDepth := 8 },
-            zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)) := by
-  have hsimple := parsePngSimple_encodeBitmap (bmp := bmp) hw hh hidat hsize hct
+            encodeBitmapIdat (bmp := bmp) (mode := mode)) := by
+  have hsimple := parsePngSimple_encodeBitmap (bmp := bmp) hw hh (mode := mode) hidat hsize hct
   unfold parsePng
   simp [hsimple]
 
@@ -3888,12 +4127,12 @@ lemma decodeRowsLoopGray_encodeRaw (bmp : BitmapGray8) :
 lemma decodeBitmap_encodeBitmap (bmp : BitmapRGB8)
     (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
     (hidat : (zlibCompressStored (encodeRaw bmp)).size < 2 ^ 32) :
-    Png.decodeBitmap (Png.encodeBitmap bmp) = some bmp := by
-  have hsize : 8 ≤ (encodeBitmap bmp).size := by
+    Png.decodeBitmap (Png.encodeBitmap bmp hw hh) = some bmp := by
+  have hsize : 8 ≤ (encodeBitmap bmp hw hh).size := by
     have hmin : 6 ≤ (zlibCompressStored (encodeRaw bmp)).size :=
       zlibCompressStored_size_ge (encodeRaw bmp)
-    have hsize' : (encodeBitmap bmp).size = (zlibCompressStored (encodeRaw bmp)).size + 57 := by
-      simpa using encodeBitmap_size bmp
+    have hsize' : (encodeBitmap bmp hw hh).size = (zlibCompressStored (encodeRaw bmp)).size + 57 := by
+      simpa using encodeBitmap_size (bmp := bmp) (hw := hw) (hh := hh)
     omega
   have hmin : 2 ≤ (zlibCompressStored (encodeRaw bmp)).size := by
     have hmin' : 6 ≤ (zlibCompressStored (encodeRaw bmp)).size :=
@@ -3907,7 +4146,8 @@ lemma decodeBitmap_encodeBitmap (bmp : BitmapRGB8)
     simpa [pngPixel_colorType_rgb] using this
   have hctProp : ¬(u8 2).toNat = 0 → ¬(u8 2).toNat = 2 → (u8 2).toNat = 6 := by
     decide
-  have hparse := parsePng_encodeBitmap (bmp := bmp) hw hh hidat hsize hct
+  have hparse := parsePng_encodeBitmap (bmp := bmp) (hw := hw) (hh := hh)
+    (mode := .stored) hidat hsize hct
   have hraw : (encodeRaw bmp).size =
       bmp.size.height * (bmp.size.width * bytesPerPixelRGB + 1) := by
     simpa using encodeRaw_size bmp
@@ -3964,15 +4204,15 @@ lemma decodeBitmap_encodeBitmap (bmp : BitmapRGB8)
 lemma decodeBitmap_encodeBitmap_rgba (bmp : BitmapRGBA8)
     (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
     (hidat : (zlibCompressStored (encodeRaw bmp)).size < 2 ^ 32) :
-    Png.decodeBitmap (Png.encodeBitmap bmp) = some bmp := by
+    Png.decodeBitmap (Png.encodeBitmap bmp hw hh) = some bmp := by
   have hidat' :
       (zlibCompressStored (PngPixel.encodeRaw (α := PixelRGBA8) bmp)).size < 2 ^ 32 := by
     simpa using hidat
-  have hsize : 8 ≤ (encodeBitmap bmp).size := by
+  have hsize : 8 ≤ (encodeBitmap bmp hw hh).size := by
     have hmin : 6 ≤ (zlibCompressStored (encodeRaw bmp)).size :=
       zlibCompressStored_size_ge (encodeRaw bmp)
-    have hsize' : (encodeBitmap bmp).size = (zlibCompressStored (encodeRaw bmp)).size + 57 := by
-      simpa [pngPixel_encodeRaw_rgba] using encodeBitmap_size (bmp := bmp)
+    have hsize' : (encodeBitmap bmp hw hh).size = (zlibCompressStored (encodeRaw bmp)).size + 57 := by
+      simpa [pngPixel_encodeRaw_rgba] using encodeBitmap_size (bmp := bmp) (hw := hw) (hh := hh)
     omega
   have hmin : 2 ≤ (zlibCompressStored (encodeRaw bmp)).size := by
     have hmin' : 6 ≤ (zlibCompressStored (encodeRaw bmp)).size :=
@@ -3986,7 +4226,8 @@ lemma decodeBitmap_encodeBitmap_rgba (bmp : BitmapRGBA8)
     simpa [pngPixel_colorType_rgba] using this
   have hctProp : ¬(u8 6).toNat = 0 → ¬(u8 6).toNat = 2 → (u8 6).toNat = 6 := by
     decide
-  have hparse := parsePng_encodeBitmap (bmp := bmp) hw hh hidat' hsize hct
+  have hparse := parsePng_encodeBitmap (bmp := bmp) (hw := hw) (hh := hh)
+    (mode := .stored) hidat' hsize hct
   have hraw : (encodeRaw bmp).size =
       bmp.size.height * (bmp.size.width * bytesPerPixelRGBA + 1) := by
     simpa [bytesPerPixel_rgba] using encodeRaw_size (bmp := bmp)
@@ -4043,15 +4284,15 @@ lemma decodeBitmap_encodeBitmap_rgba (bmp : BitmapRGBA8)
 lemma decodeBitmap_encodeBitmap_gray (bmp : BitmapGray8)
     (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
     (hidat : (zlibCompressStored (encodeRaw bmp)).size < 2 ^ 32) :
-    Png.decodeBitmap (Png.encodeBitmap bmp) = some bmp := by
+    Png.decodeBitmap (Png.encodeBitmap bmp hw hh) = some bmp := by
   have hidat' :
       (zlibCompressStored (PngPixel.encodeRaw (α := PixelGray8) bmp)).size < 2 ^ 32 := by
     simpa using hidat
-  have hsize : 8 ≤ (encodeBitmap bmp).size := by
+  have hsize : 8 ≤ (encodeBitmap bmp hw hh).size := by
     have hmin : 6 ≤ (zlibCompressStored (encodeRaw bmp)).size :=
       zlibCompressStored_size_ge (encodeRaw bmp)
-    have hsize' : (encodeBitmap bmp).size = (zlibCompressStored (encodeRaw bmp)).size + 57 := by
-      simpa [pngPixel_encodeRaw_gray] using encodeBitmap_size (bmp := bmp)
+    have hsize' : (encodeBitmap bmp hw hh).size = (zlibCompressStored (encodeRaw bmp)).size + 57 := by
+      simpa [pngPixel_encodeRaw_gray] using encodeBitmap_size (bmp := bmp) (hw := hw) (hh := hh)
     omega
   have hmin : 2 ≤ (zlibCompressStored (encodeRaw bmp)).size := by
     have hmin' : 6 ≤ (zlibCompressStored (encodeRaw bmp)).size :=
@@ -4065,7 +4306,8 @@ lemma decodeBitmap_encodeBitmap_gray (bmp : BitmapGray8)
     simpa [pngPixel_colorType_gray] using this
   have hctProp : ¬(u8 0).toNat = 0 → ¬(u8 0).toNat = 2 → (u8 0).toNat = 6 := by
     decide
-  have hparse := parsePng_encodeBitmap (bmp := bmp) hw hh hidat' hsize hct
+  have hparse := parsePng_encodeBitmap (bmp := bmp) (hw := hw) (hh := hh)
+    (mode := .stored) hidat' hsize hct
   have hraw : (encodeRaw bmp).size =
       bmp.size.height * (bmp.size.width * bytesPerPixelGray + 1) := by
     simpa [bytesPerPixel_gray] using encodeRaw_size (bmp := bmp)

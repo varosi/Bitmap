@@ -27,17 +27,17 @@ def bitmapGrayOfSeed (seed w h : Nat) : BitmapGray8 :=
   BitmapGray8.ofPixelFn w h (fun i : Fin (w * h) => pixelGrayOfSeed seed i.val)
 
 def pngRoundTripOk (bmp : BitmapRGB8) : Bool :=
-  match Png.decodeBitmap (Png.encodeBitmap bmp) with
+  match Png.decodeBitmap (Png.encodeBitmapUnchecked bmp) with
   | some bmp' => decide (bmp' = bmp)
   | none => false
 
 def pngRoundTripOkRGBA (bmp : BitmapRGBA8) : Bool :=
-  match Png.decodeBitmap (px := PixelRGBA8) (Png.encodeBitmap bmp) with
+  match Png.decodeBitmap (px := PixelRGBA8) (Png.encodeBitmapUnchecked bmp) with
   | some bmp' => decide (bmp' = bmp)
   | none => false
 
 def pngRoundTripOkGray (bmp : BitmapGray8) : Bool :=
-  match Png.decodeBitmap (px := PixelGray8) (Png.encodeBitmap bmp) with
+  match Png.decodeBitmap (px := PixelGray8) (Png.encodeBitmapUnchecked bmp) with
   | some bmp' => decide (bmp' = bmp)
   | none => false
 
@@ -156,7 +156,7 @@ private def perfFillRead (w h : Nat) : IO (Nat × Nat) := do
 private def perfPngRoundTrip (w h : Nat) : IO (Nat × Bool) := do
   let t0 <- IO.monoNanosNow
   let bmp := mkBlankBitmap w h { r := 0, g := 0, b := 0 }
-  let bytes := Png.encodeBitmap bmp
+  let bytes := Png.encodeBitmapUnchecked bmp
   let ok :=
     match Png.decodeBitmap bytes with
     | some bmp' => decide (bmp' = bmp)

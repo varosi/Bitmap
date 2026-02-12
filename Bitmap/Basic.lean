@@ -599,6 +599,11 @@ decreasing_by
 def deflateStoredFast (raw : ByteArray) : ByteArray :=
   deflateStoredFastAux raw ByteArray.empty
 
+inductive PngEncodeMode
+  | stored
+  | fixed
+deriving Repr, DecidableEq
+
 structure BitWriter where
   out : ByteArray
   cur : UInt8
@@ -616,6 +621,11 @@ def BitWriter.writeBit (bw : BitWriter) (bit : Nat) : BitWriter :=
     { bw with cur := cur, bitPos := bw.bitPos + 1 }
 
 def BitWriter.writeBits (bw : BitWriter) (bits len : Nat) : BitWriter :=
+  match len with
+  | 0 => bw
+  | n + 1 => BitWriter.writeBits (bw.writeBit (bits % 2)) (bits >>> 1) n
+
+def BitWriter.writeBitsImpl (bw : BitWriter) (bits len : Nat) : BitWriter :=
   Id.run do
     let mut bw := bw
     let mut i := 0
@@ -624,11 +634,34 @@ def BitWriter.writeBits (bw : BitWriter) (bits len : Nat) : BitWriter :=
       i := i + 1
     return bw
 
+attribute [implemented_by BitWriter.writeBitsImpl] BitWriter.writeBits
+
 def BitWriter.flush (bw : BitWriter) : ByteArray :=
   if bw.bitPos == 0 then
     bw.out
   else
     bw.out.push bw.cur
+
+def reverseBitsAux (code len res : Nat) : Nat :=
+  match len with
+  | 0 => res
+  | n + 1 =>
+      reverseBitsAux (code >>> 1) n ((res <<< 1) ||| (code &&& 1))
+
+def reverseBits (code len : Nat) : Nat :=
+  reverseBitsAux code len 0
+
+def reverseBitsImpl (code len : Nat) : Nat :=
+  Id.run do
+    let mut x := code
+    let mut res := 0
+    for _ in [0:len] do
+      let bit := x &&& 1
+      res := (res <<< 1) ||| bit
+      x := x >>> 1
+    return res
+
+attribute [implemented_by reverseBitsImpl] reverseBits
 
 -- Fixed Huffman literal/length code (code, bit-length).
 def fixedLitLenCode (sym : Nat) : Nat × Nat :=
@@ -641,7 +674,30 @@ def fixedLitLenCode (sym : Nat) : Nat × Nat :=
   else
     (sym - 280 + 192, 8)
 
+def deflateFixedAux (data : Array UInt8) (i : Nat) (bw : BitWriter) : BitWriter :=
+  if h : i < data.size then
+    let b := data[i]
+    let (code, len) := fixedLitLenCode b.toNat
+    deflateFixedAux data (i + 1) (bw.writeBits (reverseBits code len) len)
+  else
+    bw
+termination_by data.size - i
+decreasing_by
+  have hlt : i < data.size := h
+  have hle : data.size - (i + 1) < data.size - i := by
+    exact Nat.sub_lt_sub_left (k := i) (m := data.size) (n := i + 1) hlt (Nat.lt_succ_self i)
+  exact hle
+
 def deflateFixed (raw : ByteArray) : ByteArray :=
+  let bw0 := BitWriter.empty
+  let bw1 := bw0.writeBits 1 1
+  let bw2 := bw1.writeBits 1 2
+  let bw3 := deflateFixedAux raw.data 0 bw2
+  let (eobCode, eobLen) := fixedLitLenCode 256
+  let bw4 := bw3.writeBits (reverseBits eobCode eobLen) eobLen
+  bw4.flush
+
+def deflateFixedImpl (raw : ByteArray) : ByteArray :=
   Id.run do
     let mut bw := BitWriter.empty
     -- Final block, fixed Huffman coding.
@@ -649,10 +705,12 @@ def deflateFixed (raw : ByteArray) : ByteArray :=
     bw := bw.writeBits 1 2
     for b in raw.data do
       let (code, len) := fixedLitLenCode b.toNat
-      bw := bw.writeBits code len
+      bw := bw.writeBits (reverseBits code len) len
     let (eobCode, eobLen) := fixedLitLenCode 256
-    bw := bw.writeBits eobCode eobLen
+    bw := bw.writeBits (reverseBits eobCode eobLen) eobLen
     return bw.flush
+
+attribute [implemented_by deflateFixedImpl] deflateFixed
 
 def deflateStoredFastImpl (raw : ByteArray) : ByteArray :=
   if _hzero : raw.size = 0 then
@@ -812,16 +870,6 @@ structure Huffman where
   maxLen : Nat
   table : Array (Array (Option Nat))
 deriving Repr
-
-def reverseBits (code len : Nat) : Nat :=
-  Id.run do
-    let mut x := code
-    let mut res := 0
-    for _ in [0:len] do
-      let bit := x &&& 1
-      res := (res <<< 1) ||| bit
-      x := x >>> 1
-    return res
 
 def mkHuffman (lengths : Array Nat) : Option Huffman := do
   let mut maxLen := 0
@@ -1112,6 +1160,50 @@ partial def readDynamicTables (br : BitReader) : Option (Huffman × Huffman × B
   let distTable ← mkHuffman distLengths
   return (litLenTable, distTable, br)
 
+def fixedLitLenRow7 : Array (Option Nat) :=
+  Array.ofFn (fun i : Fin (1 <<< 7) =>
+    let code := reverseBits i.val 7
+    if code < 24 then
+      some (256 + code)
+    else
+      none)
+
+def fixedLitLenRow8 : Array (Option Nat) :=
+  Array.ofFn (fun i : Fin (1 <<< 8) =>
+    let code := reverseBits i.val 8
+    if code < 192 then
+      if 48 <= code then
+        some (code - 48)
+      else
+        none
+    else if code < 200 then
+      some (code - 192 + 280)
+    else
+      none)
+
+def fixedLitLenRow9 : Array (Option Nat) :=
+  Array.ofFn (fun i : Fin (1 <<< 9) =>
+    let code := reverseBits i.val 9
+    if 400 <= code then
+      some (code - 400 + 144)
+    else
+      none)
+
+def fixedLitLenHuffman : Huffman :=
+  { maxLen := 9
+    table := #[
+      #[],
+      Array.replicate (1 <<< 1) none,
+      Array.replicate (1 <<< 2) none,
+      Array.replicate (1 <<< 3) none,
+      Array.replicate (1 <<< 4) none,
+      Array.replicate (1 <<< 5) none,
+      Array.replicate (1 <<< 6) none,
+      fixedLitLenRow7,
+      fixedLitLenRow8,
+      fixedLitLenRow9
+    ] }
+
 def fixedLitLenLengths : Array Nat :=
   Id.run do
     let mut arr : Array Nat := Array.replicate 288 0
@@ -1183,7 +1275,7 @@ partial def zlibDecompress (data : ByteArray) (hsize : 2 <= data.size) : Option 
       else
         none
     else if btype == 1 then
-      let litLenTable ← mkHuffman fixedLitLenLengths
+      let litLenTable := fixedLitLenHuffman
       let distTable ← mkHuffman (Array.replicate 32 5)
       let (br', out') ← decodeCompressedBlock litLenTable distTable br out
       br := br'
@@ -1623,14 +1715,18 @@ def encodeRawFastImpl {px : Type u} [Pixel px] (bmp : Bitmap px) : ByteArray :=
 attribute [implemented_by encodeRawFastImpl] encodeRawFast
 attribute [implemented_by encodeRawFast] encodeRaw
 
-def encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px) : ByteArray :=
+def encodeBitmapUnchecked {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
+    (mode : PngEncodeMode := .stored) : ByteArray :=
   Id.run do
     let w := bmp.size.width
     let h := bmp.size.height
     let raw := PngPixel.encodeRaw (α := px) bmp
     let ihdr := u32be w ++ u32be h ++
       ByteArray.mk #[u8 8, PngPixel.colorType (α := px), u8 0, u8 0, u8 0]
-    let idat := zlibCompressStored raw
+    let idat :=
+      match mode with
+      | .stored => zlibCompressStored raw
+      | .fixed => zlibCompressFixed raw
     let ihdrChunk := mkChunkBytes ihdrTypeBytes ihdr
     let idatChunk := mkChunkBytes idatTypeBytes idat
     let iendChunk := mkChunkBytes iendTypeBytes ByteArray.empty
@@ -1638,21 +1734,17 @@ def encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px) : Byte
     let out := ByteArray.emptyWithCapacity outSize
     out ++ pngSignature ++ ihdrChunk ++ idatChunk ++ iendChunk
 
+def encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
+    (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (mode : PngEncodeMode := .stored) : ByteArray :=
+  have _ := hw
+  have _ := hh
+  encodeBitmapUnchecked bmp mode
+
 -- Encode a bitmap using fixed-Huffman deflate blocks.
-def encodeBitmapFixed {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px) : ByteArray :=
-  Id.run do
-    let w := bmp.size.width
-    let h := bmp.size.height
-    let raw := PngPixel.encodeRaw (α := px) bmp
-    let ihdr := u32be w ++ u32be h ++
-      ByteArray.mk #[u8 8, PngPixel.colorType (α := px), u8 0, u8 0, u8 0]
-    let idat := zlibCompressFixed raw
-    let ihdrChunk := mkChunkBytes ihdrTypeBytes ihdr
-    let idatChunk := mkChunkBytes idatTypeBytes idat
-    let iendChunk := mkChunkBytes iendTypeBytes ByteArray.empty
-    let outSize := pngSignature.size + ihdrChunk.size + idatChunk.size + iendChunk.size
-    let out := ByteArray.emptyWithCapacity outSize
-    out ++ pngSignature ++ ihdrChunk ++ idatChunk ++ iendChunk
+def encodeBitmapFixed {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
+    (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32) : ByteArray :=
+  encodeBitmap bmp hw hh .fixed
 
 def Bitmap.readPng {px : Type u} [Pixel px] [PngPixel px]
     (path : FilePath) : IO (Except String (Bitmap px)) := do
@@ -1670,7 +1762,7 @@ def BitmapRGB8.readPng [Pixel PixelRGB8] [PngPixel PixelRGB8]
 
 def BitmapRGB8.writePng [Pixel PixelRGB8] [PngPixel PixelRGB8]
     (path : FilePath) (bmp : BitmapRGB8) : IO (Except String Unit) :=
-  ioToExcept (IO.FS.writeBinFile path (encodeBitmap bmp))
+  ioToExcept (IO.FS.writeBinFile path (encodeBitmapUnchecked bmp))
 
 def BitmapRGBA8.readPng [Pixel PixelRGBA8] [PngPixel PixelRGBA8]
     (path : FilePath) : IO (Except String BitmapRGBA8) :=
@@ -1678,7 +1770,7 @@ def BitmapRGBA8.readPng [Pixel PixelRGBA8] [PngPixel PixelRGBA8]
 
 def BitmapRGBA8.writePng [Pixel PixelRGBA8] [PngPixel PixelRGBA8]
     (path : FilePath) (bmp : BitmapRGBA8) : IO (Except String Unit) :=
-  ioToExcept (IO.FS.writeBinFile path (encodeBitmap bmp))
+  ioToExcept (IO.FS.writeBinFile path (encodeBitmapUnchecked bmp))
 
 def BitmapGray8.readPng [Pixel PixelGray8] [PngPixel PixelGray8]
     (path : FilePath) : IO (Except String BitmapGray8) :=
@@ -1686,7 +1778,7 @@ def BitmapGray8.readPng [Pixel PixelGray8] [PngPixel PixelGray8]
 
 def BitmapGray8.writePng [Pixel PixelGray8] [PngPixel PixelGray8]
     (path : FilePath) (bmp : BitmapGray8) : IO (Except String Unit) :=
-  ioToExcept (IO.FS.writeBinFile path (encodeBitmap bmp))
+  ioToExcept (IO.FS.writeBinFile path (encodeBitmapUnchecked bmp))
 
 end Png
 
