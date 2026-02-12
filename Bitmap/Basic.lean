@@ -1205,6 +1205,56 @@ def fixedLitLenHuffman : Huffman :=
       fixedLitLenRow9
     ] }
 
+-- Decode a single fixed-Huffman literal/length symbol (literal-only fast path).
+partial def decodeFixedLiteralSym (br : BitReader) : Option (Nat × BitReader) := do
+  let (bits7, br7) ←
+    if h : br.bitIndex + 7 <= br.data.size * 8 then
+      some (br.readBits 7 h)
+    else
+      none
+  match fixedLitLenRow7[bits7]? with
+  | some (some sym) =>
+      return (sym, br7)
+  | _ =>
+      let (bit8, br8) ←
+        if h : br7.bitIndex + 1 <= br7.data.size * 8 then
+          some (br7.readBits 1 h)
+        else
+          none
+      let bits8 := bits7 ||| (bit8 <<< 7)
+      match fixedLitLenRow8[bits8]? with
+      | some (some sym) =>
+          return (sym, br8)
+      | _ =>
+          let (bit9, br9) ←
+            if h : br8.bitIndex + 1 <= br8.data.size * 8 then
+              some (br8.readBits 1 h)
+            else
+              none
+          let bits9 := bits8 ||| (bit9 <<< 8)
+          match fixedLitLenRow9[bits9]? with
+          | some (some sym) =>
+              return (sym, br9)
+          | _ =>
+              none
+
+-- Decode a fixed-Huffman block that is restricted to literals and end-of-block.
+partial def decodeFixedLiteralBlock (br : BitReader) (out : ByteArray) :
+    Option (BitReader × ByteArray) := do
+  let mut br := br
+  let mut out := out
+  let mut done := false
+  while !done do
+    let (sym, br') ← decodeFixedLiteralSym br
+    br := br'
+    if sym < 256 then
+      out := out.push (u8 sym)
+    else if sym == 256 then
+      done := true
+    else
+      none
+  return (br, out)
+
 def fixedLitLenLengths : Array Nat :=
   Id.run do
     let mut arr : Array Nat := Array.replicate 288 0
@@ -1278,9 +1328,14 @@ partial def zlibDecompress (data : ByteArray) (hsize : 2 <= data.size) : Option 
     else if btype == 1 then
       let litLenTable := fixedLitLenHuffman
       let distTable ← mkHuffman (Array.replicate 32 5)
-      let (br', out') ← decodeCompressedBlock litLenTable distTable br out
-      br := br'
-      out := out'
+      match decodeFixedLiteralBlock br out with
+      | some (br', out') =>
+          br := br'
+          out := out'
+      | none =>
+          let (br', out') ← decodeCompressedBlock litLenTable distTable br out
+          br := br'
+          out := out'
     else if btype == 2 then
       let (litLenTable, distTable, br') ← readDynamicTables br
       let (br'', out') ← decodeCompressedBlock litLenTable distTable br' out

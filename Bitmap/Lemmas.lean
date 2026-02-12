@@ -80,6 +80,181 @@ lemma flush_size_mul_ge_bitCount (bw : BitWriter) (hbit : bw.bitPos < 8) :
       _ ≥ bw.out.size * 8 + bw.bitPos := by
         omega
 
+-- Writing a bit keeps the bit position in range.
+lemma bitPos_lt_8_writeBit (bw : BitWriter) (bit : Nat) (hbit : bw.bitPos < 8) :
+    (BitWriter.writeBit bw bit).bitPos < 8 := by
+  unfold BitWriter.writeBit
+  by_cases h : bw.bitPos = 7
+  · simp [h]
+  · have hlt : bw.bitPos < 7 := by
+      exact lt_of_le_of_ne (Nat.le_of_lt_succ hbit) h
+    have hlt' : bw.bitPos + 1 < 8 := by
+      simpa [Nat.succ_eq_add_one] using (Nat.succ_lt_succ_iff.mpr hlt)
+    simp [h, hlt']
+
+-- Writing multiple bits keeps the bit position in range.
+lemma bitPos_lt_8_writeBits (bw : BitWriter) (bits len : Nat) (hbit : bw.bitPos < 8) :
+    (BitWriter.writeBits bw bits len).bitPos < 8 := by
+  induction len generalizing bw bits with
+  | zero =>
+      simp [BitWriter.writeBits, hbit]
+  | succ n ih =>
+      have hbit' : (BitWriter.writeBit bw (bits % 2)).bitPos < 8 :=
+        bitPos_lt_8_writeBit bw (bits % 2) hbit
+      simpa [BitWriter.writeBits] using (ih (bw := BitWriter.writeBit bw (bits % 2)) (bits := bits >>> 1) hbit')
+
+-- Writing a bit does not shrink the output buffer.
+lemma out_size_writeBit_le (bw : BitWriter) (bit : Nat) :
+    bw.out.size ≤ (BitWriter.writeBit bw bit).out.size := by
+  unfold BitWriter.writeBit
+  by_cases h : bw.bitPos = 7 <;> simp [h, Nat.le_succ]
+
+-- Writing bits does not shrink the output buffer.
+lemma out_size_writeBits_le (bw : BitWriter) (bits len : Nat) :
+    bw.out.size ≤ (BitWriter.writeBits bw bits len).out.size := by
+  induction len generalizing bw bits with
+  | zero =>
+      simp [BitWriter.writeBits]
+  | succ n ih =>
+      have hle := out_size_writeBit_le bw (bits % 2)
+      have hle' := ih (bw := BitWriter.writeBit bw (bits % 2)) (bits := bits >>> 1)
+      have htrans : bw.out.size ≤ (BitWriter.writeBit bw (bits % 2)).out.size :=
+        hle
+      exact le_trans htrans hle'
+
+-- Flush never shrinks the output.
+lemma out_size_le_flush (bw : BitWriter) : bw.out.size ≤ bw.flush.size := by
+  by_cases h : bw.bitPos = 0 <;> simp [BitWriter.flush, h]
+
+-- Writing one bit always extends the flushed buffer by exactly one byte.
+lemma flush_size_writeBit (bw : BitWriter) (bit : Nat) :
+    (BitWriter.writeBit bw bit).flush.size = bw.out.size + 1 := by
+  by_cases h : bw.bitPos = 7 <;> simp [BitWriter.writeBit, BitWriter.flush, h]
+
+-- Writing bits never shrinks the flushed buffer.
+lemma flush_size_writeBits_le (bw : BitWriter) (bits len : Nat) :
+    bw.flush.size ≤ (BitWriter.writeBits bw bits len).flush.size := by
+  induction len generalizing bw bits with
+  | zero =>
+      simp [BitWriter.writeBits]
+  | succ n ih =>
+      have h1 : bw.flush.size ≤ (BitWriter.writeBit bw (bits % 2)).flush.size := by
+        have hle : bw.flush.size ≤ bw.out.size + 1 := by
+          by_cases h0 : bw.bitPos = 0 <;> simp [BitWriter.flush, h0]
+        -- rewrite the right-hand side using the exact flush size
+        simpa [flush_size_writeBit] using hle
+      have h2 :=
+        ih (bw := BitWriter.writeBit bw (bits % 2)) (bits := bits >>> 1)
+      exact le_trans h1 h2
+
+-- Bits at and above the current position are clear in the working byte.
+def BitWriter.curClearAbove (bw : BitWriter) : Prop :=
+  ∀ i, bw.bitPos ≤ i → i < 8 → bw.cur.toNat.testBit i = false
+
+lemma curClearAbove_empty : BitWriter.curClearAbove BitWriter.empty := by
+  intro i _ hlt
+  simp [BitWriter.empty]
+
+lemma curClearAbove_writeBit (bw : BitWriter) (bit : Nat) (hbit : bw.bitPos < 8)
+    (hcur : bw.curClearAbove) :
+    (BitWriter.writeBit bw bit).curClearAbove := by
+  intro i hi hlt
+  unfold BitWriter.writeBit
+  by_cases h : bw.bitPos = 7
+  · simp [h]
+  · -- i ≥ bitPos + 1, so the new bit does not affect position i.
+    have hpos : bw.bitPos + 1 ≤ i := by
+      simpa [BitWriter.writeBit, h] using hi
+    have hpos' : bw.bitPos < i := lt_of_lt_of_le (Nat.lt_succ_self _) hpos
+    have hle : bw.bitPos ≤ i := Nat.le_of_lt hpos'
+    have hlt' : bw.bitPos < 8 := hbit
+    have hshift_lt : (bit % 2) <<< bw.bitPos < 2 ^ 8 := by
+      have hbit' : bit % 2 < 2 := by
+        exact Nat.mod_lt _ (by decide : 0 < 2)
+      have hbit'' : bit % 2 ≤ 1 := Nat.lt_succ_iff.mp hbit'
+      have hpow : 2 ^ bw.bitPos ≤ 2 ^ 7 := by
+        have hle' : bw.bitPos ≤ 7 := Nat.le_of_lt_succ hbit
+        exact Nat.pow_le_pow_of_le (by decide : 1 < 2) hle'
+      have : (bit % 2) <<< bw.bitPos ≤ 1 * 2 ^ bw.bitPos := by
+        simpa [Nat.shiftLeft_eq] using Nat.mul_le_mul_right (2 ^ bw.bitPos) hbit''
+      have : (bit % 2) <<< bw.bitPos ≤ 2 ^ 7 := by
+        exact le_trans this (by simpa [Nat.mul_one] using hpow)
+      have : (bit % 2) <<< bw.bitPos < 2 ^ 8 := by
+        exact lt_of_le_of_lt this (by decide : 2 ^ 7 < 2 ^ 8)
+      exact this
+    have hcur' : bw.cur.toNat.testBit i = false := hcur i hle hlt
+    have hbitpos : (((bit % 2) <<< bw.bitPos) % 256).testBit i = false := by
+      have htest :
+          (((bit % 2) <<< bw.bitPos).testBit i) = false := by
+        -- Use the shift-left testBit lemma.
+        have hle' : bw.bitPos ≤ i := Nat.le_of_lt hpos'
+        have hshift :
+            (((bit % 2) <<< bw.bitPos).testBit i) =
+              (decide (i ≥ bw.bitPos) && (bit % 2).testBit (i - bw.bitPos)) := by
+          simp [Nat.testBit_shiftLeft]
+        -- Since i > bw.bitPos, the decide is true.
+        have hsrc : 1 ≤ i - bw.bitPos := by
+          -- from bw.bitPos + 1 ≤ i
+          exact Nat.le_sub_of_add_le (by simpa [Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using hpos)
+        have hsmall : bit % 2 < 2 ^ 1 := by
+          exact Nat.mod_lt _ (by decide : 0 < 2)
+        have hzero : (bit % 2).testBit (i - bw.bitPos) = false := by
+          apply Nat.testBit_lt_two_pow
+          have hle'' : 2 ^ 1 ≤ 2 ^ (i - bw.bitPos) := by
+            exact Nat.pow_le_pow_of_le (by decide : 1 < 2) hsrc
+          exact lt_of_lt_of_le hsmall hle''
+        -- simplify the shift-left formula
+        have hdec : decide (i ≥ bw.bitPos) = true := by
+          exact decide_eq_true hle'
+        -- now finish
+        simp [hshift, hdec, hzero]
+      have hmod : ((bit % 2) <<< bw.bitPos) % 256 = (bit % 2) <<< bw.bitPos :=
+        Nat.mod_eq_of_lt hshift_lt
+      -- rewrite the modulus and use the plain shift-left result
+      rw [hmod]
+      exact htest
+    -- Combine both parts of the OR.
+    have hcurNat :
+        (bw.cur ||| UInt8.ofNat ((bit % 2) <<< bw.bitPos)).toNat.testBit i = false := by
+      -- Convert to Nat and use testBit_or.
+      simp [UInt8.toNat_or, Nat.testBit_or, hcur', hbitpos]
+    simpa [BitWriter.curClearAbove, BitWriter.writeBit, h] using hcurNat
+
+lemma curClearAbove_writeBits (bw : BitWriter) (bits len : Nat) (hbit : bw.bitPos < 8)
+    (hcur : bw.curClearAbove) :
+    (BitWriter.writeBits bw bits len).curClearAbove := by
+  induction len generalizing bw bits with
+  | zero =>
+      simp [BitWriter.writeBits, hcur]
+  | succ n ih =>
+      have hcur' := curClearAbove_writeBit bw (bits % 2) hbit hcur
+      have hbit' : (BitWriter.writeBit bw (bits % 2)).bitPos < 8 :=
+        bitPos_lt_8_writeBit bw (bits % 2) hbit
+      simpa [BitWriter.writeBits] using
+        (ih (bw := BitWriter.writeBit bw (bits % 2)) (bits := bits >>> 1) hbit' hcur')
+
+-- Build a bit reader at the current writer position.
+def BitWriter.toReader (bw : BitWriter) (hbit : bw.bitPos < 8) : BitReader :=
+  { data := bw.flush
+    bytePos := bw.out.size
+    bitPos := bw.bitPos
+    hpos := out_size_le_flush bw
+    hend := by
+      intro hEq
+      by_cases h0 : bw.bitPos = 0
+      · exact h0
+      · exfalso
+        have hsize : bw.flush.size = bw.out.size + 1 := by
+          simp [BitWriter.flush, h0]
+        have hlt : bw.out.size < bw.flush.size := by
+          simp [hsize]
+        exact (Nat.ne_of_lt hlt) hEq
+    hbit := hbit }
+
+@[simp] lemma bitIndex_toReader (bw : BitWriter) (hbit : bw.bitPos < 8) :
+    (BitWriter.toReader bw hbit).bitIndex = bw.bitCount := by
+  simp [BitWriter.toReader, BitReader.bitIndex, BitWriter.bitCount]
+
 lemma shiftLeft_bit (b : Bool) (res n : Nat) :
     (Nat.bit b res) <<< n = (res <<< (n + 1)) + (b.toNat <<< n) := by
   -- Expand `bit` and shift-left as multiplication.
