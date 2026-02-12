@@ -285,6 +285,134 @@ lemma reverseBits_reverseBits (code len : Nat) (hcode : code < 2 ^ len) :
       have hlt' : code < 2 ^ i := lt_of_lt_of_le hcode hpow
       exact Nat.testBit_lt_two_pow hlt'
     simp [hfalse1, hfalse2]
+
+lemma fixedLitLenRow7_size : fixedLitLenRow7.size = 1 <<< 7 := by
+  simp [fixedLitLenRow7]
+
+lemma fixedLitLenRow8_size : fixedLitLenRow8.size = 1 <<< 8 := by
+  simp [fixedLitLenRow8]
+
+lemma fixedLitLenRow9_size : fixedLitLenRow9.size = 1 <<< 9 := by
+  simp [fixedLitLenRow9]
+
+lemma fixedLitLenRow7_get (code : Nat) (hcode : code < 24) :
+    fixedLitLenRow7[reverseBits code 7]'(by
+      simpa [fixedLitLenRow7_size, Nat.shiftLeft_eq] using (reverseBits_lt code 7)) =
+      some (256 + code) := by
+  have hcode7 : code < 2 ^ 7 := by
+    have : 24 ≤ 2 ^ 7 := by decide
+    exact lt_of_lt_of_le hcode this
+  have hrev : reverseBits (reverseBits code 7) 7 = code :=
+    reverseBits_reverseBits code 7 hcode7
+  -- unfold the row and simplify
+  simp [fixedLitLenRow7, hrev, hcode]
+
+lemma fixedLitLenRow8_get_low (code : Nat) (h48 : 48 ≤ code) (hcode : code < 192) :
+    fixedLitLenRow8[reverseBits code 8]'(by
+      simpa [fixedLitLenRow8_size, Nat.shiftLeft_eq] using (reverseBits_lt code 8)) =
+      some (code - 48) := by
+  have hcode8 : code < 2 ^ 8 := by
+    have : 192 ≤ 2 ^ 8 := by decide
+    exact lt_of_lt_of_le hcode this
+  have hrev : reverseBits (reverseBits code 8) 8 = code :=
+    reverseBits_reverseBits code 8 hcode8
+  have hget :
+      fixedLitLenRow8[reverseBits code 8]'(by
+        simpa [fixedLitLenRow8_size, Nat.shiftLeft_eq] using (reverseBits_lt code 8)) =
+        let code := reverseBits (reverseBits code 8) 8
+        if code < 192 then
+          if 48 ≤ code then some (code - 48) else none
+        else if code < 200 then some (code - 192 + 280) else none := by
+      simp [fixedLitLenRow8]
+  have hget' := hget
+  rw [hrev] at hget'
+  simp [hcode, h48] at hget'
+  exact hget'
+
+lemma fixedLitLenRow8_get_high (code : Nat) (h192 : 192 ≤ code) (hcode : code < 200) :
+    fixedLitLenRow8[reverseBits code 8]'(by
+      simpa [fixedLitLenRow8_size, Nat.shiftLeft_eq] using (reverseBits_lt code 8)) =
+      some (code - 192 + 280) := by
+  have hcode8 : code < 2 ^ 8 := by
+    have : 200 ≤ 2 ^ 8 := by decide
+    exact lt_of_lt_of_le hcode this
+  have hrev : reverseBits (reverseBits code 8) 8 = code :=
+    reverseBits_reverseBits code 8 hcode8
+  have hnot : ¬ code < 192 := Nat.not_lt_of_ge h192
+  have hget :
+      fixedLitLenRow8[reverseBits code 8]'(by
+        simpa [fixedLitLenRow8_size, Nat.shiftLeft_eq] using (reverseBits_lt code 8)) =
+        let code := reverseBits (reverseBits code 8) 8
+        if code < 192 then
+          if 48 ≤ code then some (code - 48) else none
+        else if code < 200 then some (code - 192 + 280) else none := by
+      simp [fixedLitLenRow8]
+  have hget' := hget
+  rw [hrev] at hget'
+  simp [hcode, hnot] at hget'
+  exact hget'
+
+lemma fixedLitLenRow9_get (code : Nat) (h400 : 400 ≤ code) (hcode : code < 512) :
+    fixedLitLenRow9[reverseBits code 9]'(by
+      simpa [fixedLitLenRow9_size, Nat.shiftLeft_eq] using (reverseBits_lt code 9)) =
+      some (code - 400 + 144) := by
+  have hcode9 : code < 2 ^ 9 := by
+    have : 512 ≤ 2 ^ 9 := by decide
+    exact lt_of_lt_of_le hcode this
+  have hrev : reverseBits (reverseBits code 9) 9 = code :=
+    reverseBits_reverseBits code 9 hcode9
+  have hget :
+      fixedLitLenRow9[reverseBits code 9]'(by
+        simpa [fixedLitLenRow9_size, Nat.shiftLeft_eq] using (reverseBits_lt code 9)) =
+        let code := reverseBits (reverseBits code 9) 9
+        if 400 ≤ code then some (code - 400 + 144) else none := by
+      simp [fixedLitLenRow9]
+  have hget' := hget
+  rw [hrev] at hget'
+  simp [h400] at hget'
+  exact hget'
+
+lemma fixedLitLenCode_row_lo (sym : Nat) (hsym : sym ≤ 143) :
+    fixedLitLenRow8[reverseBits (sym + 48) 8]'(by
+      simpa [fixedLitLenRow8_size, Nat.shiftLeft_eq] using (reverseBits_lt (sym + 48) 8)) =
+      some sym := by
+  have h48 : 48 ≤ sym + 48 := by omega
+  have hcode : sym + 48 < 192 := by omega
+  simpa [Nat.add_sub_cancel_left] using
+    (fixedLitLenRow8_get_low (code := sym + 48) h48 hcode)
+
+lemma fixedLitLenCode_row_mid (sym : Nat) (hsym : 144 ≤ sym) (hsym' : sym ≤ 255) :
+    fixedLitLenRow9[reverseBits (sym - 144 + 400) 9]'(by
+      simpa [fixedLitLenRow9_size, Nat.shiftLeft_eq] using
+        (reverseBits_lt (sym - 144 + 400) 9)) =
+      some sym := by
+  have h400 : 400 ≤ sym - 144 + 400 := by omega
+  have hcode : sym - 144 + 400 < 512 := by omega
+  have hrow := fixedLitLenRow9_get (code := sym - 144 + 400) h400 hcode
+  have hcalc1 : sym - 144 + 400 - 400 + 144 = sym - 144 + 144 := by omega
+  have hcalc2 : sym - 144 + 144 = sym := Nat.sub_add_cancel hsym
+  simpa [hcalc1, hcalc2] using hrow
+
+lemma fixedLitLenCode_row_hi (sym : Nat) (hsym : 256 ≤ sym) (hsym' : sym ≤ 279) :
+    fixedLitLenRow7[reverseBits (sym - 256) 7]'(by
+      simpa [fixedLitLenRow7_size, Nat.shiftLeft_eq] using (reverseBits_lt (sym - 256) 7)) =
+      some sym := by
+  have hcode : sym - 256 < 24 := by omega
+  have hrow := fixedLitLenRow7_get (code := sym - 256) hcode
+  have hcalc : 256 + (sym - 256) = sym := by omega
+  simpa [hcalc] using hrow
+
+lemma fixedLitLenCode_row_hi2 (sym : Nat) (hsym : 280 ≤ sym) (hsym' : sym ≤ 287) :
+    fixedLitLenRow8[reverseBits (sym - 280 + 192) 8]'(by
+      simpa [fixedLitLenRow8_size, Nat.shiftLeft_eq] using
+        (reverseBits_lt (sym - 280 + 192) 8)) =
+      some sym := by
+  have h192 : 192 ≤ sym - 280 + 192 := by omega
+  have hcode : sym - 280 + 192 < 200 := by omega
+  have hrow := fixedLitLenRow8_get_high (code := sym - 280 + 192) h192 hcode
+  have hcalc1 : sym - 280 + 192 - 192 + 280 = sym - 280 + 280 := by omega
+  have hcalc2 : sym - 280 + 280 = sym := Nat.sub_add_cancel hsym
+  simpa [hcalc1, hcalc2] using hrow
 -- Static Huffman length base table size.
 lemma lengthBases_size : lengthBases.size = 29 := by decide
 -- Static Huffman length extra table size.
