@@ -1,5 +1,7 @@
 import Bitmap.Basic
 import Init.Data.Nat.Bitwise.Basic
+import Init.Data.Nat.Bitwise.Lemmas
+import Init.Data.Nat.Lemmas
 import Init.Data.ByteArray.Lemmas
 import Init.Data.Range.Lemmas
 import Init.Data.UInt.Lemmas
@@ -164,6 +166,125 @@ lemma reverseBits_lt (code len : Nat) : reverseBits code len < 2 ^ len := by
       -- `2^n * 2 = 2^(n+1)`
       simpa [Nat.pow_succ] using hsum'
 
+lemma reverseBits_testBit (code len i : Nat) :
+    (reverseBits code len).testBit i =
+      if i < len then code.testBit (len - 1 - i) else false := by
+  induction len generalizing code i with
+  | zero =>
+      simp [reverseBits, reverseBitsAux]
+  | succ n ih =>
+      by_cases hi : i < n + 1
+      · have hrev :
+          reverseBits code (n + 1) =
+            2 ^ n * (code.testBit 0).toNat + reverseBits (code >>> 1) n := by
+          calc
+            reverseBits code (n + 1)
+                = reverseBits (code >>> 1) n + ((code.testBit 0).toNat <<< n) := reverseBits_succ code n
+            _ = reverseBits (code >>> 1) n + 2 ^ n * (code.testBit 0).toNat := by
+                simp [Nat.shiftLeft_eq, Nat.mul_comm]
+            _ = 2 ^ n * (code.testBit 0).toNat + reverseBits (code >>> 1) n := by
+                simp [Nat.add_comm]
+        have hb : reverseBits (code >>> 1) n < 2 ^ n := reverseBits_lt _ _
+        have hbit :
+            (reverseBits code (n + 1)).testBit i =
+              if i < n then (reverseBits (code >>> 1) n).testBit i
+              else (code.testBit 0).toNat.testBit (i - n) := by
+          simpa [hrev] using
+            (Nat.testBit_two_pow_mul_add
+              (a := (code.testBit 0).toNat)
+              (b := reverseBits (code >>> 1) n)
+              (i := n)
+              hb
+              i)
+        have hle : i ≤ n := Nat.le_of_lt_succ hi
+        cases lt_or_eq_of_le hle with
+        | inl hlt =>
+            have hbit' : (reverseBits code (n + 1)).testBit i =
+                (reverseBits (code >>> 1) n).testBit i := by
+              simpa [hlt] using hbit
+            have hih :
+                (reverseBits (code >>> 1) n).testBit i =
+                  if i < n then (code >>> 1).testBit (n - 1 - i) else false := ih _ _
+            have hih' : (reverseBits (code >>> 1) n).testBit i =
+                (code >>> 1).testBit (n - 1 - i) := by
+              simpa [hlt] using hih
+            have hshift :
+                (code >>> 1).testBit (n - 1 - i) =
+                  code.testBit ((n - 1 - i) + 1) := by
+              simp [Nat.add_comm]
+            have hcalc : (n - 1 - i) + 1 = n - i := by omega
+            have hres :
+                (reverseBits code (n + 1)).testBit i = code.testBit (n - i) := by
+              calc
+                (reverseBits code (n + 1)).testBit i
+                    = (reverseBits (code >>> 1) n).testBit i := hbit'
+                _ = (code >>> 1).testBit (n - 1 - i) := hih'
+                _ = code.testBit ((n - 1 - i) + 1) := hshift
+                _ = code.testBit (n - i) := by simp [hcalc]
+            simpa [hi, hlt] using hres
+        | inr hEq =>
+            have hnot : ¬ i < n := by
+              rw [hEq]
+              exact Nat.lt_irrefl n
+            have hbit' : (reverseBits code (n + 1)).testBit i =
+                (code.testBit 0).toNat.testBit (i - n) := by
+              simpa [hnot] using hbit
+            have hbit'' : (reverseBits code (n + 1)).testBit n =
+                (code.testBit 0).toNat.testBit 0 := by
+              have hbit'' := hbit'
+              rw [hEq] at hbit''
+              rw [Nat.sub_self] at hbit''
+              exact hbit''
+            have hres : (reverseBits code (n + 1)).testBit n = code.testBit 0 := by
+              cases hbit0 : code.testBit 0 <;> simp [hbit'', hbit0]
+            simpa [hEq, hi] using hres
+      · have hlt : reverseBits code (n + 1) < 2 ^ (n + 1) := reverseBits_lt code (n + 1)
+        have hle : n + 1 ≤ i := Nat.le_of_not_gt hi
+        have hpow : 2 ^ (n + 1) ≤ 2 ^ i := Nat.pow_le_pow_of_le (a := 2) (by decide) hle
+        have hlt' : reverseBits code (n + 1) < 2 ^ i := lt_of_lt_of_le hlt hpow
+        have hfalse : (reverseBits code (n + 1)).testBit i = false :=
+          Nat.testBit_lt_two_pow hlt'
+        simp [hi, hfalse]
+
+lemma reverseBits_reverseBits (code len : Nat) (hcode : code < 2 ^ len) :
+    reverseBits (reverseBits code len) len = code := by
+  apply Nat.eq_of_testBit_eq
+  intro i
+  by_cases hi : i < len
+  · have h1 := reverseBits_testBit (code := reverseBits code len) (len := len) (i := i)
+    have h2 := reverseBits_testBit (code := code) (len := len) (i := len - 1 - i)
+    have hlen : len - 1 - i < len := by
+      have : i ≤ len - 1 := by omega
+      omega
+    -- simplify the nested testBit
+    have h1' :
+        (reverseBits (reverseBits code len) len).testBit i =
+          (reverseBits code len).testBit (len - 1 - i) := by
+      have h1' := h1
+      simp [hi] at h1'
+      exact h1'
+    have h2' :
+        (reverseBits code len).testBit (len - 1 - i) =
+          code.testBit (len - 1 - (len - 1 - i)) := by
+      have h2' := h2
+      simp [hlen] at h2'
+      exact h2'
+    have hcalc : len - 1 - (len - 1 - i) = i := by omega
+    calc
+      (reverseBits (reverseBits code len) len).testBit i
+          = (reverseBits code len).testBit (len - 1 - i) := h1'
+      _ = code.testBit (len - 1 - (len - 1 - i)) := h2'
+      _ = code.testBit i := by simp [hcalc]
+  · have hle : len ≤ i := Nat.le_of_not_gt hi
+    have hpow : 2 ^ len ≤ 2 ^ i := Nat.pow_le_pow_of_le (a := 2) (by decide) hle
+    have hlt1 : reverseBits (reverseBits code len) len < 2 ^ len := reverseBits_lt _ _
+    have hlt1' : reverseBits (reverseBits code len) len < 2 ^ i := lt_of_lt_of_le hlt1 hpow
+    have hfalse1 : (reverseBits (reverseBits code len) len).testBit i = false :=
+      Nat.testBit_lt_two_pow hlt1'
+    have hfalse2 : code.testBit i = false := by
+      have hlt' : code < 2 ^ i := lt_of_lt_of_le hcode hpow
+      exact Nat.testBit_lt_two_pow hlt'
+    simp [hfalse1, hfalse2]
 -- Static Huffman length base table size.
 lemma lengthBases_size : lengthBases.size = 29 := by decide
 -- Static Huffman length extra table size.
