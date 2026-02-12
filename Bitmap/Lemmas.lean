@@ -46,11 +46,10 @@ lemma bitCount_writeBit (bw : BitWriter) (bit : Nat) :
     (BitWriter.writeBit bw bit).bitCount = bw.bitCount + 1 := by
   unfold BitWriter.writeBit BitWriter.bitCount
   by_cases h : bw.bitPos = 7
-  · simp [h, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm]
-  · have hlt : bw.bitPos + 1 < 8 := by
-      have hle : bw.bitPos + 1 ≤ 8 := Nat.succ_le_of_lt bw.hbit
-      exact lt_of_le_of_ne hle h
-    simp [h, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm, hlt, Nat.mul_add]
+  · simp [h]
+    omega
+  · simp [h]
+    omega
 
 lemma bitCount_writeBits (bw : BitWriter) (bits len : Nat) :
     (BitWriter.writeBits bw bits len).bitCount = bw.bitCount + len := by
@@ -58,17 +57,17 @@ lemma bitCount_writeBits (bw : BitWriter) (bits len : Nat) :
   | zero =>
       simp [BitWriter.writeBits]
   | succ n ih =>
-      simp [BitWriter.writeBits, ih, bitCount_writeBit, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm]
+      simp [BitWriter.writeBits, ih, bitCount_writeBit, Nat.add_assoc, Nat.add_comm]
 
 lemma flush_size (bw : BitWriter) :
     bw.flush.size = bw.out.size + (if bw.bitPos = 0 then 0 else 1) := by
   by_cases h : bw.bitPos = 0 <;> simp [BitWriter.flush, h]
 
-lemma flush_size_mul_ge_bitCount (bw : BitWriter) :
+lemma flush_size_mul_ge_bitCount (bw : BitWriter) (hbit : bw.bitPos < 8) :
     bw.flush.size * 8 ≥ bw.bitCount := by
   unfold BitWriter.bitCount
   by_cases h : bw.bitPos = 0
-  · simp [flush_size, h, Nat.mul_add, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc]
+  · simp [flush_size, h, Nat.add_comm]
   · have hsize : bw.flush.size = bw.out.size + 1 := by
       simp [flush_size, h]
     calc
@@ -78,6 +77,55 @@ lemma flush_size_mul_ge_bitCount (bw : BitWriter) :
         omega
       _ ≥ bw.out.size * 8 + bw.bitPos := by
         omega
+
+lemma shiftLeft_bit (b : Bool) (res n : Nat) :
+    (Nat.bit b res) <<< n = (res <<< (n + 1)) + (b.toNat <<< n) := by
+  -- Expand `bit` and shift-left as multiplication.
+  have hbit : Nat.bit b res = 2 * res + b.toNat := by
+    simpa using (Nat.bit_val b res)
+  calc
+    (Nat.bit b res) <<< n
+        = (2 * res + b.toNat) * 2 ^ n := by
+            simp [hbit, Nat.shiftLeft_eq]
+    _ = (2 * res) * 2 ^ n + b.toNat * 2 ^ n := by
+            simp [Nat.add_mul]
+    _ = res * 2 ^ (n + 1) + b.toNat * 2 ^ n := by
+            simp [Nat.pow_add, Nat.mul_assoc, Nat.mul_comm]
+    _ = (res <<< (n + 1)) + (b.toNat <<< n) := by
+            simp [Nat.shiftLeft_eq]
+
+lemma reverseBitsAux_eq_add (code len res : Nat) :
+    reverseBitsAux code len res = reverseBits code len + (res <<< len) := by
+  induction len generalizing code res with
+  | zero =>
+      simp [reverseBits, reverseBitsAux]
+  | succ n ih =>
+      have hbit : Nat.bit (code.testBit 0) res = 2 * res + (code.testBit 0).toNat := by
+        simpa using (Nat.bit_val (code.testBit 0) res)
+      calc
+        reverseBitsAux code (n + 1) res
+            = reverseBitsAux (code >>> 1) n (Nat.bit (code.testBit 0) res) := by
+                simp [reverseBitsAux]
+        _ = reverseBits (code >>> 1) n + ((Nat.bit (code.testBit 0) res) <<< n) := by
+                exact (ih (code := code >>> 1) (res := Nat.bit (code.testBit 0) res))
+        _ = reverseBits (code >>> 1) n + ((res <<< (n + 1)) + ((code.testBit 0).toNat <<< n)) := by
+                simp [shiftLeft_bit, Nat.add_assoc, Nat.add_comm]
+        _ = (reverseBits (code >>> 1) n + ((code.testBit 0).toNat <<< n)) + (res <<< (n + 1)) := by
+                omega
+        _ = reverseBits code (n + 1) + (res <<< (n + 1)) := by
+                -- Expand `reverseBits` one step and use the auxiliary lemma with `res = 0`.
+                have hrev :
+                    reverseBits code (n + 1) =
+                      reverseBits (code >>> 1) n + ((code.testBit 0).toNat <<< n) := by
+                  calc
+                    reverseBits code (n + 1)
+                        = reverseBitsAux (code >>> 1) n (Nat.bit (code.testBit 0) 0) := by
+                            simp [reverseBits, reverseBitsAux]
+                    _ = reverseBits (code >>> 1) n + ((Nat.bit (code.testBit 0) 0) <<< n) := by
+                            simpa using (ih (code := code >>> 1) (res := Nat.bit (code.testBit 0) 0))
+                    _ = reverseBits (code >>> 1) n + ((code.testBit 0).toNat <<< n) := by
+                            simp [Nat.bit_val, Nat.shiftLeft_eq]
+                simp [hrev, Nat.add_comm]
 
 -- Static Huffman length base table size.
 lemma lengthBases_size : lengthBases.size = 29 := by decide
@@ -2422,6 +2470,7 @@ lemma encodeBitmap_extract_idat_data {px : Type u} [Pixel px] [PngPixel px] (bmp
   have hdef : encodeBitmap bmp hw hh mode = sigIhdr ++ tail := by
     simp [encodeBitmap, encodeBitmapUnchecked, sigIhdr, tail, ihdr, idat, ihdrTailColor,
       encodeBitmapIdat, ByteArray.append_assoc, Id.run]
+    rfl
   have hshift' :
       (encodeBitmap bmp hw hh mode).extract (sigIhdr.size + 8) (sigIhdr.size + (8 + idat.size)) =
         tail.extract 8 (8 + idat.size) := by
@@ -2488,6 +2537,7 @@ lemma encodeBitmap_extract_iend_len {px : Type u} [Pixel px] [PngPixel px] (bmp 
   have hdef : encodeBitmap bmp hw hh mode = sigIhdr ++ tail := by
     simp [encodeBitmap, encodeBitmapUnchecked, sigIhdr, tail, ihdr, idat, ihdrTailColor,
       encodeBitmapIdat, ByteArray.append_assoc, Id.run]
+    rfl
   have hshift' :
       (encodeBitmap bmp hw hh mode).extract
           (sigIhdr.size + (mkChunk "IDAT" idat).size)
@@ -2571,6 +2621,7 @@ lemma encodeBitmap_extract_iend_type {px : Type u} [Pixel px] [PngPixel px] (bmp
   have hdef : encodeBitmap bmp hw hh mode = sigIhdr ++ tail := by
     simp [encodeBitmap, encodeBitmapUnchecked, sigIhdr, tail, ihdr, idat, ihdrTailColor,
       encodeBitmapIdat, ByteArray.append_assoc, Id.run]
+    rfl
   have hshift' :
       (encodeBitmap bmp hw hh mode).extract
           (sigIhdr.size + (mkChunk "IDAT" idat).size + 4)
@@ -2619,14 +2670,25 @@ lemma encodeBitmap_size {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
     (mode : PngEncodeMode := .stored) :
     (encodeBitmap bmp hw hh mode).size =
       (encodeBitmapIdat (bmp := bmp) (mode := mode)).size + 57 := by
-  cases mode <;> unfold encodeBitmap encodeBitmapUnchecked encodeBitmapIdat
-  have htail :
-      (ByteArray.mk #[u8 8, PngPixel.colorType (α := px), u8 0, u8 0, u8 0]).size = 5 := by
-    simp [ByteArray.size]
-  simp [Id.run, ByteArray.size_append, mkChunk_size, pngSignature_size, htail,
-    ihdr_utf8ByteSize, idat_utf8ByteSize, iend_utf8ByteSize, u32be_size,
-    Nat.add_comm]
-  omega
+  cases mode with
+  | stored =>
+      unfold encodeBitmap encodeBitmapUnchecked encodeBitmapIdat
+      have htail :
+          (ByteArray.mk #[u8 8, PngPixel.colorType (α := px), u8 0, u8 0, u8 0]).size = 5 := by
+        simp [ByteArray.size]
+      simp [Id.run, ByteArray.size_append, mkChunk_size, pngSignature_size, htail,
+        ihdr_utf8ByteSize, idat_utf8ByteSize, iend_utf8ByteSize, u32be_size,
+        Nat.add_comm]
+      omega
+  | fixed =>
+      unfold encodeBitmap encodeBitmapUnchecked encodeBitmapIdat
+      have htail :
+          (ByteArray.mk #[u8 8, PngPixel.colorType (α := px), u8 0, u8 0, u8 0]).size = 5 := by
+        simp [ByteArray.size]
+      simp [Id.run, ByteArray.size_append, mkChunk_size, pngSignature_size, htail,
+        ihdr_utf8ByteSize, idat_utf8ByteSize, iend_utf8ByteSize, u32be_size,
+        Nat.add_comm]
+      omega
 
 -- Reading the IHDR chunk from an encoded bitmap yields its header payload.
 lemma readChunk_encodeBitmap_ihdr {px : Type u} [Pixel px] [PngPixel px]
@@ -4167,7 +4229,8 @@ lemma decodeBitmap_encodeBitmap (bmp : BitmapRGB8)
       decodeRowsLoop (encodeRaw bmp) bmp.size.width bmp.size.height 3 (bmp.size.width * 3) 0 0
           ByteArray.empty { data := Array.replicate (bmp.size.height * (bmp.size.width * 3)) 0 } =
         some bmp.data := by
-    simpa [bytesPerPixelRGB] using hrows'
+    dsimp [bytesPerPixelRGB]
+    simpa using hrows'
   have hrows''' :
       decodeRowsLoop (encodeRaw bmp) bmp.size.width bmp.size.height 3 (bmp.size.width * 3) 0 0
           ByteArray.empty { data := Array.replicate (bmp.size.width * bmp.size.height * 3) 0 } =
@@ -4177,9 +4240,7 @@ lemma decodeBitmap_encodeBitmap (bmp : BitmapRGB8)
     simpa [bytesPerPixelRGB] using hvalid
   unfold Png.decodeBitmap
   -- Parse and header checks.
-  simp [hsize, hparse]
-  -- Decompression path.
-  simp [hmin, zlibDecompressStored_zlibCompressStored]
+  simp [hsize, hparse, hmin, zlibDecompressStored_zlibCompressStored, encodeBitmapIdat]
   -- Raw size check and row decoding.
   have hbpp : (if (u8 2).toNat = 0 then 1 else if (u8 2).toNat = 2 then 3 else 4) = 3 := by
     decide
@@ -4247,7 +4308,8 @@ lemma decodeBitmap_encodeBitmap_rgba (bmp : BitmapRGBA8)
       decodeRowsLoopRGBA (encodeRaw bmp) bmp.size.width bmp.size.height 4 (bmp.size.width * 4) 0 0
           ByteArray.empty { data := Array.replicate (bmp.size.height * (bmp.size.width * 4)) 0 } =
         some bmp.data := by
-    simpa [bytesPerPixelRGBA] using hrows'
+    dsimp [bytesPerPixelRGBA]
+    simpa using hrows'
   have hrows''' :
       decodeRowsLoopRGBA (encodeRaw bmp) bmp.size.width bmp.size.height 4 (bmp.size.width * 4) 0 0
           ByteArray.empty { data := Array.replicate (bmp.size.width * bmp.size.height * 4) 0 } =
@@ -4257,9 +4319,7 @@ lemma decodeBitmap_encodeBitmap_rgba (bmp : BitmapRGBA8)
     simpa [bytesPerPixelRGBA] using hvalid
   unfold Png.decodeBitmap
   -- Parse and header checks.
-  simp [hsize, hparse]
-  -- Decompression path.
-  simp [hmin, zlibDecompressStored_zlibCompressStored]
+  simp [hsize, hparse, hmin, zlibDecompressStored_zlibCompressStored, encodeBitmapIdat]
   -- Raw size check and row decoding.
   have hbpp : (if (u8 6).toNat = 0 then 1 else if (u8 6).toNat = 2 then 3 else 4) = 4 := by
     decide
@@ -4324,29 +4384,17 @@ lemma decodeBitmap_encodeBitmap_gray (bmp : BitmapGray8)
         some bmp.data := by
     simpa [bytesPerPixelGray] using hrows
   have hrows'' :
-      decodeRowsLoopGray (encodeRaw bmp) bmp.size.width bmp.size.height 1 (bmp.size.width * 1) 0 0
-          ByteArray.empty { data := Array.replicate (bmp.size.height * (bmp.size.width * 1)) 0 } =
-        some bmp.data := by
-    simpa [bytesPerPixelGray] using hrows'
-  have hrows''' :
-      decodeRowsLoopGray (encodeRaw bmp) bmp.size.width bmp.size.height 1 (bmp.size.width * 1) 0 0
-          ByteArray.empty { data := Array.replicate (bmp.size.width * bmp.size.height * 1) 0 } =
-        some bmp.data := by
-    simpa [Nat.mul_left_comm, Nat.mul_comm, Nat.mul_assoc] using hrows''
-  have hrows'''' :
       decodeRowsLoopGray (encodeRaw bmp) bmp.size.width bmp.size.height 1 bmp.size.width 0 0 ByteArray.empty
           { data := Array.replicate (bmp.size.width * bmp.size.height) 0 } =
         some bmp.data := by
-    simpa using hrows'''
+    simpa [bytesPerPixelGray, Nat.mul_left_comm, Nat.mul_comm, Nat.mul_assoc] using hrows'
   have hvalid' : bmp.data.size = bmp.size.width * bmp.size.height * 1 := by
     simpa [bytesPerPixelGray] using hvalid
   have hvalid'' : bmp.data.size = bmp.size.width * bmp.size.height := by
     simpa using hvalid'
   unfold Png.decodeBitmap
   -- Parse and header checks.
-  simp [hsize, hparse]
-  -- Decompression path.
-  simp [hmin, zlibDecompressStored_zlibCompressStored]
+  simp [hsize, hparse, hmin, zlibDecompressStored_zlibCompressStored, encodeBitmapIdat]
   -- Raw size check and row decoding.
   have hbpp : (if (u8 0).toNat = 0 then 1 else if (u8 0).toNat = 2 then 3 else 4) = 1 := by
     decide
@@ -4367,7 +4415,7 @@ lemma decodeBitmap_encodeBitmap_gray (bmp : BitmapGray8)
               , valid := by simpa [bytesPerPixel_gray, bytesPerPixelGray] using h }
           else none) =
         some bmp := by
-    simp [hbpp, hrows'''', hvalid'']
+    simp [hbpp, hrows'', hvalid'']
   have hrowsEq :
       ((decodeRowsLoopGray (encodeRaw bmp) bmp.size.width bmp.size.height
               (if (u8 0).toNat = 0 then 1 else if (u8 0).toNat = 2 then 3 else 4)

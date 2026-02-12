@@ -1,4 +1,5 @@
 import Mathlib.Data.Nat.Basic
+import Mathlib.Data.Nat.BinaryRec
 import Init.Tactics
 import Init.Data.Array.Lemmas
 import Init.Data.Array.Set
@@ -646,7 +647,7 @@ def reverseBitsAux (code len res : Nat) : Nat :=
   match len with
   | 0 => res
   | n + 1 =>
-      reverseBitsAux (code >>> 1) n ((res <<< 1) ||| (code &&& 1))
+      reverseBitsAux (code >>> 1) n (Nat.bit (code.testBit 0) res)
 
 def reverseBits (code len : Nat) : Nat :=
   reverseBitsAux code len 0
