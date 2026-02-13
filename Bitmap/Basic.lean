@@ -608,27 +608,23 @@ deriving Repr, DecidableEq
 structure BitWriter where
   out : ByteArray
   cur : UInt8
-  bitPos : Fin 8
+  bitPos : Nat
+  hbit : bitPos < 8
 deriving Repr
 
 def BitWriter.empty : BitWriter :=
-  { out := ByteArray.empty, cur := 0, bitPos := 0 }
+  { out := ByteArray.empty, cur := 0, bitPos := 0, hbit := by decide }
 
 def BitWriter.writeBit (bw : BitWriter) (bit : Nat) : BitWriter :=
-  let cur := bw.cur ||| UInt8.ofNat ((bit % 2) <<< (bw.bitPos : Nat))
+  let cur := bw.cur ||| UInt8.ofNat ((bit % 2) <<< bw.bitPos)
   if h7 : bw.bitPos = 7 then
-    { out := bw.out.push cur, cur := 0, bitPos := 0 }
+    { out := bw.out.push cur, cur := 0, bitPos := 0, hbit := by decide }
   else
-    let h7' : (bw.bitPos : Nat) ≠ 7 := by
-      intro h
-      apply h7
-      exact Fin.ext h
-    let hle : (bw.bitPos : Nat) ≤ 7 := Nat.le_of_lt_succ bw.bitPos.isLt
-    let hlt : (bw.bitPos : Nat) < 7 := lt_of_le_of_ne hle h7'
-    let hlt' : (bw.bitPos : Nat) + 1 < 8 := by
-      have := Nat.succ_lt_succ_iff.mpr hlt
-      simpa [Nat.succ_eq_add_one] using this
-    { bw with cur := cur, bitPos := ⟨(bw.bitPos : Nat) + 1, hlt'⟩ }
+    let hle : bw.bitPos ≤ 7 := Nat.le_of_lt_succ bw.hbit
+    let hlt : bw.bitPos < 7 := lt_of_le_of_ne hle h7
+    let hbit' : bw.bitPos + 1 < 8 := by
+      simpa [Nat.succ_eq_add_one] using (Nat.succ_lt_succ_iff.mpr hlt)
+    { bw with cur := cur, bitPos := bw.bitPos + 1, hbit := hbit' }
 
 def BitWriter.writeBits (bw : BitWriter) (bits len : Nat) : BitWriter :=
   match len with
