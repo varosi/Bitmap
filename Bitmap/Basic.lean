@@ -804,54 +804,16 @@ def BitReader.readBit (br : BitReader) : Nat × BitReader :=
           hend := hend'
           hbit := hbit' })
 
+def BitReader.readBitsAux (br : BitReader) : Nat → Nat × BitReader
+  | 0 => (0, br)
+  | n + 1 =>
+      let (bit, br') := br.readBit
+      let (rest, br'') := readBitsAux br' n
+      (bit ||| (rest <<< 1), br'')
+
 def BitReader.readBits (br : BitReader) (n : Nat)
-    (h : br.bitIndex + n <= br.data.size * 8) : Nat × BitReader := by
-  induction n generalizing br with
-  | zero =>
-      exact (0, br)
-  | succ n ih =>
-      have hlt : br.bitIndex < br.data.size * 8 := by
-        have hpos : 0 < Nat.succ n := Nat.succ_pos _
-        have hlt' : br.bitIndex < br.bitIndex + Nat.succ n :=
-          Nat.lt_add_of_pos_right (n := br.bitIndex) (k := Nat.succ n) hpos
-        exact lt_of_lt_of_le hlt' h
-      have hle : br.bytePos * 8 <= br.bitIndex := by
-        dsimp [BitReader.bitIndex]
-        exact Nat.le_add_right _ _
-      have hmul : br.bytePos * 8 < br.data.size * 8 := lt_of_le_of_lt hle hlt
-      have hbyte : br.bytePos < br.data.size := by
-        have hmul' : 8 * br.bytePos < 8 * br.data.size := by
-          simpa [Nat.mul_comm] using hmul
-        exact Nat.lt_of_mul_lt_mul_left hmul'
-      cases hres : br.readBit with
-      | mk bit br' =>
-          have hindex' : (BitReader.readBit br).2.bitIndex = br.bitIndex + 1 := by
-            unfold BitReader.readBit BitReader.bitIndex
-            have hne : br.bytePos ≠ br.data.size := ne_of_lt hbyte
-            by_cases hnext : br.bitPos + 1 = 8
-            · calc
-                (BitReader.readBit br).2.bitIndex
-                    = (br.bytePos + 1) * 8 := by
-                        simp [BitReader.readBit, BitReader.bitIndex, hne, hnext]
-                _ = br.bytePos * 8 + (br.bitPos + 1) := by
-                        simp [Nat.add_mul, hnext, Nat.add_comm]
-                _ = br.bitIndex + 1 := by
-                        simp [BitReader.bitIndex, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm]
-            · simp [hne, hnext, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm]
-          have hdata' : (br.readBit).2.data = br.data := by
-            unfold BitReader.readBit
-            have hne : br.bytePos ≠ br.data.size := ne_of_lt hbyte
-            by_cases hnext : br.bitPos + 1 = 8 <;> simp [hne, hnext]
-          have hindex : br'.bitIndex = br.bitIndex + 1 := by
-            simpa [hres] using hindex'
-          have hdata : br'.data = br.data := by
-            simpa [hres] using hdata'
-          have h' : br'.bitIndex + n <= br'.data.size * 8 := by
-            have h'raw : br'.bitIndex + n <= br.data.size * 8 := by
-              simpa [hindex, Nat.succ_eq_add_one, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm] using h
-            simpa [hdata] using h'raw
-          let (rest, br'') := ih br' h'
-          exact (bit ||| (rest <<< 1), br'')
+    (_h : br.bitIndex + n <= br.data.size * 8) : Nat × BitReader := by
+  exact br.readBitsAux n
 
 def BitReader.alignByte (br : BitReader) : BitReader :=
   by
@@ -1246,19 +1208,13 @@ partial def decodeFixedLiteralSym (br : BitReader) : Option (Nat × BitReader) :
 -- Decode a fixed-Huffman block that is restricted to literals and end-of-block.
 partial def decodeFixedLiteralBlock (br : BitReader) (out : ByteArray) :
     Option (BitReader × ByteArray) := do
-  let mut br := br
-  let mut out := out
-  let mut done := false
-  while !done do
-    let (sym, br') ← decodeFixedLiteralSym br
-    br := br'
-    if sym < 256 then
-      out := out.push (u8 sym)
-    else if sym == 256 then
-      done := true
-    else
-      none
-  return (br, out)
+  let (sym, br') ← decodeFixedLiteralSym br
+  if sym < 256 then
+    decodeFixedLiteralBlock br' (out.push (u8 sym))
+  else if sym == 256 then
+    return (br', out)
+  else
+    none
 
 def fixedLitLenLengths : Array Nat :=
   Id.run do

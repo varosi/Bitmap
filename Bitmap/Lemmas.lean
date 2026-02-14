@@ -153,6 +153,25 @@ lemma flush_size_writeBits_le (bw : BitWriter) (bits len : Nat) :
         ih (bw := BitWriter.writeBit bw (bits % 2)) (bits := bits >>> 1)
       exact le_trans h1 h2
 
+-- Writing at least one bit strictly grows the flushed buffer.
+lemma flush_size_writeBits_lt (bw : BitWriter) (bits len : Nat) (h : 0 < len) :
+    bw.out.size < (BitWriter.writeBits bw bits len).flush.size := by
+  cases len with
+  | zero => cases h
+  | succ n =>
+      have h1 : (BitWriter.writeBit bw (bits % 2)).flush.size = bw.out.size + 1 :=
+        flush_size_writeBit bw (bits % 2)
+      have hle :
+          (BitWriter.writeBit bw (bits % 2)).flush.size ≤
+            (BitWriter.writeBits bw bits (Nat.succ n)).flush.size := by
+        -- unfold one step, then use monotonicity
+        simpa [BitWriter.writeBits] using
+          (flush_size_writeBits_le (bw := BitWriter.writeBit bw (bits % 2)) (bits := bits >>> 1) (len := n))
+      calc
+        bw.out.size < bw.out.size + 1 := by omega
+        _ = (BitWriter.writeBit bw (bits % 2)).flush.size := by simpa [h1]
+        _ ≤ (BitWriter.writeBits bw bits (Nat.succ n)).flush.size := hle
+
 -- Bits at and above the current position are clear in the working byte.
 def BitWriter.curClearAbove (bw : BitWriter) : Prop :=
   ∀ i, bw.bitPos ≤ i → i < 8 → bw.cur.toNat.testBit i = false
@@ -459,6 +478,7 @@ lemma readBit_readerAt_writeBit (bw : BitWriter) (bit : Nat)
       apply BitReader.ext <;> simp [BitWriter.readerAt, BitWriter.writeBit, h7]
     -- finish
     simp [hread, hreader]
+
   · -- reader stays in same byte
     have h7nat : bw.bitPos ≠ 7 := h7
     have hnext : bw.bitPos + 1 ≠ 8 := by
@@ -550,6 +570,85 @@ lemma mod_two_pow_decomp (bits n : Nat) :
           exact not_lt_of_ge (Nat.succ_le_succ (Nat.le_of_not_gt hk))
         simp [hk, hk', hbit0, Nat.add_comm]
 
+-- Decompose a low `(n+1)`-bit window into the first `n` bits and the `n`-th bit.
+lemma mod_two_pow_decomp_high (bits n : Nat) :
+    bits % 2 ^ (n + 1) =
+      (bits % 2 ^ n) ||| (((bits >>> n) % 2) <<< n) := by
+  apply Nat.eq_of_testBit_eq
+  intro i
+  by_cases hi : i < n
+  · -- lower bits come from the `n`-bit prefix
+    have hshift : (((bits >>> n) % 2) <<< n).testBit i = false := by
+      have hle : ¬ i ≥ n := Nat.not_le_of_gt hi
+      simp [Nat.testBit_shiftLeft, hle]
+    have hleft :
+        (bits % 2 ^ n).testBit i = bits.testBit i := by
+      have := Nat.testBit_mod_two_pow bits n i
+      simpa [hi] using this
+    have hlt' : i < n + 1 := lt_trans hi (Nat.lt_succ_self n)
+    have hright :
+        (bits % 2 ^ (n + 1)).testBit i = bits.testBit i := by
+      have := Nat.testBit_mod_two_pow bits (n + 1) i
+      simpa [hlt'] using this
+    simp [Nat.testBit_or, hshift, hleft, hright]
+  · have hge : n ≤ i := Nat.le_of_not_gt hi
+    cases lt_or_eq_of_le hge with
+    | inl hgt =>
+        -- `i > n`: both sides are zero
+        have hlt' : ¬ i < n + 1 := by omega
+        have hleft :
+            (bits % 2 ^ (n + 1)).testBit i = false := by
+          have := Nat.testBit_mod_two_pow bits (n + 1) i
+          simpa [hlt'] using this
+        have hright1 :
+            (bits % 2 ^ n).testBit i = false := by
+          have hlt'' : ¬ i < n := by omega
+          have := Nat.testBit_mod_two_pow bits n i
+          simpa [hlt''] using this
+        have hx : ((bits >>> n) % 2) < 2 := Nat.mod_lt _ (by decide : 0 < (2 : Nat))
+        have hpos : 0 < i - n := by omega
+        have hpow : 2 ≤ 2 ^ (i - n) := by
+          have hle1 : 1 ≤ i - n := Nat.succ_le_of_lt hpos
+          have := Nat.pow_le_pow_of_le (a := 2) (by decide) hle1
+          simpa [Nat.pow_succ] using this
+        have hltx : ((bits >>> n) % 2) < 2 ^ (i - n) := lt_of_lt_of_le hx hpow
+        have hbit : ((bits >>> n) % 2).testBit (i - n) = false :=
+          Nat.testBit_lt_two_pow hltx
+        have hright2 :
+            (((bits >>> n) % 2) <<< n).testBit i = false := by
+          have hge' : i ≥ n := hge
+          simp [Nat.testBit_shiftLeft, hge', hbit]
+        simp [Nat.testBit_or, hleft, hright1, hright2]
+    | inr hEq =>
+        -- `i = n`: left side is `bits.testBit n`
+        subst hEq
+        have hlt' : n < n + 1 := Nat.lt_succ_self n
+        have hleft :
+            (bits % 2 ^ (n + 1)).testBit n = bits.testBit n := by
+          have := Nat.testBit_mod_two_pow bits (n + 1) n
+          simpa [hlt'] using this
+        have hright1 :
+            (bits % 2 ^ n).testBit n = false := by
+          have hlt'' : ¬ n < n := Nat.lt_irrefl n
+          have := Nat.testBit_mod_two_pow bits n n
+          simpa [hlt''] using this
+        have hshift :
+            (((bits >>> n) % 2) <<< n).testBit n = ((bits >>> n) % 2).testBit 0 := by
+          have hge' : n ≥ n := le_rfl
+          simp [Nat.testBit_shiftLeft, hge']
+        have hbit0 :
+            ((bits >>> n) % 2).testBit 0 = (bits >>> n).testBit 0 := by
+          have := Nat.testBit_mod_two_pow (bits >>> n) 1 0
+          simpa using this
+        have hbitn : (bits >>> n).testBit 0 = bits.testBit n := by
+          simpa using (Nat.testBit_shiftRight (x := bits) (i := n) (j := 0))
+        have hright2 :
+            (((bits >>> n) % 2) <<< n).testBit n = bits.testBit n := by
+          simp [hshift, hbit0, hbitn]
+        -- rewrite both sides explicitly
+        rw [hleft]
+        simp [Nat.testBit_or, hright1, hright2]
+
 -- OR with a higher shifted bit does not change lower bits.
 lemma testBit_or_shiftLeft_lt (x y i j : Nat) (hij : i < j) :
     ((x ||| (y <<< j)).testBit i) = x.testBit i := by
@@ -558,6 +657,31 @@ lemma testBit_or_shiftLeft_lt (x y i j : Nat) (hij : i < j) :
     simp [Nat.testBit_shiftLeft, hle]
   have htest := Nat.testBit_or x (y <<< j) i
   simpa [hmask] using htest
+
+-- Writing a higher bit does not affect lower bits in a byte.
+lemma bit_preserved_or_shift (cur : UInt8) (bitPos bit i : Nat)
+    (hi : i < bitPos) (hbit : bitPos < 8) :
+    (cur ||| UInt8.ofNat ((bit % 2) <<< bitPos)).toNat.testBit i = cur.toNat.testBit i := by
+  have hmask : ((bit % 2) <<< bitPos).testBit i = false := by
+    have hle : ¬ i ≥ bitPos := Nat.not_le_of_gt hi
+    simp [Nat.testBit_shiftLeft, hle]
+  have hmod :
+      (((bit % 2) <<< bitPos) % 256).testBit i =
+        ((bit % 2) <<< bitPos).testBit i := by
+    have hlt : i < 8 := lt_trans hi hbit
+    -- `testBit` is preserved under mod 2^8 at bit `i`.
+    simpa [Nat.testBit_mod_two_pow, hlt] using
+      (Nat.testBit_mod_two_pow ((bit % 2) <<< bitPos) 8 i)
+  calc
+    (cur ||| UInt8.ofNat ((bit % 2) <<< bitPos)).toNat.testBit i
+        = (cur.toNat ||| ((bit % 2) <<< bitPos) % 256).testBit i := by
+            simp [UInt8.toNat_or]
+    _ = (cur.toNat.testBit i || (((bit % 2) <<< bitPos) % 256).testBit i) := by
+            simpa using (Nat.testBit_or cur.toNat (((bit % 2) <<< bitPos) % 256) i)
+    _ = (cur.toNat.testBit i || ((bit % 2) <<< bitPos).testBit i) := by
+            simp [hmod]
+    _ = cur.toNat.testBit i := by
+            simp [hmask]
 
 -- Bit-1 is preserved in the first output byte as bits are written.
 def bit1Inv (bw : BitWriter) : Prop :=
@@ -588,6 +712,586 @@ lemma bit1_preserved_or_shift (cur : UInt8) (bitPos bit : Nat) (hpos : 1 < bitPo
             simp [hmod]
     _ = cur.toNat.testBit 1 := by
             simp [hmask]
+
+-- Invariant: a specific bit in the first output byte is preserved.
+def bitPosInv (bw : BitWriter) (out0 pos0 : Nat) (bit : Bool) : Prop :=
+  (bw.out.size = out0 ∧ pos0 < bw.bitPos ∧ bw.cur.toNat.testBit pos0 = bit) ∨
+  (∃ h : out0 < bw.out.size, (bw.out.get out0 h).toNat.testBit pos0 = bit)
+
+-- Establish the invariant after writing the first bit.
+lemma bitPosInv_writeBit_start (bw : BitWriter) (bit : Nat)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let out0 := bw.out.size
+    let pos0 := bw.bitPos
+    bitPosInv (BitWriter.writeBit bw bit) out0 pos0 (decide (bit % 2 = 1)) := by
+  -- unfold the lets
+  dsimp
+  -- compute the written bit in the updated byte
+  have hbitnat := bitNat_writeBit bw bit hbit hcur
+  let x := (bw.cur ||| UInt8.ofNat ((bit % 2) <<< bw.bitPos)).toNat
+  have hbool : (x.testBit bw.bitPos).toNat = bit % 2 := by
+    calc
+      (x.testBit bw.bitPos).toNat = ((x >>> bw.bitPos) &&& 1) := by
+        symm
+        simpa using (bitNat_of_testBit (x := x) (i := bw.bitPos))
+      _ = bit % 2 := by
+        simpa using hbitnat
+  have htest : x.testBit bw.bitPos = decide (bit % 2 = 1) := by
+    cases htb : x.testBit bw.bitPos with
+    | false =>
+        have : bit % 2 = 0 := by simpa [htb] using hbool.symm
+        simp [htb, this]
+    | true =>
+        have : bit % 2 = 1 := by simpa [htb] using hbool.symm
+        simp [htb, this]
+  by_cases h7 : bw.bitPos = 7
+  · -- flushed to out
+    right
+    have hsize : bw.out.size < (BitWriter.writeBit bw bit).out.size := by
+      simp [BitWriter.writeBit, h7, ByteArray.size_push]
+    have hget' :
+        (bw.out.push (bw.cur ||| UInt8.ofNat ((bit % 2) <<< bw.bitPos)))[bw.out.size] =
+          (bw.cur ||| UInt8.ofNat ((bit % 2) <<< bw.bitPos)) := by
+      simpa using
+        (ByteArray.get_push_eq bw.out (bw.cur ||| UInt8.ofNat ((bit % 2) <<< bw.bitPos)))
+    have hget :
+        (BitWriter.writeBit bw bit).out.get bw.out.size
+            (by
+              simpa [BitWriter.writeBit, h7, ByteArray.size_push] using
+                (Nat.lt_succ_self bw.out.size)) =
+          (bw.cur ||| UInt8.ofNat ((bit % 2) <<< bw.bitPos)) := by
+      simpa [BitWriter.writeBit, h7, byteArray_get_eq_getElem] using hget'
+    refine ⟨hsize, ?_⟩
+    -- rewrite through `hget` to use `htest`
+    have hget'' :
+        ((BitWriter.writeBit bw bit).out.get bw.out.size
+              (by
+                simpa [BitWriter.writeBit, h7, ByteArray.size_push] using
+                  (Nat.lt_succ_self bw.out.size))).toNat.testBit bw.bitPos =
+          x.testBit bw.bitPos := by
+      rw [hget]
+    exact hget''.trans htest
+  · -- stays in cur
+    left
+    refine ⟨?_, ?_, ?_⟩
+    · simp [BitWriter.writeBit, h7]
+    · have hpos' : bw.bitPos < bw.bitPos + 1 := Nat.lt_succ_self _
+      simpa [BitWriter.writeBit, h7] using hpos'
+    · -- rewrite through the updated `cur`
+      have hcur' :
+          (BitWriter.writeBit bw bit).cur =
+            (bw.cur ||| UInt8.ofNat ((bit % 2) <<< bw.bitPos)) := by
+        simp [BitWriter.writeBit, h7]
+      have hcur'' :
+          (BitWriter.writeBit bw bit).cur.toNat.testBit bw.bitPos =
+            (bw.cur ||| UInt8.ofNat ((bit % 2) <<< bw.bitPos)).toNat.testBit bw.bitPos := by
+        simpa [hcur']
+      have hcur''' :
+          (bw.cur ||| UInt8.ofNat ((bit % 2) <<< bw.bitPos)).toNat.testBit bw.bitPos =
+            x.testBit bw.bitPos := by
+        rfl
+      exact (hcur''.trans hcur''').trans htest
+
+-- The invariant is preserved by writing another bit.
+lemma bitPosInv_writeBit (bw : BitWriter) (out0 pos0 : Nat) (bit : Bool) (b : Nat)
+    (h : bitPosInv bw out0 pos0 bit) :
+    bitPosInv (BitWriter.writeBit bw b) out0 pos0 bit := by
+  classical
+  cases h with
+  | inl h0 =>
+      rcases h0 with ⟨hout, hpos, hcur⟩
+      -- simplify `out0` to the concrete size
+      subst hout
+      by_cases h7 : bw.bitPos = 7
+      · -- flushes to out
+        right
+        have hsize : bw.out.size < (BitWriter.writeBit bw b).out.size := by
+          -- out size increases by one
+          simp [BitWriter.writeBit, h7, ByteArray.size_push]
+        have hget' :
+            (bw.out.push (bw.cur ||| UInt8.ofNat ((b % 2) <<< bw.bitPos)))[bw.out.size] =
+              (bw.cur ||| UInt8.ofNat ((b % 2) <<< bw.bitPos)) := by
+          simpa using
+            (ByteArray.get_push_eq bw.out (bw.cur ||| UInt8.ofNat ((b % 2) <<< bw.bitPos)))
+        have hget :
+            (BitWriter.writeBit bw b).out.get bw.out.size
+                (by
+                  simpa [BitWriter.writeBit, h7, ByteArray.size_push] using
+                    (Nat.lt_succ_self bw.out.size)) =
+              (bw.cur ||| UInt8.ofNat ((b % 2) <<< bw.bitPos)) := by
+          simpa [BitWriter.writeBit, h7, byteArray_get_eq_getElem] using hget'
+        have hbit : bw.bitPos < 8 := bw.hbit
+        have hpres :
+            (bw.cur ||| UInt8.ofNat ((b % 2) <<< bw.bitPos)).toNat.testBit pos0 = bit := by
+          have hpres' :=
+            bit_preserved_or_shift (cur := bw.cur) (bitPos := bw.bitPos) (bit := b)
+              (i := pos0) hpos hbit
+          simpa [hcur] using hpres'
+        refine ⟨hsize, ?_⟩
+        simpa [hget] using hpres
+      · -- stays in cur
+        left
+        have hbit : bw.bitPos < 8 := bw.hbit
+        have hpres' :=
+          bit_preserved_or_shift (cur := bw.cur) (bitPos := bw.bitPos) (bit := b)
+            (i := pos0) hpos hbit
+        have hcur' : (BitWriter.writeBit bw b).cur.toNat.testBit pos0 = bit := by
+          calc
+            (BitWriter.writeBit bw b).cur.toNat.testBit pos0
+                = (bw.cur ||| UInt8.ofNat ((b % 2) <<< bw.bitPos)).toNat.testBit pos0 := by
+                    simp [BitWriter.writeBit, h7]
+            _ = bw.cur.toNat.testBit pos0 := hpres'
+            _ = bit := hcur
+        refine ⟨?_, ?_, ?_⟩
+        · simp [BitWriter.writeBit, h7]
+        · have hpos' : pos0 < bw.bitPos + 1 := Nat.lt_succ_of_lt hpos
+          simpa [BitWriter.writeBit, h7] using hpos'
+        · exact hcur'
+  | inr h0 =>
+      rcases h0 with ⟨hsize, hbit⟩
+      by_cases h7 : bw.bitPos = 7
+      · -- flushes, but earlier bytes unchanged
+        right
+        have hsize' : out0 < (BitWriter.writeBit bw b).out.size := by
+          have hsize'' : out0 < bw.out.size + 1 := Nat.lt_trans hsize (Nat.lt_succ_self _)
+          simpa [BitWriter.writeBit, h7, ByteArray.size_push] using hsize''
+        have hget' :
+            (bw.out.push (bw.cur ||| UInt8.ofNat ((b % 2) <<< bw.bitPos)))[out0]'(by
+                have : out0 < (bw.out.push (bw.cur ||| UInt8.ofNat ((b % 2) <<< bw.bitPos))).size := by
+                  simpa [BitWriter.writeBit, h7, ByteArray.size_push] using hsize'
+                simpa [ByteArray.size_push] using this) =
+              bw.out[out0]'(by simpa using hsize) := by
+          simpa [ByteArray.size_push] using
+            (ByteArray.get_push_lt bw.out (bw.cur ||| UInt8.ofNat ((b % 2) <<< bw.bitPos)) out0 hsize)
+        have hget :
+            (BitWriter.writeBit bw b).out.get out0
+                (by
+                  simpa [BitWriter.writeBit, h7, ByteArray.size_push] using hsize') =
+              bw.out.get out0 hsize := by
+          simpa [BitWriter.writeBit, h7, byteArray_get_eq_getElem, byteArray_get_proof_irrel] using hget'
+        refine ⟨hsize', ?_⟩
+        simpa [hget] using hbit
+      · -- out unchanged
+        right
+        have hsize' : out0 < (BitWriter.writeBit bw b).out.size := by
+          simpa [BitWriter.writeBit, h7] using hsize
+        have hget :
+            (BitWriter.writeBit bw b).out.get out0
+                (by simpa [BitWriter.writeBit, h7] using hsize) =
+              bw.out.get out0 hsize := by
+          simpa [BitWriter.writeBit, h7] using rfl
+        refine ⟨hsize', ?_⟩
+        simpa [hget] using hbit
+
+-- Preserve the invariant across multiple bit writes.
+lemma bitPosInv_writeBits (bw : BitWriter) (out0 pos0 : Nat) (bit : Bool) (bits len : Nat)
+    (h : bitPosInv bw out0 pos0 bit) :
+    bitPosInv (BitWriter.writeBits bw bits len) out0 pos0 bit := by
+  induction len generalizing bw bits with
+  | zero =>
+      simpa [BitWriter.writeBits] using h
+  | succ n ih =>
+      have h' :=
+        bitPosInv_writeBit (bw := bw) (out0 := out0) (pos0 := pos0) (bit := bit)
+          (b := bits % 2) h
+      simpa [BitWriter.writeBits] using
+        (ih (bw := BitWriter.writeBit bw (bits % 2)) (bits := bits >>> 1) h')
+
+-- Extract the preserved bit from the flushed buffer.
+lemma bitPosInv_flush (bw : BitWriter) (out0 pos0 : Nat) (bit : Bool)
+    (h : bitPosInv bw out0 pos0 bit) (hout : out0 < bw.flush.size) :
+    (bw.flush.get out0 hout).toNat.testBit pos0 = bit := by
+  cases h with
+  | inl h0 =>
+      rcases h0 with ⟨hout0, hpos, hcur⟩
+      -- simplify `out0` to the concrete size
+      subst hout0
+      have hbitpos : bw.bitPos ≠ 0 := by
+        -- pos0 < bw.bitPos, so bitPos > 0
+        exact Nat.ne_of_gt (lt_of_le_of_lt (Nat.zero_le _) hpos)
+      have hflush : bw.flush = bw.out.push bw.cur := by
+        simp [BitWriter.flush, hbitpos]
+      have hget' :
+          (bw.out.push bw.cur)[bw.out.size] = bw.cur := by
+        simpa using (ByteArray.get_push_eq bw.out bw.cur)
+      have hget :
+          bw.flush.get bw.out.size hout = bw.cur := by
+        -- proof irrelevance for bounds
+        have hsize : bw.out.size < (bw.out.push bw.cur).size := by
+          simpa [hflush, ByteArray.size_push] using hout
+        -- rewrite via `hflush` and `hget'`
+        simpa [hflush, byteArray_get_eq_getElem, byteArray_get_proof_irrel] using hget'
+      simpa [hget] using hcur
+  | inr h0 =>
+      rcases h0 with ⟨hsize, hbit⟩
+      by_cases hbitpos : bw.bitPos = 0
+      · -- flush is just out
+        simpa [BitWriter.flush, hbitpos, byteArray_get_proof_irrel] using hbit
+      · -- flush pushes current byte, old bytes unchanged
+        have hget' :
+            (bw.out.push bw.cur)[out0]'(by
+                have : out0 < (bw.out.push bw.cur).size := by
+                  simpa [ByteArray.size_push] using
+                    (Nat.lt_trans hsize (Nat.lt_succ_self _))
+                simpa [ByteArray.size_push] using this) =
+              bw.out[out0]'(by simpa using hsize) := by
+          simpa [ByteArray.size_push] using
+            (ByteArray.get_push_lt bw.out bw.cur out0 hsize)
+        have hget :
+            bw.flush.get out0 hout = bw.out.get out0 hsize := by
+          simpa [BitWriter.flush, hbitpos, byteArray_get_eq_getElem, byteArray_get_proof_irrel] using hget'
+        simpa [hget] using hbit
+
+-- The extracted bit from the flushed buffer matches the first written bit.
+lemma bitNat_writeBits (bw : BitWriter) (bits len : Nat)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) (hlen : 0 < len) :
+    let bw' := BitWriter.writeBits bw bits len
+    have hlt : bw.out.size < bw'.flush.size :=
+      flush_size_writeBits_lt bw bits len hlen
+    ((bw'.flush.get bw.out.size hlt).toNat >>> bw.bitPos) &&& 1 = bits % 2 := by
+  -- unfold len to expose the first bit
+  cases len with
+  | zero => cases hlen
+  | succ n =>
+      -- set up the invariant after the first write
+      have hstart :
+          bitPosInv (BitWriter.writeBit bw (bits % 2)) bw.out.size bw.bitPos (decide (bits % 2 = 1)) := by
+        simpa using (bitPosInv_writeBit_start (bw := bw) (bit := bits % 2) hbit hcur)
+      -- preserve through the remaining writes
+      have hfinal :
+          bitPosInv (BitWriter.writeBits (BitWriter.writeBit bw (bits % 2)) (bits >>> 1) n)
+            bw.out.size bw.bitPos (decide (bits % 2 = 1)) := by
+        simpa [BitWriter.writeBits] using
+          (bitPosInv_writeBits (bw := BitWriter.writeBit bw (bits % 2))
+            (out0 := bw.out.size) (pos0 := bw.bitPos) (bit := (decide (bits % 2 = 1)))
+            (bits := bits >>> 1) (len := n) hstart)
+      -- relate the final writer to `bw'`
+      have hbw' :
+          BitWriter.writeBits (BitWriter.writeBit bw (bits % 2)) (bits >>> 1) n =
+            BitWriter.writeBits bw bits (Nat.succ n) := by
+        simp [BitWriter.writeBits]
+      -- extract the preserved bit from the final flush
+      have hlt :
+          bw.out.size <
+            (BitWriter.writeBits (BitWriter.writeBit bw (bits % 2)) (bits >>> 1) n).flush.size := by
+        simpa [hbw'] using (flush_size_writeBits_lt bw bits (Nat.succ n) (by omega))
+      have hbit' :
+          ((BitWriter.writeBits (BitWriter.writeBit bw (bits % 2)) (bits >>> 1) n).flush.get
+                bw.out.size hlt).toNat.testBit bw.bitPos =
+            decide (bits % 2 = 1) := by
+        exact bitPosInv_flush
+          (bw := BitWriter.writeBits (BitWriter.writeBit bw (bits % 2)) (bits >>> 1) n)
+          (out0 := bw.out.size) (pos0 := bw.bitPos) (bit := (decide (bits % 2 = 1)))
+          hfinal hlt
+      -- convert testBit to the numeric bit
+      have hbool :
+          (((BitWriter.writeBits (BitWriter.writeBit bw (bits % 2)) (bits >>> 1) n).flush.get
+                bw.out.size hlt).toNat.testBit bw.bitPos).toNat =
+            bits % 2 := by
+        -- `bits % 2` is 0 or 1
+        have hbool' :
+            (((BitWriter.writeBits (BitWriter.writeBit bw (bits % 2)) (bits >>> 1) n).flush.get
+                  bw.out.size hlt).toNat.testBit bw.bitPos).toNat =
+              (decide (bits % 2 = 1)).toNat := by
+          exact congrArg Bool.toNat hbit'
+        cases Nat.mod_two_eq_zero_or_one bits with
+        | inl h0 =>
+            simpa [h0] using hbool'
+        | inr h1 =>
+            simpa [h1] using hbool'
+      -- rewrite using `bitNat_of_testBit`
+      have hbitnat' :
+          (((BitWriter.writeBits (BitWriter.writeBit bw (bits % 2)) (bits >>> 1) n).flush.get
+                bw.out.size hlt).toNat >>> bw.bitPos) &&& 1 = bits % 2 := by
+        calc
+          (((BitWriter.writeBits (BitWriter.writeBit bw (bits % 2)) (bits >>> 1) n).flush.get
+                bw.out.size hlt).toNat >>> bw.bitPos) &&& 1
+              = (((BitWriter.writeBits (BitWriter.writeBit bw (bits % 2)) (bits >>> 1) n).flush.get
+                bw.out.size hlt).toNat.testBit bw.bitPos).toNat := by
+                  simpa using
+                    (bitNat_of_testBit
+                      (x := ((BitWriter.writeBits (BitWriter.writeBit bw (bits % 2)) (bits >>> 1) n).flush.get
+                        bw.out.size hlt).toNat)
+                      (i := bw.bitPos))
+          _ = bits % 2 := hbool
+      simpa [hbw'] using hbitnat'
+
+-- Reading the next bit from a reader aligned to a writer after writing `len` bits.
+lemma readBit_readerAt_writeBits (bw : BitWriter) (bits len : Nat)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) (hlen : 0 < len) :
+    let bw' := BitWriter.writeBits bw bits len
+    let br := BitWriter.readerAt bw bw'.flush (flush_size_writeBits_le bw bits len) hbit
+    br.readBit =
+      (bits % 2,
+        BitWriter.readerAt (BitWriter.writeBit bw (bits % 2)) bw'.flush
+          (by
+            -- final flush contains the prefix after the first bit
+            cases len with
+            | zero => cases hlen
+            | succ n =>
+                simpa [BitWriter.writeBits] using
+                  (flush_size_writeBits_le
+                    (bw := BitWriter.writeBit bw (bits % 2)) (bits := bits >>> 1) (len := n))
+          )
+          (bitPos_lt_8_writeBit bw (bits % 2) hbit)) := by
+  classical
+  -- unfold the lets
+  dsimp
+  have hlt : bw.out.size < (BitWriter.writeBits bw bits len).flush.size :=
+    flush_size_writeBits_lt bw bits len hlen
+  have hne : bw.out.size ≠ (BitWriter.writeBits bw bits len).flush.size :=
+    ne_of_lt hlt
+  have hbitnat :
+      (((BitWriter.writeBits bw bits len).flush.get bw.out.size hlt).toNat >>> bw.bitPos) &&& 1 =
+        bits % 2 := by
+    simpa using (bitNat_writeBits bw bits len hbit hcur hlen)
+  by_cases h7 : bw.bitPos = 7
+  · -- reader advances to next byte
+    have hread :
+        (BitWriter.readerAt bw (BitWriter.writeBits bw bits len).flush
+            (flush_size_writeBits_le bw bits len) hbit).readBit
+          = (bits % 2,
+              { data := (BitWriter.writeBits bw bits len).flush
+                bytePos := bw.out.size + 1
+                bitPos := 0
+                hpos := by
+                  have hle : bw.out.size < (BitWriter.writeBits bw bits len).flush.size := hlt
+                  exact Nat.succ_le_of_lt hle
+                hend := by intro _; rfl
+                hbit := by decide }) := by
+      -- reduce the reader; discharge the bit computation via `hbitnat`
+      have hbitnat' :
+          (((BitWriter.writeBits bw bits len).flush.get bw.out.size hlt).toNat >>> 7) &&& 1 =
+            bits % 2 := by
+        simpa [h7] using hbitnat
+      simp [BitWriter.readerAt, BitReader.readBit, hne, h7, hbitnat',
+        -UInt8.toNat_or, -UInt8.ofNat_shiftLeft, -Nat.and_one_is_mod]
+    have hreader :
+        ( { data := (BitWriter.writeBits bw bits len).flush
+            bytePos := bw.out.size + 1
+            bitPos := 0
+            hpos := by
+              have hle : bw.out.size < (BitWriter.writeBits bw bits len).flush.size := hlt
+              exact Nat.succ_le_of_lt hle
+            hend := by intro _; rfl
+            hbit := by decide } : BitReader)
+          =
+          BitWriter.readerAt (BitWriter.writeBit bw (bits % 2))
+            (BitWriter.writeBits bw bits len).flush
+            (by
+              cases len with
+              | zero => cases hlen
+              | succ n =>
+                  simpa [BitWriter.writeBits] using
+                    (flush_size_writeBits_le
+                      (bw := BitWriter.writeBit bw (bits % 2)) (bits := bits >>> 1) (len := n)))
+            (bitPos_lt_8_writeBit bw (bits % 2) hbit) := by
+      apply BitReader.ext <;> simp [BitWriter.readerAt, BitWriter.writeBit, h7]
+    simp [hread, hreader]
+  · -- reader stays in the same byte
+    have hread :
+        (BitWriter.readerAt bw (BitWriter.writeBits bw bits len).flush
+            (flush_size_writeBits_le bw bits len) hbit).readBit
+          = (bits % 2,
+              { data := (BitWriter.writeBits bw bits len).flush
+                bytePos := bw.out.size
+                bitPos := bw.bitPos + 1
+                hpos := by
+                  have hpos' : bw.out.size ≤ (BitWriter.writeBits bw bits len).flush.size := by
+                    have hpos' : bw.out.size ≤ bw.flush.size := out_size_le_flush bw
+                    exact le_trans hpos' (flush_size_writeBits_le bw bits len)
+                  simpa using hpos'
+                hend := by
+                  intro hEq
+                  have hlt : bw.out.size < (BitWriter.writeBits bw bits len).flush.size := hlt
+                  exact (False.elim ((Nat.ne_of_lt hlt) hEq))
+                hbit := by
+                  have hlt' : bw.bitPos < 7 := by
+                    exact lt_of_le_of_ne (Nat.le_of_lt_succ hbit) h7
+                  have hbit' : bw.bitPos + 1 < 8 := by
+                    simpa [Nat.succ_eq_add_one] using (Nat.succ_lt_succ_iff.mpr hlt')
+                  simpa [Nat.add_comm] using hbit' }) := by
+      simp [BitWriter.readerAt, BitReader.readBit, hne, h7, hbitnat,
+        -UInt8.toNat_or, -UInt8.ofNat_shiftLeft, -Nat.and_one_is_mod]
+    have hreader :
+        ( { data := (BitWriter.writeBits bw bits len).flush
+            bytePos := bw.out.size
+            bitPos := bw.bitPos + 1
+            hpos := by
+              have hpos' : bw.out.size ≤ (BitWriter.writeBits bw bits len).flush.size := by
+                have hpos' : bw.out.size ≤ bw.flush.size := out_size_le_flush bw
+                exact le_trans hpos' (flush_size_writeBits_le bw bits len)
+              simpa using hpos'
+            hend := by
+              intro hEq
+              have hlt : bw.out.size < (BitWriter.writeBits bw bits len).flush.size := hlt
+              exact (False.elim ((Nat.ne_of_lt hlt) hEq))
+            hbit := by
+              have hlt' : bw.bitPos < 7 := by
+                exact lt_of_le_of_ne (Nat.le_of_lt_succ hbit) h7
+              have hbit' : bw.bitPos + 1 < 8 := by
+                simpa [Nat.succ_eq_add_one] using (Nat.succ_lt_succ_iff.mpr hlt')
+              simpa [Nat.add_comm] using hbit' } : BitReader)
+          =
+          BitWriter.readerAt (BitWriter.writeBit bw (bits % 2))
+            (BitWriter.writeBits bw bits len).flush
+            (by
+              cases len with
+              | zero => cases hlen
+              | succ n =>
+                  simpa [BitWriter.writeBits] using
+                    (flush_size_writeBits_le
+                      (bw := BitWriter.writeBit bw (bits % 2)) (bits := bits >>> 1) (len := n)))
+            (bitPos_lt_8_writeBit bw (bits % 2) hbit) := by
+      apply BitReader.ext <;> simp [BitWriter.readerAt, BitWriter.writeBit, h7]
+    simp [hread, hreader]
+
+-- Split a `writeBits` call into a prefix and suffix.
+lemma writeBits_split (bw : BitWriter) (bits k n : Nat) :
+    BitWriter.writeBits bw bits (k + n) =
+      BitWriter.writeBits (BitWriter.writeBits bw bits k) (bits >>> k) n := by
+  induction k generalizing bw bits with
+  | zero =>
+      simp [BitWriter.writeBits]
+  | succ k ih =>
+      -- unroll one step and use the induction hypothesis
+      have hshift : (bits >>> 1) >>> k = bits >>> (k + 1) := by
+        -- shift-right is additive in the shift amount
+        simpa [Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using
+          (Nat.shiftRight_add bits 1 k).symm
+      calc
+        BitWriter.writeBits bw bits (Nat.succ k + n)
+            = BitWriter.writeBits (BitWriter.writeBit bw (bits % 2)) (bits >>> 1) (k + n) := by
+                simp [BitWriter.writeBits, Nat.succ_add]
+        _ = BitWriter.writeBits
+              (BitWriter.writeBits (BitWriter.writeBit bw (bits % 2)) (bits >>> 1) k)
+              ((bits >>> 1) >>> k) n := by
+                simpa using (ih (bw := BitWriter.writeBit bw (bits % 2)) (bits := bits >>> 1))
+        _ = BitWriter.writeBits (BitWriter.writeBits bw bits (Nat.succ k)) (bits >>> (Nat.succ k)) n := by
+                simp [BitWriter.writeBits, hshift, Nat.succ_eq_add_one, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc]
+
+-- Flush size is monotone in the number of bits written.
+lemma flush_size_writeBits_prefix (bw : BitWriter) (bits k len : Nat) (hk : k ≤ len) :
+    (BitWriter.writeBits bw bits k).flush.size ≤
+      (BitWriter.writeBits bw bits len).flush.size := by
+  have hlen : k + (len - k) = len := Nat.add_sub_of_le hk
+  have hsplit :
+      BitWriter.writeBits bw bits len =
+        BitWriter.writeBits (BitWriter.writeBits bw bits k) (bits >>> k) (len - k) := by
+    simpa [hlen] using (writeBits_split bw bits k (len - k))
+  have hle :
+      (BitWriter.writeBits bw bits k).flush.size ≤
+        (BitWriter.writeBits (BitWriter.writeBits bw bits k) (bits >>> k) (len - k)).flush.size := by
+    simpa using
+      (flush_size_writeBits_le (bw := BitWriter.writeBits bw bits k) (bits := bits >>> k) (len := len - k))
+  simpa [hsplit] using hle
+
+-- Bounds for reading the first `k` bits from a stream produced by `writeBits`.
+lemma readerAt_writeBits_bound (bw : BitWriter) (bits len k : Nat) (hk : k ≤ len)
+    (hbit : bw.bitPos < 8) :
+    let bw' := BitWriter.writeBits bw bits len
+    let br := BitWriter.readerAt bw bw'.flush (flush_size_writeBits_le bw bits len) hbit
+    br.bitIndex + k ≤ br.data.size * 8 := by
+  dsimp
+  have hbit' : (BitWriter.writeBits bw bits len).bitPos < 8 :=
+    bitPos_lt_8_writeBits bw bits len hbit
+  have hle1 : bw.bitCount + k ≤ bw.bitCount + len := by
+    exact Nat.add_le_add_left hk _
+  have hle2 : bw.bitCount + k ≤ (BitWriter.writeBits bw bits len).bitCount := by
+    simpa [bitCount_writeBits] using hle1
+  have hle3 :
+      (BitWriter.writeBits bw bits len).bitCount ≤
+        (BitWriter.writeBits bw bits len).flush.size * 8 := by
+    simpa using (flush_size_mul_ge_bitCount (bw := BitWriter.writeBits bw bits len) hbit')
+  simpa [BitWriter.readerAt, BitReader.bitIndex, BitWriter.bitCount] using
+    (le_trans hle2 hle3)
+
+-- Reading the first `k` bits from a stream produced by `writeBits`.
+lemma readBits_proof_irrel (br : BitReader) (n : Nat)
+    (h1 h2 : br.bitIndex + n ≤ br.data.size * 8) :
+    br.readBits n h1 = br.readBits n h2 := by
+  cases (Subsingleton.elim h1 h2)
+  rfl
+
+lemma proof_irrel_fun {α} {p : Prop} (f : p → α) (h1 h2 : p) : f h1 = f h2 := by
+  cases (Subsingleton.elim h1 h2)
+  rfl
+
+lemma readBits_succ_eq (br : BitReader) (k : Nat)
+    (h : br.bitIndex + (k + 1) ≤ br.data.size * 8)
+    (bit : Nat) (br' : BitReader) (hbit : br.readBit = (bit, br'))
+    (hread' : br'.bitIndex + k ≤ br'.data.size * 8) :
+    br.readBits (k + 1) h =
+      (bit ||| ((br'.readBits k hread').1 <<< 1), (br'.readBits k hread').2) := by
+  -- unfold one step of `readBits`
+  simp [BitReader.readBits, BitReader.readBitsAux, hbit]
+
+lemma readBits_readerAt_writeBits_prefix (bw : BitWriter) (bits len k : Nat)
+    (hk : k ≤ len) (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let bw' := BitWriter.writeBits bw bits len
+    let br := BitWriter.readerAt bw bw'.flush (flush_size_writeBits_le bw bits len) hbit
+    ∀ {hread : br.bitIndex + k ≤ br.data.size * 8},
+      br.readBits k hread =
+        (bits % 2 ^ k,
+          BitWriter.readerAt (BitWriter.writeBits bw bits k) bw'.flush
+            (flush_size_writeBits_prefix bw bits k len hk)
+            (bitPos_lt_8_writeBits bw bits k hbit)) := by
+  classical
+  -- unfold the lets
+  dsimp
+  intro hread
+  -- induction on `k`
+  induction k generalizing bw bits len with
+  | zero =>
+      -- `readBits 0` returns the current reader
+      simp [BitReader.readBits, BitReader.readBitsAux, BitWriter.writeBits, Nat.mod_one]
+  | succ k ih =>
+      -- `len` must be positive
+      cases len with
+      | zero =>
+          cases (Nat.not_succ_le_zero _ hk)
+      | succ len =>
+          have hk' : k ≤ len := by
+            exact (Nat.succ_le_succ_iff.mp hk)
+          -- compute the first bit
+          have hlen : 0 < Nat.succ len := Nat.succ_pos _
+          have hreadbit :=
+            readBit_readerAt_writeBits (bw := bw) (bits := bits) (len := Nat.succ len) hbit hcur hlen
+          let br1 :=
+            BitWriter.readerAt (BitWriter.writeBit bw (bits % 2))
+              (BitWriter.writeBits (BitWriter.writeBit bw (bits % 2)) (bits >>> 1) len).flush
+              (flush_size_writeBits_le (bw := BitWriter.writeBit bw (bits % 2))
+                (bits := bits >>> 1) (len := len))
+              (bitPos_lt_8_writeBit bw (bits % 2) hbit)
+          have hreadbit' :
+              (BitWriter.readerAt bw (BitWriter.writeBits bw bits (Nat.succ len)).flush
+                  (flush_size_writeBits_le bw bits (Nat.succ len)) hbit).readBit =
+                (bits % 2, br1) := by
+            simpa [br1, BitWriter.writeBits] using hreadbit
+          have hreadbit_fst :
+              (BitWriter.readerAt bw (BitWriter.writeBits bw bits (Nat.succ len)).flush
+                  (flush_size_writeBits_le bw bits (Nat.succ len)) hbit).readBit.fst = bits % 2 := by
+            simpa using congrArg Prod.fst hreadbit'
+          have hreadbit_snd :
+              (BitWriter.readerAt bw (BitWriter.writeBits bw bits (Nat.succ len)).flush
+                  (flush_size_writeBits_le bw bits (Nat.succ len)) hbit).readBit.snd = br1 := by
+            simpa using congrArg Prod.snd hreadbit'
+          have hread' : br1.bitIndex + k ≤ br1.data.size * 8 := by
+            simpa [br1] using
+              (readerAt_writeBits_bound
+                (bw := BitWriter.writeBit bw (bits % 2)) (bits := bits >>> 1) (len := len) (k := k)
+                (hk := hk') (hbit := bitPos_lt_8_writeBit bw (bits % 2) hbit))
+          have ih' :=
+            ih (bw := BitWriter.writeBit bw (bits % 2)) (bits := bits >>> 1) (len := len)
+              (hk := hk') (hbit := bitPos_lt_8_writeBit bw (bits % 2) hbit)
+              (hcur := curClearAbove_writeBit bw (bits % 2) hbit hcur) (hread := hread')
+          -- use the single-step `readBits` equation
+          have hcalc :=
+            readBits_succ_eq
+              (br := BitWriter.readerAt bw (BitWriter.writeBits bw bits (Nat.succ len)).flush
+                (flush_size_writeBits_le bw bits (Nat.succ len)) hbit)
+              (k := k) (h := hread) (bit := bits % 2) (br' := br1) hreadbit' hread'
+          simpa [mod_two_pow_decomp, ih', br1, BitWriter.writeBits] using hcalc
 
 lemma bit1Inv_writeBit (bw : BitWriter) (bit : Nat) (h : bit1Inv bw) :
     bit1Inv (BitWriter.writeBit bw bit) := by
@@ -1037,6 +1741,59 @@ lemma reverseBits_testBit (code len i : Nat) :
           Nat.testBit_lt_two_pow hlt'
         simp [hi, hfalse]
 
+-- Prefix of a reversed code corresponds to a shift of the original code.
+lemma reverseBits_prefix_shift (code len k : Nat) (hcode : code < 2 ^ len) (hk : k ≤ len) :
+    reverseBits ((reverseBits code len) % 2 ^ k) k = code >>> (len - k) := by
+  apply Nat.eq_of_testBit_eq
+  intro i
+  by_cases hi : i < k
+  · have hki : k - 1 - i < k := by omega
+    have hki' : k - 1 - i < len := by omega
+    have hmod :
+        ((reverseBits code len) % 2 ^ k).testBit (k - 1 - i) =
+          (reverseBits code len).testBit (k - 1 - i) := by
+      have := Nat.testBit_mod_two_pow (reverseBits code len) k (k - 1 - i)
+      simpa [hki] using this
+    have hrev :
+        (reverseBits code len).testBit (k - 1 - i) =
+          code.testBit (len - 1 - (k - 1 - i)) := by
+      have := reverseBits_testBit (code := code) (len := len) (i := k - 1 - i)
+      simpa [hki'] using this
+    have hcalc : len - 1 - (k - 1 - i) = len - k + i := by omega
+    calc
+      (reverseBits ((reverseBits code len) % 2 ^ k) k).testBit i
+          = ((reverseBits code len) % 2 ^ k).testBit (k - 1 - i) := by
+              have := reverseBits_testBit (code := (reverseBits code len) % 2 ^ k) (len := k) (i := i)
+              simpa [hi] using this
+      _ = (reverseBits code len).testBit (k - 1 - i) := hmod
+      _ = code.testBit (len - 1 - (k - 1 - i)) := hrev
+      _ = code.testBit (len - k + i) := by simp [hcalc]
+      _ = (code >>> (len - k)).testBit i := by
+              -- `testBit` of a shifted value moves the index by the shift.
+              symm
+              simpa [Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using
+                (Nat.testBit_shiftRight (x := code) (i := len - k) (j := i))
+  · have hge : k ≤ i := Nat.le_of_not_gt hi
+    have hfalseL : (reverseBits ((reverseBits code len) % 2 ^ k) k).testBit i = false := by
+      have := reverseBits_testBit (code := (reverseBits code len) % 2 ^ k) (len := k) (i := i)
+      simpa [hi] using this
+    have hpow : 2 ^ (len - k) * 2 ^ k = 2 ^ len := by
+      have hlen : len - k + k = len := Nat.sub_add_cancel hk
+      calc
+        2 ^ (len - k) * 2 ^ k = 2 ^ ((len - k) + k) := by
+          symm
+          simp [Nat.pow_add, Nat.mul_comm, Nat.mul_left_comm, Nat.mul_assoc]
+        _ = 2 ^ len := by simpa [hlen]
+    have hcode' : code < 2 ^ (len - k) * 2 ^ k := by
+      simpa [hpow] using hcode
+    have hdiv : code / 2 ^ (len - k) < 2 ^ k := Nat.div_lt_of_lt_mul hcode'
+    have hlt : code >>> (len - k) < 2 ^ k := by
+      simpa [Nat.shiftRight_eq_div_pow] using hdiv
+    have hpow' : 2 ^ k ≤ 2 ^ i := Nat.pow_le_pow_of_le (a := 2) (by decide) hge
+    have hlt' : code >>> (len - k) < 2 ^ i := lt_of_lt_of_le hlt hpow'
+    have hfalseR : (code >>> (len - k)).testBit i = false := Nat.testBit_lt_two_pow hlt'
+    simpa [hfalseL, hfalseR]
+
 lemma reverseBits_reverseBits (code len : Nat) (hcode : code < 2 ^ len) :
     reverseBits (reverseBits code len) len = code := by
   apply Nat.eq_of_testBit_eq
@@ -1157,11 +1914,27 @@ lemma fixedLitLenRow9_get (code : Nat) (h400 : 400 ≤ code) (hcode : code < 512
         simpa [fixedLitLenRow9_size, Nat.shiftLeft_eq] using (reverseBits_lt code 9)) =
         let code := reverseBits (reverseBits code 9) 9
         if 400 ≤ code then some (code - 400 + 144) else none := by
-      simp [fixedLitLenRow9]
+    simp [fixedLitLenRow9]
   have hget' := hget
   rw [hrev] at hget'
   simp [h400] at hget'
   exact hget'
+
+lemma fixedLitLenRow7_get_none_of_ge (bits : Nat) (hbits : bits < fixedLitLenRow7.size)
+    (h24 : 24 ≤ reverseBits bits 7) :
+    fixedLitLenRow7[bits]'hbits = none := by
+  have hnot : ¬ reverseBits bits 7 < 24 := Nat.not_lt_of_ge h24
+  simp [fixedLitLenRow7, hnot]
+
+set_option maxRecDepth 2048 in
+lemma fixedLitLenRow8_get_none_of_ge (bits : Nat) (hbits : bits < fixedLitLenRow8.size)
+    (h200 : 200 ≤ reverseBits bits 8) :
+    fixedLitLenRow8[bits]'hbits = none := by
+  classical
+  have hnot192 : ¬ reverseBits bits 8 < 192 := by
+    exact Nat.not_lt_of_ge (le_trans (by decide : 192 ≤ 200) h200)
+  have hnot200 : ¬ reverseBits bits 8 < 200 := Nat.not_lt_of_ge h200
+  simp [fixedLitLenRow8, hnot192, hnot200]
 
 lemma fixedLitLenCode_row_lo (sym : Nat) (hsym : sym ≤ 143) :
     fixedLitLenRow8[reverseBits (sym + 48) 8]'(by
@@ -1290,6 +2063,424 @@ lemma fixedLitLenCode_lookup (sym : Nat) (hsym : sym < 288) :
         have hrow := fixedLitLenCode_row_hi2 (sym := sym) h280 h287
         dsimp
         simp [fixedLitLenCode, h143, h255, h279, hrow]
+
+-- Decoding a fixed literal/length symbol after writing its fixed code.
+set_option maxHeartbeats 4000000 in
+set_option maxRecDepth 10000 in
+lemma decodeFixedLiteralSym_readerAt_writeBits (bw : BitWriter) (sym : Nat)
+    (hsym : sym < 288) (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let codeLen := fixedLitLenCode sym
+    let code := codeLen.1
+    let len := codeLen.2
+    let bits := reverseBits code len
+    let bw' := BitWriter.writeBits bw bits len
+    let br := BitWriter.readerAt bw bw'.flush (flush_size_writeBits_le bw bits len) hbit
+    decodeFixedLiteralSym br =
+      some (sym, BitWriter.readerAt bw' bw'.flush (by rfl)
+        (bitPos_lt_8_writeBits bw bits len hbit)) := by
+  classical
+  by_cases h143 : sym ≤ 143
+  · -- 8-bit low range
+    have hcode : fixedLitLenCode sym = (sym + 48, 8) := fixedLitLenCode_lo sym h143
+    let code := sym + 48
+    let bits := reverseBits code 8
+    let bw' := BitWriter.writeBits bw bits 8
+    let br := BitWriter.readerAt bw bw'.flush (flush_size_writeBits_le bw bits 8) hbit
+    let br7 :=
+      BitWriter.readerAt (BitWriter.writeBits bw bits 7) bw'.flush
+        (flush_size_writeBits_prefix bw bits 7 8 (by decide))
+        (bitPos_lt_8_writeBits bw bits 7 hbit)
+    have hread7 : br.bitIndex + 7 ≤ br.data.size * 8 := by
+      simpa [br, bw'] using
+        (readerAt_writeBits_bound (bw := bw) (bits := bits) (len := 8) (k := 7) (hk := by decide) hbit)
+    have hbits7 :
+        br.readBits 7 hread7 =
+          (bits % 2 ^ 7,
+            br7) := by
+      simpa [br, bw'] using
+        (readBits_readerAt_writeBits_prefix (bw := bw) (bits := bits) (len := 8) (k := 7)
+          (hk := by decide) (hbit := hbit) (hcur := hcur))
+    have hbits7_lt : bits % 2 ^ 7 < fixedLitLenRow7.size := by
+      have hlt : bits % 2 ^ 7 < 2 ^ 7 := Nat.mod_lt _ (by decide)
+      simpa [fixedLitLenRow7_size, Nat.shiftLeft_eq] using hlt
+    have hcode8 : code < 2 ^ 8 := by
+      have hlt : code < 192 := by omega
+      have hle : 192 ≤ 2 ^ 8 := by decide
+      exact lt_of_lt_of_le hlt hle
+    have hrev7 : reverseBits (bits % 2 ^ 7) 7 = code >>> 1 := by
+      simpa [bits] using
+        (reverseBits_prefix_shift (code := code) (len := 8) (k := 7) hcode8 (by decide))
+    have h24 : 24 ≤ code >>> 1 := by
+      have hdiv : 24 ≤ code / 2 := by
+        have h48 : 48 ≤ code := by omega
+        exact (Nat.le_div_iff_mul_le (by decide : 0 < (2 : Nat))).2 (by simpa [Nat.mul_comm] using h48)
+      simpa [Nat.shiftRight_eq_div_pow] using hdiv
+    have hrow7 : fixedLitLenRow7[bits % 2 ^ 7]'hbits7_lt = none := by
+      have h24' : 24 ≤ reverseBits (bits % 2 ^ 7) 7 := by simpa [hrev7] using h24
+      exact fixedLitLenRow7_get_none_of_ge (bits := bits % 2 ^ 7) hbits7_lt h24'
+    have hrow7? : fixedLitLenRow7[bits % 2 ^ 7]? = some none := by
+      simp [hbits7_lt, hrow7]
+    have hsplit :
+        BitWriter.writeBits bw bits 8 =
+          BitWriter.writeBits (BitWriter.writeBits bw bits 7) (bits >>> 7) 1 := by
+      simpa using (writeBits_split bw bits 7 1)
+    have hread1 :
+        br7.bitIndex + 1 ≤ br7.data.size * 8 := by
+      -- reuse bounds for the remaining one bit
+      have hread1' :=
+        (readerAt_writeBits_bound
+          (bw := BitWriter.writeBits bw bits 7) (bits := bits >>> 7) (len := 1) (k := 1)
+          (hk := by decide)
+          (hbit := bitPos_lt_8_writeBits bw bits 7 hbit))
+      simpa [bw', hsplit, br7] using hread1'
+    let br8 :=
+      BitWriter.readerAt
+        (BitWriter.writeBits (BitWriter.writeBits bw bits 7) (bits >>> 7) 1) bw'.flush
+        (flush_size_writeBits_prefix (BitWriter.writeBits bw bits 7) (bits >>> 7) 1 1 (by decide))
+        (bitPos_lt_8_writeBits (BitWriter.writeBits bw bits 7) (bits >>> 7) 1
+          (bitPos_lt_8_writeBits bw bits 7 hbit))
+    have hbits8 :
+        br7.readBits 1 hread1 = ((bits >>> 7) % 2, br8) := by
+      simpa [bw', hsplit, br7, br8] using
+          (readBits_readerAt_writeBits_prefix (bw := BitWriter.writeBits bw bits 7)
+            (bits := bits >>> 7) (len := 1) (k := 1) (hk := by decide)
+            (hbit := bitPos_lt_8_writeBits bw bits 7 hbit)
+            (hcur := curClearAbove_writeBits bw bits 7 hbit hcur))
+    have hbits8_eq :
+        (bits % 2 ^ 7) ||| (((bits >>> 7) % 2) <<< 7) = bits := by
+      have hmod : bits % 2 ^ (7 + 1) = (bits % 2 ^ 7) ||| (((bits >>> 7) % 2) <<< 7) := by
+        simpa using (mod_two_pow_decomp_high bits 7)
+      have hlt : bits < 2 ^ 8 := by simpa [bits] using (reverseBits_lt code 8)
+      have hmod' : bits % 2 ^ 8 = bits := Nat.mod_eq_of_lt hlt
+      simpa [Nat.add_comm, hmod', Nat.add_left_comm, Nat.add_assoc] using hmod.symm
+    have hbits8_lt : bits < fixedLitLenRow8.size := by
+      have hlt : bits < 2 ^ 8 := by simpa [bits] using (reverseBits_lt code 8)
+      simpa [fixedLitLenRow8_size, Nat.shiftLeft_eq] using hlt
+    have hrow8 : fixedLitLenRow8[bits]'hbits8_lt = some sym := by
+      -- row8 lookup for low range
+      have hrow := fixedLitLenCode_row_lo (sym := sym) h143
+      simpa [code, bits] using hrow
+    have hrow8? : fixedLitLenRow8[bits]? = some (some sym) := by
+      simp [hbits8_lt, hrow8]
+    -- finish by unfolding the decoder
+    have hresult :
+        decodeFixedLiteralSym br = some (sym, br8) := by
+      -- evaluate the decoder step-by-step
+      unfold decodeFixedLiteralSym
+      simp [hread7, hbits7, hrow7?,
+        hread1, hbits8, hbits8_eq, hrow8?]
+    -- rewrite back to the original statement
+    have hbw' : BitWriter.writeBits (BitWriter.writeBits bw bits 7) (bits >>> 7) 1 = bw' := by
+      simpa [bw', hsplit]
+    simpa [hcode, code, bits, bw', br, br8, hbw'] using hresult
+  · have h144 : 144 ≤ sym := by omega
+    by_cases h255 : sym ≤ 255
+    · -- 9-bit mid range
+      have hcode : fixedLitLenCode sym = (sym - 144 + 400, 9) :=
+        fixedLitLenCode_mid sym h144 h255
+      let code := sym - 144 + 400
+      let bits := reverseBits code 9
+      let bw' := BitWriter.writeBits bw bits 9
+      let br := BitWriter.readerAt bw bw'.flush (flush_size_writeBits_le bw bits 9) hbit
+      let br7 :=
+        BitWriter.readerAt (BitWriter.writeBits bw bits 7) bw'.flush
+          (flush_size_writeBits_prefix bw bits 7 9 (by decide))
+          (bitPos_lt_8_writeBits bw bits 7 hbit)
+      have hread7 : br.bitIndex + 7 ≤ br.data.size * 8 := by
+        simpa [br, bw'] using
+          (readerAt_writeBits_bound (bw := bw) (bits := bits) (len := 9) (k := 7) (hk := by decide) hbit)
+      have hbits7 :
+          br.readBits 7 hread7 =
+            (bits % 2 ^ 7,
+              br7) := by
+        simpa [br, bw'] using
+          (readBits_readerAt_writeBits_prefix (bw := bw) (bits := bits) (len := 9) (k := 7)
+            (hk := by decide) (hbit := hbit) (hcur := hcur))
+      have hbits7_lt : bits % 2 ^ 7 < fixedLitLenRow7.size := by
+        have hlt : bits % 2 ^ 7 < 2 ^ 7 := Nat.mod_lt _ (by decide)
+        simpa [fixedLitLenRow7_size, Nat.shiftLeft_eq] using hlt
+      have hcode9 : code < 2 ^ 9 := by
+        have hlt : code < 512 := by omega
+        have hle : 512 ≤ 2 ^ 9 := by decide
+        exact lt_of_lt_of_le hlt hle
+      have hrev7 : reverseBits (bits % 2 ^ 7) 7 = code >>> 2 := by
+        simpa [bits] using
+          (reverseBits_prefix_shift (code := code) (len := 9) (k := 7) hcode9 (by decide))
+      have h24 : 24 ≤ code >>> 2 := by
+        have hdiv : 24 ≤ code / 4 := by
+          have h96 : 96 ≤ code := by omega
+          exact (Nat.le_div_iff_mul_le (by decide : 0 < (4 : Nat))).2 (by simpa [Nat.mul_comm] using h96)
+        simpa [Nat.shiftRight_eq_div_pow] using hdiv
+      have hrow7 : fixedLitLenRow7[bits % 2 ^ 7]'hbits7_lt = none := by
+        have h24' : 24 ≤ reverseBits (bits % 2 ^ 7) 7 := by simpa [hrev7] using h24
+        exact fixedLitLenRow7_get_none_of_ge (bits := bits % 2 ^ 7) hbits7_lt h24'
+      have hrow7? : fixedLitLenRow7[bits % 2 ^ 7]? = some none := by
+        simp [hbits7_lt, hrow7]
+      have hsplit8 :
+          BitWriter.writeBits bw bits 8 =
+            BitWriter.writeBits (BitWriter.writeBits bw bits 7) (bits >>> 7) 1 := by
+        simpa using (writeBits_split bw bits 7 1)
+      have hsplit7_2 :
+          BitWriter.writeBits bw bits 9 =
+            BitWriter.writeBits (BitWriter.writeBits bw bits 7) (bits >>> 7) 2 := by
+        simpa using (writeBits_split bw bits 7 2)
+      have hread1 :
+          br7.bitIndex + 1 ≤ br7.data.size * 8 := by
+        have hread1' :=
+          (readerAt_writeBits_bound
+            (bw := BitWriter.writeBits bw bits 7) (bits := bits >>> 7) (len := 2) (k := 1)
+            (hk := by decide)
+            (hbit := bitPos_lt_8_writeBits bw bits 7 hbit))
+        simpa [bw', hsplit7_2, br7] using hread1'
+      let br8 :=
+        BitWriter.readerAt
+          (BitWriter.writeBits (BitWriter.writeBits bw bits 7) (bits >>> 7) 1) bw'.flush
+          (flush_size_writeBits_prefix (BitWriter.writeBits bw bits 7) (bits >>> 7) 1 2 (by decide))
+          (bitPos_lt_8_writeBits (BitWriter.writeBits bw bits 7) (bits >>> 7) 1
+            (bitPos_lt_8_writeBits bw bits 7 hbit))
+      have hbits8 :
+          br7.readBits 1 hread1 = ((bits >>> 7) % 2, br8) := by
+        simpa [bw', hsplit7_2, br7, br8] using
+          (readBits_readerAt_writeBits_prefix (bw := BitWriter.writeBits bw bits 7)
+            (bits := bits >>> 7) (len := 2) (k := 1) (hk := by decide)
+            (hbit := bitPos_lt_8_writeBits bw bits 7 hbit)
+            (hcur := curClearAbove_writeBits bw bits 7 hbit hcur))
+      have hbits8_eq :
+          (bits % 2 ^ 7) ||| (((bits >>> 7) % 2) <<< 7) = bits % 2 ^ 8 := by
+        simpa using (mod_two_pow_decomp_high bits 7).symm
+      have hbits8_lt : bits % 2 ^ 8 < fixedLitLenRow8.size := by
+        have hlt : bits % 2 ^ 8 < 2 ^ 8 := Nat.mod_lt _ (by decide)
+        simpa [fixedLitLenRow8_size, Nat.shiftLeft_eq] using hlt
+      have hrev8 : reverseBits (bits % 2 ^ 8) 8 = code >>> 1 := by
+        simpa [bits] using
+          (reverseBits_prefix_shift (code := code) (len := 9) (k := 8) hcode9 (by decide))
+      have h200 : 200 ≤ code >>> 1 := by
+        have hdiv : 200 ≤ code / 2 := by
+          have h400 : 400 ≤ code := by omega
+          exact (Nat.le_div_iff_mul_le (by decide : 0 < (2 : Nat))).2 (by simpa [Nat.mul_comm] using h400)
+        simpa [Nat.shiftRight_eq_div_pow] using hdiv
+      have hrow8 : fixedLitLenRow8[bits % 2 ^ 8]'hbits8_lt = none := by
+        have h200' : 200 ≤ reverseBits (bits % 2 ^ 8) 8 := by simpa [hrev8] using h200
+        exact fixedLitLenRow8_get_none_of_ge (bits := bits % 2 ^ 8) hbits8_lt h200'
+      have hrow8? : fixedLitLenRow8[bits % 2 ^ 8]? = some none := by
+        simp [hbits8_lt, hrow8]
+      have hsplit9 :
+          BitWriter.writeBits bw bits 9 =
+            BitWriter.writeBits (BitWriter.writeBits bw bits 8) (bits >>> 8) 1 := by
+        simpa using (writeBits_split bw bits 8 1)
+      have hread2 :
+          br8.bitIndex + 1 ≤ br8.data.size * 8 := by
+        have hread2' :=
+          (readerAt_writeBits_bound
+            (bw := BitWriter.writeBits (BitWriter.writeBits bw bits 7) (bits >>> 7) 1)
+            (bits := bits >>> 8) (len := 1) (k := 1) (hk := by decide)
+            (hbit := bitPos_lt_8_writeBits (BitWriter.writeBits bw bits 7) (bits >>> 7) 1
+              (bitPos_lt_8_writeBits bw bits 7 hbit)))
+        simpa [bw', hsplit9, hsplit8, br8] using hread2'
+      let br9 :=
+        BitWriter.readerAt
+          (BitWriter.writeBits (BitWriter.writeBits (BitWriter.writeBits bw bits 7) (bits >>> 7) 1)
+              (bits >>> 8) 1) bw'.flush
+          (flush_size_writeBits_prefix
+            (BitWriter.writeBits (BitWriter.writeBits bw bits 7) (bits >>> 7) 1) (bits >>> 8) 1 1
+            (by decide))
+          (bitPos_lt_8_writeBits
+            (BitWriter.writeBits (BitWriter.writeBits bw bits 7) (bits >>> 7) 1) (bits >>> 8) 1
+            (bitPos_lt_8_writeBits (BitWriter.writeBits bw bits 7) (bits >>> 7) 1
+              (bitPos_lt_8_writeBits bw bits 7 hbit)))
+      have hbits9 :
+          br8.readBits 1 hread2 = ((bits >>> 8) % 2, br9) := by
+        simpa [bw', hsplit9, hsplit8, br8, br9] using
+          (readBits_readerAt_writeBits_prefix
+            (bw := BitWriter.writeBits (BitWriter.writeBits bw bits 7) (bits >>> 7) 1)
+            (bits := bits >>> 8) (len := 1) (k := 1) (hk := by decide)
+            (hbit := bitPos_lt_8_writeBits (BitWriter.writeBits bw bits 7) (bits >>> 7) 1
+              (bitPos_lt_8_writeBits bw bits 7 hbit))
+            (hcur := curClearAbove_writeBits (BitWriter.writeBits bw bits 7) (bits >>> 7) 1
+              (bitPos_lt_8_writeBits bw bits 7 hbit) (curClearAbove_writeBits bw bits 7 hbit hcur)))
+      have hbits9_eq :
+          (bits % 2 ^ 8) ||| (((bits >>> 8) % 2) <<< 8) = bits := by
+        have hmod : bits % 2 ^ (8 + 1) = (bits % 2 ^ 8) ||| (((bits >>> 8) % 2) <<< 8) := by
+          simpa using (mod_two_pow_decomp_high bits 8)
+        have hlt : bits < 2 ^ 9 := by simpa [bits] using (reverseBits_lt code 9)
+        have hmod' : bits % 2 ^ 9 = bits := Nat.mod_eq_of_lt hlt
+        simpa [Nat.add_comm, hmod', Nat.add_left_comm, Nat.add_assoc] using hmod.symm
+      have hbits9_lt : bits < fixedLitLenRow9.size := by
+        have hlt : bits < 2 ^ 9 := by simpa [bits] using (reverseBits_lt code 9)
+        simpa [fixedLitLenRow9_size, Nat.shiftLeft_eq] using hlt
+      have hrow9 : fixedLitLenRow9[bits]'hbits9_lt = some sym := by
+        have hrow := fixedLitLenCode_row_mid (sym := sym) h144 h255
+        simpa [code, bits] using hrow
+      have hrow9? : fixedLitLenRow9[bits]? = some (some sym) := by
+        simp [hbits9_lt, hrow9]
+      have hresult :
+          decodeFixedLiteralSym br = some (sym, br9) := by
+        unfold decodeFixedLiteralSym
+        simp [hread7, hbits7, hrow7?,
+          hread1, hbits8, hbits8_eq, hrow8?,
+          hread2, hbits9, hbits9_eq, hrow9?]
+      have hbw' :
+          BitWriter.writeBits
+              (BitWriter.writeBits (BitWriter.writeBits bw bits 7) (bits >>> 7) 1) (bits >>> 8) 1 = bw' := by
+        -- combine the splits
+        have hsplit8' : BitWriter.writeBits bw bits 8 =
+            BitWriter.writeBits (BitWriter.writeBits bw bits 7) (bits >>> 7) 1 := by
+          simpa using (writeBits_split bw bits 7 1)
+        have hsplit9' : BitWriter.writeBits bw bits 9 =
+            BitWriter.writeBits (BitWriter.writeBits bw bits 8) (bits >>> 8) 1 := by
+          simpa using (writeBits_split bw bits 8 1)
+        -- rewrite through hsplit8'
+        simpa [bw', hsplit9', hsplit8']
+      simpa [hcode, code, bits, bw', br, br9, hbw'] using hresult
+    · -- 7-bit range
+      have h256 : 256 ≤ sym := by omega
+      by_cases h279 : sym ≤ 279
+      · have hcode : fixedLitLenCode sym = (sym - 256, 7) :=
+          fixedLitLenCode_hi sym h256 h279
+        let code := sym - 256
+        let bits := reverseBits code 7
+        let bw' := BitWriter.writeBits bw bits 7
+        let br := BitWriter.readerAt bw bw'.flush (flush_size_writeBits_le bw bits 7) hbit
+        have hread7 : br.bitIndex + 7 ≤ br.data.size * 8 := by
+          simpa [br, bw'] using
+            (readerAt_writeBits_bound (bw := bw) (bits := bits) (len := 7) (k := 7) (hk := by decide) hbit)
+        have hbits7 :
+            br.readBits 7 hread7 =
+              (bits % 2 ^ 7,
+                BitWriter.readerAt (BitWriter.writeBits bw bits 7) bw'.flush
+                  (flush_size_writeBits_prefix bw bits 7 7 (by decide))
+                  (bitPos_lt_8_writeBits bw bits 7 hbit)) := by
+          simpa [br, bw'] using
+            (readBits_readerAt_writeBits_prefix (bw := bw) (bits := bits) (len := 7) (k := 7)
+              (hk := by decide) (hbit := hbit) (hcur := hcur))
+        have hbits7_lt : bits < fixedLitLenRow7.size := by
+          have hlt : bits < 2 ^ 7 := by simpa [bits] using (reverseBits_lt code 7)
+          simpa [fixedLitLenRow7_size, Nat.shiftLeft_eq] using hlt
+        have hbits7_eq : bits % 2 ^ 7 = bits := by
+          have hlt : bits < 2 ^ 7 := by simpa [bits] using (reverseBits_lt code 7)
+          exact Nat.mod_eq_of_lt hlt
+        have hrow7 : fixedLitLenRow7[bits]'hbits7_lt = some sym := by
+          have hrow := fixedLitLenCode_row_hi (sym := sym) h256 h279
+          simpa [code, bits] using hrow
+        have hrow7? : fixedLitLenRow7[bits]? = some (some sym) := by
+          simp [hbits7_lt, hrow7]
+        have hresult :
+            decodeFixedLiteralSym br =
+              some (sym,
+                BitWriter.readerAt (BitWriter.writeBits bw bits 7) bw'.flush
+                  (by exact (flush_size_writeBits_prefix bw bits 7 7 (by decide)))
+                  (by simpa using (bitPos_lt_8_writeBits bw bits 7 hbit))) := by
+          unfold decodeFixedLiteralSym
+          simp [hread7, hbits7, hbits7_eq, hrow7?]
+        simpa [hcode, code, bits, bw', br] using hresult
+      · -- 8-bit high range
+        have h280 : 280 ≤ sym := by omega
+        have h287 : sym ≤ 287 := by omega
+        have hcode : fixedLitLenCode sym = (sym - 280 + 192, 8) :=
+          fixedLitLenCode_hi2 sym h280 h287
+        let code := sym - 280 + 192
+        let bits := reverseBits code 8
+        let bw' := BitWriter.writeBits bw bits 8
+        let br := BitWriter.readerAt bw bw'.flush (flush_size_writeBits_le bw bits 8) hbit
+        have hread7 : br.bitIndex + 7 ≤ br.data.size * 8 := by
+          simpa [br, bw'] using
+            (readerAt_writeBits_bound (bw := bw) (bits := bits) (len := 8) (k := 7) (hk := by decide) hbit)
+        have hbits7 :
+            br.readBits 7 hread7 =
+              (bits % 2 ^ 7,
+                BitWriter.readerAt (BitWriter.writeBits bw bits 7) bw'.flush
+                  (flush_size_writeBits_prefix bw bits 7 8 (by decide))
+                  (bitPos_lt_8_writeBits bw bits 7 hbit)) := by
+          simpa [br, bw'] using
+            (readBits_readerAt_writeBits_prefix (bw := bw) (bits := bits) (len := 8) (k := 7)
+              (hk := by decide) (hbit := hbit) (hcur := hcur))
+        have hbits7_lt : bits % 2 ^ 7 < fixedLitLenRow7.size := by
+          have hlt : bits % 2 ^ 7 < 2 ^ 7 := Nat.mod_lt _ (by decide)
+          simpa [fixedLitLenRow7_size, Nat.shiftLeft_eq] using hlt
+        have hcode8 : code < 2 ^ 8 := by
+          have hlt : code < 200 := by omega
+          have hle : 200 ≤ 2 ^ 8 := by decide
+          exact lt_of_lt_of_le hlt hle
+        have hrev7 : reverseBits (bits % 2 ^ 7) 7 = code >>> 1 := by
+          simpa [bits] using
+            (reverseBits_prefix_shift (code := code) (len := 8) (k := 7) hcode8 (by decide))
+        have h24 : 24 ≤ code >>> 1 := by
+          have hdiv : 24 ≤ code / 2 := by
+            have h48 : 48 ≤ code := by omega
+            exact (Nat.le_div_iff_mul_le (by decide : 0 < (2 : Nat))).2 (by simpa [Nat.mul_comm] using h48)
+          simpa [Nat.shiftRight_eq_div_pow] using hdiv
+        have hrow7 : fixedLitLenRow7[bits % 2 ^ 7]'hbits7_lt = none := by
+          have h24' : 24 ≤ reverseBits (bits % 2 ^ 7) 7 := by simpa [hrev7] using h24
+          exact fixedLitLenRow7_get_none_of_ge (bits := bits % 2 ^ 7) hbits7_lt h24'
+        have hrow7? : fixedLitLenRow7[bits % 2 ^ 7]? = some none := by
+          simp [hbits7_lt, hrow7]
+        have hsplit :
+            BitWriter.writeBits bw bits 8 =
+              BitWriter.writeBits (BitWriter.writeBits bw bits 7) (bits >>> 7) 1 := by
+          simpa using (writeBits_split bw bits 7 1)
+        have hread1 :
+            (BitWriter.readerAt (BitWriter.writeBits bw bits 7) bw'.flush
+                (flush_size_writeBits_prefix bw bits 7 8 (by decide))
+                (bitPos_lt_8_writeBits bw bits 7 hbit)).bitIndex + 1 ≤
+              (BitWriter.readerAt (BitWriter.writeBits bw bits 7) bw'.flush
+                  (flush_size_writeBits_prefix bw bits 7 8 (by decide))
+                  (bitPos_lt_8_writeBits bw bits 7 hbit)).data.size * 8 := by
+          have hread1' :=
+            (readerAt_writeBits_bound
+              (bw := BitWriter.writeBits bw bits 7) (bits := bits >>> 7) (len := 1) (k := 1)
+              (hk := by decide)
+              (hbit := bitPos_lt_8_writeBits bw bits 7 hbit))
+          simpa [bw', hsplit] using hread1'
+        have hbits8 :
+            (BitWriter.readerAt (BitWriter.writeBits bw bits 7) bw'.flush
+                (flush_size_writeBits_prefix bw bits 7 8 (by decide))
+                (bitPos_lt_8_writeBits bw bits 7 hbit)).readBits 1 hread1 =
+              ((bits >>> 7) % 2,
+                BitWriter.readerAt
+                  (BitWriter.writeBits (BitWriter.writeBits bw bits 7) (bits >>> 7) 1) bw'.flush
+                  (flush_size_writeBits_prefix (BitWriter.writeBits bw bits 7) (bits >>> 7) 1 1 (by decide))
+                  (bitPos_lt_8_writeBits (BitWriter.writeBits bw bits 7) (bits >>> 7) 1
+                    (bitPos_lt_8_writeBits bw bits 7 hbit))) := by
+          simpa [bw', hsplit] using
+            (readBits_readerAt_writeBits_prefix (bw := BitWriter.writeBits bw bits 7)
+              (bits := bits >>> 7) (len := 1) (k := 1) (hk := by decide)
+              (hbit := bitPos_lt_8_writeBits bw bits 7 hbit)
+              (hcur := curClearAbove_writeBits bw bits 7 hbit hcur))
+        have hbits8_eq :
+            (bits % 2 ^ 7) ||| (((bits >>> 7) % 2) <<< 7) = bits := by
+          have hmod : bits % 2 ^ (7 + 1) = (bits % 2 ^ 7) ||| (((bits >>> 7) % 2) <<< 7) := by
+            simpa using (mod_two_pow_decomp_high bits 7)
+          have hlt : bits < 2 ^ 8 := by simpa [bits] using (reverseBits_lt code 8)
+          have hmod' : bits % 2 ^ 8 = bits := Nat.mod_eq_of_lt hlt
+          simpa [Nat.add_comm, hmod', Nat.add_left_comm, Nat.add_assoc] using hmod.symm
+        have hbits8_lt : bits < fixedLitLenRow8.size := by
+          have hlt : bits < 2 ^ 8 := by simpa [bits] using (reverseBits_lt code 8)
+          simpa [fixedLitLenRow8_size, Nat.shiftLeft_eq] using hlt
+        have hrow8 : fixedLitLenRow8[bits]'hbits8_lt = some sym := by
+          have hrow := fixedLitLenCode_row_hi2 (sym := sym) h280 h287
+          simpa [code, bits] using hrow
+        have hrow8? : fixedLitLenRow8[bits]? = some (some sym) := by
+          simp [hbits8_lt, hrow8]
+        have hresult :
+            decodeFixedLiteralSym br =
+              some (sym,
+                BitWriter.readerAt
+                  (BitWriter.writeBits (BitWriter.writeBits bw bits 7) (bits >>> 7) 1) bw'.flush
+                  (by
+                    simpa [bw', hsplit] using
+                      (flush_size_writeBits_prefix (bw := BitWriter.writeBits bw bits 7) (bits := bits >>> 7)
+                        (k := 1) (len := 1) (by decide)))
+                  (by
+                    simpa [bw', hsplit] using
+                      (bitPos_lt_8_writeBits (bw := BitWriter.writeBits bw bits 7) (bits := bits >>> 7) (len := 1)
+                        (bitPos_lt_8_writeBits bw bits 7 hbit)))) := by
+          unfold decodeFixedLiteralSym
+          simp [hread7, hbits7, hrow7?,
+            hread1, hbits8, hbits8_eq, hrow8?, -bitIndex_readerAt]
+        have hbw' :
+            BitWriter.writeBits (BitWriter.writeBits bw bits 7) (bits >>> 7) 1 = bw' := by
+          simpa [bw', hsplit]
+        simpa [hcode, code, bits, bw', br, hbw'] using hresult
 
 -- Static Huffman length base table size.
 lemma lengthBases_size : lengthBases.size = 29 := by decide
