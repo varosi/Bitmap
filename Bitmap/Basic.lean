@@ -1206,15 +1206,22 @@ partial def decodeFixedLiteralSym (br : BitReader) : Option (Nat × BitReader) :
               none
 
 -- Decode a fixed-Huffman block that is restricted to literals and end-of-block.
-partial def decodeFixedLiteralBlock (br : BitReader) (out : ByteArray) :
+def decodeFixedLiteralBlockFuel (fuel : Nat) (br : BitReader) (out : ByteArray) :
     Option (BitReader × ByteArray) := do
-  let (sym, br') ← decodeFixedLiteralSym br
-  if sym < 256 then
-    decodeFixedLiteralBlock br' (out.push (u8 sym))
-  else if sym == 256 then
-    return (br', out)
-  else
-    none
+  match fuel with
+  | 0 => none
+  | fuel + 1 =>
+      let (sym, br') ← decodeFixedLiteralSym br
+      if sym < 256 then
+        decodeFixedLiteralBlockFuel fuel br' (out.push (u8 sym))
+      else if sym == 256 then
+        return (br', out)
+      else
+        none
+
+def decodeFixedLiteralBlock (br : BitReader) (out : ByteArray) :
+    Option (BitReader × ByteArray) :=
+  decodeFixedLiteralBlockFuel (br.data.size * 8) br out
 
 def fixedLitLenLengths : Array Nat :=
   Id.run do
@@ -1229,62 +1236,70 @@ def fixedLitLenLengths : Array Nat :=
       arr := arr.set! i 8
     return arr
 
--- Decode deflate blocks until the final block, returning the reader and output.
-partial def zlibDecompressLoop (br : BitReader) (out : ByteArray) : Option (BitReader × ByteArray) := do
-  let (hdr, br2) ←
-    if h : br.bitIndex + 3 <= br.data.size * 8 then
-      some (br.readBits 3 h)
-    else
-      none
-  let bfinal := hdr % 2
-  let btype := (hdr >>> 1) % 4
-  let mut br := br2
-  let mut out := out
-  if btype == 0 then
-    br := br.alignByte
-    if h : br.bytePos + 3 < br.data.size then
-      let len := readU16LE br.data br.bytePos (by omega)
-      let nlen := readU16LE br.data (br.bytePos + 2) (by omega)
-      if len + nlen != 0xFFFF then
-        none
-      let start := br.bytePos + 4
-      if hlen : start + len > br.data.size then
-        none
+-- Decode deflate blocks with a fuel bound to guarantee termination.
+def zlibDecompressLoopFuel (fuel : Nat) (br : BitReader) (out : ByteArray) :
+    Option (BitReader × ByteArray) := do
+  match fuel with
+  | 0 => none
+  | fuel + 1 =>
+      let (hdr, br2) ←
+        if h : br.bitIndex + 3 <= br.data.size * 8 then
+          some (br.readBits 3 h)
+        else
+          none
+      let bfinal := hdr % 2
+      let btype := (hdr >>> 1) % 4
+      let mut br := br2
+      let mut out := out
+      if btype == 0 then
+        br := br.alignByte
+        if h : br.bytePos + 3 < br.data.size then
+          let len := readU16LE br.data br.bytePos (by omega)
+          let nlen := readU16LE br.data (br.bytePos + 2) (by omega)
+          if len + nlen != 0xFFFF then
+            none
+          let start := br.bytePos + 4
+          if hlen : start + len > br.data.size then
+            none
+          else
+            out := out ++ br.data.extract start (start + len)
+            have hle : start + len ≤ br.data.size := Nat.le_of_not_gt hlen
+            br := {
+              data := br.data
+              bytePos := start + len
+              bitPos := 0
+              hpos := hle
+              hend := by intro _; rfl
+              hbit := by decide
+            }
+        else
+          none
+      else if btype == 1 then
+        match decodeFixedLiteralBlock br out with
+        | some (br', out') =>
+            br := br'
+            out := out'
+        | none =>
+            let litLenTable := fixedLitLenHuffman
+            let distTable ← mkHuffman (Array.replicate 32 5)
+            let (br', out') ← decodeCompressedBlock litLenTable distTable br out
+            br := br'
+            out := out'
+      else if btype == 2 then
+        let (litLenTable, distTable, br') ← readDynamicTables br
+        let (br'', out') ← decodeCompressedBlock litLenTable distTable br' out
+        br := br''
+        out := out'
       else
-        out := out ++ br.data.extract start (start + len)
-        have hle : start + len ≤ br.data.size := Nat.le_of_not_gt hlen
-        br := {
-          data := br.data
-          bytePos := start + len
-          bitPos := 0
-          hpos := hle
-          hend := by intro _; rfl
-          hbit := by decide
-        }
-    else
-      none
-  else if btype == 1 then
-    match decodeFixedLiteralBlock br out with
-    | some (br', out') =>
-        br := br'
-        out := out'
-    | none =>
-        let litLenTable := fixedLitLenHuffman
-        let distTable ← mkHuffman (Array.replicate 32 5)
-        let (br', out') ← decodeCompressedBlock litLenTable distTable br out
-        br := br'
-        out := out'
-  else if btype == 2 then
-    let (litLenTable, distTable, br') ← readDynamicTables br
-    let (br'', out') ← decodeCompressedBlock litLenTable distTable br' out
-    br := br''
-    out := out'
-  else
-    none
-  if bfinal == 1 then
-    return (br, out)
-  else
-    zlibDecompressLoop br out
+        none
+      if bfinal == 1 then
+        return (br, out)
+      else
+        zlibDecompressLoopFuel fuel br out
+
+-- Decode deflate blocks until the final block, returning the reader and output.
+def zlibDecompressLoop (br : BitReader) (out : ByteArray) : Option (BitReader × ByteArray) :=
+  zlibDecompressLoopFuel (br.data.size * 8 + 1) br out
 
 partial def zlibDecompress (data : ByteArray) (hsize : 2 <= data.size) : Option ByteArray := do
   let h0 : 0 < data.size := by omega
