@@ -1229,6 +1229,63 @@ def fixedLitLenLengths : Array Nat :=
       arr := arr.set! i 8
     return arr
 
+-- Decode deflate blocks until the final block, returning the reader and output.
+partial def zlibDecompressLoop (br : BitReader) (out : ByteArray) : Option (BitReader × ByteArray) := do
+  let (hdr, br2) ←
+    if h : br.bitIndex + 3 <= br.data.size * 8 then
+      some (br.readBits 3 h)
+    else
+      none
+  let bfinal := hdr % 2
+  let btype := (hdr >>> 1) % 4
+  let mut br := br2
+  let mut out := out
+  if btype == 0 then
+    br := br.alignByte
+    if h : br.bytePos + 3 < br.data.size then
+      let len := readU16LE br.data br.bytePos (by omega)
+      let nlen := readU16LE br.data (br.bytePos + 2) (by omega)
+      if len + nlen != 0xFFFF then
+        none
+      let start := br.bytePos + 4
+      if hlen : start + len > br.data.size then
+        none
+      else
+        out := out ++ br.data.extract start (start + len)
+        have hle : start + len ≤ br.data.size := Nat.le_of_not_gt hlen
+        br := {
+          data := br.data
+          bytePos := start + len
+          bitPos := 0
+          hpos := hle
+          hend := by intro _; rfl
+          hbit := by decide
+        }
+    else
+      none
+  else if btype == 1 then
+    match decodeFixedLiteralBlock br out with
+    | some (br', out') =>
+        br := br'
+        out := out'
+    | none =>
+        let litLenTable := fixedLitLenHuffman
+        let distTable ← mkHuffman (Array.replicate 32 5)
+        let (br', out') ← decodeCompressedBlock litLenTable distTable br out
+        br := br'
+        out := out'
+  else if btype == 2 then
+    let (litLenTable, distTable, br') ← readDynamicTables br
+    let (br'', out') ← decodeCompressedBlock litLenTable distTable br' out
+    br := br''
+    out := out'
+  else
+    none
+  if bfinal == 1 then
+    return (br, out)
+  else
+    zlibDecompressLoop br out
+
 partial def zlibDecompress (data : ByteArray) (hsize : 2 <= data.size) : Option ByteArray := do
   let h0 : 0 < data.size := by omega
   let h1 : 1 < data.size := by omega
@@ -1240,73 +1297,21 @@ partial def zlibDecompress (data : ByteArray) (hsize : 2 <= data.size) : Option 
     none
   if (flg &&& (0x20 : UInt8)) != (0 : UInt8) then
     none
-  let mut br : BitReader := {
-    data := data
-    bytePos := 2
+  let deflated := data.extract 2 (data.size - 4)
+  let br0 : BitReader := {
+    data := deflated
+    bytePos := 0
     bitPos := 0
-    hpos := hsize
+    hpos := by exact Nat.zero_le _
     hend := by intro _; rfl
     hbit := by decide
   }
-  let mut out := ByteArray.empty
-  let mut final := false
-  while not final do
-    let (bfinal, br1) ←
-      if h : br.bitIndex + 1 <= br.data.size * 8 then
-        some (br.readBits 1 h)
-      else
-        none
-    let (btype, br2) ←
-      if h : br1.bitIndex + 2 <= br1.data.size * 8 then
-        some (br1.readBits 2 h)
-      else
-        none
-    br := br2
-    final := bfinal == 1
-    if btype == 0 then
-      br := br.alignByte
-      if h : br.bytePos + 3 < data.size then
-        let len := readU16LE data br.bytePos (by omega)
-        let nlen := readU16LE data (br.bytePos + 2) (by omega)
-        if len + nlen != 0xFFFF then
-          none
-        let start := br.bytePos + 4
-        if hlen : start + len > data.size then
-          none
-        else
-          out := out ++ data.extract start (start + len)
-          have hle : start + len ≤ data.size := Nat.le_of_not_gt hlen
-          br := {
-            data := data
-            bytePos := start + len
-            bitPos := 0
-            hpos := hle
-            hend := by intro _; rfl
-            hbit := by decide
-          }
-      else
-        none
-    else if btype == 1 then
-      let litLenTable := fixedLitLenHuffman
-      let distTable ← mkHuffman (Array.replicate 32 5)
-      match decodeFixedLiteralBlock br out with
-      | some (br', out') =>
-          br := br'
-          out := out'
-      | none =>
-          let (br', out') ← decodeCompressedBlock litLenTable distTable br out
-          br := br'
-          out := out'
-    else if btype == 2 then
-      let (litLenTable, distTable, br') ← readDynamicTables br
-      let (br'', out') ← decodeCompressedBlock litLenTable distTable br' out
-      br := br''
-      out := out'
-    else
-      none
+  let out := ByteArray.empty
+  let (br, out) ← zlibDecompressLoop br0 out
   let brAligned := br.alignByte
-  if hAdler : brAligned.bytePos + 3 < data.size then
-    let adlerExpected := readU32BE data brAligned.bytePos hAdler
+  let adlerPos := brAligned.bytePos + 2
+  if hAdler : adlerPos + 3 < data.size then
+    let adlerExpected := readU32BE data adlerPos hAdler
     let adlerActual := (adler32 out).toNat
     if adlerExpected != adlerActual then
       none
