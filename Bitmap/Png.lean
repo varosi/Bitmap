@@ -428,29 +428,30 @@ def mkHuffman (lengths : Array Nat) : Option Huffman := do
       table := table.set! len row'
   return { maxLen, table }
 
-partial def Huffman.decode (h : Huffman) (br : BitReader) : Option (Nat × BitReader) := do
-  let mut code := 0
-  let mut len := 0
-  let mut br := br
-  while len < h.maxLen do
-    if br.bytePos < br.data.size then
-      let (bit, br') := br.readBit
-      br := br'
-      code := code ||| (bit <<< len)
-      len := len + 1
-    else
-      none
-    if hlen : h.table.size <= len then
-      pure ()
-    else
-      let row := Array.getInternal h.table len (Nat.lt_of_not_ge hlen)
-      if hcode : code < row.size then
-        match Array.getInternal row code hcode with
-        | some sym => return (sym, br)
-        | none => pure ()
+def Huffman.decodeFuel (h : Huffman) (fuel code len : Nat) (br : BitReader) :
+    Option (Nat × BitReader) :=
+  match fuel with
+  | 0 => none
+  | fuel + 1 =>
+      if br.bytePos < br.data.size then
+        let (bit, br') := br.readBit
+        let code' := code ||| (bit <<< len)
+        let len' := len + 1
+        if hlen : h.table.size <= len' then
+          Huffman.decodeFuel h fuel code' len' br'
+        else
+          let row := Array.getInternal h.table len' (Nat.lt_of_not_ge hlen)
+          if hcode : code' < row.size then
+            match Array.getInternal row code' hcode with
+            | some sym => some (sym, br')
+            | none => Huffman.decodeFuel h fuel code' len' br'
+          else
+            Huffman.decodeFuel h fuel code' len' br'
       else
-        pure ()
-  none
+        none
+
+def Huffman.decode (h : Huffman) (br : BitReader) : Option (Nat × BitReader) :=
+  Huffman.decodeFuel h h.maxLen 0 0 br
 
 def lengthBases : Array Nat :=
   #[3, 4, 5, 6, 7, 8, 9, 10,
@@ -557,53 +558,100 @@ def decodeDistance (sym : Nat) (br : BitReader)
     let (bits, br') := br.readBits extra (by simpa [hextra] using hbits)
     (base + bits, br')
 
-partial def decodeCompressedBlock (litLen dist : Huffman) (br : BitReader) (out : ByteArray) :
-    Option (BitReader × ByteArray) := do
-  let hLengthExtraSize : lengthExtra.size = 29 := by decide
-  let hDistBasesSize : distBases.size = 30 := by decide
-  let hDistExtraSize : distExtra.size = 30 := by decide
-  let mut br := br
-  let mut out := out
-  let mut done := false
-  while !done do
-    let (sym, br') ← litLen.decode br
-    br := br'
-    if sym < 256 then
-      out := out.push (u8 sym)
-    else if sym == 256 then
-      done := true
-    else if hlen : 257 ≤ sym ∧ sym ≤ 285 then
-      let idx := sym - 257
-      have hidxle : idx ≤ 28 := by
-        dsimp [idx]
-        omega
-      have hidxlt : idx < 29 := Nat.lt_succ_of_le hidxle
-      have hidxExtra : idx < lengthExtra.size := by simpa [hLengthExtraSize] using hidxlt
-      let extra := Array.getInternal lengthExtra idx hidxExtra
-      if hbits : br.bitIndex + extra <= br.data.size * 8 then
-        let (len, br'') := decodeLength sym br hlen (by simpa using hbits)
-        br := br''
-        let (distSym, br''') ← dist.decode br
-        br := br'''
-        if hdist : distSym < distBases.size then
-          let extraD := Array.getInternal distExtra distSym (by
-            simpa [hDistExtraSize, hDistBasesSize] using hdist)
-          if hbitsD : br.bitIndex + extraD <= br.data.size * 8 then
-            let (distance, br'''') := decodeDistance distSym br hdist (by simpa using hbitsD)
-            br := br''''
-            let out' ← copyDistance out distance len
-            out := out'
+def decodeCompressedBlockFuel (fuel : Nat) (litLen dist : Huffman) (br : BitReader)
+    (out : ByteArray) : Option (BitReader × ByteArray) :=
+  match fuel with
+  | 0 => none
+  | fuel + 1 => do
+      let hLengthExtraSize : lengthExtra.size = 29 := by decide
+      let hDistBasesSize : distBases.size = 30 := by decide
+      let hDistExtraSize : distExtra.size = 30 := by decide
+      let (sym, br') ← litLen.decode br
+      if sym < 256 then
+        decodeCompressedBlockFuel fuel litLen dist br' (out.push (u8 sym))
+      else if sym == 256 then
+        return (br', out)
+      else if hlen : 257 ≤ sym ∧ sym ≤ 285 then
+        let idx := sym - 257
+        have hidxle : idx ≤ 28 := by
+          dsimp [idx]
+          omega
+        have hidxlt : idx < 29 := Nat.lt_succ_of_le hidxle
+        have hidxExtra : idx < lengthExtra.size := by simpa [hLengthExtraSize] using hidxlt
+        let extra := Array.getInternal lengthExtra idx hidxExtra
+        if hbits : br'.bitIndex + extra <= br'.data.size * 8 then
+          let (len, br'') := decodeLength sym br' hlen (by simpa using hbits)
+          let (distSym, br''') ← dist.decode br''
+          if hdist : distSym < distBases.size then
+            let extraD := Array.getInternal distExtra distSym (by
+              simpa [hDistExtraSize, hDistBasesSize] using hdist)
+            if hbitsD : br'''.bitIndex + extraD <= br'''.data.size * 8 then
+              let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa using hbitsD)
+              let out' ← copyDistance out distance len
+              decodeCompressedBlockFuel fuel litLen dist br'''' out'
+            else
+              none
           else
             none
         else
           none
       else
         none
-    else
-      none
-  return (br, out)
 
-partial def readDynamicTables (br : BitReader) : Option (Huffman × Huffman × BitReader) := do
+def decodeCompressedBlock (litLen dist : Huffman) (br : BitReader) (out : ByteArray) :
+    Option (BitReader × ByteArray) :=
+  decodeCompressedBlockFuel (br.data.size * 8 + 1) litLen dist br out
+
+def readDynamicTablesLengthsFuel (fuel total : Nat) (codeLenTable : Huffman) (br : BitReader)
+    (lengths : Array Nat) : Option (Array Nat × BitReader) :=
+  match fuel with
+  | 0 => none
+  | fuel + 1 => do
+      if lengths.size >= total then
+        return (lengths, br)
+      let (sym, br') ← codeLenTable.decode br
+      let mut lengthsCur := lengths
+      let mut brCur := br'
+      if sym <= 15 then
+        lengthsCur := lengthsCur.push sym
+      else if sym == 16 then
+        if lengthsCur.size == 0 then
+          none
+        let (extra, br'') ←
+          if h : brCur.bitIndex + 2 <= brCur.data.size * 8 then
+            some (brCur.readBits 2 h)
+          else
+            none
+        brCur := br''
+        let repeatCount := 3 + extra
+        let prev := lengthsCur[lengthsCur.size - 1]!
+        for _ in [0:repeatCount] do
+          lengthsCur := lengthsCur.push prev
+      else if sym == 17 then
+        let (extra, br'') ←
+          if h : brCur.bitIndex + 3 <= brCur.data.size * 8 then
+            some (brCur.readBits 3 h)
+          else
+            none
+        brCur := br''
+        let repeatCount := 3 + extra
+        for _ in [0:repeatCount] do
+          lengthsCur := lengthsCur.push 0
+      else if sym == 18 then
+        let (extra, br'') ←
+          if h : brCur.bitIndex + 7 <= brCur.data.size * 8 then
+            some (brCur.readBits 7 h)
+          else
+            none
+        brCur := br''
+        let repeatCount := 11 + extra
+        for _ in [0:repeatCount] do
+          lengthsCur := lengthsCur.push 0
+      else
+        none
+      readDynamicTablesLengthsFuel fuel total codeLenTable brCur lengthsCur
+
+def readDynamicTables (br : BitReader) : Option (Huffman × Huffman × BitReader) := do
   let (hlitBits, br) ←
     if h : br.bitIndex + 5 <= br.data.size * 8 then
       some (br.readBits 5 h)
@@ -624,65 +672,28 @@ partial def readDynamicTables (br : BitReader) : Option (Huffman × Huffman × B
   let hclen := hclenBits + 4
   let order : Array Nat := #[16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
   let mut codeLenLengths : Array Nat := Array.replicate 19 0
-  let mut br := br
+  let mut brCur := br
   for i in [0:hclen] do
     let (len, br') ←
-      if h : br.bitIndex + 3 <= br.data.size * 8 then
-        some (br.readBits 3 h)
+      if h : brCur.bitIndex + 3 <= brCur.data.size * 8 then
+        some (brCur.readBits 3 h)
       else
         none
     codeLenLengths := codeLenLengths.set! order[i]! len
-    br := br'
+    brCur := br'
   let codeLenTable ← mkHuffman codeLenLengths
   let total := hlit + hdist
-  let mut lengths : Array Nat := Array.mkEmpty total
-  while lengths.size < total do
-    let (sym, br') ← codeLenTable.decode br
-    br := br'
-    if sym <= 15 then
-      lengths := lengths.push sym
-    else if sym == 16 then
-      if lengths.size == 0 then
-        none
-      let (extra, br'') ←
-        if h : br.bitIndex + 2 <= br.data.size * 8 then
-          some (br.readBits 2 h)
-        else
-          none
-      br := br''
-      let repeatCount := 3 + extra
-      let prev := lengths[lengths.size - 1]!
-      for _ in [0:repeatCount] do
-        lengths := lengths.push prev
-    else if sym == 17 then
-      let (extra, br'') ←
-        if h : br.bitIndex + 3 <= br.data.size * 8 then
-          some (br.readBits 3 h)
-        else
-          none
-      br := br''
-      let repeatCount := 3 + extra
-      for _ in [0:repeatCount] do
-        lengths := lengths.push 0
-    else if sym == 18 then
-      let (extra, br'') ←
-        if h : br.bitIndex + 7 <= br.data.size * 8 then
-          some (br.readBits 7 h)
-        else
-          none
-      br := br''
-      let repeatCount := 11 + extra
-      for _ in [0:repeatCount] do
-        lengths := lengths.push 0
-    else
-      none
+  let lengths0 : Array Nat := Array.mkEmpty total
+  let (lengths, brNext) ←
+    readDynamicTablesLengthsFuel (brCur.data.size * 8 + 1) total codeLenTable brCur lengths0
+  brCur := brNext
   if lengths.size != total then
     none
   let litLenLengths := lengths.extract 0 hlit
   let distLengths := lengths.extract hlit (hlit + hdist)
   let litLenTable ← mkHuffman litLenLengths
   let distTable ← mkHuffman distLengths
-  return (litLenTable, distTable, br)
+  return (litLenTable, distTable, brCur)
 
 def fixedLitLenRow7 : Array (Option Nat) :=
   Array.ofFn (fun i : Fin (1 <<< 7) =>
@@ -729,7 +740,7 @@ def fixedLitLenHuffman : Huffman :=
     ] }
 
 -- Decode a single fixed-Huffman literal/length symbol (literal-only fast path).
-partial def decodeFixedLiteralSym (br : BitReader) : Option (Nat × BitReader) := do
+def decodeFixedLiteralSym (br : BitReader) : Option (Nat × BitReader) := do
   let (bits7, br7) ←
     if h : br.bitIndex + 7 <= br.data.size * 8 then
       some (br.readBits 7 h)
@@ -857,7 +868,7 @@ def zlibDecompressLoopFuel (fuel : Nat) (br : BitReader) (out : ByteArray) :
 def zlibDecompressLoop (br : BitReader) (out : ByteArray) : Option (BitReader × ByteArray) :=
   zlibDecompressLoopFuel (br.data.size * 8 + 1) br out
 
-partial def zlibDecompress (data : ByteArray) (hsize : 2 <= data.size) : Option ByteArray := do
+def zlibDecompress (data : ByteArray) (hsize : 2 <= data.size) : Option ByteArray := do
   let h0 : 0 < data.size := by omega
   let h1 : 1 < data.size := by omega
   let cmf := data.get 0 h0
@@ -935,7 +946,7 @@ decreasing_by
   exact Nat.sub_lt_self hpos hle
 
 -- Inflate stored blocks and require the stream to end exactly at the final block.
-partial def inflateStored (data : ByteArray) : Option ByteArray := do
+def inflateStored (data : ByteArray) : Option ByteArray := do
   if h : 0 < data.size then
     let (payload, rest) ← inflateStoredAux data h
     if rest.size == 0 then
@@ -946,7 +957,7 @@ partial def inflateStored (data : ByteArray) : Option ByteArray := do
     none
 
 -- Fast path for zlib streams that use only stored (uncompressed) deflate blocks.
-partial def zlibDecompressStored (data : ByteArray) (hsize : 2 <= data.size) : Option ByteArray := do
+def zlibDecompressStored (data : ByteArray) (hsize : 2 <= data.size) : Option ByteArray := do
   let cmf := data.get 0 (by omega)
   let flg := data.get 1 (by omega)
   if ((cmf.toNat <<< 8) + flg.toNat) % 31 != 0 then
@@ -1049,48 +1060,58 @@ def parsePngSimple (bytes : ByteArray) (_hsize : 8 <= bytes.size) :
     none
 
 
-partial def parsePng (bytes : ByteArray) (_hsize : 8 <= bytes.size) : Option (PngHeader × ByteArray) := do
+def parsePngLoopFuel (fuel : Nat) (bytes : ByteArray) (pos : Nat)
+    (header : Option PngHeader) (idat : ByteArray) : Option (PngHeader × ByteArray) :=
+  match fuel with
+  | 0 => none
+  | fuel + 1 => do
+      if hpos : pos + 8 <= bytes.size then
+        if hLen : pos + 3 < bytes.size then
+          let len := readU32BE bytes pos hLen
+          let dataStart := pos + 8
+          match readChunk bytes pos hLen with
+          | some (typBytes, chunkData, posNext) =>
+              if typBytes == "IHDR".toUTF8 then
+                if len != 13 then
+                  none
+                if hIH : dataStart + 12 < bytes.size then
+                  let w := readU32BE bytes dataStart (by omega)
+                  let h := readU32BE bytes (dataStart + 4) (by omega)
+                  let bitDepth := (bytes.get (dataStart + 8) (by omega)).toNat
+                  let colorType := (bytes.get (dataStart + 9) (by omega)).toNat
+                  let comp := (bytes.get (dataStart + 10) (by omega)).toNat
+                  let filter := (bytes.get (dataStart + 11) (by omega)).toNat
+                  let interlace := (bytes.get (dataStart + 12) (by omega)).toNat
+                  if comp != 0 || filter != 0 || interlace != 0 then
+                    none
+                  let header := some { width := w, height := h, colorType, bitDepth }
+                  parsePngLoopFuel fuel bytes posNext header idat
+                else
+                  none
+              else if typBytes == "IDAT".toUTF8 then
+                parsePngLoopFuel fuel bytes posNext header (idat ++ chunkData)
+              else if typBytes == "IEND".toUTF8 then
+                match header with
+                | none => none
+                | some h => some (h, idat)
+              else
+                parsePngLoopFuel fuel bytes posNext header idat
+          | none =>
+              none
+        else
+          none
+      else
+        match header with
+        | none => none
+        | some h => some (h, idat)
+
+def parsePng (bytes : ByteArray) (_hsize : 8 <= bytes.size) :
+    Option (PngHeader × ByteArray) := do
   if let some res := parsePngSimple bytes _hsize then
     return res
   if bytes.extract 0 8 != pngSignature then
     none
-  let mut pos := 8
-  let mut header : Option PngHeader := none
-  let mut idat := ByteArray.empty
-  while pos + 8 <= bytes.size do
-    if hLen : pos + 3 < bytes.size then
-      let len := readU32BE bytes pos hLen
-      let dataStart := pos + 8
-      match readChunk bytes pos hLen with
-      | some (typBytes, chunkData, posNext) =>
-          if typBytes == "IHDR".toUTF8 then
-            if len != 13 then
-              none
-            if hIH : dataStart + 12 < bytes.size then
-              let w := readU32BE bytes dataStart (by omega)
-              let h := readU32BE bytes (dataStart + 4) (by omega)
-              let bitDepth := (bytes.get (dataStart + 8) (by omega)).toNat
-              let colorType := (bytes.get (dataStart + 9) (by omega)).toNat
-              let comp := (bytes.get (dataStart + 10) (by omega)).toNat
-              let filter := (bytes.get (dataStart + 11) (by omega)).toNat
-              let interlace := (bytes.get (dataStart + 12) (by omega)).toNat
-              if comp != 0 || filter != 0 || interlace != 0 then
-                none
-              header := some { width := w, height := h, colorType, bitDepth }
-            else
-              none
-          else if typBytes == "IDAT".toUTF8 then
-            idat := idat ++ chunkData
-          else if typBytes == "IEND".toUTF8 then
-            break
-          pos := posNext
-      | none =>
-          none
-    else
-      none
-  match header with
-  | none => none
-  | some h => some (h, idat)
+  parsePngLoopFuel (bytes.size + 1) bytes 8 none ByteArray.empty
 
 def paethPredictor (a b c : Nat) : Nat :=
   let p : Int := (a : Int) + (b : Int) - (c : Int)
