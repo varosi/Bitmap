@@ -182,15 +182,17 @@ private def runPerfTest : IO Unit := do
   let w : Nat := 2688
   let h : Nat := 2688
   let iters : Nat := 10
+  let hb0 <- IO.getNumHeartbeats
   let mut totalNs : Nat := 0
   let mut totalChecksum : Nat := 0
   for _ in [0:iters] do
     let (elapsedNs, checksum) <- perfFillRead w h
     totalNs := totalNs + elapsedNs
     totalChecksum := totalChecksum + checksum
+  let hb1 <- IO.getNumHeartbeats
   let avgNs := totalNs / iters
   let avgMs := avgNs / 1_000_000
-  IO.println s!"perf put/get: {w}x{h} pixels, avg {avgMs} ms over {iters} runs, checksum {totalChecksum}"
+  IO.println s!"perf put/get: {w}x{h} pixels, avg {avgMs} ms over {iters} runs, checksum {totalChecksum}, heartbeats {hb1 - hb0}"
 
 -- Fixed-size performance test for PNG encode/decode on this machine.
 -- Chosen so 10 runs total about 5 seconds here.
@@ -198,15 +200,17 @@ private def runPngPerfTest : IO Unit := do
   let w : Nat := 1600
   let h : Nat := 1600
   let iters : Nat := 10
+  let hb0 <- IO.getNumHeartbeats
   let mut totalNs : Nat := 0
   for _ in [0:iters] do
     let (elapsedNs, ok) <- perfPngRoundTrip w h
     if !ok then
       throw (IO.userError "png perf round-trip failed")
     totalNs := totalNs + elapsedNs
+  let hb1 <- IO.getNumHeartbeats
   let avgNs := totalNs / iters
   let avgMs := avgNs / 1_000_000
-  IO.println s!"perf png round-trip: {w}x{h} pixels, avg {avgMs} ms over {iters} runs"
+  IO.println s!"perf png round-trip: {w}x{h} pixels, avg {avgMs} ms over {iters} runs, heartbeats {hb1 - hb0}"
 
 def run : IO Unit := do
   let ok <- pngRoundTripProperty 20
