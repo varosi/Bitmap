@@ -296,12 +296,15 @@ def BitReader.readBit (br : BitReader) : Nat × BitReader :=
           hend := hend'
           hbit := hbit' })
 
-def BitReader.readBitsAux (br : BitReader) : Nat → Nat × BitReader
-  | 0 => (0, br)
+def BitReader.readBitsAuxAcc (br : BitReader) (n shift acc : Nat) : Nat × BitReader :=
+  match n with
+  | 0 => (acc, br)
   | n + 1 =>
       let (bit, br') := br.readBit
-      let (rest, br'') := readBitsAux br' n
-      (bit ||| (rest <<< 1), br'')
+      readBitsAuxAcc br' n (shift + 1) (acc ||| (bit <<< shift))
+
+def BitReader.readBitsAux (br : BitReader) (n : Nat) : Nat × BitReader :=
+  readBitsAuxAcc br n 0 0
 
 def BitReader.readBits (br : BitReader) (n : Nat)
     (_h : br.bitIndex + n <= br.data.size * 8) : Nat × BitReader := by

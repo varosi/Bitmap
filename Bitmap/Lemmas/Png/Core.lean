@@ -1786,6 +1786,67 @@ lemma proof_irrel_fun {α} {p : Prop} (f : p → α) (h1 h2 : p) : f h1 = f h2 :
   cases (Subsingleton.elim h1 h2)
   rfl
 
+lemma shiftLeft_shiftLeft (a b c : Nat) : (a <<< b) <<< c = a <<< (b + c) := by
+  simp [Nat.shiftLeft_eq, Nat.mul_assoc, Nat.pow_add]
+
+lemma readBitsAuxAcc_eq (br : BitReader) (n shift acc : Nat) :
+    BitReader.readBitsAuxAcc br n shift acc =
+      let (rest, br') := BitReader.readBitsAuxAcc br n 0 0
+      (acc ||| (rest <<< shift), br') := by
+  induction n generalizing br shift acc with
+  | zero =>
+      simp [BitReader.readBitsAuxAcc]
+  | succ n ih =>
+      cases hbit : br.readBit with
+      | mk bit br' =>
+          simp [BitReader.readBitsAuxAcc, hbit]
+          cases hrest : BitReader.readBitsAuxAcc br' n 0 0 with
+          | mk rest0 br'' =>
+              have hL :
+                  BitReader.readBitsAuxAcc br' n (shift + 1) (acc ||| (bit <<< shift)) =
+                    ((acc ||| (bit <<< shift)) ||| (rest0 <<< (shift + 1)), br'') := by
+                simpa [hrest] using
+                  (ih (br := br') (shift := shift + 1) (acc := acc ||| (bit <<< shift)))
+              have h1 :=
+                ih (br := br') (shift := 1) (acc := bit)
+              have h1' :
+                  BitReader.readBitsAuxAcc br' n 1 bit = (bit ||| (rest0 <<< 1), br'') := by
+                simpa [hrest] using h1
+              have hR' :
+                  ((acc ||| (bit <<< shift)) ||| (rest0 <<< (shift + 1))) =
+                    acc ||| ((bit ||| (rest0 <<< 1)) <<< shift) := by
+                calc
+                  (acc ||| (bit <<< shift)) ||| (rest0 <<< (shift + 1))
+                      = acc ||| ((bit <<< shift) ||| (rest0 <<< (shift + 1))) := by
+                          simp [Nat.or_assoc]
+                  _ = acc ||| ((bit <<< shift) ||| (rest0 <<< (1 + shift))) := by
+                          simp [Nat.add_comm]
+                  _ = acc ||| ((bit <<< shift) ||| ((rest0 <<< 1) <<< shift)) := by
+                          simp [shiftLeft_shiftLeft]
+                  _ = acc ||| ((bit ||| (rest0 <<< 1)) <<< shift) := by
+                          simp [Nat.shiftLeft_or_distrib]
+              -- combine and normalize bitwise shifts
+              have hcalc :
+                  BitReader.readBitsAuxAcc br' n (shift + 1) (acc ||| (bit <<< shift)) =
+                    (acc ||| ((bit ||| (rest0 <<< 1)) <<< shift), br'') := by
+                calc
+                  BitReader.readBitsAuxAcc br' n (shift + 1) (acc ||| (bit <<< shift))
+                      = ((acc ||| (bit <<< shift)) ||| (rest0 <<< (shift + 1)), br'') := hL
+                  _ = (acc ||| ((bit ||| (rest0 <<< 1)) <<< shift), br'') := by
+                        exact congrArg (fun x => (x, br'')) hR'
+              simpa [h1'] using hcalc
+
+lemma readBitsAux_succ (br : BitReader) (k : Nat) :
+    BitReader.readBitsAux br (k + 1) =
+      let (bit, br') := br.readBit
+      let (rest, br'') := BitReader.readBitsAux br' k
+      (bit ||| (rest <<< 1), br'') := by
+  unfold BitReader.readBitsAux
+  cases hbit : br.readBit with
+  | mk bit br' =>
+      simp [BitReader.readBitsAuxAcc, hbit]
+      simpa using (readBitsAuxAcc_eq (br := br') (n := k) (shift := 1) (acc := bit))
+
 lemma readBits_succ_eq (br : BitReader) (k : Nat)
     (h : br.bitIndex + (k + 1) ≤ br.data.size * 8)
     (bit : Nat) (br' : BitReader) (hbit : br.readBit = (bit, br'))
@@ -1793,7 +1854,7 @@ lemma readBits_succ_eq (br : BitReader) (k : Nat)
     br.readBits (k + 1) h =
       (bit ||| ((br'.readBits k hread').1 <<< 1), (br'.readBits k hread').2) := by
   -- unfold one step of `readBits`
-  simp [BitReader.readBits, BitReader.readBitsAux, hbit]
+  simp [BitReader.readBits, readBitsAux_succ, hbit]
 
 lemma readBits_readerAt_writeBits_prefix (bw : BitWriter) (bits len k : Nat)
     (hk : k ≤ len) (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
@@ -1813,7 +1874,8 @@ lemma readBits_readerAt_writeBits_prefix (bw : BitWriter) (bits len k : Nat)
   induction k generalizing bw bits len with
   | zero =>
       -- `readBits 0` returns the current reader
-      simp [BitReader.readBits, BitReader.readBitsAux, BitWriter.writeBits, Nat.mod_one]
+      simp [BitReader.readBits, BitReader.readBitsAux, BitReader.readBitsAuxAcc,
+        BitWriter.writeBits, Nat.mod_one]
   | succ k ih =>
       -- `len` must be positive
       cases len with
