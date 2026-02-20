@@ -1783,6 +1783,17 @@ def encodeBitmapFixed {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
     (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32) : ByteArray :=
   encodeBitmap bmp hw hh .fixed
 
+-- Encode a bitmap, returning an error if dimensions exceed PNG limits.
+def encodeBitmapChecked {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
+    (mode : PngEncodeMode := .stored) : Except String ByteArray :=
+  if hw : bmp.size.width < 2 ^ 32 then
+    if hh : bmp.size.height < 2 ^ 32 then
+      Except.ok (encodeBitmap bmp hw hh mode)
+    else
+      Except.error "bitmap height exceeds PNG limit (2^32)"
+  else
+    Except.error "bitmap width exceeds PNG limit (2^32)"
+
 def Bitmap.readPng {px : Type u} [Pixel px] [PngPixel px]
     (path : FilePath) : IO (Except String (Bitmap px)) := do
   let bytesOrErr <- ioToExcept (IO.FS.readBinFile path)
@@ -1799,7 +1810,9 @@ def BitmapRGB8.readPng [Pixel PixelRGB8] [PngPixel PixelRGB8]
 
 def BitmapRGB8.writePng [Pixel PixelRGB8] [PngPixel PixelRGB8]
     (path : FilePath) (bmp : BitmapRGB8) : IO (Except String Unit) :=
-  ioToExcept (IO.FS.writeBinFile path (encodeBitmapUnchecked bmp))
+  match encodeBitmapChecked (px := PixelRGB8) bmp with
+  | Except.error err => pure (Except.error err)
+  | Except.ok bytes => ioToExcept (IO.FS.writeBinFile path bytes)
 
 def BitmapRGBA8.readPng [Pixel PixelRGBA8] [PngPixel PixelRGBA8]
     (path : FilePath) : IO (Except String BitmapRGBA8) :=
@@ -1807,7 +1820,9 @@ def BitmapRGBA8.readPng [Pixel PixelRGBA8] [PngPixel PixelRGBA8]
 
 def BitmapRGBA8.writePng [Pixel PixelRGBA8] [PngPixel PixelRGBA8]
     (path : FilePath) (bmp : BitmapRGBA8) : IO (Except String Unit) :=
-  ioToExcept (IO.FS.writeBinFile path (encodeBitmapUnchecked bmp))
+  match encodeBitmapChecked (px := PixelRGBA8) bmp with
+  | Except.error err => pure (Except.error err)
+  | Except.ok bytes => ioToExcept (IO.FS.writeBinFile path bytes)
 
 def BitmapGray8.readPng [Pixel PixelGray8] [PngPixel PixelGray8]
     (path : FilePath) : IO (Except String BitmapGray8) :=
@@ -1815,7 +1830,9 @@ def BitmapGray8.readPng [Pixel PixelGray8] [PngPixel PixelGray8]
 
 def BitmapGray8.writePng [Pixel PixelGray8] [PngPixel PixelGray8]
     (path : FilePath) (bmp : BitmapGray8) : IO (Except String Unit) :=
-  ioToExcept (IO.FS.writeBinFile path (encodeBitmapUnchecked bmp))
+  match encodeBitmapChecked (px := PixelGray8) bmp with
+  | Except.error err => pure (Except.error err)
+  | Except.ok bytes => ioToExcept (IO.FS.writeBinFile path bytes)
 
 end Png
 
