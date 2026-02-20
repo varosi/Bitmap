@@ -16,48 +16,6 @@ namespace Lemmas
 
 open Png
 
--- Setting a byte does not change the buffer size.
-@[simp] lemma byteArray_size_set
-    {bs : ByteArray} {i : Nat} (h : i < bs.size) {v : UInt8} :
-    (bs.set i v h).size = bs.size := by
-  cases bs with
-  | mk arr =>
-      simp [ByteArray.set, ByteArray.size, Array.size_set]
-
--- Getting the byte just set yields the new value.
-@[simp] lemma byteArray_get_set_self
-    {bs : ByteArray} {i : Nat} (h : i < bs.size) {v : UInt8} :
-    (bs.set i v h).get i (by simpa [byteArray_size_set] using h) = v := by
-  cases bs with
-  | mk arr =>
-      simp [ByteArray.set, ByteArray.get]
-
--- Getting the byte just set yields the new value (explicit bounds).
-@[simp] lemma byteArray_get_set_self'
-    {bs : ByteArray} {i : Nat} (h : i < bs.size) {v : UInt8}
-    (h' : i < (bs.set i v h).size) :
-    (bs.set i v h).get i h' = v := by
-  cases bs with
-  | mk arr =>
-      simp [ByteArray.set, ByteArray.get]
-
--- Getting a different index after setting preserves the old value (explicit bounds).
-lemma byteArray_get_set_ne'
-    {bs : ByteArray} {i j : Nat} (hi : i < bs.size) (hj : j < bs.size)
-    (hij : i ≠ j) {v : UInt8} (h' : j < (bs.set i v hi).size) :
-    (bs.set i v hi).get j h' = bs.get j hj := by
-  cases bs with
-  | mk arr =>
-      simpa [ByteArray.set, ByteArray.get] using
-        (Array.getElem_set_ne (xs := arr) (i := i) (j := j) (h' := hi) (pj := hj) (h := hij))
-
--- Getting the byte just set yields the new value (alternate proof of bounds).
--- `getElem` is proof-irrelevant for ByteArrays.
-@[simp] lemma byteArray_getElem_eq {bs : ByteArray} {i : Nat} (h1 h2 : i < bs.size) :
-    bs[i]'h1 = bs[i]'h2 := by
-  rfl
-
-
 -- Writing an RGB8 pixel does not change the buffer size.
 lemma pixelWriteRGB8_size
     (data : ByteArray) (base : Nat) (h : base + 2 < data.size) (px : PixelRGB8) :
