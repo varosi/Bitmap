@@ -162,184 +162,141 @@ lemma decodeBitmap_encodeBitmap_common {px : Type u} [Pixel px] [PngPixel px]
         encodeBitmapIdat] using
         (And.intro hctProp (And.intro hminFixed (And.intro hrawEq' hrowsEq)))
 
--- Round-trip PNG encode/decode for bitmap payloads.
-lemma decodeBitmap_encodeBitmap (bmp : BitmapRGB8)
-    (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
-    (mode : PngEncodeMode)
-    (hidat : (encodeBitmapIdat (bmp := bmp) (mode := mode)).size < 2 ^ 32) :
-    Png.decodeBitmap (Png.encodeBitmap bmp hw hh mode) = some bmp := by
-  -- Color type and bpp computations.
-  have hct :
-      (PngPixel.colorType (α := PixelRGB8)).toNat = 0 ∨
-        (PngPixel.colorType (α := PixelRGB8)).toNat = 2 ∨
-        (PngPixel.colorType (α := PixelRGB8)).toNat = 6 := by
+-- Package the pixel-specific facts needed for PNG round-trips.
+class PngRoundTrip (px : Type u) [Pixel px] [PngPixel px] : Prop where
+  colorType_ok :
+    (PngPixel.colorType (α := px)).toNat = 0 ∨
+      (PngPixel.colorType (α := px)).toNat = 2 ∨
+      (PngPixel.colorType (α := px)).toNat = 6
+  encodeRaw_size :
+    ∀ bmp : Bitmap px,
+      (PngPixel.encodeRaw (α := px) bmp).size =
+        bmp.size.height *
+          ((bmp.size.width *
+            (if (PngPixel.colorType (α := px)).toNat = 0 then 1 else
+              if (PngPixel.colorType (α := px)).toNat = 2 then 3 else 4)) + 1)
+  decodeRowsLoop_encodeRaw :
+    ∀ bmp : Bitmap px,
+      PngPixel.decodeRowsLoop (α := px)
+        (PngPixel.encodeRaw (α := px) bmp) bmp.size.width bmp.size.height
+        (if (PngPixel.colorType (α := px)).toNat = 0 then 1 else
+          if (PngPixel.colorType (α := px)).toNat = 2 then 3 else 4)
+        (bmp.size.width *
+          (if (PngPixel.colorType (α := px)).toNat = 0 then 1 else
+            if (PngPixel.colorType (α := px)).toNat = 2 then 3 else 4))
+        0 0 ByteArray.empty
+        { data := Array.replicate
+            (bmp.size.width * bmp.size.height * Pixel.bytesPerPixel (α := px)) 0 } =
+        some bmp.data
+
+instance : PngRoundTrip PixelRGB8 where
+  colorType_ok := by
     have : (u8 2).toNat = 0 ∨ (u8 2).toNat = 2 ∨ (u8 2).toNat = 6 := by decide
     simpa [pngPixel_colorType_rgb] using this
-  have hbpp :
-      (if (u8 2).toNat = 0 then 1 else if (u8 2).toNat = 2 then 3 else 4) = 3 := by
-    decide
-  -- Raw size check for the encoded bytes.
-  have hraw : (encodeRaw bmp).size =
-      bmp.size.height * (bmp.size.width * bytesPerPixelRGB + 1) := by
-    simpa using encodeRaw_size bmp
-  have hrawEq :
-      (PngPixel.encodeRaw (α := PixelRGB8) bmp).size =
-        bmp.size.height *
-          ((bmp.size.width *
-            (if (PngPixel.colorType (α := PixelRGB8)).toNat = 0 then 1 else
-              if (PngPixel.colorType (α := PixelRGB8)).toNat = 2 then 3 else 4)) + 1) := by
+  encodeRaw_size := by
+    intro bmp
+    have hraw : (encodeRaw bmp).size =
+        bmp.size.height * (bmp.size.width * bytesPerPixelRGB + 1) := by
+      simpa using encodeRaw_size (bmp := bmp)
+    have hbpp :
+        (if (u8 2).toNat = 0 then 1 else if (u8 2).toNat = 2 then 3 else 4) = 3 := by
+      decide
     simpa [pngPixel_encodeRaw_rgb, pngPixel_colorType_rgb, hbpp, bytesPerPixelRGB] using hraw
-  -- Row decoding for RGB pixels.
-  have hrows0 :
-      decodeRowsLoop (encodeRaw bmp) bmp.size.width bmp.size.height bytesPerPixelRGB
-          (bmp.size.width * bytesPerPixelRGB) 0 0 ByteArray.empty
-          (ByteArray.mk <| Array.replicate (bmp.size.height * (bmp.size.width * bytesPerPixelRGB)) 0) =
-        some bmp.data := by
-    simpa using (decodeRowsLoop_encodeRaw (bmp := bmp))
-  have hrows1 :
-      decodeRowsLoop (encodeRaw bmp) bmp.size.width bmp.size.height 3 (bmp.size.width * 3) 0 0
-          ByteArray.empty { data := Array.replicate (bmp.size.height * (bmp.size.width * 3)) 0 } =
-        some bmp.data := by
-    simpa [bytesPerPixelRGB] using hrows0
-  have hrows2 :
-      decodeRowsLoop (encodeRaw bmp) bmp.size.width bmp.size.height 3 (bmp.size.width * 3) 0 0
-          ByteArray.empty { data := Array.replicate (bmp.size.width * bmp.size.height * 3) 0 } =
-        some bmp.data := by
-    simpa [Nat.mul_left_comm, Nat.mul_comm, Nat.mul_assoc] using hrows1
-  have hrows :
-      PngPixel.decodeRowsLoop (α := PixelRGB8)
-          (PngPixel.encodeRaw (α := PixelRGB8) bmp) bmp.size.width bmp.size.height
-          (if (PngPixel.colorType (α := PixelRGB8)).toNat = 0 then 1 else
-            if (PngPixel.colorType (α := PixelRGB8)).toNat = 2 then 3 else 4)
-          (bmp.size.width *
-            (if (PngPixel.colorType (α := PixelRGB8)).toNat = 0 then 1 else
-              if (PngPixel.colorType (α := PixelRGB8)).toNat = 2 then 3 else 4))
-          0 0 ByteArray.empty
-          { data := Array.replicate
-              (bmp.size.width * bmp.size.height * Pixel.bytesPerPixel (α := PixelRGB8)) 0 } =
-        some bmp.data := by
-    simpa [pngPixel_decodeRowsLoop_rgb, pngPixel_encodeRaw_rgb, pngPixel_colorType_rgb,
-      hbpp, bytesPerPixel_rgb, bytesPerPixelRGB, Nat.mul_left_comm, Nat.mul_comm, Nat.mul_assoc] using hrows2
-  exact
-    decodeBitmap_encodeBitmap_common (bmp := bmp) (hw := hw) (hh := hh)
-      (mode := mode) hidat hct hrawEq hrows
+  decodeRowsLoop_encodeRaw := by
+    intro bmp
+    have hrows :
+        decodeRowsLoop (encodeRaw bmp) bmp.size.width bmp.size.height bytesPerPixelRGB
+            (bmp.size.width * bytesPerPixelRGB) 0 0 ByteArray.empty
+            (ByteArray.mk <| Array.replicate
+              (bmp.size.height * (bmp.size.width * bytesPerPixelRGB)) 0) =
+          some bmp.data := by
+      simpa using (decodeRowsLoop_encodeRaw (bmp := bmp))
+    have hbpp :
+        (if (u8 2).toNat = 0 then 1 else if (u8 2).toNat = 2 then 3 else 4) = 3 := by
+      decide
+    simpa [pngPixel_decodeRowsLoop_rgb, pngPixel_encodeRaw_rgb, pngPixel_colorType_rgb, hbpp,
+      bytesPerPixel_rgb, bytesPerPixelRGB, Nat.mul_left_comm, Nat.mul_comm, Nat.mul_assoc] using hrows
 
--- Round-trip PNG encode/decode for RGBA bitmap payloads.
-lemma decodeBitmap_encodeBitmap_rgba (bmp : BitmapRGBA8)
-    (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
-    (mode : PngEncodeMode)
-    (hidat : (encodeBitmapIdat (bmp := bmp) (mode := mode)).size < 2 ^ 32) :
-    Png.decodeBitmap (Png.encodeBitmap bmp hw hh mode) = some bmp := by
-  have hct :
-      (PngPixel.colorType (α := PixelRGBA8)).toNat = 0 ∨
-        (PngPixel.colorType (α := PixelRGBA8)).toNat = 2 ∨
-        (PngPixel.colorType (α := PixelRGBA8)).toNat = 6 := by
+instance : PngRoundTrip PixelRGBA8 where
+  colorType_ok := by
     have : (u8 6).toNat = 0 ∨ (u8 6).toNat = 2 ∨ (u8 6).toNat = 6 := by decide
     simpa [pngPixel_colorType_rgba] using this
-  have hbpp :
-      (if (u8 6).toNat = 0 then 1 else if (u8 6).toNat = 2 then 3 else 4) = 4 := by
-    decide
-  -- Raw size check for the encoded bytes.
-  have hraw : (encodeRaw bmp).size =
-      bmp.size.height * (bmp.size.width * bytesPerPixelRGBA + 1) := by
-    simpa [bytesPerPixel_rgba] using encodeRaw_size (bmp := bmp)
-  have hrawEq :
-      (PngPixel.encodeRaw (α := PixelRGBA8) bmp).size =
-        bmp.size.height *
-          ((bmp.size.width *
-            (if (PngPixel.colorType (α := PixelRGBA8)).toNat = 0 then 1 else
-              if (PngPixel.colorType (α := PixelRGBA8)).toNat = 2 then 3 else 4)) + 1) := by
+  encodeRaw_size := by
+    intro bmp
+    have hraw : (encodeRaw bmp).size =
+        bmp.size.height * (bmp.size.width * bytesPerPixelRGBA + 1) := by
+      simpa [bytesPerPixel_rgba] using encodeRaw_size (bmp := bmp)
+    have hbpp :
+        (if (u8 6).toNat = 0 then 1 else if (u8 6).toNat = 2 then 3 else 4) = 4 := by
+      decide
     simpa [pngPixel_encodeRaw_rgba, pngPixel_colorType_rgba, hbpp, bytesPerPixelRGBA] using hraw
-  -- Row decoding for RGBA pixels.
-  have hrows0 :
-      decodeRowsLoopRGBA (encodeRaw bmp) bmp.size.width bmp.size.height bytesPerPixelRGBA
-          (bmp.size.width * bytesPerPixelRGBA) 0 0 ByteArray.empty
-          (ByteArray.mk <| Array.replicate (bmp.size.height * (bmp.size.width * bytesPerPixelRGBA)) 0) =
-        some bmp.data := by
-    simpa using (decodeRowsLoopRGBA_encodeRaw (bmp := bmp))
-  have hrows1 :
-      decodeRowsLoopRGBA (encodeRaw bmp) bmp.size.width bmp.size.height 4 (bmp.size.width * 4) 0 0
-          ByteArray.empty { data := Array.replicate (bmp.size.height * (bmp.size.width * 4)) 0 } =
-        some bmp.data := by
-    simpa [bytesPerPixelRGBA] using hrows0
-  have hrows2 :
-      decodeRowsLoopRGBA (encodeRaw bmp) bmp.size.width bmp.size.height 4 (bmp.size.width * 4) 0 0
-          ByteArray.empty { data := Array.replicate (bmp.size.width * bmp.size.height * 4) 0 } =
-        some bmp.data := by
-    simpa [Nat.mul_left_comm, Nat.mul_comm, Nat.mul_assoc] using hrows1
-  have hrows :
-      PngPixel.decodeRowsLoop (α := PixelRGBA8)
-          (PngPixel.encodeRaw (α := PixelRGBA8) bmp) bmp.size.width bmp.size.height
-          (if (PngPixel.colorType (α := PixelRGBA8)).toNat = 0 then 1 else
-            if (PngPixel.colorType (α := PixelRGBA8)).toNat = 2 then 3 else 4)
-          (bmp.size.width *
-            (if (PngPixel.colorType (α := PixelRGBA8)).toNat = 0 then 1 else
-              if (PngPixel.colorType (α := PixelRGBA8)).toNat = 2 then 3 else 4))
-          0 0 ByteArray.empty
-          { data := Array.replicate
-              (bmp.size.width * bmp.size.height * Pixel.bytesPerPixel (α := PixelRGBA8)) 0 } =
-        some bmp.data := by
-    simpa [pngPixel_decodeRowsLoop_rgba, pngPixel_encodeRaw_rgba, pngPixel_colorType_rgba,
-      hbpp, bytesPerPixel_rgba, bytesPerPixelRGBA, Nat.mul_left_comm, Nat.mul_comm, Nat.mul_assoc] using hrows2
-  exact
-    decodeBitmap_encodeBitmap_common (bmp := bmp) (hw := hw) (hh := hh)
-      (mode := mode) hidat hct hrawEq hrows
+  decodeRowsLoop_encodeRaw := by
+    intro bmp
+    have hrows :
+        decodeRowsLoopRGBA (encodeRaw bmp) bmp.size.width bmp.size.height bytesPerPixelRGBA
+            (bmp.size.width * bytesPerPixelRGBA) 0 0 ByteArray.empty
+            (ByteArray.mk <| Array.replicate
+              (bmp.size.height * (bmp.size.width * bytesPerPixelRGBA)) 0) =
+          some bmp.data := by
+      simpa using (decodeRowsLoopRGBA_encodeRaw (bmp := bmp))
+    have hbpp :
+        (if (u8 6).toNat = 0 then 1 else if (u8 6).toNat = 2 then 3 else 4) = 4 := by
+      decide
+    simpa [pngPixel_decodeRowsLoop_rgba, pngPixel_encodeRaw_rgba, pngPixel_colorType_rgba, hbpp,
+      bytesPerPixel_rgba, bytesPerPixelRGBA, Nat.mul_left_comm, Nat.mul_comm, Nat.mul_assoc] using hrows
 
--- Round-trip PNG encode/decode for grayscale bitmap payloads.
-lemma decodeBitmap_encodeBitmap_gray (bmp : BitmapGray8)
+instance : PngRoundTrip PixelGray8 where
+  colorType_ok := by
+    have : (u8 0).toNat = 0 ∨ (u8 0).toNat = 2 ∨ (u8 0).toNat = 6 := by decide
+    simpa [pngPixel_colorType_gray] using this
+  encodeRaw_size := by
+    intro bmp
+    have hraw : (encodeRaw bmp).size =
+        bmp.size.height * (bmp.size.width * bytesPerPixelGray + 1) := by
+      simpa [bytesPerPixel_gray] using encodeRaw_size (bmp := bmp)
+    have hbpp :
+        (if (u8 0).toNat = 0 then 1 else if (u8 0).toNat = 2 then 3 else 4) = 1 := by
+      decide
+    simpa [pngPixel_encodeRaw_gray, pngPixel_colorType_gray, hbpp, bytesPerPixelGray] using hraw
+  decodeRowsLoop_encodeRaw := by
+    intro bmp
+    have hrows :
+        decodeRowsLoopGray (encodeRaw bmp) bmp.size.width bmp.size.height bytesPerPixelGray
+            (bmp.size.width * bytesPerPixelGray) 0 0 ByteArray.empty
+            (ByteArray.mk <| Array.replicate
+              (bmp.size.height * (bmp.size.width * bytesPerPixelGray)) 0) =
+          some bmp.data := by
+      simpa using (decodeRowsLoopGray_encodeRaw (bmp := bmp))
+    have hbpp :
+        (if (u8 0).toNat = 0 then 1 else if (u8 0).toNat = 2 then 3 else 4) = 1 := by
+      decide
+    simpa [pngPixel_decodeRowsLoop_gray, pngPixel_encodeRaw_gray, pngPixel_colorType_gray, hbpp,
+      bytesPerPixel_gray, bytesPerPixelGray, Nat.mul_left_comm, Nat.mul_comm, Nat.mul_assoc] using hrows
+
+-- Round-trip PNG encode/decode for bitmap payloads.
+lemma decodeBitmap_encodeBitmap {px : Type u} [Pixel px] [PngPixel px] [PngRoundTrip px]
+    (bmp : Bitmap px)
     (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
     (mode : PngEncodeMode)
     (hidat : (encodeBitmapIdat (bmp := bmp) (mode := mode)).size < 2 ^ 32) :
     Png.decodeBitmap (Png.encodeBitmap bmp hw hh mode) = some bmp := by
-  have hct :
-      (PngPixel.colorType (α := PixelGray8)).toNat = 0 ∨
-        (PngPixel.colorType (α := PixelGray8)).toNat = 2 ∨
-        (PngPixel.colorType (α := PixelGray8)).toNat = 6 := by
-    have : (u8 0).toNat = 0 ∨ (u8 0).toNat = 2 ∨ (u8 0).toNat = 6 := by decide
-    simpa [pngPixel_colorType_gray] using this
-  have hbpp :
-      (if (u8 0).toNat = 0 then 1 else if (u8 0).toNat = 2 then 3 else 4) = 1 := by
-    decide
-  -- Raw size check for the encoded bytes.
-  have hraw : (encodeRaw bmp).size =
-      bmp.size.height * (bmp.size.width * bytesPerPixelGray + 1) := by
-    simpa [bytesPerPixel_gray] using encodeRaw_size (bmp := bmp)
-  have hrawEq :
-      (PngPixel.encodeRaw (α := PixelGray8) bmp).size =
-        bmp.size.height *
-          ((bmp.size.width *
-            (if (PngPixel.colorType (α := PixelGray8)).toNat = 0 then 1 else
-              if (PngPixel.colorType (α := PixelGray8)).toNat = 2 then 3 else 4)) + 1) := by
-    simpa [pngPixel_encodeRaw_gray, pngPixel_colorType_gray, hbpp, bytesPerPixelGray] using hraw
-  -- Row decoding for grayscale pixels.
-  have hrows0 :
-      decodeRowsLoopGray (encodeRaw bmp) bmp.size.width bmp.size.height bytesPerPixelGray
-          (bmp.size.width * bytesPerPixelGray) 0 0 ByteArray.empty
-          (ByteArray.mk <| Array.replicate (bmp.size.height * (bmp.size.width * bytesPerPixelGray)) 0) =
-        some bmp.data := by
-    simpa using (decodeRowsLoopGray_encodeRaw (bmp := bmp))
-  have hrows1 :
-      decodeRowsLoopGray (encodeRaw bmp) bmp.size.width bmp.size.height 1 bmp.size.width 0 0 ByteArray.empty
-          { data := Array.replicate (bmp.size.width * bmp.size.height) 0 } =
-        some bmp.data := by
-    simpa [bytesPerPixelGray, Nat.mul_left_comm, Nat.mul_comm, Nat.mul_assoc] using hrows0
-  have hrows :
-      PngPixel.decodeRowsLoop (α := PixelGray8)
-          (PngPixel.encodeRaw (α := PixelGray8) bmp) bmp.size.width bmp.size.height
-          (if (PngPixel.colorType (α := PixelGray8)).toNat = 0 then 1 else
-            if (PngPixel.colorType (α := PixelGray8)).toNat = 2 then 3 else 4)
-          (bmp.size.width *
-            (if (PngPixel.colorType (α := PixelGray8)).toNat = 0 then 1 else
-              if (PngPixel.colorType (α := PixelGray8)).toNat = 2 then 3 else 4))
-          0 0 ByteArray.empty
-          { data := Array.replicate
-              (bmp.size.width * bmp.size.height * Pixel.bytesPerPixel (α := PixelGray8)) 0 } =
-        some bmp.data := by
-    simpa [pngPixel_decodeRowsLoop_gray, pngPixel_encodeRaw_gray, pngPixel_colorType_gray,
-      hbpp, bytesPerPixel_gray, bytesPerPixelGray, Nat.mul_left_comm, Nat.mul_comm, Nat.mul_assoc] using hrows1
+  have hct := PngRoundTrip.colorType_ok (px := px)
+  have hrawEq := PngRoundTrip.encodeRaw_size (px := px) bmp
+  have hrows := PngRoundTrip.decodeRowsLoop_encodeRaw (px := px) bmp
   exact
     decodeBitmap_encodeBitmap_common (bmp := bmp) (hw := hw) (hh := hh)
       (mode := mode) hidat hct hrawEq hrows
+
+-- RGB-specialized wrapper for symmetry.
+lemma decodeBitmap_encodeBitmap_rgb (bmp : BitmapRGB8)
+    (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (mode : PngEncodeMode)
+    (hidat : (encodeBitmapIdat (bmp := bmp) (mode := mode)).size < 2 ^ 32) :
+    Png.decodeBitmap (Png.encodeBitmap bmp hw hh mode) = some bmp := by
+  simpa using
+    (decodeBitmap_encodeBitmap (px := PixelRGB8) (bmp := bmp)
+      (hw := hw) (hh := hh) (mode := mode) hidat)
+
 
 -- Re-export: static Huffman length base table size.
 lemma lengthBases_size : lengthBases.size = 29 := Png.lengthBases_size
