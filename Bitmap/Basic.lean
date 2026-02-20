@@ -1,4 +1,5 @@
 import Mathlib.Data.Nat.Basic
+import Mathlib.Data.Nat.BinaryRec
 import Init.Tactics
 import Init.Data.Array.Lemmas
 import Init.Data.Array.Set
@@ -599,6 +600,124 @@ decreasing_by
 def deflateStoredFast (raw : ByteArray) : ByteArray :=
   deflateStoredFastAux raw ByteArray.empty
 
+inductive PngEncodeMode
+  | stored
+  | fixed
+deriving Repr, DecidableEq
+
+structure BitWriter where
+  out : ByteArray
+  cur : UInt8
+  bitPos : Nat
+  hbit : bitPos < 8
+deriving Repr
+
+def BitWriter.empty : BitWriter :=
+  { out := ByteArray.empty, cur := 0, bitPos := 0, hbit := by decide }
+
+def BitWriter.writeBit (bw : BitWriter) (bit : Nat) : BitWriter :=
+  let cur := bw.cur ||| UInt8.ofNat ((bit % 2) <<< bw.bitPos)
+  if h7 : bw.bitPos = 7 then
+    { out := bw.out.push cur, cur := 0, bitPos := 0, hbit := by decide }
+  else
+    let hle : bw.bitPos ≤ 7 := Nat.le_of_lt_succ bw.hbit
+    let hlt : bw.bitPos < 7 := lt_of_le_of_ne hle h7
+    let hbit' : bw.bitPos + 1 < 8 := by
+      simpa [Nat.succ_eq_add_one] using (Nat.succ_lt_succ_iff.mpr hlt)
+    { bw with cur := cur, bitPos := bw.bitPos + 1, hbit := hbit' }
+
+def BitWriter.writeBits (bw : BitWriter) (bits len : Nat) : BitWriter :=
+  match len with
+  | 0 => bw
+  | n + 1 => BitWriter.writeBits (bw.writeBit (bits % 2)) (bits >>> 1) n
+
+def BitWriter.writeBitsImpl (bw : BitWriter) (bits len : Nat) : BitWriter :=
+  Id.run do
+    let mut bw := bw
+    let mut i := 0
+    while i < len do
+      bw := bw.writeBit ((bits >>> i) % 2)
+      i := i + 1
+    return bw
+
+attribute [implemented_by BitWriter.writeBitsImpl] BitWriter.writeBits
+
+def BitWriter.flush (bw : BitWriter) : ByteArray :=
+  if bw.bitPos = 0 then
+    bw.out
+  else
+    bw.out.push bw.cur
+
+def reverseBitsAux (code len res : Nat) : Nat :=
+  match len with
+  | 0 => res
+  | n + 1 =>
+      reverseBitsAux (code >>> 1) n (Nat.bit (code.testBit 0) res)
+
+def reverseBits (code len : Nat) : Nat :=
+  reverseBitsAux code len 0
+
+def reverseBitsImpl (code len : Nat) : Nat :=
+  Id.run do
+    let mut x := code
+    let mut res := 0
+    for _ in [0:len] do
+      let bit := x &&& 1
+      res := (res <<< 1) ||| bit
+      x := x >>> 1
+    return res
+
+attribute [implemented_by reverseBitsImpl] reverseBits
+
+-- Fixed Huffman literal/length code (code, bit-length).
+def fixedLitLenCode (sym : Nat) : Nat × Nat :=
+  if sym ≤ 143 then
+    (sym + 48, 8)
+  else if sym ≤ 255 then
+    (sym - 144 + 400, 9)
+  else if sym ≤ 279 then
+    (sym - 256, 7)
+  else
+    (sym - 280 + 192, 8)
+
+def deflateFixedAux (data : Array UInt8) (i : Nat) (bw : BitWriter) : BitWriter :=
+  if h : i < data.size then
+    let b := data[i]
+    let (code, len) := fixedLitLenCode b.toNat
+    deflateFixedAux data (i + 1) (bw.writeBits (reverseBits code len) len)
+  else
+    bw
+termination_by data.size - i
+decreasing_by
+  have hlt : i < data.size := h
+  have hle : data.size - (i + 1) < data.size - i := by
+    exact Nat.sub_lt_sub_left (k := i) (m := data.size) (n := i + 1) hlt (Nat.lt_succ_self i)
+  exact hle
+
+def deflateFixed (raw : ByteArray) : ByteArray :=
+  let bw0 := BitWriter.empty
+  let bw1 := bw0.writeBits 1 1
+  let bw2 := bw1.writeBits 1 2
+  let bw3 := deflateFixedAux raw.data 0 bw2
+  let (eobCode, eobLen) := fixedLitLenCode 256
+  let bw4 := bw3.writeBits (reverseBits eobCode eobLen) eobLen
+  bw4.flush
+
+def deflateFixedImpl (raw : ByteArray) : ByteArray :=
+  Id.run do
+    let mut bw := BitWriter.empty
+    -- Final block, fixed Huffman coding.
+    bw := bw.writeBits 1 1
+    bw := bw.writeBits 1 2
+    for b in raw.data do
+      let (code, len) := fixedLitLenCode b.toNat
+      bw := bw.writeBits (reverseBits code len) len
+    let (eobCode, eobLen) := fixedLitLenCode 256
+    bw := bw.writeBits (reverseBits eobCode eobLen) eobLen
+    return bw.flush
+
+attribute [implemented_by deflateFixedImpl] deflateFixed
+
 def deflateStoredFastImpl (raw : ByteArray) : ByteArray :=
   if _hzero : raw.size = 0 then
     storedBlock ByteArray.empty true
@@ -624,6 +743,14 @@ def deflateStoredFastImpl (raw : ByteArray) : ByteArray :=
 
 attribute [implemented_by deflateStoredFastImpl] deflateStoredFast
 attribute [implemented_by deflateStoredFast] deflateStored
+
+def zlibCompressFixed (raw : ByteArray) : ByteArray :=
+  let header := ByteArray.mk #[u8 0x78, u8 0x01]
+  let deflated := deflateFixed raw
+  let adler := u32be (adler32 raw).toNat
+  let outSize := header.size + deflated.size + adler.size
+  let out := ByteArray.emptyWithCapacity outSize
+  out ++ header ++ deflated ++ adler
 
 def zlibCompressStored (raw : ByteArray) : ByteArray :=
   let header := ByteArray.mk #[u8 0x78, u8 0x01]
@@ -677,54 +804,16 @@ def BitReader.readBit (br : BitReader) : Nat × BitReader :=
           hend := hend'
           hbit := hbit' })
 
+def BitReader.readBitsAux (br : BitReader) : Nat → Nat × BitReader
+  | 0 => (0, br)
+  | n + 1 =>
+      let (bit, br') := br.readBit
+      let (rest, br'') := readBitsAux br' n
+      (bit ||| (rest <<< 1), br'')
+
 def BitReader.readBits (br : BitReader) (n : Nat)
-    (h : br.bitIndex + n <= br.data.size * 8) : Nat × BitReader := by
-  induction n generalizing br with
-  | zero =>
-      exact (0, br)
-  | succ n ih =>
-      have hlt : br.bitIndex < br.data.size * 8 := by
-        have hpos : 0 < Nat.succ n := Nat.succ_pos _
-        have hlt' : br.bitIndex < br.bitIndex + Nat.succ n :=
-          Nat.lt_add_of_pos_right (n := br.bitIndex) (k := Nat.succ n) hpos
-        exact lt_of_lt_of_le hlt' h
-      have hle : br.bytePos * 8 <= br.bitIndex := by
-        dsimp [BitReader.bitIndex]
-        exact Nat.le_add_right _ _
-      have hmul : br.bytePos * 8 < br.data.size * 8 := lt_of_le_of_lt hle hlt
-      have hbyte : br.bytePos < br.data.size := by
-        have hmul' : 8 * br.bytePos < 8 * br.data.size := by
-          simpa [Nat.mul_comm] using hmul
-        exact Nat.lt_of_mul_lt_mul_left hmul'
-      cases hres : br.readBit with
-      | mk bit br' =>
-          have hindex' : (BitReader.readBit br).2.bitIndex = br.bitIndex + 1 := by
-            unfold BitReader.readBit BitReader.bitIndex
-            have hne : br.bytePos ≠ br.data.size := ne_of_lt hbyte
-            by_cases hnext : br.bitPos + 1 = 8
-            · calc
-                (BitReader.readBit br).2.bitIndex
-                    = (br.bytePos + 1) * 8 := by
-                        simp [BitReader.readBit, BitReader.bitIndex, hne, hnext]
-                _ = br.bytePos * 8 + (br.bitPos + 1) := by
-                        simp [Nat.add_mul, hnext, Nat.add_comm]
-                _ = br.bitIndex + 1 := by
-                        simp [BitReader.bitIndex, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm]
-            · simp [hne, hnext, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm]
-          have hdata' : (br.readBit).2.data = br.data := by
-            unfold BitReader.readBit
-            have hne : br.bytePos ≠ br.data.size := ne_of_lt hbyte
-            by_cases hnext : br.bitPos + 1 = 8 <;> simp [hne, hnext]
-          have hindex : br'.bitIndex = br.bitIndex + 1 := by
-            simpa [hres] using hindex'
-          have hdata : br'.data = br.data := by
-            simpa [hres] using hdata'
-          have h' : br'.bitIndex + n <= br'.data.size * 8 := by
-            have h'raw : br'.bitIndex + n <= br.data.size * 8 := by
-              simpa [hindex, Nat.succ_eq_add_one, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm] using h
-            simpa [hdata] using h'raw
-          let (rest, br'') := ih br' h'
-          exact (bit ||| (rest <<< 1), br'')
+    (_h : br.bitIndex + n <= br.data.size * 8) : Nat × BitReader := by
+  exact br.readBitsAux n
 
 def BitReader.alignByte (br : BitReader) : BitReader :=
   by
@@ -749,16 +838,6 @@ structure Huffman where
   maxLen : Nat
   table : Array (Array (Option Nat))
 deriving Repr
-
-def reverseBits (code len : Nat) : Nat :=
-  Id.run do
-    let mut x := code
-    let mut res := 0
-    for _ in [0:len] do
-      let bit := x &&& 1
-      res := (res <<< 1) ||| bit
-      x := x >>> 1
-    return res
 
 def mkHuffman (lengths : Array Nat) : Option Huffman := do
   let mut maxLen := 0
@@ -1049,6 +1128,101 @@ partial def readDynamicTables (br : BitReader) : Option (Huffman × Huffman × B
   let distTable ← mkHuffman distLengths
   return (litLenTable, distTable, br)
 
+def fixedLitLenRow7 : Array (Option Nat) :=
+  Array.ofFn (fun i : Fin (1 <<< 7) =>
+    let code := reverseBits i.val 7
+    if code < 24 then
+      some (256 + code)
+    else
+      none)
+
+def fixedLitLenRow8 : Array (Option Nat) :=
+  Array.ofFn (fun i : Fin (1 <<< 8) =>
+    let code := reverseBits i.val 8
+    if code < 192 then
+      if 48 <= code then
+        some (code - 48)
+      else
+        none
+    else if code < 200 then
+      some (code - 192 + 280)
+    else
+      none)
+
+def fixedLitLenRow9 : Array (Option Nat) :=
+  Array.ofFn (fun i : Fin (1 <<< 9) =>
+    let code := reverseBits i.val 9
+    if 400 <= code then
+      some (code - 400 + 144)
+    else
+      none)
+
+def fixedLitLenHuffman : Huffman :=
+  { maxLen := 9
+    table := #[
+      #[],
+      Array.replicate (1 <<< 1) none,
+      Array.replicate (1 <<< 2) none,
+      Array.replicate (1 <<< 3) none,
+      Array.replicate (1 <<< 4) none,
+      Array.replicate (1 <<< 5) none,
+      Array.replicate (1 <<< 6) none,
+      fixedLitLenRow7,
+      fixedLitLenRow8,
+      fixedLitLenRow9
+    ] }
+
+-- Decode a single fixed-Huffman literal/length symbol (literal-only fast path).
+partial def decodeFixedLiteralSym (br : BitReader) : Option (Nat × BitReader) := do
+  let (bits7, br7) ←
+    if h : br.bitIndex + 7 <= br.data.size * 8 then
+      some (br.readBits 7 h)
+    else
+      none
+  match fixedLitLenRow7[bits7]? with
+  | some (some sym) =>
+      return (sym, br7)
+  | _ =>
+      let (bit8, br8) ←
+        if h : br7.bitIndex + 1 <= br7.data.size * 8 then
+          some (br7.readBits 1 h)
+        else
+          none
+      let bits8 := bits7 ||| (bit8 <<< 7)
+      match fixedLitLenRow8[bits8]? with
+      | some (some sym) =>
+          return (sym, br8)
+      | _ =>
+          let (bit9, br9) ←
+            if h : br8.bitIndex + 1 <= br8.data.size * 8 then
+              some (br8.readBits 1 h)
+            else
+              none
+          let bits9 := bits8 ||| (bit9 <<< 8)
+          match fixedLitLenRow9[bits9]? with
+          | some (some sym) =>
+              return (sym, br9)
+          | _ =>
+              none
+
+-- Decode a fixed-Huffman block that is restricted to literals and end-of-block.
+def decodeFixedLiteralBlockFuel (fuel : Nat) (br : BitReader) (out : ByteArray) :
+    Option (BitReader × ByteArray) := do
+  match fuel with
+  | 0 => none
+  | fuel + 1 =>
+      let (sym, br') ← decodeFixedLiteralSym br
+      if sym < 256 then
+        decodeFixedLiteralBlockFuel fuel br' (out.push (u8 sym))
+      else if sym == 256 then
+        return (br', out)
+      else
+        none
+
+def decodeFixedLiteralBlock (br : BitReader) (out : ByteArray) :
+    Option (BitReader × ByteArray) :=
+  decodeFixedLiteralBlockFuel (br.data.size * 8) br out
+
 def fixedLitLenLengths : Array Nat :=
   Id.run do
     let mut arr : Array Nat := Array.replicate 288 0
@@ -1062,6 +1236,71 @@ def fixedLitLenLengths : Array Nat :=
       arr := arr.set! i 8
     return arr
 
+-- Decode deflate blocks with a fuel bound to guarantee termination.
+def zlibDecompressLoopFuel (fuel : Nat) (br : BitReader) (out : ByteArray) :
+    Option (BitReader × ByteArray) := do
+  match fuel with
+  | 0 => none
+  | fuel + 1 =>
+      let (hdr, br2) ←
+        if h : br.bitIndex + 3 <= br.data.size * 8 then
+          some (br.readBits 3 h)
+        else
+          none
+      let bfinal := hdr % 2
+      let btype := (hdr >>> 1) % 4
+      let mut br := br2
+      let mut out := out
+      if btype == 0 then
+        br := br.alignByte
+        if h : br.bytePos + 3 < br.data.size then
+          let len := readU16LE br.data br.bytePos (by omega)
+          let nlen := readU16LE br.data (br.bytePos + 2) (by omega)
+          if len + nlen != 0xFFFF then
+            none
+          let start := br.bytePos + 4
+          if hlen : start + len > br.data.size then
+            none
+          else
+            out := out ++ br.data.extract start (start + len)
+            have hle : start + len ≤ br.data.size := Nat.le_of_not_gt hlen
+            br := {
+              data := br.data
+              bytePos := start + len
+              bitPos := 0
+              hpos := hle
+              hend := by intro _; rfl
+              hbit := by decide
+            }
+        else
+          none
+      else if btype == 1 then
+        match decodeFixedLiteralBlock br out with
+        | some (br', out') =>
+            br := br'
+            out := out'
+        | none =>
+            let litLenTable := fixedLitLenHuffman
+            let distTable ← mkHuffman (Array.replicate 32 5)
+            let (br', out') ← decodeCompressedBlock litLenTable distTable br out
+            br := br'
+            out := out'
+      else if btype == 2 then
+        let (litLenTable, distTable, br') ← readDynamicTables br
+        let (br'', out') ← decodeCompressedBlock litLenTable distTable br' out
+        br := br''
+        out := out'
+      else
+        none
+      if bfinal == 1 then
+        return (br, out)
+      else
+        zlibDecompressLoopFuel fuel br out
+
+-- Decode deflate blocks until the final block, returning the reader and output.
+def zlibDecompressLoop (br : BitReader) (out : ByteArray) : Option (BitReader × ByteArray) :=
+  zlibDecompressLoopFuel (br.data.size * 8 + 1) br out
+
 partial def zlibDecompress (data : ByteArray) (hsize : 2 <= data.size) : Option ByteArray := do
   let h0 : 0 < data.size := by omega
   let h1 : 1 < data.size := by omega
@@ -1073,68 +1312,21 @@ partial def zlibDecompress (data : ByteArray) (hsize : 2 <= data.size) : Option 
     none
   if (flg &&& (0x20 : UInt8)) != (0 : UInt8) then
     none
-  let mut br : BitReader := {
-    data := data
-    bytePos := 2
+  let deflated := data.extract 2 (data.size - 4)
+  let br0 : BitReader := {
+    data := deflated
+    bytePos := 0
     bitPos := 0
-    hpos := hsize
+    hpos := by exact Nat.zero_le _
     hend := by intro _; rfl
     hbit := by decide
   }
-  let mut out := ByteArray.empty
-  let mut final := false
-  while not final do
-    let (bfinal, br1) ←
-      if h : br.bitIndex + 1 <= br.data.size * 8 then
-        some (br.readBits 1 h)
-      else
-        none
-    let (btype, br2) ←
-      if h : br1.bitIndex + 2 <= br1.data.size * 8 then
-        some (br1.readBits 2 h)
-      else
-        none
-    br := br2
-    final := bfinal == 1
-    if btype == 0 then
-      br := br.alignByte
-      if h : br.bytePos + 3 < data.size then
-        let len := readU16LE data br.bytePos (by omega)
-        let nlen := readU16LE data (br.bytePos + 2) (by omega)
-        if len + nlen != 0xFFFF then
-          none
-        let start := br.bytePos + 4
-        if hlen : start + len > data.size then
-          none
-        else
-          out := out ++ data.extract start (start + len)
-          have hle : start + len ≤ data.size := Nat.le_of_not_gt hlen
-          br := {
-            data := data
-            bytePos := start + len
-            bitPos := 0
-            hpos := hle
-            hend := by intro _; rfl
-            hbit := by decide
-          }
-      else
-        none
-    else if btype == 1 then
-      let litLenTable ← mkHuffman fixedLitLenLengths
-      let distTable ← mkHuffman (Array.replicate 32 5)
-      let (br', out') ← decodeCompressedBlock litLenTable distTable br out
-      br := br'
-      out := out'
-    else if btype == 2 then
-      let (litLenTable, distTable, br') ← readDynamicTables br
-      let (br'', out') ← decodeCompressedBlock litLenTable distTable br' out
-      br := br''
-      out := out'
-    else
-      none
+  let out := ByteArray.empty
+  let (br, out) ← zlibDecompressLoop br0 out
   let brAligned := br.alignByte
-  if hAdler : brAligned.bytePos + 3 < data.size then
-    let adlerExpected := readU32BE data brAligned.bytePos hAdler
+  let adlerPos := brAligned.bytePos + 2
+  if hAdler : adlerPos + 3 < data.size then
+    let adlerExpected := readU32BE data adlerPos hAdler
     let adlerActual := (adler32 out).toNat
     if adlerExpected != adlerActual then
       none
@@ -1262,9 +1454,18 @@ def parsePngSimple (bytes : ByteArray) (_hsize : 8 <= bytes.size) :
           let w := readU32BE data1 0 (by simp [hlen'])
           let h := readU32BE data1 4 (by simp [hlen'])
           let tail := data1.extract 8 13
-          if tail != ByteArray.mk #[u8 8, u8 2, u8 0, u8 0, u8 0] then
+          let bitDepth := (tail.get! 0).toNat
+          let colorType := (tail.get! 1).toNat
+          let comp := (tail.get! 2).toNat
+          let filter := (tail.get! 3).toNat
+          let interlace := (tail.get! 4).toNat
+          if bitDepth != 8 then
             none
-          let hdr : PngHeader := { width := w, height := h, colorType := 2, bitDepth := 8 }
+          if colorType != 0 && colorType != 2 && colorType != 6 then
+            none
+          if comp != 0 || filter != 0 || interlace != 0 then
+            none
+          let hdr : PngHeader := { width := w, height := h, colorType, bitDepth }
           if hLen2 : pos2 + 3 < bytes.size then
             match readChunk bytes pos2 hLen2 with
             | some (typ2, data2, pos3) =>
@@ -1551,20 +1752,36 @@ def encodeRawFastImpl {px : Type u} [Pixel px] (bmp : Bitmap px) : ByteArray :=
 attribute [implemented_by encodeRawFastImpl] encodeRawFast
 attribute [implemented_by encodeRawFast] encodeRaw
 
-def encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px) : ByteArray :=
+def encodeBitmapUnchecked {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
+    (mode : PngEncodeMode := .stored) : ByteArray :=
   Id.run do
     let w := bmp.size.width
     let h := bmp.size.height
     let raw := PngPixel.encodeRaw (α := px) bmp
     let ihdr := u32be w ++ u32be h ++
       ByteArray.mk #[u8 8, PngPixel.colorType (α := px), u8 0, u8 0, u8 0]
-    let idat := zlibCompressStored raw
+    let idat :=
+      match mode with
+      | .stored => zlibCompressStored raw
+      | .fixed => zlibCompressFixed raw
     let ihdrChunk := mkChunkBytes ihdrTypeBytes ihdr
     let idatChunk := mkChunkBytes idatTypeBytes idat
     let iendChunk := mkChunkBytes iendTypeBytes ByteArray.empty
     let outSize := pngSignature.size + ihdrChunk.size + idatChunk.size + iendChunk.size
     let out := ByteArray.emptyWithCapacity outSize
     out ++ pngSignature ++ ihdrChunk ++ idatChunk ++ iendChunk
+
+def encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
+    (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (mode : PngEncodeMode := .stored) : ByteArray :=
+  have _ := hw
+  have _ := hh
+  encodeBitmapUnchecked bmp mode
+
+-- Encode a bitmap using fixed-Huffman deflate blocks.
+def encodeBitmapFixed {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
+    (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32) : ByteArray :=
+  encodeBitmap bmp hw hh .fixed
 
 def Bitmap.readPng {px : Type u} [Pixel px] [PngPixel px]
     (path : FilePath) : IO (Except String (Bitmap px)) := do
@@ -1582,7 +1799,7 @@ def BitmapRGB8.readPng [Pixel PixelRGB8] [PngPixel PixelRGB8]
 
 def BitmapRGB8.writePng [Pixel PixelRGB8] [PngPixel PixelRGB8]
     (path : FilePath) (bmp : BitmapRGB8) : IO (Except String Unit) :=
-  ioToExcept (IO.FS.writeBinFile path (encodeBitmap bmp))
+  ioToExcept (IO.FS.writeBinFile path (encodeBitmapUnchecked bmp))
 
 def BitmapRGBA8.readPng [Pixel PixelRGBA8] [PngPixel PixelRGBA8]
     (path : FilePath) : IO (Except String BitmapRGBA8) :=
@@ -1590,7 +1807,7 @@ def BitmapRGBA8.readPng [Pixel PixelRGBA8] [PngPixel PixelRGBA8]
 
 def BitmapRGBA8.writePng [Pixel PixelRGBA8] [PngPixel PixelRGBA8]
     (path : FilePath) (bmp : BitmapRGBA8) : IO (Except String Unit) :=
-  ioToExcept (IO.FS.writeBinFile path (encodeBitmap bmp))
+  ioToExcept (IO.FS.writeBinFile path (encodeBitmapUnchecked bmp))
 
 def BitmapGray8.readPng [Pixel PixelGray8] [PngPixel PixelGray8]
     (path : FilePath) : IO (Except String BitmapGray8) :=
@@ -1598,7 +1815,7 @@ def BitmapGray8.readPng [Pixel PixelGray8] [PngPixel PixelGray8]
 
 def BitmapGray8.writePng [Pixel PixelGray8] [PngPixel PixelGray8]
     (path : FilePath) (bmp : BitmapGray8) : IO (Except String Unit) :=
-  ioToExcept (IO.FS.writeBinFile path (encodeBitmap bmp))
+  ioToExcept (IO.FS.writeBinFile path (encodeBitmapUnchecked bmp))
 
 end Png
 
