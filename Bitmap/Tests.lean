@@ -27,7 +27,7 @@ def bitmapGrayOfSeed (seed w h : Nat) : BitmapGray8 :=
   BitmapGray8.ofPixelFn w h (fun i : Fin (w * h) => pixelGrayOfSeed seed i.val)
 
 def pngRoundTripOk (bmp : BitmapRGB8) : Bool :=
-  match Png.encodeBitmapChecked (px := PixelRGB8) bmp with
+  match Png.encodeBitmapChecked (px := PixelRGB8) bmp .fixed with
   | Except.error _ => false
   | Except.ok bytes =>
       match Png.decodeBitmap bytes with
@@ -35,7 +35,7 @@ def pngRoundTripOk (bmp : BitmapRGB8) : Bool :=
       | none => false
 
 def pngRoundTripOkRGBA (bmp : BitmapRGBA8) : Bool :=
-  match Png.encodeBitmapChecked (px := PixelRGBA8) bmp with
+  match Png.encodeBitmapChecked (px := PixelRGBA8) bmp .fixed with
   | Except.error _ => false
   | Except.ok bytes =>
       match Png.decodeBitmap (px := PixelRGBA8) bytes with
@@ -43,7 +43,7 @@ def pngRoundTripOkRGBA (bmp : BitmapRGBA8) : Bool :=
       | none => false
 
 def pngRoundTripOkGray (bmp : BitmapGray8) : Bool :=
-  match Png.encodeBitmapChecked (px := PixelGray8) bmp with
+  match Png.encodeBitmapChecked (px := PixelGray8) bmp .fixed with
   | Except.error _ => false
   | Except.ok bytes =>
       match Png.decodeBitmap (px := PixelGray8) bytes with
@@ -166,7 +166,7 @@ private def perfPngRoundTrip (w h : Nat) : IO (Nat × Bool) := do
   let t0 <- IO.monoNanosNow
   let bmp := mkBlankBitmap w h { r := 0, g := 0, b := 0 }
   let bytes ←
-    match Png.encodeBitmapChecked (px := PixelRGB8) bmp with
+    match Png.encodeBitmapChecked (px := PixelRGB8) bmp .fixed with
     | Except.ok bytes => pure bytes
     | Except.error err => throw (IO.userError err)
   let ok :=
