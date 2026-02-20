@@ -187,17 +187,6 @@ def BitWriter.writeBits (bw : BitWriter) (bits len : Nat) : BitWriter :=
   | 0 => bw
   | n + 1 => BitWriter.writeBits (bw.writeBit (bits % 2)) (bits >>> 1) n
 
-def BitWriter.writeBitsImpl (bw : BitWriter) (bits len : Nat) : BitWriter :=
-  Id.run do
-    let mut bw := bw
-    let mut i := 0
-    while i < len do
-      bw := bw.writeBit ((bits >>> i) % 2)
-      i := i + 1
-    return bw
-
-attribute [implemented_by BitWriter.writeBitsImpl] BitWriter.writeBits
-
 def BitWriter.flush (bw : BitWriter) : ByteArray :=
   if bw.bitPos = 0 then
     bw.out
@@ -212,18 +201,6 @@ def reverseBitsAux (code len res : Nat) : Nat :=
 
 def reverseBits (code len : Nat) : Nat :=
   reverseBitsAux code len 0
-
-def reverseBitsImpl (code len : Nat) : Nat :=
-  Id.run do
-    let mut x := code
-    let mut res := 0
-    for _ in [0:len] do
-      let bit := x &&& 1
-      res := (res <<< 1) ||| bit
-      x := x >>> 1
-    return res
-
-attribute [implemented_by reverseBitsImpl] reverseBits
 
 -- Fixed Huffman literal/length code (code, bit-length).
 def fixedLitLenCode (sym : Nat) : Nat × Nat :=
@@ -258,47 +235,6 @@ def deflateFixed (raw : ByteArray) : ByteArray :=
   let (eobCode, eobLen) := fixedLitLenCode 256
   let bw4 := bw3.writeBits (reverseBits eobCode eobLen) eobLen
   bw4.flush
-
-def deflateFixedImpl (raw : ByteArray) : ByteArray :=
-  Id.run do
-    let mut bw := BitWriter.empty
-    -- Final block, fixed Huffman coding.
-    bw := bw.writeBits 1 1
-    bw := bw.writeBits 1 2
-    for b in raw.data do
-      let (code, len) := fixedLitLenCode b.toNat
-      bw := bw.writeBits (reverseBits code len) len
-    let (eobCode, eobLen) := fixedLitLenCode 256
-    bw := bw.writeBits (reverseBits eobCode eobLen) eobLen
-    return bw.flush
-
-attribute [implemented_by deflateFixedImpl] deflateFixed
-
-def deflateStoredFastImpl (raw : ByteArray) : ByteArray :=
-  if _hzero : raw.size = 0 then
-    storedBlock ByteArray.empty true
-  else
-    let blockSize : Nat := 65535
-    let rawSize := raw.size
-    let blocks := (rawSize + blockSize - 1) / blockSize
-    let outSize := rawSize + blocks * 5
-    Id.run do
-      let mut out := ByteArray.emptyWithCapacity outSize
-      let mut pos : Nat := 0
-      while pos < rawSize do
-        let remaining := rawSize - pos
-        let len := if remaining > blockSize then blockSize else remaining
-        let final := pos + len == rawSize
-        let header :=
-          ByteArray.mk #[if final then u8 0x01 else u8 0x00]
-            ++ u16le len ++ u16le (0xFFFF - len)
-        out := out ++ header
-        out := raw.copySlice pos out out.size len
-        pos := pos + len
-      return out
-
-attribute [implemented_by deflateStoredFastImpl] deflateStoredFast
-attribute [implemented_by deflateStoredFast] deflateStored
 
 def zlibCompressFixed (raw : ByteArray) : ByteArray :=
   let header := ByteArray.mk #[u8 0x78, u8 0x01]
@@ -957,58 +893,6 @@ def inflateStored (data : ByteArray) : Option ByteArray := do
     none
 
 -- Tail-recursive stored-block inflater used for the runtime implementation.
-def inflateStoredLoopFuel (fuel : Nat) (data : ByteArray) (pos : Nat) (out : ByteArray) :
-    Option (ByteArray × Nat) :=
-  match fuel with
-  | 0 => none
-  | fuel + 1 =>
-      if hpos : pos < data.size then
-        let header := data.get pos hpos
-        let bfinal := header &&& (0x01 : UInt8)
-        let btype := (header >>> 1) &&& (0x03 : UInt8)
-        if btype != (0 : UInt8) then
-          none
-        else if hlen : pos + 4 < data.size then
-          let hlen1 : pos + 2 < data.size := by
-            exact lt_of_le_of_lt (by omega) hlen
-          let hlen1' : pos + 1 + 1 < data.size := by
-            simpa [Nat.add_assoc] using hlen1
-          let hlen3 : pos + 3 + 1 < data.size := by
-            simpa [Nat.add_assoc] using hlen
-          let len := readU16LE data (pos + 1) hlen1'
-          let nlen := readU16LE data (pos + 3) hlen3
-          if len + nlen != 0xFFFF then
-            none
-          else
-            let start := pos + 5
-            if hbad : start + len > data.size then
-              none
-            else
-              let payload := data.extract start (start + len)
-              let out := out ++ payload
-              let pos' := start + len
-              if bfinal == (1 : UInt8) then
-                some (out, pos')
-              else
-                inflateStoredLoopFuel fuel data pos' out
-        else
-          none
-      else
-        none
-
-def inflateStoredImpl (data : ByteArray) : Option ByteArray := do
-  if h : 0 < data.size then
-    have _hpos : 0 < data.size := h
-    let (payload, pos) ← inflateStoredLoopFuel (data.size + 1) data 0 ByteArray.empty
-    if pos == data.size then
-      return payload
-    else
-      none
-  else
-    none
-
-attribute [implemented_by inflateStoredImpl] inflateStored
-
 -- Fast path for zlib streams that use only stored (uncompressed) deflate blocks.
 def zlibDecompressStored (data : ByteArray) (hsize : 2 <= data.size) : Option ByteArray := do
   let cmf := data.get 0 (by omega)
@@ -1359,28 +1243,6 @@ def encodeRawFast {px : Type u} [Pixel px] (bmp : Bitmap px) : ByteArray :=
   let rawSize := h * (rowBytes + 1)
   let raw := ByteArray.mk <| Array.replicate rawSize 0
   encodeRawPrefix bmp.data rowBytes h raw
-
-def encodeRawFastImpl {px : Type u} [Pixel px] (bmp : Bitmap px) : ByteArray :=
-  Id.run do
-    let w := bmp.size.width
-    let h := bmp.size.height
-    let rowBytes := w * Pixel.bytesPerPixel (α := px)
-    let rowStride := rowBytes + 1
-    let rawSize := h * rowStride
-    let mut raw := ByteArray.mk <| Array.replicate rawSize 0
-    let data := bmp.data
-    let mut y : Nat := 0
-    let mut srcOff : Nat := 0
-    let mut dstOff : Nat := 1
-    while y < h do
-      raw := data.copySlice srcOff raw dstOff rowBytes
-      y := y + 1
-      srcOff := srcOff + rowBytes
-      dstOff := dstOff + rowStride
-    return raw
-
-attribute [implemented_by encodeRawFastImpl] encodeRawFast
-attribute [implemented_by encodeRawFast] encodeRaw
 
 def encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
     (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
