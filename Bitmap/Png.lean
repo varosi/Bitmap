@@ -956,6 +956,59 @@ def inflateStored (data : ByteArray) : Option ByteArray := do
   else
     none
 
+-- Tail-recursive stored-block inflater used for the runtime implementation.
+def inflateStoredLoopFuel (fuel : Nat) (data : ByteArray) (pos : Nat) (out : ByteArray) :
+    Option (ByteArray × Nat) :=
+  match fuel with
+  | 0 => none
+  | fuel + 1 =>
+      if hpos : pos < data.size then
+        let header := data.get pos hpos
+        let bfinal := header &&& (0x01 : UInt8)
+        let btype := (header >>> 1) &&& (0x03 : UInt8)
+        if btype != (0 : UInt8) then
+          none
+        else if hlen : pos + 4 < data.size then
+          let hlen1 : pos + 2 < data.size := by
+            exact lt_of_le_of_lt (by omega) hlen
+          let hlen1' : pos + 1 + 1 < data.size := by
+            simpa [Nat.add_assoc] using hlen1
+          let hlen3 : pos + 3 + 1 < data.size := by
+            simpa [Nat.add_assoc] using hlen
+          let len := readU16LE data (pos + 1) hlen1'
+          let nlen := readU16LE data (pos + 3) hlen3
+          if len + nlen != 0xFFFF then
+            none
+          else
+            let start := pos + 5
+            if hbad : start + len > data.size then
+              none
+            else
+              let payload := data.extract start (start + len)
+              let out := out ++ payload
+              let pos' := start + len
+              if bfinal == (1 : UInt8) then
+                some (out, pos')
+              else
+                inflateStoredLoopFuel fuel data pos' out
+        else
+          none
+      else
+        none
+
+def inflateStoredImpl (data : ByteArray) : Option ByteArray := do
+  if h : 0 < data.size then
+    have _hpos : 0 < data.size := h
+    let (payload, pos) ← inflateStoredLoopFuel (data.size + 1) data 0 ByteArray.empty
+    if pos == data.size then
+      return payload
+    else
+      none
+  else
+    none
+
+attribute [implemented_by inflateStoredImpl] inflateStored
+
 -- Fast path for zlib streams that use only stored (uncompressed) deflate blocks.
 def zlibDecompressStored (data : ByteArray) (hsize : 2 <= data.size) : Option ByteArray := do
   let cmf := data.get 0 (by omega)
