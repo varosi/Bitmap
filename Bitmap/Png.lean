@@ -1215,7 +1215,7 @@ class PngPixel (α : Type u) [Pixel α] where
     (y offset : Nat) -> (prevRow pixels : ByteArray) -> Option ByteArray
 
 -- PNG decoder for RGB/RGBA; converts as needed (drops or fills alpha).
-partial def decodeBitmap {px : Type u} [Pixel px] [PngPixel px]
+def decodeBitmap {px : Type u} [Pixel px] [PngPixel px]
     (bytes : ByteArray) : Option (Bitmap px) := do
   let (hdr, idat) ←
     if hsize : 8 <= bytes.size then
