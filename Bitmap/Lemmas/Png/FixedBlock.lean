@@ -1,5 +1,5 @@
 import Bitmap.Lemmas.Png.FixedLiteral
-import Bitmap.Basic
+import Bitmap.Png
 import Init.Data.Nat.Bitwise.Basic
 import Init.Data.Nat.Bitwise.Lemmas
 import Init.Data.Nat.Lemmas

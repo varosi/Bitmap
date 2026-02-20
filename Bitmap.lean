@@ -1,4 +1,5 @@
 import Bitmap.Basic
+import Bitmap.Png
 import Bitmap.Lemmas
 
 /-!

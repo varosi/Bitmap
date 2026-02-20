@@ -1,4 +1,4 @@
-import Bitmap.Basic
+import Bitmap.Png
 import Init.Data.Nat.Bitwise.Basic
 import Init.Data.Nat.Bitwise.Lemmas
 import Init.Data.Nat.Lemmas
@@ -1974,7 +1974,7 @@ lemma encodeBitmap_signature {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitma
     (encodeBitmap bmp hw hh mode).extract 0 8 = pngSignature := by
   have hsig : pngSignature.size = 8 := pngSignature_size
   let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
-  simpa [encodeBitmap, encodeBitmapUnchecked, hsig, ByteArray.append_assoc, idat, encodeBitmapIdat] using
+  simpa [encodeBitmap, hsig, ByteArray.append_assoc, idat, encodeBitmapIdat] using
     (ByteArray.extract_append_eq_left
       (a := pngSignature)
       (b := mkChunk "IHDR"
@@ -2069,7 +2069,7 @@ lemma encodeBitmap_extract_ihdr_len {px : Type u} [Pixel px] [PngPixel px] (bmp 
   have hshift :
       (encodeBitmap bmp hw hh mode).extract 8 12 =
         (mkChunk "IHDR" ihdr ++ mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty).extract 0 4 := by
-    simpa [encodeBitmap, encodeBitmapUnchecked, hsig, idat, encodeBitmapIdat] using
+    simpa [encodeBitmap, hsig, idat, encodeBitmapIdat] using
       (ByteArray.extract_append_size_add
         (a := pngSignature)
         (b := mkChunk "IHDR" ihdr ++ mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty)
@@ -2115,7 +2115,7 @@ lemma encodeBitmap_extract_ihdr_type {px : Type u} [Pixel px] [PngPixel px] (bmp
   have hshift :
       (encodeBitmap bmp hw hh mode).extract 12 16 =
         (mkChunk "IHDR" ihdr ++ mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty).extract 4 8 := by
-    simpa [encodeBitmap, encodeBitmapUnchecked, hsig, idat, encodeBitmapIdat] using
+    simpa [encodeBitmap, hsig, idat, encodeBitmapIdat] using
       (ByteArray.extract_append_size_add
         (a := pngSignature)
         (b := mkChunk "IHDR" ihdr ++ mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty)
@@ -2157,7 +2157,7 @@ lemma encodeBitmap_extract_ihdr_data {px : Type u} [Pixel px] [PngPixel px] (bmp
   have hshift :
       (encodeBitmap bmp hw hh mode).extract 16 29 =
         (mkChunk "IHDR" ihdr ++ mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty).extract 8 21 := by
-    simpa [encodeBitmap, encodeBitmapUnchecked, hsig, idat, encodeBitmapIdat] using
+    simpa [encodeBitmap, hsig, idat, encodeBitmapIdat] using
       (ByteArray.extract_append_size_add
         (a := pngSignature)
         (b := mkChunk "IHDR" ihdr ++ mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty)
@@ -2212,7 +2212,7 @@ lemma encodeBitmap_extract_idat_len {px : Type u} [Pixel px] [PngPixel px] (bmp 
   have hshift :
       (encodeBitmap bmp hw hh mode).extract 33 37 =
         (mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty).extract 0 4 := by
-    simpa [encodeBitmap, encodeBitmapUnchecked, hsig, idat, encodeBitmapIdat, ByteArray.append_assoc] using
+    simpa [encodeBitmap, hsig, idat, encodeBitmapIdat, ByteArray.append_assoc] using
       (ByteArray.extract_append_size_add
         (a := pngSignature ++ mkChunk "IHDR" ihdr)
         (b := mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty)
@@ -2264,7 +2264,7 @@ lemma encodeBitmap_extract_idat_type {px : Type u} [Pixel px] [PngPixel px] (bmp
   have hshift :
       (encodeBitmap bmp hw hh mode).extract 37 41 =
         (mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty).extract 4 8 := by
-    simpa [encodeBitmap, encodeBitmapUnchecked, hsig, idat, encodeBitmapIdat, ByteArray.append_assoc] using
+    simpa [encodeBitmap, hsig, idat, encodeBitmapIdat, ByteArray.append_assoc] using
       (ByteArray.extract_append_size_add
         (a := pngSignature ++ mkChunk "IHDR" ihdr)
         (b := mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty)
@@ -2305,7 +2305,7 @@ lemma encodeBitmap_extract_idat_data {px : Type u} [Pixel px] [PngPixel px] (bmp
   have hsig : sigIhdr.size = 33 := by
     simpa [sigIhdr, ihdr] using encodeBitmap_sig_ihdr_size (bmp := bmp)
   have hdef : encodeBitmap bmp hw hh mode = sigIhdr ++ tail := by
-    simp [encodeBitmap, encodeBitmapUnchecked, sigIhdr, tail, ihdr, idat, ihdrTailColor,
+    simp [encodeBitmap, sigIhdr, tail, ihdr, idat, ihdrTailColor,
       encodeBitmapIdat, ByteArray.append_assoc, Id.run]
     rfl
   have hshift' :
@@ -2372,7 +2372,7 @@ lemma encodeBitmap_extract_iend_len {px : Type u} [Pixel px] [PngPixel px] (bmp 
       _ = idat.size + 12 := by
           simp [idat_utf8ByteSize]
   have hdef : encodeBitmap bmp hw hh mode = sigIhdr ++ tail := by
-    simp [encodeBitmap, encodeBitmapUnchecked, sigIhdr, tail, ihdr, idat, ihdrTailColor,
+    simp [encodeBitmap, sigIhdr, tail, ihdr, idat, ihdrTailColor,
       encodeBitmapIdat, ByteArray.append_assoc, Id.run]
     rfl
   have hshift' :
@@ -2456,7 +2456,7 @@ lemma encodeBitmap_extract_iend_type {px : Type u} [Pixel px] [PngPixel px] (bmp
       _ = idat.size + 12 := by
           simp [idat_utf8ByteSize]
   have hdef : encodeBitmap bmp hw hh mode = sigIhdr ++ tail := by
-    simp [encodeBitmap, encodeBitmapUnchecked, sigIhdr, tail, ihdr, idat, ihdrTailColor,
+    simp [encodeBitmap, sigIhdr, tail, ihdr, idat, ihdrTailColor,
       encodeBitmapIdat, ByteArray.append_assoc, Id.run]
     rfl
   have hshift' :
@@ -2509,7 +2509,7 @@ lemma encodeBitmap_size {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
       (encodeBitmapIdat (bmp := bmp) (mode := mode)).size + 57 := by
   cases mode with
   | stored =>
-      unfold encodeBitmap encodeBitmapUnchecked encodeBitmapIdat
+      unfold encodeBitmap encodeBitmapIdat
       have htail :
           (ByteArray.mk #[u8 8, PngPixel.colorType (α := px), u8 0, u8 0, u8 0]).size = 5 := by
         simp [ByteArray.size]
@@ -2518,7 +2518,7 @@ lemma encodeBitmap_size {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
         Nat.add_comm]
       omega
   | fixed =>
-      unfold encodeBitmap encodeBitmapUnchecked encodeBitmapIdat
+      unfold encodeBitmap encodeBitmapIdat
       have htail :
           (ByteArray.mk #[u8 8, PngPixel.colorType (α := px), u8 0, u8 0, u8 0]).size = 5 := by
         simp [ByteArray.size]
