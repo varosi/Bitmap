@@ -1747,142 +1747,103 @@ lemma writeBits_small (bw : BitWriter) (bits len : Nat) (hsmall : bw.bitPos + le
       simp [BitWriter.writeBits, BitWriter.writeBit, hpos]
       simpa [BitWriter.writeBit, hpos, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm] using ih'
 
+lemma writeBits_fill_byte (bw : BitWriter) (bits k : Nat) (hk : bw.bitPos + k = 8) :
+    BitWriter.writeBits bw bits k =
+      { out := bw.out.push (packBitsAccU8 bits k bw.bitPos bw.cur),
+        cur := 0, bitPos := 0, hbit := by decide } := by
+  cases k with
+  | zero =>
+      have hne : bw.bitPos ≠ 8 := Nat.ne_of_lt bw.hbit
+      exact (hne (by simpa using hk)).elim
+  | succ k =>
+      cases k with
+      | zero =>
+          -- k = 1, so bw.bitPos = 7
+          have hpos : bw.bitPos = 7 := by
+            have : bw.bitPos + 1 = 8 := by simpa using hk
+            omega
+          simp [BitWriter.writeBits, BitWriter.writeBit, packBitsAccU8, hpos]
+      | succ k =>
+          -- k ≥ 2
+          have hpos7 : bw.bitPos ≠ 7 := by
+            intro h
+            have : 7 + Nat.succ (Nat.succ k) = 8 := by simpa [h] using hk
+            omega
+          by_cases h6 : bw.bitPos = 6
+          · -- then k = 0 (original k = 2), compute directly
+            have hk0 : k = 0 := by
+              have : 6 + Nat.succ (Nat.succ k) = 8 := by simpa [h6] using hk
+              omega
+            subst hk0
+            simp [BitWriter.writeBits, BitWriter.writeBit, packBitsAccU8, h6]
+          · -- bw.bitPos ≤ 5, so the next write doesn't flush
+            let bw1 := BitWriter.writeBit bw (bits % 2)
+            have hbitpos : bw1.bitPos = bw.bitPos + 1 := by
+              simp [bw1, BitWriter.writeBit, hpos7]
+            have hk' :
+                bw1.bitPos + Nat.succ k = 8 := by
+              -- bw.bitPos + (k+2) = 8 ⇒ (bw.bitPos + 1) + (k+1) = 8
+              omega
+            have ih :=
+              writeBits_fill_byte
+                (bw := bw1)
+                (bits := bits >>> 1)
+                (k := Nat.succ k) hk'
+            -- unfold one step and use IH
+            calc
+              BitWriter.writeBits bw bits (Nat.succ (Nat.succ k))
+                  = BitWriter.writeBits bw1 (bits >>> 1) (Nat.succ k) := by
+                      simp [BitWriter.writeBits, bw1]
+              _ =
+                  { out := bw1.out.push
+                      (packBitsAccU8 (bits >>> 1) (Nat.succ k) bw1.bitPos bw1.cur),
+                    cur := 0, bitPos := 0, hbit := by decide } := ih
+              _ =
+                  { out := bw.out.push (packBitsAccU8 bits (Nat.succ (Nat.succ k)) bw.bitPos bw.cur),
+                    cur := 0, bitPos := 0, hbit := by decide } := by
+                      simp [bw1, packBitsAccU8, BitWriter.writeBit, hpos7]
+
 lemma writeBitsFast_eq_writeBits (bw : BitWriter) (bits len : Nat) :
     BitWriter.writeBitsFast bw bits len = BitWriter.writeBits bw bits len := by
   classical
-  -- Strong induction on `len` because the fast path subtracts 8.
+  -- Strong induction on `len` because the fast path subtracts k ≥ 1.
   revert bw bits
   refine Nat.strong_induction_on len ?_
   intro n ih bw bits
-  by_cases hfast : bw.bitPos = 0 ∧ 8 ≤ n
-  · -- fast path: peel off 8 bits, then apply IH
-    by_cases hlen8 : n = 8
-    · subst hlen8
-      have h8 := writeBits_align8 bw bits hfast.1
-      simp [BitWriter.writeBitsFast, hfast, h8]
-    · by_cases hlen9 : n = 9
-      · subst hlen9
-        have h8 := writeBits_align8 bw bits hfast.1
-        let bw8 : BitWriter :=
-          { out := bw.out.push
-              (bw.cur ||| UInt8.ofNat (bits % 2) |||
-                (UInt8.ofNat ((bits >>> 1) % 2) <<< 1) |||
-                (UInt8.ofNat ((bits >>> 1 >>> 1) % 2) <<< 2) |||
-                (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1) % 2) <<< 3) |||
-                (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 4) |||
-                (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 5) |||
-                (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 6) |||
-                (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 7)),
+  by_cases hsmall : bw.bitPos + n < 8
+  · have hsmall' := writeBits_small (bw := bw) (bits := bits) (len := n) hsmall
+    simp [BitWriter.writeBitsFast, hsmall, hsmall']
+  · -- fill the current byte, then recurse on the remainder
+    let k := 8 - bw.bitPos
+    have hkpos : 0 < k := by
+      have hpos : bw.bitPos < 8 := bw.hbit
+      omega
+    have hkle : k ≤ n := by
+      omega
+    have hk : bw.bitPos + k = 8 := by
+      omega
+    have hfill :
+        BitWriter.writeBits bw bits k =
+          { out := bw.out.push (packBitsAccU8 bits k bw.bitPos bw.cur),
+            cur := 0, bitPos := 0, hbit := by decide } := by
+      simpa using (writeBits_fill_byte (bw := bw) (bits := bits) (k := k) hk)
+    have hsplit0 := writeBits_split bw bits k (n - k)
+    have hsplit : BitWriter.writeBits bw bits n =
+        BitWriter.writeBits (BitWriter.writeBits bw bits k) (bits >>> k) (n - k) := by
+      simpa [Nat.add_sub_of_le hkle] using hsplit0
+    have hrec :
+        BitWriter.writeBitsFast
+          { out := bw.out.push (packBitsAccU8 bits k bw.bitPos bw.cur),
             cur := 0, bitPos := 0, hbit := by decide }
-        have h8' : BitWriter.writeBits bw bits 8 = bw8 := by
-          simpa [bw8] using h8
-        have hsplit := writeBits_split bw bits 8 1
-        have hsmall : bw8.bitPos + 1 < 8 := by
-          simp [bw8]
-        have h1 := writeBits_small (bw := bw8) (bits := bits >>> 8) (len := 1) hsmall
-        have hpack :
-            packBitsAccU8 (bits >>> 8) 1 bw8.bitPos bw8.cur =
-              UInt8.ofNat ((bits >>> 8) % 2) := by
-          simp [bw8, packBitsAccU8]
-        have hwrite9 :
-            BitWriter.writeBits bw bits 9 =
-              { out := bw.out.push
-                  (bw.cur ||| UInt8.ofNat (bits % 2) |||
-                    (UInt8.ofNat ((bits >>> 1) % 2) <<< 1) |||
-                    (UInt8.ofNat ((bits >>> 1 >>> 1) % 2) <<< 2) |||
-                    (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1) % 2) <<< 3) |||
-                    (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 4) |||
-                    (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 5) |||
-                    (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 6) |||
-                    (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 7)),
-                cur := UInt8.ofNat ((bits >>> 8) % 2),
-                bitPos := 1,
-                hbit := by decide } := by
-          -- split into 8 bits + 1 bit
-          calc
-            BitWriter.writeBits bw bits 9
-                = BitWriter.writeBits (BitWriter.writeBits bw bits 8) (bits >>> 8) 1 := by
-                    simpa using hsplit
-            _ = BitWriter.writeBits bw8 (bits >>> 8) 1 := by
-                    simp [h8']
-            _ = { out := bw8.out,
-                  cur := packBitsAccU8 (bits >>> 8) 1 bw8.bitPos bw8.cur,
-                  bitPos := bw8.bitPos + 1,
-                  hbit := by omega } := by
-                    simpa using h1
-            _ = { out := bw.out.push
-                    (bw.cur ||| UInt8.ofNat (bits % 2) |||
-                      (UInt8.ofNat ((bits >>> 1) % 2) <<< 1) |||
-                      (UInt8.ofNat ((bits >>> 1 >>> 1) % 2) <<< 2) |||
-                      (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1) % 2) <<< 3) |||
-                      (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 4) |||
-                      (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 5) |||
-                      (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 6) |||
-                      (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 7)),
-                  cur := UInt8.ofNat ((bits >>> 8) % 2),
-                  bitPos := 1,
-                  hbit := by decide } := by
-                    simp [bw8, hpack]
-        simpa [BitWriter.writeBitsFast, hfast, hlen8] using hwrite9.symm
-      · -- general recursive case
-        have hlen : n = 8 + (n - 8) := by
-          have hle : 8 ≤ n := hfast.2
-          exact (Nat.add_sub_of_le hle).symm
-        -- compute the first byte via `writeBits`
-        have h8 : BitWriter.writeBits bw bits 8 =
-            { out := bw.out.push
-                (bw.cur ||| UInt8.ofNat (bits % 2) |||
-                  (UInt8.ofNat ((bits >>> 1) % 2) <<< 1) |||
-                  (UInt8.ofNat ((bits >>> 1 >>> 1) % 2) <<< 2) |||
-                  (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1) % 2) <<< 3) |||
-                  (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 4) |||
-                  (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 5) |||
-                  (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 6) |||
-                  (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 7)),
-              cur := 0, bitPos := 0, hbit := by decide } := by
-          exact writeBits_align8 bw bits hfast.1
-        -- split the slow writer
-        have hsplit :
-            BitWriter.writeBits bw bits n =
-              BitWriter.writeBits (BitWriter.writeBits bw bits 8) (bits >>> 8) (n - 8) := by
-          -- use the split lemma with k=8
-          have hsplit0 := writeBits_split bw bits 8 (n - 8)
-          simpa [← hlen] using hsplit0
-        -- apply IH on the remainder
-        have hrec :
-            BitWriter.writeBitsFast
-              { out := bw.out.push
-                  (bw.cur ||| UInt8.ofNat (bits % 2) |||
-                    (UInt8.ofNat ((bits >>> 1) % 2) <<< 1) |||
-                    (UInt8.ofNat ((bits >>> 1 >>> 1) % 2) <<< 2) |||
-                    (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1) % 2) <<< 3) |||
-                    (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 4) |||
-                    (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 5) |||
-                    (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 6) |||
-                    (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 7)),
-                cur := 0, bitPos := 0, hbit := by decide }
-              (bits >>> 8) (n - 8) =
-            BitWriter.writeBits
-              { out := bw.out.push
-                  (bw.cur ||| UInt8.ofNat (bits % 2) |||
-                    (UInt8.ofNat ((bits >>> 1) % 2) <<< 1) |||
-                    (UInt8.ofNat ((bits >>> 1 >>> 1) % 2) <<< 2) |||
-                    (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1) % 2) <<< 3) |||
-                    (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 4) |||
-                    (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 5) |||
-                    (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 6) |||
-                    (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 7)),
-                cur := 0, bitPos := 0, hbit := by decide }
-              (bits >>> 8) (n - 8) := by
-          -- `n - 8 < n` when `8 ≤ n`
-          have hlt : n - 8 < n := by omega
-          exact ih (n - 8) hlt _ _
-        -- finish
-        simp [BitWriter.writeBitsFast, hfast, hlen8, hlen9, h8, hsplit, hrec]
-  · by_cases hsmall : bw.bitPos + n < 8
-    · have hsmall' : bw.bitPos + n < 8 := hsmall
-      simp [BitWriter.writeBitsFast, hfast, hsmall, writeBits_small (bw := bw) (bits := bits) (len := n) hsmall']
-    · simp [BitWriter.writeBitsFast, hfast, hsmall]
+          (bits >>> k) (n - k) =
+        BitWriter.writeBits
+          { out := bw.out.push (packBitsAccU8 bits k bw.bitPos bw.cur),
+            cur := 0, bitPos := 0, hbit := by decide }
+          (bits >>> k) (n - k) := by
+      have hlt : n - k < n := by
+        exact Nat.sub_lt_self hkpos hkle
+      exact ih (n - k) hlt _ _
+    simp [BitWriter.writeBitsFast, hsmall, k, hfill, hsplit, hrec]
 
 attribute [simp] writeBitsFast_eq_writeBits
 

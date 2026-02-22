@@ -195,35 +195,23 @@ def packBitsAccU8 (bits len shift : Nat) (acc : UInt8) : UInt8 :=
         (acc ||| UInt8.ofNat ((bits % 2) <<< shift))
 
 def BitWriter.writeBitsFast (bw : BitWriter) (bits len : Nat) : BitWriter :=
-  if hfast : bw.bitPos = 0 ∧ 8 ≤ len then
-    let byte :=
-      bw.cur ||| UInt8.ofNat (bits % 2) |||
-      (UInt8.ofNat ((bits >>> 1) % 2) <<< 1) |||
-      (UInt8.ofNat ((bits >>> 1 >>> 1) % 2) <<< 2) |||
-      (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1) % 2) <<< 3) |||
-      (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 4) |||
-      (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 5) |||
-      (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 6) |||
-      (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 7)
-    if hlen8 : len = 8 then
-      { out := bw.out.push byte, cur := 0, bitPos := 0, hbit := by decide }
-    else if hlen9 : len = 9 then
-      { out := bw.out.push byte,
-        cur := UInt8.ofNat ((bits >>> 8) % 2),
-        bitPos := 1,
-        hbit := by decide }
-    else
-      let bw' : BitWriter :=
-        { out := bw.out.push byte, cur := 0, bitPos := 0, hbit := by decide }
-      writeBitsFast bw' (bits >>> 8) (len - 8)
-  else if hsmall : bw.bitPos + len < 8 then
+  if hsmall : bw.bitPos + len < 8 then
     let cur := packBitsAccU8 bits len bw.bitPos bw.cur
     { bw with cur := cur, bitPos := bw.bitPos + len, hbit := by omega }
   else
-    BitWriter.writeBits bw bits len
+    let k := 8 - bw.bitPos
+    let byte := packBitsAccU8 bits k bw.bitPos bw.cur
+    let bw' : BitWriter :=
+      { out := bw.out.push byte, cur := 0, bitPos := 0, hbit := by decide }
+    writeBitsFast bw' (bits >>> k) (len - k)
 termination_by len
 decreasing_by
-  omega
+  have hlt : 0 < 8 - bw.bitPos := by
+    have hpos : bw.bitPos < 8 := bw.hbit
+    omega
+  have hle : 8 - bw.bitPos ≤ len := by
+    omega
+  exact Nat.sub_lt_self hlt hle
 
 def BitWriter.flush (bw : BitWriter) : ByteArray :=
   if bw.bitPos = 0 then
@@ -274,6 +262,7 @@ def deflateFixed (raw : ByteArray) : ByteArray :=
   let bw4 := bw3.writeBits (reverseBits eobCode eobLen) eobLen
   bw4.flush
 
+
 def zlibCompressFixed (raw : ByteArray) : ByteArray :=
   let header := ByteArray.mk #[u8 0x78, u8 0x01]
   let deflated := deflateFixed raw
@@ -281,6 +270,7 @@ def zlibCompressFixed (raw : ByteArray) : ByteArray :=
   let outSize := header.size + deflated.size + adler.size
   let out := ByteArray.emptyWithCapacity outSize
   out ++ header ++ deflated ++ adler
+
 
 def zlibCompressStored (raw : ByteArray) : ByteArray :=
   let header := ByteArray.mk #[u8 0x78, u8 0x01]
@@ -1327,6 +1317,8 @@ def encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
     let out := ByteArray.emptyWithCapacity outSize
     out ++ pngSignature ++ ihdrChunk ++ idatChunk ++ iendChunk
 
+-- Encode a bitmap using the buffered fixed-Huffman deflate blocks (perf testing).
+
 -- Encode a bitmap using fixed-Huffman deflate blocks.
 def encodeBitmapFixed {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
     (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32) : ByteArray :=
@@ -1342,6 +1334,7 @@ def encodeBitmapChecked {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
       Except.error "bitmap height exceeds PNG limit (2^32)"
   else
     Except.error "bitmap width exceeds PNG limit (2^32)"
+
 
 def Bitmap.readPng {px : Type u} [Pixel px] [PngPixel px]
     (path : FilePath) : IO (Except String (Bitmap px)) := do
