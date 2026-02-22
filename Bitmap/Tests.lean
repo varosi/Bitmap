@@ -198,6 +198,22 @@ private def perfPngRoundTrip (w h : Nat) : IO (Nat × Bool) := do
   let t1 <- IO.monoNanosNow
   return (t1 - t0, ok)
 
+-- Encode a blank bitmap using stored deflate blocks and decode it back.
+-- Returns elapsed time in nanoseconds and whether the round-trip was exact.
+private def perfPngRoundTripStored (w h : Nat) : IO (Nat × Bool) := do
+  let t0 <- IO.monoNanosNow
+  let bmp := mkBlankBitmap w h { r := 0, g := 0, b := 0 }
+  let bytes ←
+    match Png.encodeBitmapChecked (px := PixelRGB8) bmp .stored with
+    | Except.ok bytes => pure bytes
+    | Except.error err => throw (IO.userError err)
+  let ok :=
+    match Png.decodeBitmap bytes with
+    | some bmp' => decide (bmp' = bmp)
+    | none => false
+  let t1 <- IO.monoNanosNow
+  return (t1 - t0, ok)
+
 -- Fixed-size performance test for putPixel/getPixel on this machine.
 -- Chosen so 10 runs total about 5 seconds here.
 private def runPerfTest : IO Unit := do
@@ -234,6 +250,24 @@ private def runPngPerfTest : IO Unit := do
   let avgMs := avgNs / 1_000_000
   IO.println s!"perf png round-trip: {w}x{h} pixels, avg {avgMs} ms over {iters} runs, heartbeats {hb1 - hb0}"
 
+-- Fixed-size performance test for PNG encode/decode via stored blocks.
+-- Chosen so 10 runs total about 5 seconds here.
+private def runPngPerfTestStored : IO Unit := do
+  let w : Nat := 1600
+  let h : Nat := 1600
+  let iters : Nat := 10
+  let hb0 <- IO.getNumHeartbeats
+  let mut totalNs : Nat := 0
+  for _ in [0:iters] do
+    let (elapsedNs, ok) <- perfPngRoundTripStored w h
+    if !ok then
+      throw (IO.userError "png perf stored round-trip failed")
+    totalNs := totalNs + elapsedNs
+  let hb1 <- IO.getNumHeartbeats
+  let avgNs := totalNs / iters
+  let avgMs := avgNs / 1_000_000
+  IO.println s!"perf png stored round-trip: {w}x{h} pixels, avg {avgMs} ms over {iters} runs, heartbeats {hb1 - hb0}"
+
 def run : IO Unit := do
   let ok <- pngRoundTripProperty 20
   if ok then
@@ -258,6 +292,7 @@ def run : IO Unit := do
   pngDecodeFixedHuffmanFixtures
   runPerfTest
   runPngPerfTest
+  runPngPerfTestStored
 
 end Bitmap.Tests
 

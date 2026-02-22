@@ -480,15 +480,35 @@ def distExtra : Array Nat :=
     12, 12,
     13, 13]
 
-def copyDistance (out : ByteArray) (distance : Nat) : Nat → Option ByteArray
+def copyDistance (out : ByteArray) (distance len : Nat) : Option ByteArray :=
+  match len with
   | 0 => some out
-  | n + 1 =>
-      if distance == 0 || distance > out.size then
+  | len + 1 =>
+      if hbad : distance = 0 ∨ distance > out.size then
         none
       else
-        let idx := out.size - distance
-        let b := out.get! idx
-        copyDistance (out.push b) distance n
+        let chunk := Nat.min distance (len + 1)
+        let start := out.size - distance
+        let stop := start + chunk
+        let out' := out ++ out.extract start stop
+        copyDistance out' distance (len + 1 - chunk)
+termination_by len
+decreasing_by
+  have hdist : 0 < distance := by
+    have : distance ≠ 0 := by
+      intro hzero
+      exact hbad (Or.inl hzero)
+    exact Nat.pos_of_ne_zero this
+  have hlen : 0 < len + 1 := Nat.succ_pos _
+  have hchunk : 0 < Nat.min distance (len + 1) := by
+    by_cases hle : distance ≤ len + 1
+    · have hmin : Nat.min distance (len + 1) = distance := Nat.min_eq_left hle
+      simp [hmin, hdist]
+    · have hlt : len + 1 < distance := lt_of_not_ge hle
+      have hmin : Nat.min distance (len + 1) = len + 1 :=
+        Nat.min_eq_right (le_of_lt hlt)
+      simp [hmin, hlen]
+  omega
 
 def decodeLength (sym : Nat) (br : BitReader)
     (h : 257 ≤ sym ∧ sym ≤ 285)
