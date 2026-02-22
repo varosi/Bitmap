@@ -338,6 +338,47 @@ def BitReader.readBits (br : BitReader) (n : Nat)
     (_h : br.bitIndex + n <= br.data.size * 8) : Nat × BitReader := by
   exact br.readBitsAux n
 
+-- Faster small-bit reader when the requested window stays inside the current byte.
+set_option linter.unnecessarySimpa false
+def BitReader.readBitsFast (br : BitReader) (n : Nat)
+    (h : br.bitIndex + n <= br.data.size * 8) : Nat × BitReader := by
+  by_cases hzero : n = 0
+  · subst hzero
+    exact (0, br)
+  by_cases hsmall : n <= 8
+  · by_cases hspan : br.bitPos + n < 8
+    · have hlt : br.bytePos < br.data.size := by
+        by_cases hEq : br.bytePos = br.data.size
+        · have hbit0 : br.bitPos = 0 := br.hend hEq
+          have hindex : br.bitIndex = br.data.size * 8 := by
+            simp [BitReader.bitIndex, hEq, hbit0]
+          have hn : 0 < n := Nat.pos_of_ne_zero hzero
+          have hgt : br.bitIndex + n > br.data.size * 8 := by
+            have : br.data.size * 8 < br.data.size * 8 + n := by
+              exact Nat.lt_add_of_pos_right hn
+            simpa [hindex, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using this
+          exact (False.elim ((not_lt_of_ge h) hgt))
+        · exact lt_of_le_of_ne br.hpos hEq
+      let byte := br.data.get br.bytePos hlt
+      let bits := (byte.toNat >>> br.bitPos) % 2 ^ n
+      let nextBitPos := br.bitPos + n
+      let hend' : br.bytePos = br.data.size → nextBitPos = 0 := by
+        intro hEq
+        have : False := by
+          simpa [hEq] using hlt
+        exact (False.elim this)
+      exact
+        (bits,
+          { data := br.data
+            bytePos := br.bytePos
+            bitPos := nextBitPos
+            hpos := br.hpos
+            hend := hend'
+            hbit := hspan })
+    · exact br.readBits n h
+  · exact br.readBits n h
+set_option linter.unnecessarySimpa true
+
 def BitReader.alignByte (br : BitReader) : BitReader :=
   by
     by_cases hzero : br.bitPos = 0
@@ -730,7 +771,7 @@ def fixedLitLenHuffman : Huffman :=
 def decodeFixedLiteralSym (br : BitReader) : Option (Nat × BitReader) := do
   let (bits7, br7) ←
     if h : br.bitIndex + 7 <= br.data.size * 8 then
-      some (br.readBits 7 h)
+      some (br.readBitsFast 7 h)
     else
       none
   match fixedLitLenRow7[bits7]? with
@@ -739,7 +780,7 @@ def decodeFixedLiteralSym (br : BitReader) : Option (Nat × BitReader) := do
   | _ =>
       let (bit8, br8) ←
         if h : br7.bitIndex + 1 <= br7.data.size * 8 then
-          some (br7.readBits 1 h)
+          some (br7.readBitsFast 1 h)
         else
           none
       let bits8 := bits7 ||| (bit8 <<< 7)
@@ -749,7 +790,7 @@ def decodeFixedLiteralSym (br : BitReader) : Option (Nat × BitReader) := do
       | _ =>
           let (bit9, br9) ←
             if h : br8.bitIndex + 1 <= br8.data.size * 8 then
-              some (br8.readBits 1 h)
+              some (br8.readBitsFast 1 h)
             else
               none
           let bits9 := bits8 ||| (bit9 <<< 8)

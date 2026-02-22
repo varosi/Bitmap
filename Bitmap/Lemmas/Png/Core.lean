@@ -1994,6 +1994,145 @@ lemma readBits_succ_eq (br : BitReader) (k : Nat)
   -- unfold one step of `readBits`
   simp [BitReader.readBits, readBitsAux_succ, hbit]
 
+-- Bounds for reading `n` bits that stay within the current byte.
+lemma readBits_within_byte_bound (br : BitReader) (n : Nat)
+    (hspan : br.bitPos + n ≤ 8) (hlt : br.bytePos < br.data.size) :
+    br.bitIndex + n ≤ br.data.size * 8 := by
+  have hpos' : br.bytePos + 1 ≤ br.data.size := Nat.succ_le_of_lt hlt
+  have hle1 : br.bytePos * 8 + (br.bitPos + n) ≤ br.bytePos * 8 + 8 := by
+    exact Nat.add_le_add_left hspan _
+  have hle2 : br.bytePos * 8 + 8 ≤ br.data.size * 8 := by
+    have hmul : (br.bytePos + 1) * 8 ≤ br.data.size * 8 :=
+      Nat.mul_le_mul_right 8 hpos'
+    simpa [Nat.mul_add, Nat.add_mul, Nat.mul_comm, Nat.mul_left_comm, Nat.mul_assoc] using hmul
+  have hle3 : br.bitIndex + n ≤ br.bytePos * 8 + (br.bitPos + n) := by
+    simp [BitReader.bitIndex, Nat.add_assoc, Nat.add_comm]
+  exact le_trans (le_trans hle3 hle1) hle2
+
+-- Reading `n` bits that stay strictly within the current byte.
+set_option linter.unnecessarySimpa false
+lemma readBits_within_byte_lt (br : BitReader) (n : Nat)
+    (hspan : br.bitPos + n < 8) (hlt : br.bytePos < br.data.size) :
+    let byte := br.data.get br.bytePos hlt
+    let bits := (byte.toNat >>> br.bitPos) % 2 ^ n
+    br.readBits n (readBits_within_byte_bound br n (Nat.le_of_lt hspan) hlt) =
+      (bits,
+        { data := br.data
+          bytePos := br.bytePos
+          bitPos := br.bitPos + n
+          hpos := br.hpos
+          hend := by
+            intro hEq
+            have : False := by
+              simpa [hEq] using hlt
+            exact (False.elim this)
+          hbit := hspan }) := by
+  classical
+  induction n generalizing br with
+  | zero =>
+      have hnext : br.bitPos + 0 ≠ 8 := by
+        exact ne_of_lt br.hbit
+      simp [BitReader.readBits, BitReader.readBitsAux, BitReader.readBitsAuxAcc,
+        Nat.pow_zero, Nat.mod_one]
+  | succ n ih =>
+      -- reading one bit keeps us inside the same byte
+      have hnext1 : br.bitPos + 1 ≠ 8 := by
+        have hlt1 : br.bitPos + 1 < 8 := by
+          have : br.bitPos + 1 ≤ br.bitPos + (n + 1) := by omega
+          exact lt_of_le_of_lt this hspan
+        exact ne_of_lt hlt1
+      -- define the reader after one bit
+      let br1 : BitReader :=
+        { data := br.data
+          bytePos := br.bytePos
+          bitPos := br.bitPos + 1
+          hpos := br.hpos
+          hend := by
+            intro hEq
+            have : False := by
+              simpa [hEq] using hlt
+            exact (False.elim this)
+          hbit := by
+            have hle : br.bitPos + 1 ≤ 8 := by
+              exact Nat.le_of_lt (by omega)
+            exact lt_of_le_of_ne hle hnext1 }
+      have hbit :
+          br.readBit =
+            (((br.data.get br.bytePos hlt).toNat >>> br.bitPos) &&& 1, br1) := by
+        have hEq : br.bytePos ≠ br.data.size := by
+          exact ne_of_lt hlt
+        simp [BitReader.readBit, hEq, hnext1, br1]
+      have hspan' : br1.bitPos + n < 8 := by
+        simpa [br1, Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using hspan
+      have ih' := ih (br := br1) (hspan := hspan') (hlt := hlt)
+      have hcalc :=
+        readBits_succ_eq (br := br) (k := n)
+          (h := readBits_within_byte_bound br (n + 1) (Nat.le_of_lt hspan) hlt)
+          (bit := ((br.data.get br.bytePos hlt).toNat >>> br.bitPos) &&& 1)
+          (br' := br1) hbit
+          (readBits_within_byte_bound br1 n (Nat.le_of_lt hspan') hlt)
+      have hshift :
+          ((br.data.get br.bytePos hlt).toNat >>> br.bitPos) >>> 1 =
+            (br.data.get br.bytePos hlt).toNat >>> (br.bitPos + 1) := by
+        simpa [Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using
+          (Nat.shiftRight_add (br.data.get br.bytePos hlt).toNat br.bitPos 1).symm
+      have hbits :
+          ((br.data.get br.bytePos hlt).toNat >>> br.bitPos) % 2 ^ (n + 1) =
+            (((br.data.get br.bytePos hlt).toNat >>> br.bitPos) % 2) |||
+              ((((br.data.get br.bytePos hlt).toNat >>> (br.bitPos + 1)) % 2 ^ n) <<< 1) := by
+        have h :=
+          mod_two_pow_decomp ((br.data.get br.bytePos hlt).toNat >>> br.bitPos) n
+        simpa [hshift] using h
+      -- finish
+      let br2 : BitReader :=
+        { data := br.data
+          bytePos := br.bytePos
+          bitPos := n + (br.bitPos + 1)
+          hpos := br.hpos
+          hend := by
+            intro hEq
+            have : False := by
+              simpa [hEq] using hlt
+            exact (False.elim this)
+          hbit := by
+            have hlt1 : br.bitPos + 1 + n < 8 := by
+              simpa [Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using hspan
+            simpa [Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using hlt1 }
+      have hcalc' : br.readBits (n + 1)
+          (readBits_within_byte_bound br (n + 1) (Nat.le_of_lt hspan) hlt) =
+          (((br.data.get br.bytePos hlt).toNat >>> br.bitPos) &&& 1 |||
+              ((((br.data.get br.bytePos hlt).toNat >>> (br.bitPos + 1)) % 2 ^ n) <<< 1), br2) := by
+        simpa [ih', br1, br2, Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using hcalc
+      simpa [hbits, Nat.and_one_is_mod, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm]
+        using hcalc'
+
+-- `readBitsFast` agrees with the verified `readBits`.
+lemma readBitsFast_eq_readBits (br : BitReader) (n : Nat)
+    (h : br.bitIndex + n ≤ br.data.size * 8) :
+    br.readBitsFast n h = br.readBits n h := by
+  by_cases hzero : n = 0
+  · subst hzero
+    simp [BitReader.readBitsFast, BitReader.readBits, BitReader.readBitsAux, BitReader.readBitsAuxAcc]
+  by_cases hsmall : n ≤ 8
+  · by_cases hspan : br.bitPos + n < 8
+    · have hlt : br.bytePos < br.data.size := by
+        by_cases hEq : br.bytePos = br.data.size
+        · have hbit0 : br.bitPos = 0 := br.hend hEq
+          have hindex : br.bitIndex = br.data.size * 8 := by
+            simp [BitReader.bitIndex, hEq, hbit0]
+          have hn : 0 < n := Nat.pos_of_ne_zero hzero
+          have hgt : br.bitIndex + n > br.data.size * 8 := by
+            have : br.data.size * 8 < br.data.size * 8 + n := by
+              exact Nat.lt_add_of_pos_right hn
+            simpa [hindex, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using this
+          exact (False.elim ((not_lt_of_ge h) hgt))
+        · exact lt_of_le_of_ne br.hpos hEq
+      simp [BitReader.readBitsFast, hzero, hsmall, hspan,
+        readBits_within_byte_lt (br := br) (n := n) (hspan := hspan) (hlt := hlt)]
+    · simp [BitReader.readBitsFast, hzero, hsmall, hspan]
+  · simp [BitReader.readBitsFast, hzero, hsmall]
+set_option linter.unnecessarySimpa true
+
 lemma readBits_readerAt_writeBits_prefix (bw : BitWriter) (bits len k : Nat)
     (hk : k ≤ len) (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
     let bw' := BitWriter.writeBits bw bits len
