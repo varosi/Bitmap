@@ -34,6 +34,14 @@ def pngRoundTripOk (bmp : BitmapRGB8) : Bool :=
       | some bmp' => decide (bmp' = bmp)
       | none => false
 
+def pngRoundTripOkStored (bmp : BitmapRGB8) : Bool :=
+  match Png.encodeBitmapChecked (px := PixelRGB8) bmp .stored with
+  | Except.error _ => false
+  | Except.ok bytes =>
+      match Png.decodeBitmap bytes with
+      | some bmp' => decide (bmp' = bmp)
+      | none => false
+
 def pngRoundTripOkRGBA (bmp : BitmapRGBA8) : Bool :=
   match Png.encodeBitmapChecked (px := PixelRGBA8) bmp .fixed with
   | Except.error _ => false
@@ -59,6 +67,20 @@ def pngRoundTripProperty (trials : Nat) : IO Bool := do
     let seed <- IO.rand 0 1000000
     let bmp := bitmapOfSeed seed w h
     if pngRoundTripOk bmp then
+      i := i + 1
+    else
+      ok := false
+  return ok
+
+def pngRoundTripPropertyStored (trials : Nat) : IO Bool := do
+  let mut ok := true
+  let mut i := 0
+  while i < trials && ok do
+    let w <- IO.rand 1 16
+    let h <- IO.rand 1 16
+    let seed <- IO.rand 0 1000000
+    let bmp := bitmapOfSeed seed w h
+    if pngRoundTripOkStored bmp then
       i := i + 1
     else
       ok := false
@@ -218,6 +240,11 @@ def run : IO Unit := do
     IO.println "png round-trip property: ok"
   else
     throw (IO.userError "png round-trip property failed")
+  let okStored <- pngRoundTripPropertyStored 20
+  if okStored then
+    IO.println "png round-trip stored property: ok"
+  else
+    throw (IO.userError "png round-trip stored property failed")
   let okRgba <- pngRoundTripPropertyRGBA 20
   if okRgba then
     IO.println "png round-trip RGBA property: ok"
