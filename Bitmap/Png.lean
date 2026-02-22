@@ -187,6 +187,13 @@ def BitWriter.writeBits (bw : BitWriter) (bits len : Nat) : BitWriter :=
   | 0 => bw
   | n + 1 => BitWriter.writeBits (bw.writeBit (bits % 2)) (bits >>> 1) n
 
+def packBitsAccU8 (bits len shift : Nat) (acc : UInt8) : UInt8 :=
+  match len with
+  | 0 => acc
+  | n + 1 =>
+      packBitsAccU8 (bits >>> 1) n (shift + 1)
+        (acc ||| UInt8.ofNat ((bits % 2) <<< shift))
+
 def BitWriter.writeBitsFast (bw : BitWriter) (bits len : Nat) : BitWriter :=
   if hfast : bw.bitPos = 0 ∧ 8 ≤ len then
     let byte :=
@@ -201,6 +208,9 @@ def BitWriter.writeBitsFast (bw : BitWriter) (bits len : Nat) : BitWriter :=
     let bw' : BitWriter :=
       { out := bw.out.push byte, cur := 0, bitPos := 0, hbit := by decide }
     writeBitsFast bw' (bits >>> 8) (len - 8)
+  else if hsmall : bw.bitPos + len < 8 then
+    let cur := packBitsAccU8 bits len bw.bitPos bw.cur
+    { bw with cur := cur, bitPos := bw.bitPos + len, hbit := by omega }
   else
     BitWriter.writeBits bw bits len
 termination_by len

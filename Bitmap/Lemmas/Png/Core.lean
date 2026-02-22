@@ -1724,6 +1724,29 @@ lemma writeBits_align8 (bw : BitWriter) (bits : Nat) (hpos : bw.bitPos = 0) :
   -- Unfold the 8 steps; `simp` resolves all bitPos cases from `hpos`.
   simp [BitWriter.writeBits, BitWriter.writeBit, hpos, Nat.add_comm]
 
+lemma writeBits_small (bw : BitWriter) (bits len : Nat) (hsmall : bw.bitPos + len < 8) :
+    BitWriter.writeBits bw bits len =
+      { out := bw.out,
+        cur := packBitsAccU8 bits len bw.bitPos bw.cur,
+        bitPos := bw.bitPos + len,
+        hbit := by omega } := by
+  induction len generalizing bw bits with
+  | zero =>
+      simp [BitWriter.writeBits, packBitsAccU8]
+  | succ n ih =>
+      have hpos : bw.bitPos ≠ 7 := by omega
+      have hsmall' : (BitWriter.writeBit bw (bits % 2)).bitPos + n < 8 := by
+        have hbitpos :
+            (BitWriter.writeBit bw (bits % 2)).bitPos = bw.bitPos + 1 := by
+          simp [BitWriter.writeBit, hpos]
+        have hlt : bw.bitPos + 1 + n < 8 := by
+          simpa [Nat.add_assoc, Nat.add_left_comm, Nat.add_comm] using hsmall
+        simpa [hbitpos, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm] using hlt
+      have ih' := ih (bw := BitWriter.writeBit bw (bits % 2)) (bits := bits >>> 1) hsmall'
+      -- unfold one step of `writeBits`, then apply the IH
+      simp [BitWriter.writeBits, BitWriter.writeBit, hpos]
+      simpa [BitWriter.writeBit, hpos, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm] using ih'
+
 lemma writeBitsFast_eq_writeBits (bw : BitWriter) (bits len : Nat) :
     BitWriter.writeBitsFast bw bits len = BitWriter.writeBits bw bits len := by
   classical
@@ -1787,7 +1810,10 @@ lemma writeBitsFast_eq_writeBits (bw : BitWriter) (bits len : Nat) :
       exact ih (n - 8) hlt _ _
     -- finish
     simp [BitWriter.writeBitsFast, hfast, h8, hsplit, hrec]
-  · simp [BitWriter.writeBitsFast, hfast]
+  · by_cases hsmall : bw.bitPos + n < 8
+    · have hsmall' : bw.bitPos + n < 8 := hsmall
+      simp [BitWriter.writeBitsFast, hfast, hsmall, writeBits_small (bw := bw) (bits := bits) (len := n) hsmall']
+    · simp [BitWriter.writeBitsFast, hfast, hsmall]
 
 attribute [simp] writeBitsFast_eq_writeBits
 
