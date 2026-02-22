@@ -187,6 +187,26 @@ def BitWriter.writeBits (bw : BitWriter) (bits len : Nat) : BitWriter :=
   | 0 => bw
   | n + 1 => BitWriter.writeBits (bw.writeBit (bits % 2)) (bits >>> 1) n
 
+def BitWriter.writeBitsFast (bw : BitWriter) (bits len : Nat) : BitWriter :=
+  if hfast : bw.bitPos = 0 ∧ 8 ≤ len then
+    let byte :=
+      bw.cur ||| UInt8.ofNat (bits % 2) |||
+      (UInt8.ofNat ((bits >>> 1) % 2) <<< 1) |||
+      (UInt8.ofNat ((bits >>> 1 >>> 1) % 2) <<< 2) |||
+      (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1) % 2) <<< 3) |||
+      (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 4) |||
+      (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 5) |||
+      (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 6) |||
+      (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 7)
+    let bw' : BitWriter :=
+      { out := bw.out.push byte, cur := 0, bitPos := 0, hbit := by decide }
+    writeBitsFast bw' (bits >>> 8) (len - 8)
+  else
+    BitWriter.writeBits bw bits len
+termination_by len
+decreasing_by
+  omega
+
 def BitWriter.flush (bw : BitWriter) : ByteArray :=
   if bw.bitPos = 0 then
     bw.out
@@ -217,7 +237,7 @@ def deflateFixedAux (data : Array UInt8) (i : Nat) (bw : BitWriter) : BitWriter 
   if h : i < data.size then
     let b := data[i]
     let (code, len) := fixedLitLenCode b.toNat
-    deflateFixedAux data (i + 1) (bw.writeBits (reverseBits code len) len)
+    deflateFixedAux data (i + 1) (bw.writeBitsFast (reverseBits code len) len)
   else
     bw
 termination_by data.size - i

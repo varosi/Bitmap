@@ -1709,6 +1709,88 @@ lemma writeBits_mod (bw : BitWriter) (bits len : Nat) :
         _ = BitWriter.writeBits bw (bits % 2 ^ (n + 1)) (n + 1) := by
                 simp [BitWriter.writeBits]
 
+lemma writeBits_align8 (bw : BitWriter) (bits : Nat) (hpos : bw.bitPos = 0) :
+    BitWriter.writeBits bw bits 8 =
+      { out := bw.out.push
+          (bw.cur ||| UInt8.ofNat (bits % 2) |||
+            (UInt8.ofNat ((bits >>> 1) % 2) <<< 1) |||
+            (UInt8.ofNat ((bits >>> 1 >>> 1) % 2) <<< 2) |||
+            (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1) % 2) <<< 3) |||
+            (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 4) |||
+            (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 5) |||
+            (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 6) |||
+            (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 7)),
+        cur := 0, bitPos := 0, hbit := by decide } := by
+  -- Unfold the 8 steps; `simp` resolves all bitPos cases from `hpos`.
+  simp [BitWriter.writeBits, BitWriter.writeBit, hpos, Nat.add_comm]
+
+lemma writeBitsFast_eq_writeBits (bw : BitWriter) (bits len : Nat) :
+    BitWriter.writeBitsFast bw bits len = BitWriter.writeBits bw bits len := by
+  classical
+  -- Strong induction on `len` because the fast path subtracts 8.
+  revert bw bits
+  refine Nat.strong_induction_on len ?_
+  intro n ih bw bits
+  by_cases hfast : bw.bitPos = 0 ∧ 8 ≤ n
+  · -- fast path: peel off 8 bits, then apply IH
+    have hlen : n = 8 + (n - 8) := by
+      have hle : 8 ≤ n := hfast.2
+      exact (Nat.add_sub_of_le hle).symm
+    -- compute the first byte via `writeBits`
+    have h8 : BitWriter.writeBits bw bits 8 =
+        { out := bw.out.push
+            (bw.cur ||| UInt8.ofNat (bits % 2) |||
+              (UInt8.ofNat ((bits >>> 1) % 2) <<< 1) |||
+              (UInt8.ofNat ((bits >>> 1 >>> 1) % 2) <<< 2) |||
+              (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1) % 2) <<< 3) |||
+              (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 4) |||
+              (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 5) |||
+              (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 6) |||
+              (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 7)),
+          cur := 0, bitPos := 0, hbit := by decide } := by
+      exact writeBits_align8 bw bits hfast.1
+    -- split the slow writer
+    have hsplit :
+        BitWriter.writeBits bw bits n =
+          BitWriter.writeBits (BitWriter.writeBits bw bits 8) (bits >>> 8) (n - 8) := by
+      -- use the split lemma with k=8
+      have hsplit0 := writeBits_split bw bits 8 (n - 8)
+      simpa [← hlen] using hsplit0
+    -- apply IH on the remainder
+    have hrec :
+        BitWriter.writeBitsFast
+          { out := bw.out.push
+              (bw.cur ||| UInt8.ofNat (bits % 2) |||
+                (UInt8.ofNat ((bits >>> 1) % 2) <<< 1) |||
+                (UInt8.ofNat ((bits >>> 1 >>> 1) % 2) <<< 2) |||
+                (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1) % 2) <<< 3) |||
+                (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 4) |||
+                (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 5) |||
+                (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 6) |||
+                (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 7)),
+            cur := 0, bitPos := 0, hbit := by decide }
+          (bits >>> 8) (n - 8) =
+        BitWriter.writeBits
+          { out := bw.out.push
+              (bw.cur ||| UInt8.ofNat (bits % 2) |||
+                (UInt8.ofNat ((bits >>> 1) % 2) <<< 1) |||
+                (UInt8.ofNat ((bits >>> 1 >>> 1) % 2) <<< 2) |||
+                (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1) % 2) <<< 3) |||
+                (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 4) |||
+                (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 5) |||
+                (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 6) |||
+                (UInt8.ofNat ((bits >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1) % 2) <<< 7)),
+            cur := 0, bitPos := 0, hbit := by decide }
+          (bits >>> 8) (n - 8) := by
+      -- `n - 8 < n` when `8 ≤ n`
+      have hlt : n - 8 < n := by omega
+      exact ih (n - 8) hlt _ _
+    -- finish
+    simp [BitWriter.writeBitsFast, hfast, h8, hsplit, hrec]
+  · simp [BitWriter.writeBitsFast, hfast]
+
+attribute [simp] writeBitsFast_eq_writeBits
+
 -- Writing concatenated bitstrings equals sequential writes.
 lemma writeBits_concat (bw : BitWriter) (bits rest len restLen : Nat)
     (hbits : bits < 2 ^ len) :
