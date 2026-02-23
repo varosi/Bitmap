@@ -1081,6 +1081,38 @@ lemma mod_two_pow_decomp_high (bits n : Nat) :
         rw [hleft]
         simp [Nat.testBit_or, hright1, hright2]
 
+-- `lowPowNat` matches `2^n` for `n ≤ 8`.
+lemma lowPowNat_eq_pow (n : Nat) (h : n ≤ 8) :
+    lowPowNat n = 2 ^ n := by
+  -- `lowPowNat` is length 9 and enumerates `2^n` for `n ≤ 8`.
+  cases n with
+  | zero => simp [lowPowNat]
+  | succ n =>
+    cases n with
+    | zero => simp [lowPowNat]
+    | succ n =>
+      cases n with
+      | zero => simp [lowPowNat]
+      | succ n =>
+        cases n with
+        | zero => simp [lowPowNat]
+        | succ n =>
+          cases n with
+          | zero => simp [lowPowNat]
+          | succ n =>
+            cases n with
+            | zero => simp [lowPowNat]
+            | succ n =>
+              cases n with
+              | zero => simp [lowPowNat]
+              | succ n =>
+                cases n with
+                | zero => simp [lowPowNat]
+                | succ n =>
+                  simp at h
+                  subst h
+                  simp [lowPowNat]
+
 -- Modulo 2^k ignores bits shifted by at least k.
 lemma mod_two_pow_or_shift (a b k len : Nat) (hk : k ≤ len) :
     (a ||| (b <<< len)) % 2 ^ k = a % 2 ^ k := by
@@ -2127,7 +2159,8 @@ lemma readBitsFast_eq_readBits (br : BitReader) (n : Nat)
             simpa [hindex, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using this
           exact (False.elim ((not_lt_of_ge h) hgt))
         · exact lt_of_le_of_ne br.hpos hEq
-      simp [BitReader.readBitsFast, hzero, hsmall, hspan,
+      have hpow : lowPowNat n = 2 ^ n := lowPowNat_eq_pow n hsmall
+      simp [BitReader.readBitsFast, hzero, hsmall, hspan, hpow,
         readBits_within_byte_lt (br := br) (n := n) (hspan := hspan) (hlt := hlt)]
     · simp [BitReader.readBitsFast, hzero, hsmall, hspan]
   · simp [BitReader.readBitsFast, hzero, hsmall]

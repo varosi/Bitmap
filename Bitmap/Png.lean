@@ -289,6 +289,20 @@ structure BitReader where
   hbit : bitPos < 8
 deriving Repr
 
+-- Precomputed `2^n` for `n ≤ 8`.
+def lowPowNat (n : Nat) : Nat :=
+  match n with
+  | 0 => 1
+  | 1 => 2
+  | 2 => 4
+  | 3 => 8
+  | 4 => 16
+  | 5 => 32
+  | 6 => 64
+  | 7 => 128
+  | 8 => 256
+  | _ => 1
+
 def BitReader.bitIndex (br : BitReader) : Nat :=
   br.bytePos * 8 + br.bitPos
 
@@ -360,7 +374,7 @@ def BitReader.readBitsFast (br : BitReader) (n : Nat)
           exact (False.elim ((not_lt_of_ge h) hgt))
         · exact lt_of_le_of_ne br.hpos hEq
       let byte := br.data.get br.bytePos hlt
-      let bits := (byte.toNat >>> br.bitPos) % 2 ^ n
+      let bits := (byte.toNat >>> br.bitPos) % lowPowNat n
       let nextBitPos := br.bitPos + n
       let hend' : br.bytePos = br.data.size → nextBitPos = 0 := by
         intro hEq
