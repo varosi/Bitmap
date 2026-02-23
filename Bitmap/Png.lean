@@ -531,35 +531,26 @@ def distExtra : Array Nat :=
     12, 12,
     13, 13]
 
+def copyDistanceFast (out : ByteArray) (distance len : Nat) : Option ByteArray :=
+  if _hbad : distance = 0 ∨ distance > out.size then
+    none
+  else
+    some <| Id.run do
+      let total := out.size + len
+      let mut dest := ByteArray.mk <| Array.replicate total 0
+      dest := out.copySlice 0 dest 0 out.size
+      let mut pos := out.size
+      let mut remaining := len
+      while remaining > 0 do
+        let chunk := Nat.min distance remaining
+        let src := pos - distance
+        dest := dest.copySlice src dest pos chunk
+        pos := pos + chunk
+        remaining := remaining - chunk
+      return dest
+
 def copyDistance (out : ByteArray) (distance len : Nat) : Option ByteArray :=
-  match len with
-  | 0 => some out
-  | len + 1 =>
-      if hbad : distance = 0 ∨ distance > out.size then
-        none
-      else
-        let chunk := Nat.min distance (len + 1)
-        let start := out.size - distance
-        let stop := start + chunk
-        let out' := out ++ out.extract start stop
-        copyDistance out' distance (len + 1 - chunk)
-termination_by len
-decreasing_by
-  have hdist : 0 < distance := by
-    have : distance ≠ 0 := by
-      intro hzero
-      exact hbad (Or.inl hzero)
-    exact Nat.pos_of_ne_zero this
-  have hlen : 0 < len + 1 := Nat.succ_pos _
-  have hchunk : 0 < Nat.min distance (len + 1) := by
-    by_cases hle : distance ≤ len + 1
-    · have hmin : Nat.min distance (len + 1) = distance := Nat.min_eq_left hle
-      simp [hmin, hdist]
-    · have hlt : len + 1 < distance := lt_of_not_ge hle
-      have hmin : Nat.min distance (len + 1) = len + 1 :=
-        Nat.min_eq_right (le_of_lt hlt)
-      simp [hmin, hlen]
-  omega
+  copyDistanceFast out distance len
 
 def decodeLength (sym : Nat) (br : BitReader)
     (h : 257 ≤ sym ∧ sym ≤ 285)
@@ -837,6 +828,59 @@ def decodeFixedLiteralBlockFuel (fuel : Nat) (br : BitReader) (out : ByteArray) 
 def decodeFixedLiteralBlock (br : BitReader) (out : ByteArray) :
     Option (BitReader × ByteArray) :=
   decodeFixedLiteralBlockFuel (br.data.size * 8) br out
+
+def decodeFixedDistanceSym (br : BitReader) : Option (Nat × BitReader) := do
+  if h : br.bitIndex + 5 <= br.data.size * 8 then
+    let (bits, br') := br.readBitsFast 5 h
+    some (reverseBits bits 5, br')
+  else
+    none
+
+def decodeFixedBlockFuel (fuel : Nat) (br : BitReader) (out : ByteArray) :
+    Option (BitReader × ByteArray) := do
+  match fuel with
+  | 0 => none
+  | fuel + 1 => do
+      let hLengthExtraSize : lengthExtra.size = 29 := by decide
+      let hDistBasesSize : distBases.size = 30 := by decide
+      let hDistExtraSize : distExtra.size = 30 := by decide
+      let (sym, br') ← decodeFixedLiteralSym br
+      if sym < 256 then
+        decodeFixedBlockFuel fuel br' (out.push (u8 sym))
+      else if sym == 256 then
+        return (br', out)
+      else if hlen : 257 ≤ sym ∧ sym ≤ 285 then
+        let idx := sym - 257
+        have hidxle : idx ≤ 28 := by
+          dsimp [idx]
+          omega
+        have hidxlt : idx < 29 := Nat.lt_succ_of_le hidxle
+        have hidxExtra : idx < lengthExtra.size := by simpa [hLengthExtraSize] using hidxlt
+        let extra := Array.getInternal lengthExtra idx hidxExtra
+        if hbits : br'.bitIndex + extra <= br'.data.size * 8 then
+          let (len, br'') := decodeLength sym br' hlen (by simpa using hbits)
+          let (distSym, br''') ← decodeFixedDistanceSym br''
+          if hdist : distSym < distBases.size then
+            let extraD := Array.getInternal distExtra distSym (by
+              simpa [hDistExtraSize, hDistBasesSize] using hdist)
+            if hbitsD : br'''.bitIndex + extraD <= br'''.data.size * 8 then
+              let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa using hbitsD)
+              let out' ← copyDistance out distance len
+              decodeFixedBlockFuel fuel br'''' out'
+            else
+              none
+          else
+            none
+        else
+          none
+      else
+        none
+
+def decodeFixedBlock (br : BitReader) (out : ByteArray) :
+    Option (BitReader × ByteArray) :=
+  match decodeFixedLiteralBlock br out with
+  | some res => some res
+  | none => decodeFixedBlockFuel (br.data.size * 8 + 1) br out
 
 def fixedLitLenLengths : Array Nat :=
   Id.run do
