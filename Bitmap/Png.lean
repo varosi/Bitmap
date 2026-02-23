@@ -66,13 +66,19 @@ def crc32Chunk (typBytes data : ByteArray) : UInt32 :=
 
 def adler32 (bytes : ByteArray) : UInt32 :=
   Id.run do
-    let mod : Nat := 65521
-    let mut a : Nat := 1
-    let mut b : Nat := 0
+    let mod : UInt32 := 65521
+    let mut a : UInt32 := 1
+    let mut b : UInt32 := 0
     for byte in bytes do
-      a := (a + byte.toNat) % mod
-      b := (b + a) % mod
-    return UInt32.ofNat ((b <<< 16) + a)
+      a := a + UInt32.ofNat byte.toNat
+      if a >= mod then
+        a := a - mod
+      b := b + a
+      if b >= mod then
+        b := b - mod
+      if b >= mod then
+        b := b - mod
+    return (b <<< 16) + a
 
 def pngSignature : ByteArray :=
   ByteArray.mk #[
