@@ -2017,6 +2017,39 @@ lemma readBitsAux_succ (br : BitReader) (k : Nat) :
       simp [BitReader.readBitsAuxAcc, hbit]
       simpa using (readBitsAuxAcc_eq (br := br') (n := k) (shift := 1) (acc := bit))
 
+lemma readBitsAux_split (br : BitReader) (k n : Nat) :
+    let (bits1, br1) := br.readBitsAux k
+    let (bits2, br2) := br1.readBitsAux n
+    br.readBitsAux (k + n) = (bits1 ||| (bits2 <<< k), br2) := by
+  induction k generalizing br with
+  | zero =>
+      simp [BitReader.readBitsAux, BitReader.readBitsAuxAcc]
+  | succ k ih =>
+      cases hbit : br.readBit with
+      | mk bit br' =>
+          -- unfold `readBitsAux` once
+          cases hrest : br'.readBitsAux k with
+          | mk rest br1 =>
+              cases hrest2 : br1.readBitsAux n with
+              | mk bits2 br2 =>
+                  have ih' : br'.readBitsAux (k + n) = (rest ||| (bits2 <<< k), br2) := by
+                    simpa [hrest, hrest2] using (ih (br := br'))
+                  -- expand the left-hand side
+                  have hsum : k.succ + n = k + n + 1 := by omega
+                  -- combine and normalize shifts
+                  have hcalc :
+                      br.readBitsAux (k.succ + n) =
+                        (bit ||| (rest <<< 1) ||| (bits2 <<< (k + 1)), br2) := by
+                    calc
+                      br.readBitsAux (k.succ + n)
+                          = (bit ||| ((rest ||| (bits2 <<< k)) <<< 1), br2) := by
+                              simp [readBitsAux_succ, hbit, hsum, ih']
+                      _ = (bit ||| (rest <<< 1) ||| (bits2 <<< (k + 1)), br2) := by
+                              simp [Nat.or_assoc, Nat.shiftLeft_or_distrib, shiftLeft_shiftLeft]
+                  -- rewrite the goal to the explicit form
+                  simpa [readBitsAux_succ, hbit, hrest, hrest2, Nat.add_assoc, Nat.add_left_comm,
+                    Nat.add_comm] using hcalc
+
 lemma readBits_succ_eq (br : BitReader) (k : Nat)
     (h : br.bitIndex + (k + 1) ≤ br.data.size * 8)
     (bit : Nat) (br' : BitReader) (hbit : br.readBit = (bit, br'))
@@ -2043,6 +2076,98 @@ lemma readBits_within_byte_bound (br : BitReader) (n : Nat)
 
 -- Reading `n` bits that stay strictly within the current byte.
 set_option linter.unnecessarySimpa false
+lemma readBitsAux_within_byte_lt (br : BitReader) (n : Nat)
+    (hspan : br.bitPos + n < 8) (hlt : br.bytePos < br.data.size) :
+    let byte := br.data.get br.bytePos hlt
+    let bits := (byte.toNat >>> br.bitPos) % 2 ^ n
+    br.readBitsAux n =
+      (bits,
+        { data := br.data
+          bytePos := br.bytePos
+          bitPos := br.bitPos + n
+          hpos := br.hpos
+          hend := by
+            intro hEq
+            have : False := by
+              simpa [hEq] using hlt
+            exact (False.elim this)
+          hbit := hspan }) := by
+  classical
+  induction n generalizing br with
+  | zero =>
+      have hnext : br.bitPos + 0 ≠ 8 := by
+        exact ne_of_lt br.hbit
+      simp [BitReader.readBitsAux, BitReader.readBitsAuxAcc, Nat.pow_zero, Nat.mod_one]
+  | succ n ih =>
+      -- reading one bit keeps us inside the same byte
+      have hnext1 : br.bitPos + 1 ≠ 8 := by
+        have hlt1 : br.bitPos + 1 < 8 := by
+          have : br.bitPos + 1 ≤ br.bitPos + (n + 1) := by omega
+          exact lt_of_le_of_lt this hspan
+        exact ne_of_lt hlt1
+      -- define the reader after one bit
+      let br1 : BitReader :=
+        { data := br.data
+          bytePos := br.bytePos
+          bitPos := br.bitPos + 1
+          hpos := br.hpos
+          hend := by
+            intro hEq
+            have : False := by
+              simpa [hEq] using hlt
+            exact (False.elim this)
+          hbit := by
+            have hle : br.bitPos + 1 ≤ 8 := by
+              exact Nat.le_of_lt (by omega)
+            exact lt_of_le_of_ne hle hnext1 }
+      have hbit :
+          br.readBit =
+            (((br.data.get br.bytePos hlt).toNat >>> br.bitPos) &&& 1, br1) := by
+        have hEq : br.bytePos ≠ br.data.size := by
+          exact ne_of_lt hlt
+        simp [BitReader.readBit, hEq, hnext1, br1]
+      have hspan' : br1.bitPos + n < 8 := by
+        simpa [br1, Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using hspan
+      have ih' := ih (br := br1) (hspan := hspan') (hlt := hlt)
+      have hcalc :
+          br.readBitsAux (n + 1) =
+            (((br.data.get br.bytePos hlt).toNat >>> br.bitPos) &&& 1 |||
+                ((br1.readBitsAux n).1 <<< 1), (br1.readBitsAux n).2) := by
+        simpa [readBitsAux_succ, hbit] using (readBitsAux_succ (br := br) (k := n))
+      have hshift :
+          ((br.data.get br.bytePos hlt).toNat >>> br.bitPos) >>> 1 =
+            (br.data.get br.bytePos hlt).toNat >>> (br.bitPos + 1) := by
+        simpa [Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using
+          (Nat.shiftRight_add (br.data.get br.bytePos hlt).toNat br.bitPos 1).symm
+      have hbits :
+          ((br.data.get br.bytePos hlt).toNat >>> br.bitPos) % 2 ^ (n + 1) =
+            (((br.data.get br.bytePos hlt).toNat >>> br.bitPos) % 2) |||
+              ((((br.data.get br.bytePos hlt).toNat >>> (br.bitPos + 1)) % 2 ^ n) <<< 1) := by
+        have h :=
+          mod_two_pow_decomp ((br.data.get br.bytePos hlt).toNat >>> br.bitPos) n
+        simpa [hshift] using h
+      -- finish
+      let br2 : BitReader :=
+        { data := br.data
+          bytePos := br.bytePos
+          bitPos := n + (br.bitPos + 1)
+          hpos := br.hpos
+          hend := by
+            intro hEq
+            have : False := by
+              simpa [hEq] using hlt
+            exact (False.elim this)
+          hbit := by
+            have hlt1 : br.bitPos + 1 + n < 8 := by
+              simpa [Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using hspan
+            simpa [Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using hlt1 }
+      have hcalc' : br.readBitsAux (n + 1) =
+          (((br.data.get br.bytePos hlt).toNat >>> br.bitPos) &&& 1 |||
+              ((((br.data.get br.bytePos hlt).toNat >>> (br.bitPos + 1)) % 2 ^ n) <<< 1), br2) := by
+        simpa [ih', br1, br2, Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using hcalc
+      simpa [hbits, Nat.and_one_is_mod, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm]
+        using hcalc'
+
 lemma readBits_within_byte_lt (br : BitReader) (n : Nat)
     (hspan : br.bitPos + n < 8) (hlt : br.bytePos < br.data.size) :
     let byte := br.data.get br.bytePos hlt

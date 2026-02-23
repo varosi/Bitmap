@@ -371,8 +371,9 @@ def BitReader.readBitsFastU32 (br : BitReader) (n : Nat)
       let w2 : UInt32 := UInt32.shiftLeft (UInt32.ofNat b2.toNat) (UInt32.ofNat 16)
       let w3 : UInt32 := UInt32.shiftLeft (UInt32.ofNat b3.toNat) (UInt32.ofNat 24)
       let word : UInt32 := w0 ||| w1 ||| w2 ||| w3
-      let mask : UInt32 := (UInt32.shiftLeft (1 : UInt32) (UInt32.ofNat n)) - 1
-      let bitsU : UInt32 := (UInt32.shiftRight word (UInt32.ofNat br.bitPos)) &&& mask
+      let bitsU : UInt32 :=
+        (UInt32.shiftRight word (UInt32.ofNat br.bitPos)) %
+          (UInt32.shiftLeft (1 : UInt32) (UInt32.ofNat n))
       let bits : Nat := bitsU.toNat
       let next := br.bitPos + n
       let mk (nextBytePos nextBitPos : Nat) (hbit : nextBitPos < 8)
@@ -410,7 +411,6 @@ def BitReader.readBitsFastU32 (br : BitReader) (n : Nat)
     · exact br.readBitsAux n
   · exact br.readBitsAux n
 
-@[implemented_by BitReader.readBitsFastU32]
 def BitReader.readBits (br : BitReader) (n : Nat)
     (_h : br.bitIndex + n <= br.data.size * 8) : Nat × BitReader := by
   exact br.readBitsAux n
