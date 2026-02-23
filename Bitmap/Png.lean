@@ -354,6 +354,63 @@ def BitReader.readBitsAuxAcc (br : BitReader) (n shift acc : Nat) : Nat × BitRe
 def BitReader.readBitsAux (br : BitReader) (n : Nat) : Nat × BitReader :=
   readBitsAuxAcc br n 0 0
 
+-- Fast path for small bit windows using a 32-bit byte window.
+def BitReader.readBitsFastU32 (br : BitReader) (n : Nat)
+    (_h : br.bitIndex + n <= br.data.size * 8) : Nat × BitReader := by
+  by_cases hzero : n = 0
+  · subst hzero
+    exact (0, br)
+  by_cases hsmall : n <= 24
+  · by_cases hnext : br.bytePos + 3 < br.data.size
+    · let b0 := br.data.get br.bytePos (by omega)
+      let b1 := br.data.get (br.bytePos + 1) (by omega)
+      let b2 := br.data.get (br.bytePos + 2) (by omega)
+      let b3 := br.data.get (br.bytePos + 3) (by omega)
+      let w0 : UInt32 := UInt32.ofNat b0.toNat
+      let w1 : UInt32 := UInt32.shiftLeft (UInt32.ofNat b1.toNat) (UInt32.ofNat 8)
+      let w2 : UInt32 := UInt32.shiftLeft (UInt32.ofNat b2.toNat) (UInt32.ofNat 16)
+      let w3 : UInt32 := UInt32.shiftLeft (UInt32.ofNat b3.toNat) (UInt32.ofNat 24)
+      let word : UInt32 := w0 ||| w1 ||| w2 ||| w3
+      let mask : UInt32 := (UInt32.shiftLeft (1 : UInt32) (UInt32.ofNat n)) - 1
+      let bitsU : UInt32 := (UInt32.shiftRight word (UInt32.ofNat br.bitPos)) &&& mask
+      let bits : Nat := bitsU.toNat
+      let next := br.bitPos + n
+      let mk (nextBytePos nextBitPos : Nat) (hbit : nextBitPos < 8)
+          (hlt : nextBytePos < br.data.size) : Nat × BitReader :=
+        (bits,
+          { data := br.data
+            bytePos := nextBytePos
+            bitPos := nextBitPos
+            hpos := Nat.le_of_lt hlt
+            hend := by
+              intro hEq
+              exact (False.elim ((Nat.ne_of_lt hlt) hEq))
+            hbit := hbit })
+      by_cases hlt1 : next < 8
+      · have hlt : br.bytePos < br.data.size := by omega
+        exact mk br.bytePos next hlt1 hlt
+      · by_cases hlt2 : next < 16
+        · have hbit' : next - 8 < 8 := by omega
+          have hlt : br.bytePos + 1 < br.data.size := by omega
+          exact mk (br.bytePos + 1) (next - 8) hbit' hlt
+        · by_cases hlt3 : next < 24
+          · have hbit' : next - 16 < 8 := by omega
+            have hlt : br.bytePos + 2 < br.data.size := by omega
+            exact mk (br.bytePos + 2) (next - 16) hbit' hlt
+          · have hnextle : next <= 31 := by
+              have hb : br.bitPos ≤ 7 := (Nat.lt_succ_iff.mp br.hbit)
+              have hn : n <= 24 := hsmall
+              have : br.bitPos + n <= 7 + 24 := by omega
+              simpa [next] using this
+            have hbit' : next - 24 <= 7 := by omega
+            have hbit'' : next - 24 < 8 := by
+              exact lt_of_le_of_lt hbit' (by decide)
+            have hlt : br.bytePos + 3 < br.data.size := by omega
+            exact mk (br.bytePos + 3) (next - 24) hbit'' hlt
+    · exact br.readBitsAux n
+  · exact br.readBitsAux n
+
+@[implemented_by BitReader.readBitsFastU32]
 def BitReader.readBits (br : BitReader) (n : Nat)
     (_h : br.bitIndex + n <= br.data.size * 8) : Nat × BitReader := by
   exact br.readBitsAux n
