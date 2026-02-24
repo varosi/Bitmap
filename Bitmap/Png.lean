@@ -64,6 +64,26 @@ def crc32 (bytes : ByteArray) : UInt32 :=
 def crc32Chunk (typBytes data : ByteArray) : UInt32 :=
   (crc32Update (crc32Update 0xFFFFFFFF typBytes) data) ^^^ 0xFFFFFFFF
 
+def adler32Fast (bytes : ByteArray) : UInt32 :=
+  Id.run do
+    let mod : Nat := 65521
+    let chunk : Nat := 5552
+    let data := bytes.data
+    let mut i : Nat := 0
+    let mut a : Nat := 1
+    let mut b : Nat := 0
+    while i < data.size do
+      let stop := Nat.min data.size (i + chunk)
+      while i < stop do
+        let byte := data[i]!
+        a := a + byte.toNat
+        b := b + a
+        i := i + 1
+      a := a % mod
+      b := b % mod
+    return UInt32.ofNat ((b <<< 16) + a)
+
+@[implemented_by adler32Fast]
 def adler32 (bytes : ByteArray) : UInt32 :=
   Id.run do
     let mod : UInt32 := 65521
