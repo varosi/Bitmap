@@ -271,6 +271,75 @@ def fixedLitLenRevCodeFast (sym : Nat) : Nat × Nat :=
     let (code, len) := fixedLitLenCode sym
     (reverseBits code len, len)
 
+-- Map a deflate match length in [3, 258] to
+-- (literal/length symbol, extra bits value, extra bits width).
+def fixedLenMatchInfo (len : Nat) : Nat × Nat × Nat :=
+  if len <= 10 then
+    (len + 254, 0, 0)
+  else if len <= 12 then
+    (265, len - 11, 1)
+  else if len <= 14 then
+    (266, len - 13, 1)
+  else if len <= 16 then
+    (267, len - 15, 1)
+  else if len <= 18 then
+    (268, len - 17, 1)
+  else if len <= 22 then
+    (269, len - 19, 2)
+  else if len <= 26 then
+    (270, len - 23, 2)
+  else if len <= 30 then
+    (271, len - 27, 2)
+  else if len <= 34 then
+    (272, len - 31, 2)
+  else if len <= 42 then
+    (273, len - 35, 3)
+  else if len <= 50 then
+    (274, len - 43, 3)
+  else if len <= 58 then
+    (275, len - 51, 3)
+  else if len <= 66 then
+    (276, len - 59, 3)
+  else if len <= 82 then
+    (277, len - 67, 4)
+  else if len <= 98 then
+    (278, len - 83, 4)
+  else if len <= 114 then
+    (279, len - 99, 4)
+  else if len <= 130 then
+    (280, len - 115, 4)
+  else if len <= 162 then
+    (281, len - 131, 5)
+  else if len <= 194 then
+    (282, len - 163, 5)
+  else if len <= 226 then
+    (283, len - 195, 5)
+  else if len <= 257 then
+    (284, len - 227, 5)
+  else
+    (285, 0, 0)
+
+@[inline] def BitWriter.writeFixedLiteralFast (bw : BitWriter) (b : UInt8) : BitWriter :=
+  let (bits, len) := fixedLitLenRevCodeFast b.toNat
+  bw.writeBitsFast bits len
+
+@[inline] def BitWriter.writeFixedMatchDist1Fast (bw : BitWriter) (matchLen : Nat) : BitWriter :=
+  let (sym, extraBits, extraLen) := fixedLenMatchInfo matchLen
+  let (symBits, symLen) := fixedLitLenRevCodeFast sym
+  let bw := bw.writeBitsFast symBits symLen
+  let bw := bw.writeBitsFast extraBits extraLen
+  -- Fixed-Huffman distance symbol 0 encodes distance = 1.
+  bw.writeBitsFast 0 5
+
+@[inline] def chooseFixedMatchChunkLen (remaining : Nat) : Nat :=
+  if remaining > 258 then
+    let r := remaining % 258
+    if r == 1 then 256
+    else if r == 2 then 257
+    else 258
+  else
+    remaining
+
 def deflateFixedAuxFast (data : Array UInt8) (i : Nat) (bw : BitWriter) : BitWriter :=
   if h : i < data.size then
     let b := data[i]
@@ -289,7 +358,40 @@ def deflateFixedFast (raw : ByteArray) : ByteArray :=
   let bw0 := BitWriter.empty
   let bw1 := bw0.writeBits 1 1
   let bw2 := bw1.writeBits 1 2
-  let bw3 := deflateFixedAuxFast raw.data 0 bw2
+  let bw3 := Id.run do
+    let data := raw.data
+    let mut i : Nat := 0
+    let mut bw := bw2
+    while i < data.size do
+      let b := data[i]!
+      let mut j := i + 1
+      let mut scanning := true
+      while scanning do
+        if j < data.size then
+          if data[j]! == b then
+            j := j + 1
+          else
+            scanning := false
+        else
+          scanning := false
+      let runLen := j - i
+      if runLen >= 4 then
+        bw := bw.writeFixedLiteralFast b
+        let mut remaining := runLen - 1
+        while remaining >= 3 do
+          let chunk := chooseFixedMatchChunkLen remaining
+          bw := bw.writeFixedMatchDist1Fast chunk
+          remaining := remaining - chunk
+        while remaining > 0 do
+          bw := bw.writeFixedLiteralFast b
+          remaining := remaining - 1
+      else
+        let mut k : Nat := 0
+        while k < runLen do
+          bw := bw.writeFixedLiteralFast b
+          k := k + 1
+      i := j
+    return bw
   let (eobBits, eobLen) := fixedLitLenRevCodeFast 256
   let bw4 := bw3.writeBits eobBits eobLen
   bw4.flush
@@ -627,6 +729,13 @@ def distExtra : Array Nat :=
 def copyDistanceFast (out : ByteArray) (distance len : Nat) : Option ByteArray :=
   if _hbad : distance = 0 ∨ distance > out.size then
     none
+  else if distance = 1 then
+    some <| Id.run do
+      let last := out.get! (out.size - 1)
+      let mut out := out
+      for _ in [0:len] do
+        out := out.push last
+      return out
   else
     some <| Id.run do
       let total := out.size + len
