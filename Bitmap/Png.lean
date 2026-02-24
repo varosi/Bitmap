@@ -933,11 +933,25 @@ def decodeFixedBlockFuel (fuel : Nat) (br : BitReader) (out : ByteArray) :
       else
         none
 
-def decodeFixedBlock (br : BitReader) (out : ByteArray) :
+def decodeFixedBlockFast (br : BitReader) (out : ByteArray) :
     Option (BitReader × ByteArray) :=
   match decodeFixedLiteralBlock br out with
   | some res => some res
   | none => decodeFixedBlockFuel (br.data.size * 8 + 1) br out
+
+def decodeFixedBlockSpec (br : BitReader) (out : ByteArray) :
+    Option (BitReader × ByteArray) := do
+  match decodeFixedLiteralBlock br out with
+  | some res => some res
+  | none =>
+      let litLenTable := fixedLitLenHuffman
+      let distTable ← mkHuffman (Array.replicate 32 5)
+      decodeCompressedBlock litLenTable distTable br out
+
+@[implemented_by decodeFixedBlockFast]
+def decodeFixedBlock (br : BitReader) (out : ByteArray) :
+    Option (BitReader × ByteArray) :=
+  decodeFixedBlockSpec br out
 
 def fixedLitLenLengths : Array Nat :=
   Id.run do
@@ -991,16 +1005,9 @@ def zlibDecompressLoopFuel (fuel : Nat) (br : BitReader) (out : ByteArray) :
         else
           none
       else if btype == 1 then
-        match decodeFixedLiteralBlock br out with
-        | some (br', out') =>
-            br := br'
-            out := out'
-        | none =>
-            let litLenTable := fixedLitLenHuffman
-            let distTable ← mkHuffman (Array.replicate 32 5)
-            let (br', out') ← decodeCompressedBlock litLenTable distTable br out
-            br := br'
-            out := out'
+        let (br', out') ← decodeFixedBlock br out
+        br := br'
+        out := out'
       else if btype == 2 then
         let (litLenTable, distTable, br') ← readDynamicTables br
         let (br'', out') ← decodeCompressedBlock litLenTable distTable br' out

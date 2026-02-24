@@ -1702,9 +1702,12 @@ lemma zlibDecompress_zlibCompressFixed (raw : ByteArray)
       zlibDecompressLoop streamReader0 ByteArray.empty =
         some (streamReaderFinal, raw) := by
     -- unfold and simplify the fixed-block path
-    have hdecode' : decodeFixedLiteralBlock streamReaderHeader ByteArray.empty =
+    have hdecodeLit : decodeFixedLiteralBlock streamReaderHeader ByteArray.empty =
         some (streamReaderFinal, raw) := by
       simpa [streamReaderFinal, hdeflateTotal, streamWriter] using hdecode
+    have hdecode' : decodeFixedBlock streamReaderHeader ByteArray.empty =
+        some (streamReaderFinal, raw) := by
+      simp [decodeFixedBlock, decodeFixedBlockSpec, hdecodeLit]
     -- Evaluate the loop body (bfinal = 1, btype = 1).
     have hbfinal : (3 % 2) = 1 := by decide
     have hbtype' : ((3 >>> 1) % 4) = 1 := by decide
