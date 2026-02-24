@@ -868,6 +868,36 @@ def decodeFixedLiteralSym (br : BitReader) : Option (Nat × BitReader) := do
           | _ =>
               none
 
+-- Decode a single fixed-Huffman literal/length symbol using a 9-bit table peek.
+def decodeFixedLiteralSymFast9 (br : BitReader) : Option (Nat × BitReader) := do
+  if h9 : br.bitIndex + 9 <= br.data.size * 8 then
+    let (bits9, br9) := br.readBitsFastU32 9 h9
+    let bits7 := bits9 % 2 ^ 7
+    match fixedLitLenRow7[bits7]? with
+    | some (some sym) =>
+        if h7 : br.bitIndex + 7 <= br.data.size * 8 then
+          let br7 := (br.readBitsFastU32 7 h7).2
+          return (sym, br7)
+        else
+          none
+    | _ =>
+        let bits8 := bits9 % 2 ^ 8
+        match fixedLitLenRow8[bits8]? with
+        | some (some sym) =>
+            if h8 : br.bitIndex + 8 <= br.data.size * 8 then
+              let br8 := (br.readBitsFastU32 8 h8).2
+              return (sym, br8)
+            else
+              none
+        | _ =>
+            match fixedLitLenRow9[bits9]? with
+            | some (some sym) =>
+                return (sym, br9)
+            | _ =>
+                none
+  else
+    decodeFixedLiteralSym br
+
 -- Decode a fixed-Huffman block that is restricted to literals and end-of-block.
 def decodeFixedLiteralBlockFuel (fuel : Nat) (br : BitReader) (out : ByteArray) :
     Option (BitReader × ByteArray) := do
@@ -933,11 +963,62 @@ def decodeFixedBlockFuel (fuel : Nat) (br : BitReader) (out : ByteArray) :
       else
         none
 
-def decodeFixedBlock (br : BitReader) (out : ByteArray) :
+def decodeFixedBlockFuelFast (fuel : Nat) (br : BitReader) (out : ByteArray) :
+    Option (BitReader × ByteArray) := do
+  match fuel with
+  | 0 => none
+  | fuel + 1 => do
+      let hLengthExtraSize : lengthExtra.size = 29 := by decide
+      let hDistBasesSize : distBases.size = 30 := by decide
+      let hDistExtraSize : distExtra.size = 30 := by decide
+      let (sym, br') ← decodeFixedLiteralSymFast9 br
+      if sym < 256 then
+        decodeFixedBlockFuelFast fuel br' (out.push (u8 sym))
+      else if sym == 256 then
+        return (br', out)
+      else if hlen : 257 ≤ sym ∧ sym ≤ 285 then
+        let idx := sym - 257
+        have hidxle : idx ≤ 28 := by
+          dsimp [idx]
+          omega
+        have hidxlt : idx < 29 := Nat.lt_succ_of_le hidxle
+        have hidxExtra : idx < lengthExtra.size := by simpa [hLengthExtraSize] using hidxlt
+        let extra := Array.getInternal lengthExtra idx hidxExtra
+        if hbits : br'.bitIndex + extra <= br'.data.size * 8 then
+          let (len, br'') := decodeLength sym br' hlen (by simpa using hbits)
+          let (distSym, br''') ← decodeFixedDistanceSym br''
+          if hdist : distSym < distBases.size then
+            let extraD := Array.getInternal distExtra distSym (by
+              simpa [hDistExtraSize, hDistBasesSize] using hdist)
+            if hbitsD : br'''.bitIndex + extraD <= br'''.data.size * 8 then
+              let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa using hbitsD)
+              let out' ← copyDistance out distance len
+              decodeFixedBlockFuelFast fuel br'''' out'
+            else
+              none
+          else
+            none
+        else
+          none
+      else
+        none
+
+def decodeFixedBlockFast (br : BitReader) (out : ByteArray) :
+    Option (BitReader × ByteArray) :=
+  match decodeFixedLiteralBlock br out with
+  | some res => some res
+  | none => decodeFixedBlockFuelFast (br.data.size * 8 + 1) br out
+
+def decodeFixedBlockSpec (br : BitReader) (out : ByteArray) :
     Option (BitReader × ByteArray) :=
   match decodeFixedLiteralBlock br out with
   | some res => some res
   | none => decodeFixedBlockFuel (br.data.size * 8 + 1) br out
+
+@[implemented_by decodeFixedBlockFast]
+def decodeFixedBlock (br : BitReader) (out : ByteArray) :
+    Option (BitReader × ByteArray) :=
+  decodeFixedBlockSpec br out
 
 def fixedLitLenLengths : Array Nat :=
   Id.run do
