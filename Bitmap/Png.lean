@@ -259,6 +259,42 @@ decreasing_by
     exact Nat.sub_lt_sub_left (k := i) (m := data.size) (n := i + 1) hlt (Nat.lt_succ_self i)
   exact hle
 
+def fixedLitLenRevTable : Array (Nat × Nat) :=
+  Array.ofFn (fun i : Fin 288 =>
+    let (code, len) := fixedLitLenCode i.val
+    (reverseBits code len, len))
+
+def fixedLitLenRevCodeFast (sym : Nat) : Nat × Nat :=
+  if h : sym < fixedLitLenRevTable.size then
+    Array.getInternal fixedLitLenRevTable sym h
+  else
+    let (code, len) := fixedLitLenCode sym
+    (reverseBits code len, len)
+
+def deflateFixedAuxFast (data : Array UInt8) (i : Nat) (bw : BitWriter) : BitWriter :=
+  if h : i < data.size then
+    let b := data[i]
+    let (bits, len) := fixedLitLenRevCodeFast b.toNat
+    deflateFixedAuxFast data (i + 1) (bw.writeBitsFast bits len)
+  else
+    bw
+termination_by data.size - i
+decreasing_by
+  have hlt : i < data.size := h
+  have hle : data.size - (i + 1) < data.size - i := by
+    exact Nat.sub_lt_sub_left (k := i) (m := data.size) (n := i + 1) hlt (Nat.lt_succ_self i)
+  exact hle
+
+def deflateFixedFast (raw : ByteArray) : ByteArray :=
+  let bw0 := BitWriter.empty
+  let bw1 := bw0.writeBits 1 1
+  let bw2 := bw1.writeBits 1 2
+  let bw3 := deflateFixedAuxFast raw.data 0 bw2
+  let (eobBits, eobLen) := fixedLitLenRevCodeFast 256
+  let bw4 := bw3.writeBits eobBits eobLen
+  bw4.flush
+
+@[implemented_by deflateFixedFast]
 def deflateFixed (raw : ByteArray) : ByteArray :=
   let bw0 := BitWriter.empty
   let bw1 := bw0.writeBits 1 1
