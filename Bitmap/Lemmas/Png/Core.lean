@@ -1010,6 +1010,130 @@ lemma mod_two_pow_decomp (bits n : Nat) :
           exact not_lt_of_ge (Nat.succ_le_succ (Nat.le_of_not_gt hk))
         simp [hk, hk', hbit0, Nat.add_comm]
 
+-- Split low bits into a `k`-bit prefix and the remaining `n` bits.
+lemma mod_two_pow_split (bits k n : Nat) :
+    bits % 2 ^ (k + n) =
+      (bits % 2 ^ k) ||| (((bits >>> k) % 2 ^ n) <<< k) := by
+  apply Nat.eq_of_testBit_eq
+  intro i
+  by_cases hi : i < k + n
+  · by_cases hik : i < k
+    · -- lower `k` bits
+      have hright :
+          (((bits >>> k) % 2 ^ n) <<< k).testBit i = false := by
+        have hle : ¬ i ≥ k := by exact not_le_of_gt hik
+        simp [Nat.testBit_shiftLeft, hle]
+      have hleft :
+          (bits % 2 ^ (k + n)).testBit i = bits.testBit i := by
+        simp [Nat.testBit_mod_two_pow, hi]
+      have hlow :
+          (bits % 2 ^ k).testBit i = bits.testBit i := by
+        simp [Nat.testBit_mod_two_pow, hik]
+      simp [Nat.testBit_or, hleft, hlow, hright]
+    · have hge : k ≤ i := Nat.le_of_not_gt hik
+      have hleft :
+          (bits % 2 ^ (k + n)).testBit i = bits.testBit i := by
+        simp [Nat.testBit_mod_two_pow, hi]
+      have hlow :
+          (bits % 2 ^ k).testBit i = false := by
+        have hnk : ¬ i < k := by exact hik
+        simp [Nat.testBit_mod_two_pow, hnk]
+      have hshift :
+          (((bits >>> k) % 2 ^ n) <<< k).testBit i =
+            ((bits >>> k) % 2 ^ n).testBit (i - k) := by
+        have hge' : i ≥ k := hge
+        simp [Nat.testBit_shiftLeft, hge']
+      have hmid :
+          ((bits >>> k) % 2 ^ n).testBit (i - k) =
+            (bits >>> k).testBit (i - k) := by
+        have hi' : i - k < n := by
+          omega
+        simp [Nat.testBit_mod_two_pow, hi']
+      have hbit :
+          (bits >>> k).testBit (i - k) = bits.testBit i := by
+        have h := (Nat.testBit_shiftRight (x := bits) (i := k) (j := i - k))
+        have h' : k + (i - k) = i := by omega
+        calc
+          (bits >>> k).testBit (i - k)
+              = bits.testBit (k + (i - k)) := h
+          _ = bits.testBit i := by simp [h']
+      simp [Nat.testBit_or, hleft, hlow, hshift, hmid, hbit]
+  · -- outside the window: both sides are zero
+    have hnot : ¬ i < k + n := by exact hi
+    have hnk : ¬ i < k := by omega
+    have hnk' : ¬ i - k < n := by omega
+    have hleft :
+        (bits % 2 ^ (k + n)).testBit i = false := by
+      simp [Nat.testBit_mod_two_pow, hnot]
+    have hright1 :
+        (bits % 2 ^ k).testBit i = false := by
+      simp [Nat.testBit_mod_two_pow, hnk]
+    have hright2 :
+        (((bits >>> k) % 2 ^ n) <<< k).testBit i = false := by
+      have hge : i ≥ k := by omega
+      have hshift :
+          (((bits >>> k) % 2 ^ n) <<< k).testBit i =
+            ((bits >>> k) % 2 ^ n).testBit (i - k) := by
+        simp [Nat.testBit_shiftLeft, hge]
+      have hmod :
+          ((bits >>> k) % 2 ^ n).testBit (i - k) = false := by
+        simp [Nat.testBit_mod_two_pow, hnk']
+      simp [hshift, hmod]
+    simp [Nat.testBit_or, hleft, hright1, hright2]
+
+-- Assemble four bytes into a 32-bit little-endian Nat word.
+def wordNat (b0 b1 b2 b3 : UInt8) : Nat :=
+  b0.toNat ||| (b1.toNat <<< 8) ||| (b2.toNat <<< 16) ||| (b3.toNat <<< 24)
+
+-- Low bits of `wordNat` come from the first byte.
+lemma wordNat_testBit_lt8 (b0 b1 b2 b3 : UInt8) {i : Nat} (hi : i < 8) :
+    (wordNat b0 b1 b2 b3).testBit i = b0.toNat.testBit i := by
+  have h1 : (b1.toNat <<< 8).testBit i = false := by
+    have hle : ¬ i ≥ 8 := by exact not_le_of_gt hi
+    simp [Nat.testBit_shiftLeft, hle]
+  have h2 : (b2.toNat <<< 16).testBit i = false := by
+    have hle : ¬ i ≥ 16 := by
+      exact not_le_of_gt (lt_trans hi (by decide : (8 : Nat) < 16))
+    simp [Nat.testBit_shiftLeft, hle]
+  have h3 : (b3.toNat <<< 24).testBit i = false := by
+    have hle : ¬ i ≥ 24 := by
+      exact not_le_of_gt (lt_trans hi (by decide : (8 : Nat) < 24))
+    simp [Nat.testBit_shiftLeft, hle]
+  simp [wordNat, Nat.testBit_or, h1, h2, h3]
+
+-- Low `k` bits after shifting by `bitPos` are from `b0` when the window stays in the first byte.
+lemma wordNat_low_bits (b0 b1 b2 b3 : UInt8) (bitPos k : Nat)
+    (hbit : bitPos < 8) (hk : k ≤ 8 - bitPos) :
+    ((wordNat b0 b1 b2 b3 >>> bitPos) % 2 ^ k) =
+      ((b0.toNat >>> bitPos) % 2 ^ k) := by
+  apply Nat.eq_of_testBit_eq
+  intro i
+  by_cases hi : i < k
+  · have hlt : bitPos + i < 8 := by omega
+    have hleft :
+        ((wordNat b0 b1 b2 b3 >>> bitPos) % 2 ^ k).testBit i =
+          (wordNat b0 b1 b2 b3 >>> bitPos).testBit i := by
+      simp [Nat.testBit_mod_two_pow, hi]
+    have hright :
+        ((b0.toNat >>> bitPos) % 2 ^ k).testBit i =
+          (b0.toNat >>> bitPos).testBit i := by
+      simp [Nat.testBit_mod_two_pow, hi]
+    have hword :
+        (wordNat b0 b1 b2 b3 >>> bitPos).testBit i =
+          (wordNat b0 b1 b2 b3).testBit (bitPos + i) := by
+      simp [Nat.testBit_shiftRight]
+    have hb0 :
+        (b0.toNat >>> bitPos).testBit i =
+          b0.toNat.testBit (bitPos + i) := by
+      simp [Nat.testBit_shiftRight]
+    have hbyte :
+        (wordNat b0 b1 b2 b3).testBit (bitPos + i) =
+          b0.toNat.testBit (bitPos + i) := by
+      exact wordNat_testBit_lt8 b0 b1 b2 b3 hlt
+    simp [hleft, hright, hword, hb0, hbyte]
+  · have hnot : ¬ i < k := by exact hi
+    simp [Nat.testBit_mod_two_pow, hnot]
+
 -- Decompose a low `(n+1)`-bit window into the first `n` bits and the `n`-th bit.
 lemma mod_two_pow_decomp_high (bits n : Nat) :
     bits % 2 ^ (n + 1) =
@@ -2050,30 +2174,6 @@ lemma readBitsAux_split (br : BitReader) (k n : Nat) :
                   simpa [readBitsAux_succ, hbit, hrest, hrest2, Nat.add_assoc, Nat.add_left_comm,
                     Nat.add_comm] using hcalc
 
-lemma readBits_succ_eq (br : BitReader) (k : Nat)
-    (h : br.bitIndex + (k + 1) ≤ br.data.size * 8)
-    (bit : Nat) (br' : BitReader) (hbit : br.readBit = (bit, br'))
-    (hread' : br'.bitIndex + k ≤ br'.data.size * 8) :
-    br.readBits (k + 1) h =
-      (bit ||| ((br'.readBits k hread').1 <<< 1), (br'.readBits k hread').2) := by
-  -- unfold one step of `readBits`
-  simp [BitReader.readBits, readBitsAux_succ, hbit]
-
--- Bounds for reading `n` bits that stay within the current byte.
-lemma readBits_within_byte_bound (br : BitReader) (n : Nat)
-    (hspan : br.bitPos + n ≤ 8) (hlt : br.bytePos < br.data.size) :
-    br.bitIndex + n ≤ br.data.size * 8 := by
-  have hpos' : br.bytePos + 1 ≤ br.data.size := Nat.succ_le_of_lt hlt
-  have hle1 : br.bytePos * 8 + (br.bitPos + n) ≤ br.bytePos * 8 + 8 := by
-    exact Nat.add_le_add_left hspan _
-  have hle2 : br.bytePos * 8 + 8 ≤ br.data.size * 8 := by
-    have hmul : (br.bytePos + 1) * 8 ≤ br.data.size * 8 :=
-      Nat.mul_le_mul_right 8 hpos'
-    simpa [Nat.mul_add, Nat.add_mul, Nat.mul_comm, Nat.mul_left_comm, Nat.mul_assoc] using hmul
-  have hle3 : br.bitIndex + n ≤ br.bytePos * 8 + (br.bitPos + n) := by
-    simp [BitReader.bitIndex, Nat.add_assoc, Nat.add_comm]
-  exact le_trans (le_trans hle3 hle1) hle2
-
 -- Reading `n` bits that stay strictly within the current byte.
 set_option linter.unnecessarySimpa false
 lemma readBitsAux_within_byte_lt (br : BitReader) (n : Nat)
@@ -2168,6 +2268,1083 @@ lemma readBitsAux_within_byte_lt (br : BitReader) (n : Nat)
       simpa [hbits, Nat.and_one_is_mod, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm]
         using hcalc'
 
+-- Reading exactly to the next byte boundary.
+lemma readBitsAux_boundary (br : BitReader) (n : Nat)
+    (hspan : br.bitPos + n = 8) (hlt : br.bytePos < br.data.size) :
+    let byte := br.data.get br.bytePos hlt
+    let bits := (byte.toNat >>> br.bitPos) % 2 ^ n
+    br.readBitsAux n =
+      (bits,
+        { data := br.data
+          bytePos := br.bytePos + 1
+          bitPos := 0
+          hpos := Nat.succ_le_of_lt hlt
+          hend := by intro _; rfl
+          hbit := by decide }) := by
+  classical
+  induction n generalizing br with
+  | zero =>
+      -- impossible: `bitPos < 8`
+      have : False := by
+        have hbitpos : br.bitPos = 8 := by simpa using hspan
+        exact (Nat.ne_of_lt br.hbit) hbitpos
+      exact (False.elim this)
+  | succ n ih =>
+      by_cases h7 : br.bitPos = 7
+      · -- boundary bit: the remainder is empty
+        have hn : n = 0 := by omega
+        subst hn
+        have hEq0 : br.bytePos ≠ br.data.size := by exact ne_of_lt hlt
+        have hnext : br.bitPos + 1 = 8 := by simpa [h7]
+        simp [BitReader.readBitsAux, BitReader.readBitsAuxAcc, BitReader.readBit, hEq0, hnext,
+          Nat.pow_one, Nat.and_one_is_mod]
+      · -- still within the same byte; apply IH to the remainder
+        have hEq0 : br.bytePos ≠ br.data.size := by exact ne_of_lt hlt
+        have hnext : br.bitPos + 1 ≠ 8 := by
+          intro h
+          exact h7 (by omega)
+        let br1 : BitReader :=
+          { data := br.data
+            bytePos := br.bytePos
+            bitPos := br.bitPos + 1
+            hpos := br.hpos
+            hend := by
+              intro hEq
+              have : False := by
+                simpa [hEq] using hlt
+              exact (False.elim this)
+            hbit := by
+              have hle : br.bitPos + 1 ≤ 8 := by
+                exact Nat.le_of_lt (by omega)
+              exact lt_of_le_of_ne hle (by
+                intro h
+                exact h7 (by omega)) }
+        have hreadBit :
+            br.readBit =
+              (((br.data.get br.bytePos hlt).toNat >>> br.bitPos) &&& 1, br1) := by
+          simp [BitReader.readBit, hEq0, hnext, br1]
+        have hspan' : br1.bitPos + n = 8 := by
+          have : br.bitPos + (n + 1) = 8 := hspan
+          simpa [br1] using (by omega : br.bitPos + 1 + n = 8)
+        have ih' :=
+          ih (br := br1) (hspan := by simpa [br1] using hspan') (hlt := by simpa [br1] using hlt)
+        have hcalc :
+            br.readBitsAux (n + 1) =
+              (((br.data.get br.bytePos hlt).toNat >>> br.bitPos) &&& 1 |||
+                  ((br1.readBitsAux n).1 <<< 1), (br1.readBitsAux n).2) := by
+          simpa [readBitsAux_succ, hreadBit] using (readBitsAux_succ (br := br) (k := n))
+        have hshift :
+            ((br.data.get br.bytePos hlt).toNat >>> br.bitPos) >>> 1 =
+              (br.data.get br.bytePos hlt).toNat >>> (br.bitPos + 1) := by
+          simpa [Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using
+            (Nat.shiftRight_add (br.data.get br.bytePos hlt).toNat br.bitPos 1).symm
+        have hbits :
+            ((br.data.get br.bytePos hlt).toNat >>> br.bitPos) % 2 ^ (n + 1) =
+              (((br.data.get br.bytePos hlt).toNat >>> br.bitPos) % 2) |||
+                ((((br.data.get br.bytePos hlt).toNat >>> (br.bitPos + 1)) % 2 ^ n) <<< 1) := by
+          have h :=
+            mod_two_pow_decomp ((br.data.get br.bytePos hlt).toNat >>> br.bitPos) n
+          simpa [hshift] using h
+        have hcalc' : br.readBitsAux (n + 1) =
+            (((br.data.get br.bytePos hlt).toNat >>> br.bitPos) &&& 1 |||
+                ((((br.data.get br.bytePos hlt).toNat >>> (br.bitPos + 1)) % 2 ^ n) <<< 1),
+              { data := br.data
+                bytePos := br.bytePos + 1
+                bitPos := 0
+                hpos := Nat.succ_le_of_lt hlt
+                hend := by intro _; rfl
+                hbit := by decide }) := by
+          simpa [ih', br1, Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using hcalc
+        simpa [hbits, Nat.and_one_is_mod, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm]
+          using hcalc'
+
+-- `readBitsFastU32` agrees with `readBitsAux`.
+set_option maxHeartbeats 3000000
+set_option linter.constructorNameAsVariable false
+lemma readBitsFastU32_eq_readBitsAux (br : BitReader) (n : Nat)
+    (h : br.bitIndex + n ≤ br.data.size * 8) :
+    br.readBitsFastU32 n h = br.readBitsAux n := by
+  classical
+  by_cases hzero : n = 0
+  · subst hzero
+    simp [BitReader.readBitsFastU32, BitReader.readBitsAux, BitReader.readBitsAuxAcc]
+  by_cases hsmall : n ≤ 24
+  · by_cases hnext : br.bytePos + 3 < br.data.size
+    · -- fast window
+      let b0 := br.data.get br.bytePos (by omega)
+      let b1 := br.data.get (br.bytePos + 1) (by omega)
+      let b2 := br.data.get (br.bytePos + 2) (by omega)
+      let b3 := br.data.get (br.bytePos + 3) (by omega)
+      let word := wordNat b0 b1 b2 b3
+      let wU : UInt32 :=
+        b0.toUInt32 ||| b1.toUInt32.shiftLeft 8 ||| b2.toUInt32.shiftLeft 16 |||
+          b3.toUInt32.shiftLeft 24
+      have hb0 : b0.toNat < 2 ^ 8 := by simpa using (UInt8.toNat_lt b0)
+      have hb1 : b1.toNat < 2 ^ 8 := by simpa using (UInt8.toNat_lt b1)
+      have hb2 : b2.toNat < 2 ^ 8 := by simpa using (UInt8.toNat_lt b2)
+      have hb3 : b3.toNat < 2 ^ 8 := by simpa using (UInt8.toNat_lt b3)
+      -- interpret the UInt32 computation as Nat
+      have hbitsNat :
+          (let w0 : UInt32 := UInt32.ofNat b0.toNat
+           let w1 : UInt32 := UInt32.shiftLeft (UInt32.ofNat b1.toNat) (UInt32.ofNat 8)
+           let w2 : UInt32 := UInt32.shiftLeft (UInt32.ofNat b2.toNat) (UInt32.ofNat 16)
+           let w3 : UInt32 := UInt32.shiftLeft (UInt32.ofNat b3.toNat) (UInt32.ofNat 24)
+           let w : UInt32 := w0 ||| w1 ||| w2 ||| w3
+           let bitsU : UInt32 :=
+             (UInt32.shiftRight w (UInt32.ofNat br.bitPos)) %
+               (UInt32.shiftLeft (1 : UInt32) (UInt32.ofNat n))
+           bitsU.toNat) =
+            (word >>> br.bitPos) % 2 ^ n := by
+        -- simplify shifts and casts
+        have hb0_32 : b0.toNat < 2 ^ 32 := lt_of_lt_of_le hb0 (by decide)
+        have hb1_32 : b1.toNat < 2 ^ 32 := lt_of_lt_of_le hb1 (by decide)
+        have hb2_32 : b2.toNat < 2 ^ 32 := lt_of_lt_of_le hb2 (by decide)
+        have hb3_32 : b3.toNat < 2 ^ 32 := lt_of_lt_of_le hb3 (by decide)
+        have hb1' : b1.toNat <<< 8 < 2 ^ 32 := by
+          have hpos : 0 < 2 ^ 8 := by decide
+          have hmul : b1.toNat * 2 ^ 8 < 2 ^ 8 * 2 ^ 8 := by
+            exact Nat.mul_lt_mul_of_pos_right hb1 hpos
+          simpa [Nat.shiftLeft_eq, Nat.pow_add, Nat.mul_assoc, Nat.mul_left_comm, Nat.mul_comm] using
+            lt_of_lt_of_le hmul (Nat.pow_le_pow_of_le (a := 2) (by decide) (by decide : (16 : Nat) ≤ 32))
+        have hb2' : b2.toNat <<< 16 < 2 ^ 32 := by
+          have hpos : 0 < 2 ^ 16 := by decide
+          have hmul : b2.toNat * 2 ^ 16 < 2 ^ 8 * 2 ^ 16 := by
+            exact Nat.mul_lt_mul_of_pos_right hb2 hpos
+          simpa [Nat.shiftLeft_eq, Nat.pow_add, Nat.mul_assoc, Nat.mul_left_comm, Nat.mul_comm] using
+            lt_of_lt_of_le hmul (Nat.pow_le_pow_of_le (a := 2) (by decide) (by decide : (24 : Nat) ≤ 32))
+        have hb3' : b3.toNat <<< 24 < 2 ^ 32 := by
+          have hpos : 0 < 2 ^ 24 := by decide
+          have hmul : b3.toNat * 2 ^ 24 < 2 ^ 8 * 2 ^ 24 := by
+            exact Nat.mul_lt_mul_of_pos_right hb3 hpos
+          simpa [Nat.shiftLeft_eq, Nat.pow_add, Nat.mul_assoc, Nat.mul_left_comm, Nat.mul_comm] using hmul
+        have htoNat_b0 : (UInt32.ofNat b0.toNat).toNat = b0.toNat := by
+          simpa using (UInt32.toNat_ofNat_of_lt' hb0_32)
+        have htoNat_b1 : (UInt32.ofNat b1.toNat).toNat = b1.toNat := by
+          simpa using (UInt32.toNat_ofNat_of_lt' hb1_32)
+        have htoNat_b2 : (UInt32.ofNat b2.toNat).toNat = b2.toNat := by
+          simpa using (UInt32.toNat_ofNat_of_lt' hb2_32)
+        have htoNat_b3 : (UInt32.ofNat b3.toNat).toNat = b3.toNat := by
+          simpa using (UInt32.toNat_ofNat_of_lt' hb3_32)
+        have hshift1 :
+            (b1.toUInt32.shiftLeft 8).toNat = b1.toNat <<< 8 := by
+          change (b1.toUInt32 <<< (8 : UInt32)).toNat = b1.toNat <<< 8
+          simp [UInt32.toNat_shiftLeft, UInt8.toNat_toUInt32, Nat.mod_eq_of_lt hb1',
+            Nat.mod_eq_of_lt (by decide : (8 : Nat) < 32)]
+        have hshift2 :
+            (b2.toUInt32.shiftLeft 16).toNat = b2.toNat <<< 16 := by
+          change (b2.toUInt32 <<< (16 : UInt32)).toNat = b2.toNat <<< 16
+          simp [UInt32.toNat_shiftLeft, UInt8.toNat_toUInt32, Nat.mod_eq_of_lt hb2',
+            Nat.mod_eq_of_lt (by decide : (16 : Nat) < 32)]
+        have hshift3 :
+            (b3.toUInt32.shiftLeft 24).toNat = b3.toNat <<< 24 := by
+          change (b3.toUInt32 <<< (24 : UInt32)).toNat = b3.toNat <<< 24
+          simp [UInt32.toNat_shiftLeft, UInt8.toNat_toUInt32, Nat.mod_eq_of_lt hb3',
+            Nat.mod_eq_of_lt (by decide : (24 : Nat) < 32)]
+        have htoNat_w :
+            wU.toNat = word := by
+          -- rewrite the UInt32 word into its Nat word assembly
+          simp [wU, word, wordNat, hshift1, hshift2, hshift3]
+        have hbp : br.bitPos < 32 := lt_trans br.hbit (by decide : (8 : Nat) < 32)
+        have hbp32 : br.bitPos < UInt32.size := lt_trans br.hbit (by decide : (8 : Nat) < UInt32.size)
+        have htoNat_bp : (UInt32.ofNat br.bitPos).toNat = br.bitPos := by
+          simpa using (UInt32.toNat_ofNat_of_lt' hbp32)
+        have hshiftR :
+            (wU.shiftRight (UInt32.ofNat br.bitPos)).toNat =
+              word >>> br.bitPos := by
+          change ((wU >>> (UInt32.ofNat br.bitPos)).toNat) = word >>> br.bitPos
+          simp [UInt32.toNat_shiftRight, htoNat_bp, Nat.mod_eq_of_lt hbp, htoNat_w]
+        have hshiftR' :
+            ((b0.toUInt32 ||| b1.toUInt32.shiftLeft 8 ||| b2.toUInt32.shiftLeft 16 |||
+                  b3.toUInt32.shiftLeft 24).shiftRight (UInt32.ofNat br.bitPos)).toNat =
+              word >>> br.bitPos := by
+          simpa [wU] using hshiftR
+        have hshiftR'' :
+            (UInt32.shiftRight
+                (b0.toUInt32 ||| b1.toUInt32.shiftLeft 8 ||| b2.toUInt32.shiftLeft 16 |||
+                  b3.toUInt32.shiftLeft 24)
+                (UInt32.ofNat br.bitPos)).toNat =
+              word >>> br.bitPos := by
+          simpa using hshiftR'
+        have hn32 : n < 32 := by
+          have hle : n ≤ 24 := hsmall
+          exact lt_of_le_of_lt hle (by decide)
+        have hnsize : n < UInt32.size := lt_of_le_of_lt hsmall (by decide : (24 : Nat) < UInt32.size)
+        have htoNat_n : (UInt32.ofNat n).toNat = n := by
+          simpa using (UInt32.toNat_ofNat_of_lt' hnsize)
+        have hpow :
+            (UInt32.shiftLeft (1 : UInt32) (UInt32.ofNat n)).toNat = 2 ^ n := by
+          have hpow_lt : 2 ^ n < 2 ^ 32 := by
+            exact Nat.pow_lt_pow_of_lt (a := 2) (h := by decide) hn32
+          change ((1 : UInt32) <<< (UInt32.ofNat n)).toNat = 2 ^ n
+          simp [UInt32.toNat_shiftLeft, htoNat_n, Nat.mod_eq_of_lt hpow_lt, Nat.mod_eq_of_lt hn32,
+            Nat.shiftLeft_eq]
+        -- put everything together
+        simp [UInt32.toNat_mod, hshiftR'', hpow]
+      let next := br.bitPos + n
+      by_cases hlt1 : next < 8
+      · have hlt : br.bytePos < br.data.size := by omega
+        have hlt1' : br.bitPos + n < 8 := by
+          simpa [next] using hlt1
+        have haux :=
+          readBitsAux_within_byte_lt (br := br) (n := n) (hspan := hlt1) (hlt := hlt)
+        have hlow :
+            (word >>> br.bitPos) % 2 ^ n =
+              ((b0.toNat >>> br.bitPos) % 2 ^ n) := by
+          have hk : n ≤ 8 - br.bitPos := by omega
+          simpa [word] using (wordNat_low_bits b0 b1 b2 b3 br.bitPos n br.hbit hk)
+        -- finish
+        rw [haux]
+        have hbitsNat' :
+            (((b0.toUInt32 ||| b1.toUInt32.shiftLeft 8 ||| b2.toUInt32.shiftLeft 16 |||
+                    b3.toUInt32.shiftLeft 24).shiftRight (UInt32.ofNat br.bitPos)).toNat %
+                (UInt32.shiftLeft 1 (UInt32.ofNat n)).toNat) =
+              (word >>> br.bitPos) % 2 ^ n := by
+          simpa using hbitsNat
+        have hbitsNat'' :
+            (((br.data.get br.bytePos hlt).toUInt32 |||
+                  (br.data.get (br.bytePos + 1) (by omega)).toUInt32.shiftLeft 8 |||
+                  (br.data.get (br.bytePos + 2) (by omega)).toUInt32.shiftLeft 16 |||
+                  (br.data.get (br.bytePos + 3) (by omega)).toUInt32.shiftLeft 24).shiftRight
+                (UInt32.ofNat br.bitPos)).toNat %
+              (UInt32.shiftLeft 1 (UInt32.ofNat n)).toNat =
+            (word >>> br.bitPos) % 2 ^ n := by
+          simpa [b0, b1, b2, b3] using hbitsNat'
+        have hlow' :
+            (word >>> br.bitPos) % 2 ^ n =
+              (br.data.get br.bytePos hlt).toNat >>> br.bitPos % 2 ^ n := by
+          simpa [b0] using hlow
+        simp [BitReader.readBitsFastU32, hzero, hsmall, hnext, hlt1', hbitsNat'', hlow']
+      · by_cases hlt2 : next < 16
+        · -- spans into the second byte
+          have hlt : br.bytePos < br.data.size := by omega
+          let k1 := 8 - br.bitPos
+          let k2 := n - k1
+          have hk1 : br.bitPos + k1 = 8 := by
+            have hle : br.bitPos ≤ 8 := Nat.le_of_lt br.hbit
+            simpa [k1] using (Nat.add_sub_of_le hle)
+          have hk2 : k2 < 8 := by
+            -- from `next < 16`
+            have : br.bitPos + n < 16 := hlt2
+            simp [k1, k2] at *
+            omega
+          have hread1 :=
+            readBitsAux_boundary (br := br) (n := k1) (hspan := by simpa [k1] using hk1) (hlt := hlt)
+          let br1 : BitReader :=
+            { data := br.data
+              bytePos := br.bytePos + 1
+              bitPos := 0
+              hpos := Nat.succ_le_of_lt hlt
+              hend := by intro _; rfl
+              hbit := by decide }
+          have hread1' :
+              br.readBitsAux k1 =
+                (((b0.toNat >>> br.bitPos) % 2 ^ k1), br1) := by
+            simpa [k1, br1] using hread1
+          have hread2 :
+              br1.readBitsAux k2 =
+                ((b1.toNat % 2 ^ k2),
+                  { data := br.data
+                    bytePos := br.bytePos + 1
+                    bitPos := k2
+                    hpos := Nat.succ_le_of_lt hlt
+                    hend := by
+                      intro hEq
+                      have : False := by
+                        simpa [hEq] using (by omega : br.bytePos + 1 < br.data.size)
+                      exact (False.elim this)
+                    hbit := by
+                      have : k2 < 8 := hk2
+                      simpa using this }) := by
+            by_cases hk2zero : k2 = 0
+            · have hbr1 :
+                br1 =
+                  { data := br.data
+                    bytePos := br.bytePos + 1
+                    bitPos := 0
+                    hpos := Nat.succ_le_of_lt hlt
+                    hend := by intro _; rfl
+                    hbit := by decide } := rfl
+              simp [hk2zero, BitReader.readBitsAux, BitReader.readBitsAuxAcc, Nat.mod_one, hbr1]
+            · have hspan2 : 0 + k2 < 8 := by simpa using hk2
+              have hlt1 : br.bytePos + 1 < br.data.size := by omega
+              have hbr1 : br1.bitPos = 0 := rfl
+              simpa [br1, hbr1, Nat.zero_add] using
+                (readBitsAux_within_byte_lt (br := br1) (n := k2) (hspan := hspan2) (hlt := hlt1))
+          have hsplit := readBitsAux_split (br := br) (k := k1) (n := k2)
+          have haux :
+              br.readBitsAux n =
+                (((b0.toNat >>> br.bitPos) % 2 ^ k1) ||| ((b1.toNat % 2 ^ k2) <<< k1),
+                  (br1.readBitsAux k2).2) := by
+            have hn : n = k1 + k2 := by
+              have hk1le : k1 ≤ n := by omega
+              calc
+                n = k1 + (n - k1) := by
+                    simpa [k1] using (Nat.add_sub_of_le hk1le).symm
+                _ = k1 + k2 := by simp [k2]
+            simpa [hn, hread1', hread2] using hsplit
+          -- relate `word` bits to the split
+          have hword8 :
+              word >>> 8 = wordNat b1 b2 b3 0 := by
+            have hword :
+                word = b0.toNat ||| ((wordNat b1 b2 b3 0) <<< 8) := by
+              simp [word, wordNat, Nat.or_assoc, Nat.shiftLeft_or_distrib, shiftLeft_shiftLeft]
+            simpa [hword] using
+              (shiftRight_or_shiftLeft (a := b0.toNat) (b := wordNat b1 b2 b3 0) (len := 8) hb0)
+          have hsplitBits :
+              (word >>> br.bitPos) % 2 ^ n =
+                ((b0.toNat >>> br.bitPos) % 2 ^ k1) |||
+                  (((word >>> 8) % 2 ^ k2) <<< k1) := by
+            have hk1' : br.bitPos + k1 = 8 := hk1
+            have hshift :
+                (word >>> br.bitPos) >>> k1 = word >>> 8 := by
+              simpa [hk1', Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using
+                (Nat.shiftRight_add word br.bitPos k1).symm
+            have hsplit' :=
+              mod_two_pow_split (word >>> br.bitPos) k1 k2
+            have hn : n = k1 + k2 := by
+              have hk1le : k1 ≤ n := by omega
+              calc
+                n = k1 + (n - k1) := by
+                    simpa [k1] using (Nat.add_sub_of_le hk1le).symm
+                _ = k1 + k2 := by simp [k2]
+            have hlow1 :
+                (word >>> br.bitPos) % 2 ^ k1 =
+                  (b0.toNat >>> br.bitPos) % 2 ^ k1 := by
+              have hk : k1 ≤ 8 - br.bitPos := by omega
+              simpa [word] using
+                (wordNat_low_bits b0 b1 b2 b3 br.bitPos k1 br.hbit hk)
+            -- replace the shifted part
+            simpa [hn, hshift, hlow1] using hsplit'
+          have hrest :
+              (word >>> 8) % 2 ^ k2 = b1.toNat % 2 ^ k2 := by
+            have hk2' : k2 ≤ 8 := by omega
+            have := wordNat_low_bits b1 b2 b3 0 0 k2 (by decide) (by omega)
+            simpa [hword8] using this
+          have hbits0 :
+              (word >>> br.bitPos) % 2 ^ n =
+                ((b0.toNat >>> br.bitPos) % 2 ^ k1) ||| ((b1.toNat % 2 ^ k2) <<< k1) := by
+            simpa [hsplitBits, hrest]
+          have hlt1' : ¬ br.bitPos + n < 8 := by
+            simpa [next] using hlt1
+          have hlt2' : br.bitPos + n < 16 := by
+            simpa [next] using hlt2
+          have hbitsNat' :
+              (((b0.toUInt32 ||| b1.toUInt32.shiftLeft 8 ||| b2.toUInt32.shiftLeft 16 |||
+                    b3.toUInt32.shiftLeft 24).shiftRight (UInt32.ofNat br.bitPos)).toNat %
+                (UInt32.shiftLeft 1 (UInt32.ofNat n)).toNat) =
+              (word >>> br.bitPos) % 2 ^ n := by
+            simpa using hbitsNat
+          have hbits :
+              (((b0.toUInt32 ||| b1.toUInt32.shiftLeft 8 ||| b2.toUInt32.shiftLeft 16 |||
+                    b3.toUInt32.shiftLeft 24).shiftRight (UInt32.ofNat br.bitPos)).toNat %
+                (UInt32.shiftLeft 1 (UInt32.ofNat n)).toNat) =
+                ((b0.toNat >>> br.bitPos) % 2 ^ k1) ||| ((b1.toNat % 2 ^ k2) <<< k1) := by
+            calc
+              _ = (word >>> br.bitPos) % 2 ^ n := hbitsNat'
+              _ = _ := hbits0
+          have hn : n = k1 + k2 := by
+            have hk1le : k1 ≤ n := by omega
+            calc
+              n = k1 + (n - k1) := by
+                    simpa [k1] using (Nat.add_sub_of_le hk1le).symm
+              _ = k1 + k2 := by simp [k2]
+          have hk2_eq : br.bitPos + n - 8 = k2 := by
+            calc
+              br.bitPos + n - 8
+                  = br.bitPos + (k1 + k2) - 8 := by simpa [hn]
+              _ = (br.bitPos + k1 + k2) - 8 := by
+                    simp [Nat.add_assoc]
+              _ = (8 + k2) - 8 := by
+                    simp [hk1]
+              _ = k2 := by omega
+          have hread2snd :
+              (br1.readBitsAux k2).snd =
+                { data := br.data
+                  bytePos := br.bytePos + 1
+                  bitPos := k2
+                  hpos := Nat.succ_le_of_lt hlt
+                  hend := by
+                    intro hEq
+                    have : False := by
+                      simpa [hEq] using (by omega : br.bytePos + 1 < br.data.size)
+                    exact (False.elim this)
+                  hbit := by
+                    have : k2 < 8 := hk2
+                    simpa using this } := by
+            simpa using congrArg Prod.snd hread2
+          rw [haux]
+          -- reduce the fast path and compare components
+          simp [BitReader.readBitsFastU32, hzero, hsmall, hnext, hlt1', hlt2']
+          constructor
+          · exact hbits
+          · -- compare the readers (proof fields are irrelevant)
+            rw [hread2snd]
+            apply BitReader.ext
+            · rfl
+            · rfl
+            · simpa [hk2_eq]
+        · by_cases hlt3 : next < 24
+          · -- spans into the third byte
+            have hlt : br.bytePos < br.data.size := by omega
+            let k1 := 8 - br.bitPos
+            let k3 := n - k1 - 8
+            have hk1 : br.bitPos + k1 = 8 := by
+              have hle : br.bitPos ≤ 8 := Nat.le_of_lt br.hbit
+              simpa [k1] using (Nat.add_sub_of_le hle)
+            have hk3 : k3 < 8 := by
+              have : br.bitPos + n < 24 := hlt3
+              simp [k1, k3] at *
+              omega
+            have hk1le : k1 ≤ n := by omega
+            have hnk1_eq : br.bitPos + n - 8 = n - k1 := by
+              have hn' : n = k1 + (n - k1) := (Nat.add_sub_of_le hk1le).symm
+              calc
+                br.bitPos + n - 8
+                    = br.bitPos + (k1 + (n - k1)) - 8 := by
+                        simpa using congrArg (fun t => br.bitPos + t - 8) hn'
+                _ = (br.bitPos + k1 + (n - k1)) - 8 := by
+                      simp [Nat.add_assoc]
+                _ = (8 + (n - k1)) - 8 := by
+                      simp [hk1]
+                _ = n - k1 := by omega
+            have h8le : 8 ≤ n - k1 := by
+              have hnextge : 16 ≤ br.bitPos + n := Nat.le_of_not_lt hlt2
+              have : 8 ≤ br.bitPos + n - 8 := by omega
+              simpa [hnk1_eq] using this
+            have hn : n = k1 + (8 + k3) := by
+              have hadd : n - k1 = 8 + (n - k1 - 8) := by
+                exact (Nat.add_sub_of_le h8le).symm
+              calc
+                n = k1 + (n - k1) := (Nat.add_sub_of_le hk1le).symm
+                _ = k1 + (8 + (n - k1 - 8)) := by
+                      simpa using congrArg (fun t => k1 + t) hadd
+                _ = k1 + (8 + k3) := by simp [k3]
+            have hread1 :=
+              readBitsAux_boundary (br := br) (n := k1) (hspan := by simpa [k1] using hk1) (hlt := hlt)
+            let br1 : BitReader :=
+              { data := br.data
+                bytePos := br.bytePos + 1
+                bitPos := 0
+                hpos := Nat.succ_le_of_lt hlt
+                hend := by intro _; rfl
+                hbit := by decide }
+            have hread1' :
+                br.readBitsAux k1 =
+                  (((b0.toNat >>> br.bitPos) % 2 ^ k1), br1) := by
+              simpa [k1, br1] using hread1
+            have hltByte1 : br.bytePos + 1 < br.data.size := by
+              exact lt_trans (by omega) hnext
+            have hread2 :=
+              readBitsAux_boundary (br := br1) (n := 8) (hspan := by simpa [br1])
+                (hlt := by simpa [br1] using hltByte1)
+            let br2 : BitReader :=
+              { data := br.data
+                bytePos := br.bytePos + 2
+                bitPos := 0
+                hpos := by omega
+                hend := by intro _; rfl
+                hbit := by decide }
+            have hread2' :
+                br1.readBitsAux 8 =
+                  (b1.toNat, br2) := by
+              simpa [br1, br2, wordNat, Nat.shiftRight_zero, Nat.mod_eq_of_lt hb1] using hread2
+            have hread3 :
+                br2.readBitsAux k3 =
+                  ((b2.toNat % 2 ^ k3),
+                    { data := br.data
+                      bytePos := br.bytePos + 2
+                      bitPos := k3
+                      hpos := by omega
+                      hend := by
+                        intro hEq
+                        have : False := by
+                          simpa [hEq] using (by omega : br.bytePos + 2 < br.data.size)
+                        exact (False.elim this)
+                      hbit := by
+                        have : k3 < 8 := hk3
+                        simpa using this }) := by
+              by_cases hk3zero : k3 = 0
+              · have hbr2 :
+                  br2 =
+                    { data := br.data
+                      bytePos := br.bytePos + 2
+                      bitPos := 0
+                      hpos := by omega
+                      hend := by intro _; rfl
+                      hbit := by decide } := rfl
+                simp [hk3zero, BitReader.readBitsAux, BitReader.readBitsAuxAcc, Nat.mod_one, hbr2]
+              · have hspan3 : 0 + k3 < 8 := by simpa using hk3
+                have hlt2 : br.bytePos + 2 < br.data.size := by omega
+                simpa [br2, Nat.zero_add] using
+                  (readBitsAux_within_byte_lt (br := br2) (n := k3) (hspan := hspan3) (hlt := hlt2))
+            -- combine via two splits
+            have hsplit1 := readBitsAux_split (br := br) (k := k1) (n := n - k1)
+            have hsplit2 := readBitsAux_split (br := br1) (k := 8) (n := k3)
+            have hsub : n - k1 = 8 + k3 := by
+              have : n - k1 = 8 + (n - k1 - 8) := (Nat.add_sub_of_le h8le).symm
+              simpa [k3, Nat.add_assoc] using this
+            have haux :
+                br.readBitsAux n =
+                  (((b0.toNat >>> br.bitPos) % 2 ^ k1) ||| (b1.toNat <<< k1) |||
+                      ((b2.toNat % 2 ^ k3) <<< (k1 + 8)),
+                    (br2.readBitsAux k3).2) := by
+              have hsplit1' :
+                  match br.readBitsAux k1 with
+                  | (bits1, br1) =>
+                    match br1.readBitsAux (8 + k3) with
+                    | (bits2, br2) =>
+                      br.readBitsAux (k1 + (8 + k3)) = (bits1 ||| bits2 <<< k1, br2) := by
+                simpa [hsub] using hsplit1
+              -- unfold split twice
+              simpa [hn, hread1', hread2', hread3, hsplit2, Nat.add_assoc, Nat.add_left_comm,
+                Nat.add_comm, Nat.or_assoc, shiftLeft_shiftLeft, Nat.shiftLeft_or_distrib] using
+                hsplit1'
+            -- relate `word` bits to the split
+            have hword8 :
+                word >>> 8 = wordNat b1 b2 b3 0 := by
+              have hword :
+                  word = b0.toNat ||| ((wordNat b1 b2 b3 0) <<< 8) := by
+                simp [word, wordNat, Nat.or_assoc, Nat.shiftLeft_or_distrib, shiftLeft_shiftLeft]
+              simpa [hword] using
+                (shiftRight_or_shiftLeft (a := b0.toNat) (b := wordNat b1 b2 b3 0) (len := 8) hb0)
+            have hword16 :
+                word >>> 16 = wordNat b2 b3 0 0 := by
+              have hword8' : word >>> 8 = wordNat b1 b2 b3 0 := hword8
+              have hword8'' :
+                  wordNat b1 b2 b3 0 = b1.toNat ||| ((wordNat b2 b3 0 0) <<< 8) := by
+                simp [wordNat, Nat.or_assoc, Nat.shiftLeft_or_distrib, shiftLeft_shiftLeft]
+              -- apply shiftRight_or_shiftLeft again
+              have hb1' : b1.toNat < 2 ^ 8 := hb1
+              have h16 : (16 : Nat) = 8 + 8 := by decide
+              have hshift8 : word >>> (8 + 8) = (word >>> 8) >>> 8 := by
+                simpa using (Nat.shiftRight_add word 8 8)
+              calc
+                word >>> 16
+                    = word >>> (8 + 8) := by simpa [h16]
+                _ = (word >>> 8) >>> 8 := by
+                        simpa using hshift8
+                _ = (wordNat b1 b2 b3 0) >>> 8 := by simpa [hword8']
+                _ = wordNat b2 b3 0 0 := by
+                        simpa [hword8''] using
+                          (shiftRight_or_shiftLeft (a := b1.toNat) (b := wordNat b2 b3 0 0) (len := 8) hb1')
+            have hsplitBits :
+                (word >>> br.bitPos) % 2 ^ n =
+                  ((b0.toNat >>> br.bitPos) % 2 ^ k1) |||
+                    ((b1.toNat % 2 ^ 8) <<< k1) |||
+                    (((word >>> 16) % 2 ^ k3) <<< (k1 + 8)) := by
+              have hk1' : br.bitPos + k1 = 8 := hk1
+              have hshift :
+                  (word >>> br.bitPos) >>> k1 = word >>> 8 := by
+                simpa [hk1', Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using
+                  (Nat.shiftRight_add word br.bitPos k1).symm
+              -- split at k1, then at 8
+              have hsplit1' := mod_two_pow_split (word >>> br.bitPos) k1 (8 + k3)
+              have hsplit2' := mod_two_pow_split (word >>> 8) 8 k3
+              have hsplit1'' :
+                  (word >>> br.bitPos) % 2 ^ n =
+                    (word >>> br.bitPos) % 2 ^ k1 |||
+                      (((word >>> 8) % 2 ^ (8 + k3)) <<< k1) := by
+                simpa [hn, hshift] using hsplit1'
+              have hshift8' : (word >>> 8) >>> 8 = word >>> 16 := by
+                simpa using (Nat.shiftRight_add word 8 8).symm
+              have hsplit2'' :
+                  (word >>> 8) % 2 ^ (8 + k3) =
+                    (word >>> 8) % 2 ^ 8 ||| (((word >>> 16) % 2 ^ k3) <<< 8) := by
+                simpa [hshift8'] using hsplit2'
+              have hlow2 :
+                  (word >>> 8) % 2 ^ 8 = b1.toNat % 2 ^ 8 := by
+                have := wordNat_low_bits b1 b2 b3 0 0 8 (by decide) (by omega)
+                simpa [hword8] using this
+              calc
+                (word >>> br.bitPos) % 2 ^ n
+                    =
+                    (word >>> br.bitPos) % 2 ^ k1 |||
+                      (((word >>> 8) % 2 ^ (8 + k3)) <<< k1) := hsplit1''
+                _ =
+                    (word >>> br.bitPos) % 2 ^ k1 |||
+                      (((word >>> 8) % 2 ^ 8 ||| (((word >>> 16) % 2 ^ k3) <<< 8)) <<< k1) := by
+                      simp [hsplit2'']
+                _ =
+                    (word >>> br.bitPos) % 2 ^ k1 |||
+                      (((word >>> 8) % 2 ^ 8) <<< k1) |||
+                      (((word >>> 16) % 2 ^ k3) <<< (k1 + 8)) := by
+                      simp [Nat.or_assoc, Nat.shiftLeft_or_distrib, shiftLeft_shiftLeft, Nat.add_comm]
+                _ =
+                    (word >>> br.bitPos) % 2 ^ k1 |||
+                      ((b1.toNat % 2 ^ 8) <<< k1) |||
+                      (((word >>> 16) % 2 ^ k3) <<< (k1 + 8)) := by
+                      simp [hlow2]
+                _ =
+                    (b0.toNat >>> br.bitPos) % 2 ^ k1 |||
+                      ((b1.toNat % 2 ^ 8) <<< k1) |||
+                      (((word >>> 16) % 2 ^ k3) <<< (k1 + 8)) := by
+                      have hk : k1 ≤ 8 - br.bitPos := by omega
+                      have hlow1 :
+                          (word >>> br.bitPos) % 2 ^ k1 =
+                            (b0.toNat >>> br.bitPos) % 2 ^ k1 := by
+                        simpa [word] using
+                          (wordNat_low_bits b0 b1 b2 b3 br.bitPos k1 br.hbit hk)
+                      simpa [hlow1]
+            have hrest :
+                (word >>> 16) % 2 ^ k3 = b2.toNat % 2 ^ k3 := by
+              have hk3' : k3 ≤ 8 := by omega
+              have := wordNat_low_bits b2 b3 0 0 0 k3 (by decide) (by omega)
+              simpa [hword16] using this
+            have hbits0 :
+                (word >>> br.bitPos) % 2 ^ n =
+                  ((b0.toNat >>> br.bitPos) % 2 ^ k1) ||| (b1.toNat <<< k1) |||
+                    ((b2.toNat % 2 ^ k3) <<< (k1 + 8)) := by
+              simpa [hsplitBits, hrest, Nat.mod_eq_of_lt hb1] 
+            have hbitsNat' :
+                (((b0.toUInt32 ||| b1.toUInt32.shiftLeft 8 ||| b2.toUInt32.shiftLeft 16 |||
+                      b3.toUInt32.shiftLeft 24).shiftRight (UInt32.ofNat br.bitPos)).toNat %
+                  (UInt32.shiftLeft 1 (UInt32.ofNat n)).toNat) =
+                (word >>> br.bitPos) % 2 ^ n := by
+              simpa using hbitsNat
+            have hbits :
+                (((b0.toUInt32 ||| b1.toUInt32.shiftLeft 8 ||| b2.toUInt32.shiftLeft 16 |||
+                      b3.toUInt32.shiftLeft 24).shiftRight (UInt32.ofNat br.bitPos)).toNat %
+                  (UInt32.shiftLeft 1 (UInt32.ofNat n)).toNat) =
+                  ((b0.toNat >>> br.bitPos) % 2 ^ k1) ||| (b1.toNat <<< k1) |||
+                    ((b2.toNat % 2 ^ k3) <<< (k1 + 8)) := by
+              calc
+                _ = (word >>> br.bitPos) % 2 ^ n := hbitsNat'
+                _ = _ := hbits0
+            have hk3_eq : br.bitPos + n - 16 = k3 := by
+              calc
+                br.bitPos + n - 16
+                    = br.bitPos + (k1 + (8 + k3)) - 16 := by simpa [hn]
+                _ = (br.bitPos + k1 + 8 + k3) - 16 := by
+                      simp [Nat.add_assoc]
+                _ = (8 + 8 + k3) - 16 := by
+                      simp [hk1]
+                _ = k3 := by omega
+            have hread3snd :
+                (br2.readBitsAux k3).snd =
+                  { data := br.data
+                    bytePos := br.bytePos + 2
+                    bitPos := k3
+                    hpos := by omega
+                    hend := by
+                      intro hEq
+                      have : False := by
+                        simpa [hEq] using (by omega : br.bytePos + 2 < br.data.size)
+                      exact (False.elim this)
+                    hbit := by
+                      have : k3 < 8 := hk3
+                      simpa using this } := by
+              simpa using congrArg Prod.snd hread3
+            have hlt1' : ¬ br.bitPos + n < 8 := by
+              simpa [next] using hlt1
+            have hlt2' : ¬ br.bitPos + n < 16 := by
+              simpa [next] using hlt2
+            have hlt3' : br.bitPos + n < 24 := by
+              simpa [next] using hlt3
+            rw [haux]
+            simp [BitReader.readBitsFastU32, hzero, hsmall, hnext, hlt1', hlt2', hlt3']
+            constructor
+            · exact hbits
+            · rw [hread3snd]
+              apply BitReader.ext
+              · rfl
+              · rfl
+              · simpa [hk3_eq]
+          · -- spans into the fourth byte
+            have hlt : br.bytePos < br.data.size := by omega
+            let k1 := 8 - br.bitPos
+            let k4 := n - k1 - 16
+            have hk1 : br.bitPos + k1 = 8 := by
+              have hle : br.bitPos ≤ 8 := Nat.le_of_lt br.hbit
+              simpa [k1] using (Nat.add_sub_of_le hle)
+            have hk4 : k4 < 8 := by
+              have : br.bitPos + n ≤ 31 := by
+                have hb : br.bitPos ≤ 7 := Nat.lt_succ_iff.mp br.hbit
+                have hn : n ≤ 24 := hsmall
+                omega
+              simp [k1, k4] at *
+              omega
+            have hk1le : k1 ≤ n := by omega
+            have hnk1_eq : br.bitPos + n - 8 = n - k1 := by
+              have hn' : n = k1 + (n - k1) := (Nat.add_sub_of_le hk1le).symm
+              calc
+                br.bitPos + n - 8
+                    = br.bitPos + (k1 + (n - k1)) - 8 := by
+                        simpa using congrArg (fun t => br.bitPos + t - 8) hn'
+                _ = (br.bitPos + k1 + (n - k1)) - 8 := by
+                      simp [Nat.add_assoc]
+                _ = (8 + (n - k1)) - 8 := by
+                      simp [hk1]
+                _ = n - k1 := by omega
+            have h16le : 16 ≤ n - k1 := by
+              have hnextge : 24 ≤ br.bitPos + n := Nat.le_of_not_lt hlt3
+              have : 16 ≤ br.bitPos + n - 8 := by omega
+              simpa [hnk1_eq] using this
+            have hn : n = k1 + (8 + (8 + k4)) := by
+              have hadd : n - k1 = 16 + (n - k1 - 16) := by
+                exact (Nat.add_sub_of_le h16le).symm
+              have h16 : (16 : Nat) = 8 + 8 := by decide
+              calc
+                n = k1 + (n - k1) := (Nat.add_sub_of_le hk1le).symm
+                _ = k1 + (16 + (n - k1 - 16)) := by
+                      simpa using congrArg (fun t => k1 + t) hadd
+                _ = k1 + (8 + (8 + k4)) := by
+                      have h16split :
+                          16 + (n - k1 - 16) = 8 + (8 + (n - k1 - 16)) := by
+                        simpa [h16] using (Nat.add_assoc 8 8 (n - k1 - 16))
+                      have h16split' :
+                          k1 + (16 + (n - k1 - 16)) =
+                            k1 + (8 + (8 + (n - k1 - 16))) := by
+                        simpa using congrArg (fun t => k1 + t) h16split
+                      calc
+                        k1 + (16 + (n - k1 - 16))
+                            = k1 + (8 + (8 + (n - k1 - 16))) := h16split'
+                        _ = k1 + (8 + (8 + k4)) := by
+                              simp [k4]
+            have hread1 :=
+              readBitsAux_boundary (br := br) (n := k1) (hspan := by simpa [k1] using hk1) (hlt := hlt)
+            let br1 : BitReader :=
+              { data := br.data
+                bytePos := br.bytePos + 1
+                bitPos := 0
+                hpos := Nat.succ_le_of_lt hlt
+                hend := by intro _; rfl
+                hbit := by decide }
+            have hread1' :
+                br.readBitsAux k1 =
+                  (((b0.toNat >>> br.bitPos) % 2 ^ k1), br1) := by
+              simpa [k1, br1] using hread1
+            have hltByte1 : br.bytePos + 1 < br.data.size := by
+              exact lt_trans (by omega) hnext
+            have hread2 :=
+              readBitsAux_boundary (br := br1) (n := 8) (hspan := by simpa [br1])
+                (hlt := by simpa [br1] using hltByte1)
+            let br2 : BitReader :=
+              { data := br.data
+                bytePos := br.bytePos + 2
+                bitPos := 0
+                hpos := by omega
+                hend := by intro _; rfl
+                hbit := by decide }
+            have hread2' :
+                br1.readBitsAux 8 =
+                  (b1.toNat, br2) := by
+              simpa [br1, br2, wordNat, Nat.shiftRight_zero, Nat.mod_eq_of_lt hb1] using hread2
+            have hltByte2 : br.bytePos + 2 < br.data.size := by
+              exact lt_trans (by omega) hnext
+            have hread3 :=
+              readBitsAux_boundary (br := br2) (n := 8) (hspan := by simpa [br2])
+                (hlt := by simpa [br2] using hltByte2)
+            let br3 : BitReader :=
+              { data := br.data
+                bytePos := br.bytePos + 3
+                bitPos := 0
+                hpos := by omega
+                hend := by intro _; rfl
+                hbit := by decide }
+            have hread3' :
+                br2.readBitsAux 8 =
+                  (b2.toNat, br3) := by
+              simpa [br2, br3, wordNat, Nat.shiftRight_zero, Nat.mod_eq_of_lt hb2] using hread3
+            have hread4 :
+                br3.readBitsAux k4 =
+                  ((b3.toNat % 2 ^ k4),
+                    { data := br.data
+                      bytePos := br.bytePos + 3
+                      bitPos := k4
+                      hpos := by omega
+                      hend := by
+                        intro hEq
+                        have : False := by
+                          simpa [hEq] using (by omega : br.bytePos + 3 < br.data.size)
+                        exact (False.elim this)
+                      hbit := by
+                        have : k4 < 8 := hk4
+                        simpa using this }) := by
+              by_cases hk4zero : k4 = 0
+              · have hbr3 :
+                  br3 =
+                    { data := br.data
+                      bytePos := br.bytePos + 3
+                      bitPos := 0
+                      hpos := by omega
+                      hend := by intro _; rfl
+                      hbit := by decide } := rfl
+                simp [hk4zero, BitReader.readBitsAux, BitReader.readBitsAuxAcc, Nat.mod_one, hbr3]
+              · have hspan4 : 0 + k4 < 8 := by simpa using hk4
+                have hltByte3 : br.bytePos + 3 < br.data.size := by omega
+                simpa [br3, Nat.zero_add] using
+                  (readBitsAux_within_byte_lt (br := br3) (n := k4) (hspan := hspan4) (hlt := hltByte3))
+            -- combine via splits
+            have haux :
+                br.readBitsAux n =
+                  (((b0.toNat >>> br.bitPos) % 2 ^ k1) ||| (b1.toNat <<< k1) |||
+                      (b2.toNat <<< (k1 + 8)) ||| ((b3.toNat % 2 ^ k4) <<< (k1 + 16)),
+                    (br3.readBitsAux k4).2) := by
+              -- use readBitsAux_split three times
+              have hsplit1 := readBitsAux_split (br := br) (k := k1) (n := 8 + (8 + k4))
+              have hsplit2 := readBitsAux_split (br := br1) (k := 8) (n := 8 + k4)
+              have hsplit3 := readBitsAux_split (br := br2) (k := 8) (n := k4)
+              have hsplit1' :
+                  match br.readBitsAux k1 with
+                  | (bits1, br1) =>
+                    match br1.readBitsAux (8 + (8 + k4)) with
+                    | (bits2, br2) =>
+                      br.readBitsAux (k1 + (8 + (8 + k4))) = (bits1 ||| bits2 <<< k1, br2) := by
+                simpa using hsplit1
+              simpa [hn, hread1', hread2', hread3', hread4, hsplit2, hsplit3, Nat.add_assoc,
+                Nat.add_left_comm, Nat.add_comm, Nat.or_assoc, shiftLeft_shiftLeft,
+                Nat.shiftLeft_or_distrib] using
+                hsplit1'
+            -- relate `word` bits to the split (omit detailed proof for now)
+            have hbits0 :
+                (word >>> br.bitPos) % 2 ^ n =
+                  ((b0.toNat >>> br.bitPos) % 2 ^ k1) ||| (b1.toNat <<< k1) |||
+                    (b2.toNat <<< (k1 + 8)) ||| ((b3.toNat % 2 ^ k4) <<< (k1 + 16)) := by
+              -- split into k1, 8, 8, k4
+              have hk1' : br.bitPos + k1 = 8 := hk1
+              have hshift1 :
+                  (word >>> br.bitPos) >>> k1 = word >>> 8 := by
+                simpa [hk1', Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using
+                  (Nat.shiftRight_add word br.bitPos k1).symm
+              have hword8 :
+                  word >>> 8 = wordNat b1 b2 b3 0 := by
+                have hword :
+                    word = b0.toNat ||| ((wordNat b1 b2 b3 0) <<< 8) := by
+                  simp [word, wordNat, Nat.or_assoc, Nat.shiftLeft_or_distrib, shiftLeft_shiftLeft]
+                simpa [hword] using
+                  (shiftRight_or_shiftLeft (a := b0.toNat) (b := wordNat b1 b2 b3 0) (len := 8) hb0)
+              have hword16 :
+                  word >>> 16 = wordNat b2 b3 0 0 := by
+                have hword8' : word >>> 8 = wordNat b1 b2 b3 0 := hword8
+                have hword8'' :
+                    wordNat b1 b2 b3 0 = b1.toNat ||| ((wordNat b2 b3 0 0) <<< 8) := by
+                  simp [wordNat, Nat.or_assoc, Nat.shiftLeft_or_distrib, shiftLeft_shiftLeft]
+                have hb1' : b1.toNat < 2 ^ 8 := hb1
+                have h16 : (16 : Nat) = 8 + 8 := by decide
+                have hshift8 : word >>> (8 + 8) = (word >>> 8) >>> 8 := by
+                  simpa using (Nat.shiftRight_add word 8 8)
+                calc
+                  word >>> 16
+                      = word >>> (8 + 8) := by simpa [h16]
+                  _ = (word >>> 8) >>> 8 := by
+                          simpa using hshift8
+                  _ = (wordNat b1 b2 b3 0) >>> 8 := by simpa [hword8']
+                  _ = wordNat b2 b3 0 0 := by
+                        simpa [hword8''] using
+                          (shiftRight_or_shiftLeft (a := b1.toNat) (b := wordNat b2 b3 0 0) (len := 8) hb1')
+              have hword24 :
+                  word >>> 24 = wordNat b3 0 0 0 := by
+                have hword16' : word >>> 16 = wordNat b2 b3 0 0 := hword16
+                have hword16'' :
+                    wordNat b2 b3 0 0 = b2.toNat ||| ((wordNat b3 0 0 0) <<< 8) := by
+                  simp [wordNat]
+                have hb2' : b2.toNat < 2 ^ 8 := hb2
+                have h24 : (24 : Nat) = 16 + 8 := by decide
+                have hshift16 : word >>> (16 + 8) = (word >>> 16) >>> 8 := by
+                  simpa using (Nat.shiftRight_add word 16 8)
+                calc
+                  word >>> 24
+                      = word >>> (16 + 8) := by simpa [h24]
+                  _ = (word >>> 16) >>> 8 := by
+                          simpa using hshift16
+                  _ = (wordNat b2 b3 0 0) >>> 8 := by simpa [hword16']
+                  _ = wordNat b3 0 0 0 := by
+                        simpa [hword16''] using
+                          (shiftRight_or_shiftLeft (a := b2.toNat) (b := wordNat b3 0 0 0) (len := 8) hb2')
+              -- split low bits stepwise
+              have hsplit1 := mod_two_pow_split (word >>> br.bitPos) k1 (8 + (8 + k4))
+              have hsplit2 := mod_two_pow_split (word >>> 8) 8 (8 + k4)
+              have hsplit3 := mod_two_pow_split (word >>> 16) 8 k4
+              -- combine and simplify
+              have hlow1 :
+                  (word >>> br.bitPos) % 2 ^ k1 =
+                    (b0.toNat >>> br.bitPos) % 2 ^ k1 := by
+                have hk : k1 ≤ 8 - br.bitPos := by omega
+                simpa [word] using (wordNat_low_bits b0 b1 b2 b3 br.bitPos k1 br.hbit hk)
+              have hlow2 :
+                  (word >>> 8) % 2 ^ 8 = b1.toNat := by
+                have := wordNat_low_bits b1 b2 b3 0 0 8 (by decide) (by omega)
+                simpa [hword8, Nat.mod_eq_of_lt hb1] using this
+              have hlow2' : (word >>> 8) % 256 = b1.toNat := by
+                simpa using hlow2
+              have hlow3 :
+                  (word >>> 16) % 2 ^ 8 = b2.toNat := by
+                have := wordNat_low_bits b2 b3 0 0 0 8 (by decide) (by omega)
+                simpa [hword16, Nat.mod_eq_of_lt hb2] using this
+              have hlow3' : (word >>> 16) % 256 = b2.toNat := by
+                simpa using hlow3
+              have hlow4 :
+                  (word >>> 24) % 2 ^ k4 = b3.toNat % 2 ^ k4 := by
+                have := wordNat_low_bits b3 0 0 0 0 k4 (by decide) (by omega)
+                simpa [hword24] using this
+              -- assemble via splits
+              have hsplit1' :
+                  (word >>> br.bitPos) % 2 ^ n =
+                    (word >>> br.bitPos) % 2 ^ k1 |||
+                      (((word >>> 8) % 2 ^ (8 + (8 + k4))) <<< k1) := by
+                simpa [hn, hshift1] using hsplit1
+              have hshift8 : (word >>> 8) >>> 8 = word >>> 16 := by
+                simpa using (Nat.shiftRight_add word 8 8).symm
+              have hshift16 : (word >>> 16) >>> 8 = word >>> 24 := by
+                have h24 : (24 : Nat) = 16 + 8 := by decide
+                simpa [h24] using (Nat.shiftRight_add word 16 8).symm
+              have hsplit2' :
+                  (word >>> 8) % 2 ^ (8 + (8 + k4)) =
+                    (word >>> 8) % 2 ^ 8 ||| (((word >>> 16) % 2 ^ (8 + k4)) <<< 8) := by
+                simpa [hshift8] using hsplit2
+              have hsplit3' :
+                  (word >>> 16) % 2 ^ (8 + k4) =
+                    (word >>> 16) % 2 ^ 8 ||| (((word >>> 24) % 2 ^ k4) <<< 8) := by
+                simpa [hshift16] using hsplit3
+              calc
+                (word >>> br.bitPos) % 2 ^ n
+                    =
+                    (word >>> br.bitPos) % 2 ^ k1 |||
+                      (((word >>> 8) % 2 ^ (8 + (8 + k4))) <<< k1) := hsplit1'
+                _ =
+                    (word >>> br.bitPos) % 2 ^ k1 |||
+                      (((word >>> 8) % 2 ^ 8 ||| (((word >>> 16) % 2 ^ (8 + k4)) <<< 8)) <<< k1) := by
+                      simpa using
+                        congrArg (fun t =>
+                          (word >>> br.bitPos) % 2 ^ k1 ||| (t <<< k1)) hsplit2'
+                _ =
+                    (word >>> br.bitPos) % 2 ^ k1 |||
+                      (((word >>> 8) % 2 ^ 8) <<< k1) |||
+                      (((word >>> 16) % 2 ^ (8 + k4)) <<< (k1 + 8)) := by
+                      -- distribute the shift, then reassociate
+                      rw [Nat.shiftLeft_or_distrib]
+                      rw [shiftLeft_shiftLeft]
+                      rw [Nat.add_comm 8 k1]
+                      rw [← Nat.or_assoc]
+                _ =
+                    (word >>> br.bitPos) % 2 ^ k1 |||
+                      (((word >>> 8) % 2 ^ 8) <<< k1) |||
+                      ((((word >>> 16) % 2 ^ 8 ||| (((word >>> 24) % 2 ^ k4) <<< 8)) <<< (k1 + 8))) := by
+                      simpa using
+                        congrArg (fun t =>
+                          (word >>> br.bitPos) % 2 ^ k1 |||
+                            (((word >>> 8) % 2 ^ 8) <<< k1) ||| (t <<< (k1 + 8))) hsplit3'
+                _ =
+                    (word >>> br.bitPos) % 2 ^ k1 |||
+                      (((word >>> 8) % 2 ^ 8) <<< k1) |||
+                      (((word >>> 16) % 2 ^ 8) <<< (k1 + 8)) |||
+                      (((word >>> 24) % 2 ^ k4) <<< (k1 + 16)) := by
+                      -- distribute the shift and reassociate
+                      rw [Nat.shiftLeft_or_distrib]
+                      rw [shiftLeft_shiftLeft]
+                      rw [← Nat.add_assoc]
+                      rw [Nat.add_comm 8 k1]
+                      rw [Nat.add_assoc]
+                      have h88 : (8 + 8 : Nat) = 16 := by decide
+                      rw [h88]
+                      rw [← Nat.or_assoc]
+                _ =
+                    (b0.toNat >>> br.bitPos) % 2 ^ k1 ||| (b1.toNat <<< k1) |||
+                      (b2.toNat <<< (k1 + 8)) ||| ((b3.toNat % 2 ^ k4) <<< (k1 + 16)) := by
+                      simp [hlow1, hlow2, hlow3, hlow4]
+            have hbitsNat' :
+                (((b0.toUInt32 ||| b1.toUInt32.shiftLeft 8 ||| b2.toUInt32.shiftLeft 16 |||
+                      b3.toUInt32.shiftLeft 24).shiftRight (UInt32.ofNat br.bitPos)).toNat %
+                  (UInt32.shiftLeft 1 (UInt32.ofNat n)).toNat) =
+                (word >>> br.bitPos) % 2 ^ n := by
+              simpa using hbitsNat
+            have hbits :
+                (((b0.toUInt32 ||| b1.toUInt32.shiftLeft 8 ||| b2.toUInt32.shiftLeft 16 |||
+                      b3.toUInt32.shiftLeft 24).shiftRight (UInt32.ofNat br.bitPos)).toNat %
+                  (UInt32.shiftLeft 1 (UInt32.ofNat n)).toNat) =
+                  ((b0.toNat >>> br.bitPos) % 2 ^ k1) ||| (b1.toNat <<< k1) |||
+                    (b2.toNat <<< (k1 + 8)) ||| ((b3.toNat % 2 ^ k4) <<< (k1 + 16)) := by
+              calc
+                _ = (word >>> br.bitPos) % 2 ^ n := hbitsNat'
+                _ = _ := hbits0
+            have hk4_eq : br.bitPos + n - 24 = k4 := by
+              calc
+                br.bitPos + n - 24
+                    = br.bitPos + (k1 + (8 + (8 + k4))) - 24 := by simpa [hn]
+                _ = (br.bitPos + k1 + 8 + 8 + k4) - 24 := by
+                      simp [Nat.add_assoc, Nat.add_left_comm, Nat.add_comm]
+                _ = (8 + 8 + 8 + k4) - 24 := by
+                      simp [hk1]
+                _ = k4 := by omega
+            have hread4snd :
+                (br3.readBitsAux k4).snd =
+                  { data := br.data
+                    bytePos := br.bytePos + 3
+                    bitPos := k4
+                    hpos := by omega
+                    hend := by
+                      intro hEq
+                      have : False := by
+                        simpa [hEq] using (by omega : br.bytePos + 3 < br.data.size)
+                      exact (False.elim this)
+                    hbit := by
+                      have : k4 < 8 := hk4
+                      simpa using this } := by
+              simpa using congrArg Prod.snd hread4
+            have hlt1' : ¬ br.bitPos + n < 8 := by
+              simpa [next] using hlt1
+            have hlt2' : ¬ br.bitPos + n < 16 := by
+              simpa [next] using hlt2
+            have hlt3' : ¬ br.bitPos + n < 24 := by
+              simpa [next] using hlt3
+            rw [haux]
+            simp [BitReader.readBitsFastU32, hzero, hsmall, hnext, hlt1', hlt2', hlt3']
+            constructor
+            · exact hbits
+            · rw [hread4snd]
+              apply BitReader.ext
+              · rfl
+              · rfl
+              · simpa [hk4_eq]
+    · simp [BitReader.readBitsFastU32, hzero, hsmall, hnext]
+  · simp [BitReader.readBitsFastU32, hzero, hsmall]
+
+-- `readBits` agrees with `readBitsAux` via the fast U32 path.
+lemma readBits_eq_readBitsAux (br : BitReader) (n : Nat)
+    (h : br.bitIndex + n ≤ br.data.size * 8) :
+    br.readBits n h = br.readBitsAux n := by
+  simpa [BitReader.readBits] using (readBitsFastU32_eq_readBitsAux (br := br) (n := n) (h := h))
+
+set_option maxHeartbeats 200000
+set_option linter.constructorNameAsVariable true
+
+lemma readBits_succ_eq (br : BitReader) (k : Nat)
+    (h : br.bitIndex + (k + 1) ≤ br.data.size * 8)
+    (bit : Nat) (br' : BitReader) (hbit : br.readBit = (bit, br'))
+    (hread' : br'.bitIndex + k ≤ br'.data.size * 8) :
+    br.readBits (k + 1) h =
+      (bit ||| ((br'.readBits k hread').1 <<< 1), (br'.readBits k hread').2) := by
+  -- reduce to the `readBitsAux` step
+  have hread : br.readBits (k + 1) h = br.readBitsAux (k + 1) :=
+    readBits_eq_readBitsAux (br := br) (n := k + 1) (h := h)
+  have hreadAux : br'.readBits k hread' = br'.readBitsAux k :=
+    readBits_eq_readBitsAux (br := br') (n := k) (h := hread')
+  have haux :
+      br.readBitsAux (k + 1) =
+        (bit ||| ((br'.readBitsAux k).1 <<< 1), (br'.readBitsAux k).2) := by
+    simpa [readBitsAux_succ, hbit]
+  calc
+    br.readBits (k + 1) h
+        = br.readBitsAux (k + 1) := hread
+    _ = (bit ||| ((br'.readBitsAux k).1 <<< 1), (br'.readBitsAux k).2) := haux
+    _ = (bit ||| ((br'.readBits k hread').1 <<< 1), (br'.readBits k hread').2) := by
+          simp [hreadAux]
+
+-- Bounds for reading `n` bits that stay within the current byte.
+lemma readBits_within_byte_bound (br : BitReader) (n : Nat)
+    (hspan : br.bitPos + n ≤ 8) (hlt : br.bytePos < br.data.size) :
+    br.bitIndex + n ≤ br.data.size * 8 := by
+  have hpos' : br.bytePos + 1 ≤ br.data.size := Nat.succ_le_of_lt hlt
+  have hle1 : br.bytePos * 8 + (br.bitPos + n) ≤ br.bytePos * 8 + 8 := by
+    exact Nat.add_le_add_left hspan _
+  have hle2 : br.bytePos * 8 + 8 ≤ br.data.size * 8 := by
+    have hmul : (br.bytePos + 1) * 8 ≤ br.data.size * 8 :=
+      Nat.mul_le_mul_right 8 hpos'
+    simpa [Nat.mul_add, Nat.add_mul, Nat.mul_comm, Nat.mul_left_comm, Nat.mul_assoc] using hmul
+  have hle3 : br.bitIndex + n ≤ br.bytePos * 8 + (br.bitPos + n) := by
+    simp [BitReader.bitIndex, Nat.add_assoc, Nat.add_comm]
+  exact le_trans (le_trans hle3 hle1) hle2
+
 lemma readBits_within_byte_lt (br : BitReader) (n : Nat)
     (hspan : br.bitPos + n < 8) (hlt : br.bytePos < br.data.size) :
     let byte := br.data.get br.bytePos hlt
@@ -2189,7 +3366,12 @@ lemma readBits_within_byte_lt (br : BitReader) (n : Nat)
   | zero =>
       have hnext : br.bitPos + 0 ≠ 8 := by
         exact ne_of_lt br.hbit
-      simp [BitReader.readBits, BitReader.readBitsAux, BitReader.readBitsAuxAcc,
+      have hread :
+          br.readBits 0 (readBits_within_byte_bound br 0 (Nat.le_of_lt hspan) hlt) =
+            br.readBitsAux 0 :=
+        readBits_eq_readBitsAux (br := br) (n := 0)
+          (h := readBits_within_byte_bound br 0 (Nat.le_of_lt hspan) hlt)
+      simp [hread, BitReader.readBitsAux, BitReader.readBitsAuxAcc,
         Nat.pow_zero, Nat.mod_one]
   | succ n ih =>
       -- reading one bit keeps us inside the same byte
@@ -2269,7 +3451,7 @@ lemma readBitsFast_eq_readBits (br : BitReader) (n : Nat)
     br.readBitsFast n h = br.readBits n h := by
   by_cases hzero : n = 0
   · subst hzero
-    simp [BitReader.readBitsFast, BitReader.readBits, BitReader.readBitsAux, BitReader.readBitsAuxAcc]
+    simp [BitReader.readBitsFast, BitReader.readBits, BitReader.readBitsFastU32]
   by_cases hsmall : n ≤ 8
   · by_cases hspan : br.bitPos + n < 8
     · have hlt : br.bytePos < br.data.size := by
@@ -2309,7 +3491,12 @@ lemma readBits_readerAt_writeBits_prefix (bw : BitWriter) (bits len k : Nat)
   induction k generalizing bw bits len with
   | zero =>
       -- `readBits 0` returns the current reader
-      simp [BitReader.readBits, BitReader.readBitsAux, BitReader.readBitsAuxAcc,
+      let br :=
+        BitWriter.readerAt bw (BitWriter.writeBits bw bits len).flush
+          (flush_size_writeBits_le bw bits len) hbit
+      have hread0 : br.readBits 0 hread = br.readBitsAux 0 :=
+        readBits_eq_readBitsAux (br := br) (n := 0) (h := hread)
+      simp [br, hread0, BitReader.readBitsAux, BitReader.readBitsAuxAcc,
         BitWriter.writeBits, Nat.mod_one]
   | succ k ih =>
       -- `len` must be positive

@@ -413,7 +413,7 @@ def BitReader.readBitsFastU32 (br : BitReader) (n : Nat)
 
 def BitReader.readBits (br : BitReader) (n : Nat)
     (_h : br.bitIndex + n <= br.data.size * 8) : Nat × BitReader := by
-  exact br.readBitsAux n
+  exact br.readBitsFastU32 n _h
 
 -- Faster small-bit reader when the requested window stays inside the current byte.
 set_option linter.unnecessarySimpa false
