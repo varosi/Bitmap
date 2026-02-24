@@ -1707,7 +1707,7 @@ lemma zlibDecompress_zlibCompressFixed (raw : ByteArray)
       simpa [streamReaderFinal, hdeflateTotal, streamWriter] using hdecode
     have hdecode' : decodeFixedBlock streamReaderHeader ByteArray.empty =
         some (streamReaderFinal, raw) := by
-      simp [decodeFixedBlock, decodeFixedBlockSpec, hdecodeLit]
+      simp [decodeFixedBlock, decodeFixedBlockFast, hdecodeLit]
     -- Evaluate the loop body (bfinal = 1, btype = 1).
     have hbfinal : (3 % 2) = 1 := by decide
     have hbtype' : ((3 >>> 1) % 4) = 1 := by decide

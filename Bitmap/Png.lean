@@ -83,22 +83,8 @@ def adler32Fast (bytes : ByteArray) : UInt32 :=
       b := b % mod
     return UInt32.ofNat ((b <<< 16) + a)
 
-@[implemented_by adler32Fast]
 def adler32 (bytes : ByteArray) : UInt32 :=
-  Id.run do
-    let mod : UInt32 := 65521
-    let mut a : UInt32 := 1
-    let mut b : UInt32 := 0
-    for byte in bytes do
-      a := a + UInt32.ofNat byte.toNat
-      if a >= mod then
-        a := a - mod
-      b := b + a
-      if b >= mod then
-        b := b - mod
-      if b >= mod then
-        b := b - mod
-    return (b <<< 16) + a
+  adler32Fast bytes
 
 def pngSignature : ByteArray :=
   ByteArray.mk #[
@@ -1180,10 +1166,9 @@ def decodeFixedBlockSpec (br : BitReader) (out : ByteArray) :
   | some res => some res
   | none => decodeFixedBlockFuel (br.data.size * 8 + 1) br out
 
-@[implemented_by decodeFixedBlockFast]
 def decodeFixedBlock (br : BitReader) (out : ByteArray) :
     Option (BitReader × ByteArray) :=
-  decodeFixedBlockSpec br out
+  decodeFixedBlockFast br out
 
 def fixedLitLenLengths : Array Nat :=
   Id.run do
