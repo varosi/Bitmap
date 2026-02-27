@@ -391,6 +391,18 @@ lemma rgbaMultiplyOver_alpha_toNat_le_max {RangeT : Type u} [AlphaChannel RangeT
   simpa [rgbaMultiplyOver_alpha] using
     (alphaOver_toNat_le_max (RangeT := RangeT) dst.a src.a)
 
+lemma rgbaMultiplyOver_alpha_toNat_eq_min {RangeT : Type u} [AlphaChannel RangeT]
+    [LawfulAlphaChannel RangeT] (dst src : PixelRGBA RangeT) :
+    AlphaChannel.toNat ((rgbaMultiplyOver (RangeT := RangeT) dst src).a) =
+      Nat.min (AlphaChannel.maxValue (RangeT := RangeT))
+        (AlphaChannel.toNat src.a +
+          alphaDivRound
+            (AlphaChannel.toNat dst.a *
+              ((AlphaChannel.maxValue (RangeT := RangeT)) - AlphaChannel.toNat src.a))
+            (AlphaChannel.maxValue (RangeT := RangeT))) := by
+  simpa [rgbaMultiplyOver_alpha] using
+    (alphaOver_toNat_eq_min (RangeT := RangeT) dst.a src.a)
+
 lemma alphaOver_dst_full {RangeT : Type u} [AlphaChannel RangeT]
     [LawfulAlphaChannel RangeT] (srcA : RangeT) :
     alphaOver (RangeT := RangeT)
@@ -1105,6 +1117,18 @@ lemma pixelRGBA_add_alpha_toNat_eq_min {RangeT : Type u} [AlphaChannel RangeT]
             (AlphaChannel.maxValue (RangeT := RangeT))) := by
   simpa [pixelRGBA_add_eq_rgbaOver] using
     (rgbaOver_alpha_toNat_eq_min (RangeT := RangeT) dst src)
+
+lemma pixelRGBA_mul_alpha_toNat_eq_min {RangeT : Type u} [AlphaChannel RangeT]
+    [LawfulAlphaChannel RangeT] (dst src : PixelRGBA RangeT) :
+    AlphaChannel.toNat ((dst * src).a) =
+      Nat.min (AlphaChannel.maxValue (RangeT := RangeT))
+        (AlphaChannel.toNat src.a +
+          alphaDivRound
+            (AlphaChannel.toNat dst.a *
+              ((AlphaChannel.maxValue (RangeT := RangeT)) - AlphaChannel.toNat src.a))
+            (AlphaChannel.maxValue (RangeT := RangeT))) := by
+  simpa [pixelRGBA_mul_eq_rgbaMultiplyOver] using
+    (rgbaMultiplyOver_alpha_toNat_eq_min (RangeT := RangeT) dst src)
 
 lemma pixelRGBA_add_alpha_src_zero {RangeT : Type u} [AlphaChannel RangeT]
     [LawfulAlphaChannel RangeT] (dst src : PixelRGBA RangeT)
