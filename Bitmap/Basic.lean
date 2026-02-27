@@ -113,19 +113,18 @@ instance (priority := low) {α : Type} [Mul α] : Mul (PixelRGBA α) where
 
 def PixelRGBA8  := PixelRGBA UInt8
 
-class AlphaChannel (RangeT : Type u) where
+class AlphaChannel (RangeT : Type u) extends NatCast RangeT where
   toNat : RangeT → Nat
-  ofNat : Nat → RangeT
   maxValue : Nat
 
 instance : AlphaChannel UInt8 where
+  natCast := UInt8.ofNat
   toNat := UInt8.toNat
-  ofNat := UInt8.ofNat
   maxValue := 255
 
 instance : AlphaChannel UInt16 where
+  natCast := UInt16.ofNat
   toNat := UInt16.toNat
-  ofNat := UInt16.ofNat
   maxValue := 65535
 
 @[inline] def alphaDivRound (num den : Nat) : Nat :=
@@ -135,7 +134,7 @@ instance : AlphaChannel UInt16 where
     (num + den / 2) / den
 
 @[inline] def alphaClamp {RangeT : Type u} [AlphaChannel RangeT] (n : Nat) : RangeT :=
-  AlphaChannel.ofNat (Nat.min (AlphaChannel.maxValue (RangeT := RangeT)) n)
+  Nat.cast (R := RangeT) (Nat.min (AlphaChannel.maxValue (RangeT := RangeT)) n)
 
 @[inline] def alphaMulNorm {RangeT : Type u} [AlphaChannel RangeT]
     (x y : RangeT) : RangeT :=

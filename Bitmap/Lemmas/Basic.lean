@@ -1,0 +1,148 @@
+import Bitmap.Basic
+import Init.Data.Nat.Lemmas
+
+universe u
+
+namespace Bitmaps
+
+namespace Lemmas
+
+class LawfulAlphaChannel (RangeT : Type u) [AlphaChannel RangeT] : Prop where
+  toNat_natCast_of_le_max :
+    ∀ n : Nat, n ≤ AlphaChannel.maxValue (RangeT := RangeT) →
+      AlphaChannel.toNat (Nat.cast (R := RangeT) n) = n
+  natCast_toNat : ∀ x : RangeT,
+      (Nat.cast (R := RangeT) (AlphaChannel.toNat x)) = x
+  toNat_le_max : ∀ x : RangeT,
+      AlphaChannel.toNat x ≤ AlphaChannel.maxValue (RangeT := RangeT)
+  maxValue_pos : 0 < AlphaChannel.maxValue (RangeT := RangeT)
+
+instance : LawfulAlphaChannel UInt8 where
+  toNat_natCast_of_le_max := by
+    intro n hn
+    have hn' : n ≤ 255 := by simpa using hn
+    have hlt : n < 2 ^ 8 := by omega
+    change UInt8.toNat (UInt8.ofNat n) = n
+    rw [UInt8.toNat.eq_1]
+    rw [UInt8.ofNat]
+    rw [BitVec.toNat_ofNat]
+    simp [Nat.mod_eq_of_lt hlt]
+  natCast_toNat := by
+    intro x
+    change UInt8.ofNat (UInt8.toNat x) = x
+    simp
+  toNat_le_max := by
+    intro x
+    have hlt : UInt8.toNat x < UInt8.size := by
+      rw [UInt8.toNat.eq_1]
+      exact x.toBitVec.isLt
+    have hlt' : UInt8.toNat x < 256 := by simpa using hlt
+    change UInt8.toNat x ≤ 255
+    exact Nat.le_of_lt_succ hlt'
+  maxValue_pos := by decide
+
+instance : LawfulAlphaChannel UInt16 where
+  toNat_natCast_of_le_max := by
+    intro n hn
+    have hn' : n ≤ 65535 := by simpa using hn
+    have hlt : n < 2 ^ 16 := by omega
+    change UInt16.toNat (UInt16.ofNat n) = n
+    rw [UInt16.toNat.eq_1]
+    rw [UInt16.ofNat]
+    rw [BitVec.toNat_ofNat]
+    simp [Nat.mod_eq_of_lt hlt]
+  natCast_toNat := by
+    intro x
+    change UInt16.ofNat (UInt16.toNat x) = x
+    simp
+  toNat_le_max := by
+    intro x
+    have hlt : UInt16.toNat x < UInt16.size := by
+      rw [UInt16.toNat.eq_1]
+      exact x.toBitVec.isLt
+    have hlt' : UInt16.toNat x < 65536 := by simpa using hlt
+    change UInt16.toNat x ≤ 65535
+    exact Nat.le_of_lt_succ hlt'
+  maxValue_pos := by decide
+
+lemma alphaDivRound_zero_left (den : Nat) : alphaDivRound 0 den = 0 := by
+  cases den with
+  | zero => simp [alphaDivRound]
+  | succ d =>
+      have hlt : Nat.succ d / 2 < Nat.succ d :=
+        Nat.div_lt_self (Nat.succ_pos d) (by decide : 1 < (2 : Nat))
+      unfold alphaDivRound
+      simp [Nat.div_eq_of_lt hlt]
+
+lemma alphaDivRound_mul_right (x den : Nat) (hden : 0 < den) :
+    alphaDivRound (x * den) den = x := by
+  unfold alphaDivRound
+  have hden' : den ≠ 0 := Nat.ne_of_gt hden
+  simp [hden']
+  have hhalf_lt : den / 2 < den := by
+    exact Nat.div_lt_self hden (by decide : 1 < (2 : Nat))
+  have hhalf_zero : (den / 2) / den = 0 := Nat.div_eq_of_lt hhalf_lt
+  calc
+    (x * den + den / 2) / den
+        = (den * x + den / 2) / den := by simp [Nat.mul_comm]
+    _ = x + (den / 2) / den := by
+          exact Nat.mul_add_div hden x (den / 2)
+    _ = x := by simp [hhalf_zero]
+
+lemma alphaClamp_toNat_eq_min {RangeT : Type u} [AlphaChannel RangeT]
+    [LawfulAlphaChannel RangeT] (n : Nat) :
+    AlphaChannel.toNat (alphaClamp (RangeT := RangeT) n) =
+      Nat.min (AlphaChannel.maxValue (RangeT := RangeT)) n := by
+  unfold alphaClamp
+  exact LawfulAlphaChannel.toNat_natCast_of_le_max
+    (RangeT := RangeT)
+    (Nat.min (AlphaChannel.maxValue (RangeT := RangeT)) n)
+    (Nat.min_le_left _ _)
+
+lemma alphaClamp_toNat_self {RangeT : Type u} [AlphaChannel RangeT]
+    [LawfulAlphaChannel RangeT] (x : RangeT) :
+    alphaClamp (RangeT := RangeT) (AlphaChannel.toNat x) = x := by
+  unfold alphaClamp
+  have hle : AlphaChannel.toNat x ≤ AlphaChannel.maxValue (RangeT := RangeT) :=
+    LawfulAlphaChannel.toNat_le_max (RangeT := RangeT) x
+  have hmin : Nat.min (AlphaChannel.maxValue (RangeT := RangeT)) (AlphaChannel.toNat x) =
+      AlphaChannel.toNat x := by
+    exact Nat.min_eq_right hle
+  simpa [hmin] using (LawfulAlphaChannel.natCast_toNat (RangeT := RangeT) x)
+
+lemma alphaOver_src_zero {RangeT : Type u} [AlphaChannel RangeT]
+    [LawfulAlphaChannel RangeT] (dstA : RangeT) :
+    alphaOver (RangeT := RangeT) dstA (Nat.cast (R := RangeT) 0) = dstA := by
+  unfold alphaOver
+  have hsrc0 : AlphaChannel.toNat (Nat.cast (R := RangeT) 0) = 0 := by
+    simpa using (LawfulAlphaChannel.toNat_natCast_of_le_max (RangeT := RangeT) 0 (Nat.zero_le _))
+  simp [hsrc0, alphaDivRound_mul_right, LawfulAlphaChannel.maxValue_pos]
+  exact alphaClamp_toNat_self (RangeT := RangeT) dstA
+
+lemma alphaOver_dst_zero {RangeT : Type u} [AlphaChannel RangeT]
+    [LawfulAlphaChannel RangeT] (srcA : RangeT) :
+    alphaOver (RangeT := RangeT) (Nat.cast (R := RangeT) 0) srcA = srcA := by
+  unfold alphaOver
+  have hdst0 : AlphaChannel.toNat (Nat.cast (R := RangeT) 0) = 0 := by
+    simpa using (LawfulAlphaChannel.toNat_natCast_of_le_max (RangeT := RangeT) 0 (Nat.zero_le _))
+  simp [hdst0, alphaDivRound_zero_left]
+  exact alphaClamp_toNat_self (RangeT := RangeT) srcA
+
+lemma alphaOver_src_full {RangeT : Type u} [AlphaChannel RangeT]
+    [LawfulAlphaChannel RangeT] (dstA : RangeT) :
+    alphaOver (RangeT := RangeT) dstA
+      (Nat.cast (R := RangeT) (AlphaChannel.maxValue (RangeT := RangeT))) =
+      Nat.cast (R := RangeT) (AlphaChannel.maxValue (RangeT := RangeT)) := by
+  unfold alphaOver
+  have hsrcMax : AlphaChannel.toNat
+      (Nat.cast (R := RangeT) (AlphaChannel.maxValue (RangeT := RangeT))) =
+      AlphaChannel.maxValue (RangeT := RangeT) := by
+    exact LawfulAlphaChannel.toNat_natCast_of_le_max (RangeT := RangeT)
+      (AlphaChannel.maxValue (RangeT := RangeT)) (Nat.le_refl _)
+  simp [hsrcMax, alphaDivRound_zero_left]
+  unfold alphaClamp
+  simp
+
+end Lemmas
+
+end Bitmaps
