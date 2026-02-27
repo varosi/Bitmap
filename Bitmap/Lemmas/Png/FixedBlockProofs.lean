@@ -229,7 +229,7 @@ lemma idRun_pushRange_eq_pushRepeat (out : ByteArray) (b : UInt8) (len : Nat) :
       for _ in [0:len] do
         out := out.push b
       return out) = pushRepeat out b len := by
-  simpa [Std.Range.forIn_eq_forIn_range'] using
+  simpa [Std.Legacy.Range.forIn_eq_forIn_range'] using
     (foldl_push_range'_eq_pushRepeat out b 0 len)
 
 lemma copyDistance_one_eq_pushRepeat (out : ByteArray) (len : Nat) (hout : 0 < out.size) :

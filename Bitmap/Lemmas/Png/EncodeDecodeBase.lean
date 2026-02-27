@@ -3226,7 +3226,7 @@ lemma unfilterRow_size (filter : UInt8) (row prev : ByteArray) (bpp : Nat)
     (unfilterRow filter row prev bpp hfilter).size = row.size := by
   -- Rewrite the loop to a fold over the range list.
   unfold unfilterRow
-  simp [Std.Range.forIn_eq_forIn_range']
+  simp [Std.Legacy.Range.forIn_eq_forIn_range']
   -- Folding with `push` adds one element per iteration.
   have hfold :
       ∀ (xs : List Nat) (f : ByteArray → Nat → UInt8) (out : ByteArray),
