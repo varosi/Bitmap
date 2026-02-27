@@ -64,15 +64,27 @@ def crc32 (bytes : ByteArray) : UInt32 :=
 def crc32Chunk (typBytes data : ByteArray) : UInt32 :=
   (crc32Update (crc32Update 0xFFFFFFFF typBytes) data) ^^^ 0xFFFFFFFF
 
-def adler32 (bytes : ByteArray) : UInt32 :=
+def adler32Fast (bytes : ByteArray) : UInt32 :=
   Id.run do
     let mod : Nat := 65521
+    let chunk : Nat := 5552
+    let data := bytes.data
+    let mut i : Nat := 0
     let mut a : Nat := 1
     let mut b : Nat := 0
-    for byte in bytes do
-      a := (a + byte.toNat) % mod
-      b := (b + a) % mod
+    while i < data.size do
+      let stop := Nat.min data.size (i + chunk)
+      while i < stop do
+        let byte := data[i]!
+        a := a + byte.toNat
+        b := b + a
+        i := i + 1
+      a := a % mod
+      b := b % mod
     return UInt32.ofNat ((b <<< 16) + a)
+
+def adler32 (bytes : ByteArray) : UInt32 :=
+  adler32Fast bytes
 
 def pngSignature : ByteArray :=
   ByteArray.mk #[
@@ -187,16 +199,31 @@ def BitWriter.writeBits (bw : BitWriter) (bits len : Nat) : BitWriter :=
   | 0 => bw
   | n + 1 => BitWriter.writeBits (bw.writeBit (bits % 2)) (bits >>> 1) n
 
-def BitWriter.writeBitsImpl (bw : BitWriter) (bits len : Nat) : BitWriter :=
-  Id.run do
-    let mut bw := bw
-    let mut i := 0
-    while i < len do
-      bw := bw.writeBit ((bits >>> i) % 2)
-      i := i + 1
-    return bw
+def packBitsAccU8 (bits len shift : Nat) (acc : UInt8) : UInt8 :=
+  match len with
+  | 0 => acc
+  | n + 1 =>
+      packBitsAccU8 (bits >>> 1) n (shift + 1)
+        (acc ||| UInt8.ofNat ((bits % 2) <<< shift))
 
-attribute [implemented_by BitWriter.writeBitsImpl] BitWriter.writeBits
+def BitWriter.writeBitsFast (bw : BitWriter) (bits len : Nat) : BitWriter :=
+  if hsmall : bw.bitPos + len < 8 then
+    let cur := packBitsAccU8 bits len bw.bitPos bw.cur
+    { bw with cur := cur, bitPos := bw.bitPos + len, hbit := by omega }
+  else
+    let k := 8 - bw.bitPos
+    let byte := packBitsAccU8 bits k bw.bitPos bw.cur
+    let bw' : BitWriter :=
+      { out := bw.out.push byte, cur := 0, bitPos := 0, hbit := by decide }
+    writeBitsFast bw' (bits >>> k) (len - k)
+termination_by len
+decreasing_by
+  have hlt : 0 < 8 - bw.bitPos := by
+    have hpos : bw.bitPos < 8 := bw.hbit
+    omega
+  have hle : 8 - bw.bitPos ≤ len := by
+    omega
+  exact Nat.sub_lt_self hlt hle
 
 def BitWriter.flush (bw : BitWriter) : ByteArray :=
   if bw.bitPos = 0 then
@@ -213,18 +240,6 @@ def reverseBitsAux (code len res : Nat) : Nat :=
 def reverseBits (code len : Nat) : Nat :=
   reverseBitsAux code len 0
 
-def reverseBitsImpl (code len : Nat) : Nat :=
-  Id.run do
-    let mut x := code
-    let mut res := 0
-    for _ in [0:len] do
-      let bit := x &&& 1
-      res := (res <<< 1) ||| bit
-      x := x >>> 1
-    return res
-
-attribute [implemented_by reverseBitsImpl] reverseBits
-
 -- Fixed Huffman literal/length code (code, bit-length).
 def fixedLitLenCode (sym : Nat) : Nat × Nat :=
   if sym ≤ 143 then
@@ -240,7 +255,7 @@ def deflateFixedAux (data : Array UInt8) (i : Nat) (bw : BitWriter) : BitWriter 
   if h : i < data.size then
     let b := data[i]
     let (code, len) := fixedLitLenCode b.toNat
-    deflateFixedAux data (i + 1) (bw.writeBits (reverseBits code len) len)
+    deflateFixedAux data (i + 1) (bw.writeBitsFast (reverseBits code len) len)
   else
     bw
 termination_by data.size - i
@@ -250,6 +265,144 @@ decreasing_by
     exact Nat.sub_lt_sub_left (k := i) (m := data.size) (n := i + 1) hlt (Nat.lt_succ_self i)
   exact hle
 
+def fixedLitLenRevTable : Array (Nat × Nat) :=
+  Array.ofFn (fun i : Fin 288 =>
+    let (code, len) := fixedLitLenCode i.val
+    (reverseBits code len, len))
+
+def fixedLitLenRevCodeFast (sym : Nat) : Nat × Nat :=
+  if h : sym < fixedLitLenRevTable.size then
+    Array.getInternal fixedLitLenRevTable sym h
+  else
+    let (code, len) := fixedLitLenCode sym
+    (reverseBits code len, len)
+
+-- Map a deflate match length in [3, 258] to
+-- (literal/length symbol, extra bits value, extra bits width).
+def fixedLenMatchInfo (len : Nat) : Nat × Nat × Nat :=
+  if len <= 10 then
+    (len + 254, 0, 0)
+  else if len <= 12 then
+    (265, len - 11, 1)
+  else if len <= 14 then
+    (266, len - 13, 1)
+  else if len <= 16 then
+    (267, len - 15, 1)
+  else if len <= 18 then
+    (268, len - 17, 1)
+  else if len <= 22 then
+    (269, len - 19, 2)
+  else if len <= 26 then
+    (270, len - 23, 2)
+  else if len <= 30 then
+    (271, len - 27, 2)
+  else if len <= 34 then
+    (272, len - 31, 2)
+  else if len <= 42 then
+    (273, len - 35, 3)
+  else if len <= 50 then
+    (274, len - 43, 3)
+  else if len <= 58 then
+    (275, len - 51, 3)
+  else if len <= 66 then
+    (276, len - 59, 3)
+  else if len <= 82 then
+    (277, len - 67, 4)
+  else if len <= 98 then
+    (278, len - 83, 4)
+  else if len <= 114 then
+    (279, len - 99, 4)
+  else if len <= 130 then
+    (280, len - 115, 4)
+  else if len <= 162 then
+    (281, len - 131, 5)
+  else if len <= 194 then
+    (282, len - 163, 5)
+  else if len <= 226 then
+    (283, len - 195, 5)
+  else if len <= 257 then
+    (284, len - 227, 5)
+  else
+    (285, 0, 0)
+
+@[inline] def BitWriter.writeFixedLiteralFast (bw : BitWriter) (b : UInt8) : BitWriter :=
+  let (bits, len) := fixedLitLenRevCodeFast b.toNat
+  bw.writeBitsFast bits len
+
+@[inline] def BitWriter.writeFixedMatchDist1Fast (bw : BitWriter) (matchLen : Nat) : BitWriter :=
+  let (sym, extraBits, extraLen) := fixedLenMatchInfo matchLen
+  let (symBits, symLen) := fixedLitLenRevCodeFast sym
+  let bw := bw.writeBitsFast symBits symLen
+  let bw := bw.writeBitsFast extraBits extraLen
+  -- Fixed-Huffman distance symbol 0 encodes distance = 1.
+  bw.writeBitsFast 0 5
+
+@[inline] def chooseFixedMatchChunkLen (remaining : Nat) : Nat :=
+  if remaining > 258 then
+    let r := remaining % 258
+    if r == 1 then 256
+    else if r == 2 then 257
+    else 258
+  else
+    remaining
+
+def deflateFixedAuxFast (data : Array UInt8) (i : Nat) (bw : BitWriter) : BitWriter :=
+  if h : i < data.size then
+    let b := data[i]
+    let (bits, len) := fixedLitLenRevCodeFast b.toNat
+    deflateFixedAuxFast data (i + 1) (bw.writeBitsFast bits len)
+  else
+    bw
+termination_by data.size - i
+decreasing_by
+  have hlt : i < data.size := h
+  have hle : data.size - (i + 1) < data.size - i := by
+    exact Nat.sub_lt_sub_left (k := i) (m := data.size) (n := i + 1) hlt (Nat.lt_succ_self i)
+  exact hle
+
+def deflateFixedFast (raw : ByteArray) : ByteArray :=
+  let bw0 := BitWriter.empty
+  let bw1 := bw0.writeBits 1 1
+  let bw2 := bw1.writeBits 1 2
+  let bw3 := Id.run do
+    let data := raw.data
+    let mut i : Nat := 0
+    let mut bw := bw2
+    while i < data.size do
+      let b := data[i]!
+      let mut j := i + 1
+      let mut scanning := true
+      while scanning do
+        if j < data.size then
+          if data[j]! == b then
+            j := j + 1
+          else
+            scanning := false
+        else
+          scanning := false
+      let runLen := j - i
+      if runLen >= 4 then
+        bw := bw.writeFixedLiteralFast b
+        let mut remaining := runLen - 1
+        while remaining >= 3 do
+          let chunk := chooseFixedMatchChunkLen remaining
+          bw := bw.writeFixedMatchDist1Fast chunk
+          remaining := remaining - chunk
+        while remaining > 0 do
+          bw := bw.writeFixedLiteralFast b
+          remaining := remaining - 1
+      else
+        let mut k : Nat := 0
+        while k < runLen do
+          bw := bw.writeFixedLiteralFast b
+          k := k + 1
+      i := j
+    return bw
+  let (eobBits, eobLen) := fixedLitLenRevCodeFast 256
+  let bw4 := bw3.writeBits eobBits eobLen
+  bw4.flush
+
+@[implemented_by deflateFixedFast]
 def deflateFixed (raw : ByteArray) : ByteArray :=
   let bw0 := BitWriter.empty
   let bw1 := bw0.writeBits 1 1
@@ -259,46 +412,6 @@ def deflateFixed (raw : ByteArray) : ByteArray :=
   let bw4 := bw3.writeBits (reverseBits eobCode eobLen) eobLen
   bw4.flush
 
-def deflateFixedImpl (raw : ByteArray) : ByteArray :=
-  Id.run do
-    let mut bw := BitWriter.empty
-    -- Final block, fixed Huffman coding.
-    bw := bw.writeBits 1 1
-    bw := bw.writeBits 1 2
-    for b in raw.data do
-      let (code, len) := fixedLitLenCode b.toNat
-      bw := bw.writeBits (reverseBits code len) len
-    let (eobCode, eobLen) := fixedLitLenCode 256
-    bw := bw.writeBits (reverseBits eobCode eobLen) eobLen
-    return bw.flush
-
-attribute [implemented_by deflateFixedImpl] deflateFixed
-
-def deflateStoredFastImpl (raw : ByteArray) : ByteArray :=
-  if _hzero : raw.size = 0 then
-    storedBlock ByteArray.empty true
-  else
-    let blockSize : Nat := 65535
-    let rawSize := raw.size
-    let blocks := (rawSize + blockSize - 1) / blockSize
-    let outSize := rawSize + blocks * 5
-    Id.run do
-      let mut out := ByteArray.emptyWithCapacity outSize
-      let mut pos : Nat := 0
-      while pos < rawSize do
-        let remaining := rawSize - pos
-        let len := if remaining > blockSize then blockSize else remaining
-        let final := pos + len == rawSize
-        let header :=
-          ByteArray.mk #[if final then u8 0x01 else u8 0x00]
-            ++ u16le len ++ u16le (0xFFFF - len)
-        out := out ++ header
-        out := raw.copySlice pos out out.size len
-        pos := pos + len
-      return out
-
-attribute [implemented_by deflateStoredFastImpl] deflateStoredFast
-attribute [implemented_by deflateStoredFast] deflateStored
 
 def zlibCompressFixed (raw : ByteArray) : ByteArray :=
   let header := ByteArray.mk #[u8 0x78, u8 0x01]
@@ -307,6 +420,7 @@ def zlibCompressFixed (raw : ByteArray) : ByteArray :=
   let outSize := header.size + deflated.size + adler.size
   let out := ByteArray.emptyWithCapacity outSize
   out ++ header ++ deflated ++ adler
+
 
 def zlibCompressStored (raw : ByteArray) : ByteArray :=
   let header := ByteArray.mk #[u8 0x78, u8 0x01]
@@ -324,6 +438,20 @@ structure BitReader where
   hend : bytePos = data.size → bitPos = 0
   hbit : bitPos < 8
 deriving Repr
+
+-- Precomputed `2^n` for `n ≤ 8`.
+def lowPowNat (n : Nat) : Nat :=
+  match n with
+  | 0 => 1
+  | 1 => 2
+  | 2 => 4
+  | 3 => 8
+  | 4 => 16
+  | 5 => 32
+  | 6 => 64
+  | 7 => 128
+  | 8 => 256
+  | _ => 1
 
 def BitReader.bitIndex (br : BitReader) : Nat :=
   br.bytePos * 8 + br.bitPos
@@ -360,16 +488,117 @@ def BitReader.readBit (br : BitReader) : Nat × BitReader :=
           hend := hend'
           hbit := hbit' })
 
-def BitReader.readBitsAux (br : BitReader) : Nat → Nat × BitReader
-  | 0 => (0, br)
+def BitReader.readBitsAuxAcc (br : BitReader) (n shift acc : Nat) : Nat × BitReader :=
+  match n with
+  | 0 => (acc, br)
   | n + 1 =>
       let (bit, br') := br.readBit
-      let (rest, br'') := readBitsAux br' n
-      (bit ||| (rest <<< 1), br'')
+      readBitsAuxAcc br' n (shift + 1) (acc ||| (bit <<< shift))
+
+def BitReader.readBitsAux (br : BitReader) (n : Nat) : Nat × BitReader :=
+  readBitsAuxAcc br n 0 0
+
+-- Fast path for small bit windows using a 32-bit byte window.
+def BitReader.readBitsFastU32 (br : BitReader) (n : Nat)
+    (_h : br.bitIndex + n <= br.data.size * 8) : Nat × BitReader := by
+  by_cases hzero : n = 0
+  · subst hzero
+    exact (0, br)
+  by_cases hsmall : n <= 24
+  · by_cases hnext : br.bytePos + 3 < br.data.size
+    · let b0 := br.data.get br.bytePos (by omega)
+      let b1 := br.data.get (br.bytePos + 1) (by omega)
+      let b2 := br.data.get (br.bytePos + 2) (by omega)
+      let b3 := br.data.get (br.bytePos + 3) (by omega)
+      let w0 : UInt32 := UInt32.ofNat b0.toNat
+      let w1 : UInt32 := UInt32.shiftLeft (UInt32.ofNat b1.toNat) (UInt32.ofNat 8)
+      let w2 : UInt32 := UInt32.shiftLeft (UInt32.ofNat b2.toNat) (UInt32.ofNat 16)
+      let w3 : UInt32 := UInt32.shiftLeft (UInt32.ofNat b3.toNat) (UInt32.ofNat 24)
+      let word : UInt32 := w0 ||| w1 ||| w2 ||| w3
+      let bitsU : UInt32 :=
+        (UInt32.shiftRight word (UInt32.ofNat br.bitPos)) %
+          (UInt32.shiftLeft (1 : UInt32) (UInt32.ofNat n))
+      let bits : Nat := bitsU.toNat
+      let next := br.bitPos + n
+      let mk (nextBytePos nextBitPos : Nat) (hbit : nextBitPos < 8)
+          (hlt : nextBytePos < br.data.size) : Nat × BitReader :=
+        (bits,
+          { data := br.data
+            bytePos := nextBytePos
+            bitPos := nextBitPos
+            hpos := Nat.le_of_lt hlt
+            hend := by
+              intro hEq
+              exact (False.elim ((Nat.ne_of_lt hlt) hEq))
+            hbit := hbit })
+      by_cases hlt1 : next < 8
+      · have hlt : br.bytePos < br.data.size := by omega
+        exact mk br.bytePos next hlt1 hlt
+      · by_cases hlt2 : next < 16
+        · have hbit' : next - 8 < 8 := by omega
+          have hlt : br.bytePos + 1 < br.data.size := by omega
+          exact mk (br.bytePos + 1) (next - 8) hbit' hlt
+        · by_cases hlt3 : next < 24
+          · have hbit' : next - 16 < 8 := by omega
+            have hlt : br.bytePos + 2 < br.data.size := by omega
+            exact mk (br.bytePos + 2) (next - 16) hbit' hlt
+          · have hnextle : next <= 31 := by
+              have hb : br.bitPos ≤ 7 := (Nat.lt_succ_iff.mp br.hbit)
+              have hn : n <= 24 := hsmall
+              have : br.bitPos + n <= 7 + 24 := by omega
+              simpa [next] using this
+            have hbit' : next - 24 <= 7 := by omega
+            have hbit'' : next - 24 < 8 := by
+              exact lt_of_le_of_lt hbit' (by decide)
+            have hlt : br.bytePos + 3 < br.data.size := by omega
+            exact mk (br.bytePos + 3) (next - 24) hbit'' hlt
+    · exact br.readBitsAux n
+  · exact br.readBitsAux n
 
 def BitReader.readBits (br : BitReader) (n : Nat)
     (_h : br.bitIndex + n <= br.data.size * 8) : Nat × BitReader := by
-  exact br.readBitsAux n
+  exact br.readBitsFastU32 n _h
+
+-- Faster small-bit reader when the requested window stays inside the current byte.
+set_option linter.unnecessarySimpa false
+def BitReader.readBitsFast (br : BitReader) (n : Nat)
+    (h : br.bitIndex + n <= br.data.size * 8) : Nat × BitReader := by
+  by_cases hzero : n = 0
+  · subst hzero
+    exact (0, br)
+  by_cases hsmall : n <= 8
+  · by_cases hspan : br.bitPos + n < 8
+    · have hlt : br.bytePos < br.data.size := by
+        by_cases hEq : br.bytePos = br.data.size
+        · have hbit0 : br.bitPos = 0 := br.hend hEq
+          have hindex : br.bitIndex = br.data.size * 8 := by
+            simp [BitReader.bitIndex, hEq, hbit0]
+          have hn : 0 < n := Nat.pos_of_ne_zero hzero
+          have hgt : br.bitIndex + n > br.data.size * 8 := by
+            have : br.data.size * 8 < br.data.size * 8 + n := by
+              exact Nat.lt_add_of_pos_right hn
+            simpa [hindex, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using this
+          exact (False.elim ((not_lt_of_ge h) hgt))
+        · exact lt_of_le_of_ne br.hpos hEq
+      let byte := br.data.get br.bytePos hlt
+      let bits := (byte.toNat >>> br.bitPos) % lowPowNat n
+      let nextBitPos := br.bitPos + n
+      let hend' : br.bytePos = br.data.size → nextBitPos = 0 := by
+        intro hEq
+        have : False := by
+          simpa [hEq] using hlt
+        exact (False.elim this)
+      exact
+        (bits,
+          { data := br.data
+            bytePos := br.bytePos
+            bitPos := nextBitPos
+            hpos := br.hpos
+            hend := hend'
+            hbit := hspan })
+    · exact br.readBits n h
+  · exact br.readBits n h
+set_option linter.unnecessarySimpa true
 
 def BitReader.alignByte (br : BitReader) : BitReader :=
   by
@@ -503,15 +732,33 @@ def distExtra : Array Nat :=
     12, 12,
     13, 13]
 
-def copyDistance (out : ByteArray) (distance : Nat) : Nat → Option ByteArray
-  | 0 => some out
-  | n + 1 =>
-      if distance == 0 || distance > out.size then
-        none
-      else
-        let idx := out.size - distance
-        let b := out.get! idx
-        copyDistance (out.push b) distance n
+def copyDistanceFast (out : ByteArray) (distance len : Nat) : Option ByteArray :=
+  if _hbad : distance = 0 ∨ distance > out.size then
+    none
+  else if distance = 1 then
+    some <| Id.run do
+      let last := out.get! (out.size - 1)
+      let mut out := out
+      for _ in [0:len] do
+        out := out.push last
+      return out
+  else
+    some <| Id.run do
+      let total := out.size + len
+      let mut dest := ByteArray.mk <| Array.replicate total 0
+      dest := out.copySlice 0 dest 0 out.size
+      let mut pos := out.size
+      let mut remaining := len
+      while remaining > 0 do
+        let chunk := Nat.min distance remaining
+        let src := pos - distance
+        dest := dest.copySlice src dest pos chunk
+        pos := pos + chunk
+        remaining := remaining - chunk
+      return dest
+
+def copyDistance (out : ByteArray) (distance len : Nat) : Option ByteArray :=
+  copyDistanceFast out distance len
 
 def decodeLength (sym : Nat) (br : BitReader)
     (h : 257 ≤ sym ∧ sym ≤ 285)
@@ -743,7 +990,7 @@ def fixedLitLenHuffman : Huffman :=
 def decodeFixedLiteralSym (br : BitReader) : Option (Nat × BitReader) := do
   let (bits7, br7) ←
     if h : br.bitIndex + 7 <= br.data.size * 8 then
-      some (br.readBits 7 h)
+      some (br.readBitsFast 7 h)
     else
       none
   match fixedLitLenRow7[bits7]? with
@@ -752,7 +999,7 @@ def decodeFixedLiteralSym (br : BitReader) : Option (Nat × BitReader) := do
   | _ =>
       let (bit8, br8) ←
         if h : br7.bitIndex + 1 <= br7.data.size * 8 then
-          some (br7.readBits 1 h)
+          some (br7.readBitsFast 1 h)
         else
           none
       let bits8 := bits7 ||| (bit8 <<< 7)
@@ -762,7 +1009,7 @@ def decodeFixedLiteralSym (br : BitReader) : Option (Nat × BitReader) := do
       | _ =>
           let (bit9, br9) ←
             if h : br8.bitIndex + 1 <= br8.data.size * 8 then
-              some (br8.readBits 1 h)
+              some (br8.readBitsFast 1 h)
             else
               none
           let bits9 := bits8 ||| (bit9 <<< 8)
@@ -771,6 +1018,36 @@ def decodeFixedLiteralSym (br : BitReader) : Option (Nat × BitReader) := do
               return (sym, br9)
           | _ =>
               none
+
+-- Decode a single fixed-Huffman literal/length symbol using a 9-bit table peek.
+def decodeFixedLiteralSymFast9 (br : BitReader) : Option (Nat × BitReader) := do
+  if h9 : br.bitIndex + 9 <= br.data.size * 8 then
+    let (bits9, br9) := br.readBitsFastU32 9 h9
+    let bits7 := bits9 % 2 ^ 7
+    match fixedLitLenRow7[bits7]? with
+    | some (some sym) =>
+        if h7 : br.bitIndex + 7 <= br.data.size * 8 then
+          let br7 := (br.readBitsFastU32 7 h7).2
+          return (sym, br7)
+        else
+          none
+    | _ =>
+        let bits8 := bits9 % 2 ^ 8
+        match fixedLitLenRow8[bits8]? with
+        | some (some sym) =>
+            if h8 : br.bitIndex + 8 <= br.data.size * 8 then
+              let br8 := (br.readBitsFastU32 8 h8).2
+              return (sym, br8)
+            else
+              none
+        | _ =>
+            match fixedLitLenRow9[bits9]? with
+            | some (some sym) =>
+                return (sym, br9)
+            | _ =>
+                none
+  else
+    decodeFixedLiteralSym br
 
 -- Decode a fixed-Huffman block that is restricted to literals and end-of-block.
 def decodeFixedLiteralBlockFuel (fuel : Nat) (br : BitReader) (out : ByteArray) :
@@ -789,6 +1066,109 @@ def decodeFixedLiteralBlockFuel (fuel : Nat) (br : BitReader) (out : ByteArray) 
 def decodeFixedLiteralBlock (br : BitReader) (out : ByteArray) :
     Option (BitReader × ByteArray) :=
   decodeFixedLiteralBlockFuel (br.data.size * 8) br out
+
+def decodeFixedDistanceSym (br : BitReader) : Option (Nat × BitReader) := do
+  if h : br.bitIndex + 5 <= br.data.size * 8 then
+    let (bits, br') := br.readBitsFast 5 h
+    some (reverseBits bits 5, br')
+  else
+    none
+
+def decodeFixedBlockFuel (fuel : Nat) (br : BitReader) (out : ByteArray) :
+    Option (BitReader × ByteArray) := do
+  match fuel with
+  | 0 => none
+  | fuel + 1 => do
+      let hLengthExtraSize : lengthExtra.size = 29 := by decide
+      let hDistBasesSize : distBases.size = 30 := by decide
+      let hDistExtraSize : distExtra.size = 30 := by decide
+      let (sym, br') ← decodeFixedLiteralSym br
+      if sym < 256 then
+        decodeFixedBlockFuel fuel br' (out.push (u8 sym))
+      else if sym == 256 then
+        return (br', out)
+      else if hlen : 257 ≤ sym ∧ sym ≤ 285 then
+        let idx := sym - 257
+        have hidxle : idx ≤ 28 := by
+          dsimp [idx]
+          omega
+        have hidxlt : idx < 29 := Nat.lt_succ_of_le hidxle
+        have hidxExtra : idx < lengthExtra.size := by simpa [hLengthExtraSize] using hidxlt
+        let extra := Array.getInternal lengthExtra idx hidxExtra
+        if hbits : br'.bitIndex + extra <= br'.data.size * 8 then
+          let (len, br'') := decodeLength sym br' hlen (by simpa using hbits)
+          let (distSym, br''') ← decodeFixedDistanceSym br''
+          if hdist : distSym < distBases.size then
+            let extraD := Array.getInternal distExtra distSym (by
+              simpa [hDistExtraSize, hDistBasesSize] using hdist)
+            if hbitsD : br'''.bitIndex + extraD <= br'''.data.size * 8 then
+              let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa using hbitsD)
+              let out' ← copyDistance out distance len
+              decodeFixedBlockFuel fuel br'''' out'
+            else
+              none
+          else
+            none
+        else
+          none
+      else
+        none
+
+def decodeFixedBlockFuelFast (fuel : Nat) (br : BitReader) (out : ByteArray) :
+    Option (BitReader × ByteArray) := do
+  match fuel with
+  | 0 => none
+  | fuel + 1 => do
+      let hLengthExtraSize : lengthExtra.size = 29 := by decide
+      let hDistBasesSize : distBases.size = 30 := by decide
+      let hDistExtraSize : distExtra.size = 30 := by decide
+      let (sym, br') ← decodeFixedLiteralSymFast9 br
+      if sym < 256 then
+        decodeFixedBlockFuelFast fuel br' (out.push (u8 sym))
+      else if sym == 256 then
+        return (br', out)
+      else if hlen : 257 ≤ sym ∧ sym ≤ 285 then
+        let idx := sym - 257
+        have hidxle : idx ≤ 28 := by
+          dsimp [idx]
+          omega
+        have hidxlt : idx < 29 := Nat.lt_succ_of_le hidxle
+        have hidxExtra : idx < lengthExtra.size := by simpa [hLengthExtraSize] using hidxlt
+        let extra := Array.getInternal lengthExtra idx hidxExtra
+        if hbits : br'.bitIndex + extra <= br'.data.size * 8 then
+          let (len, br'') := decodeLength sym br' hlen (by simpa using hbits)
+          let (distSym, br''') ← decodeFixedDistanceSym br''
+          if hdist : distSym < distBases.size then
+            let extraD := Array.getInternal distExtra distSym (by
+              simpa [hDistExtraSize, hDistBasesSize] using hdist)
+            if hbitsD : br'''.bitIndex + extraD <= br'''.data.size * 8 then
+              let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa using hbitsD)
+              let out' ← copyDistance out distance len
+              decodeFixedBlockFuelFast fuel br'''' out'
+            else
+              none
+          else
+            none
+        else
+          none
+      else
+        none
+
+def decodeFixedBlockFast (br : BitReader) (out : ByteArray) :
+    Option (BitReader × ByteArray) :=
+  match decodeFixedLiteralBlock br out with
+  | some res => some res
+  | none => decodeFixedBlockFuelFast (br.data.size * 8 + 1) br out
+
+def decodeFixedBlockSpec (br : BitReader) (out : ByteArray) :
+    Option (BitReader × ByteArray) :=
+  match decodeFixedLiteralBlock br out with
+  | some res => some res
+  | none => decodeFixedBlockFuel (br.data.size * 8 + 1) br out
+
+def decodeFixedBlock (br : BitReader) (out : ByteArray) :
+    Option (BitReader × ByteArray) :=
+  decodeFixedBlockFast br out
 
 def fixedLitLenLengths : Array Nat :=
   Id.run do
@@ -842,16 +1222,9 @@ def zlibDecompressLoopFuel (fuel : Nat) (br : BitReader) (out : ByteArray) :
         else
           none
       else if btype == 1 then
-        match decodeFixedLiteralBlock br out with
-        | some (br', out') =>
-            br := br'
-            out := out'
-        | none =>
-            let litLenTable := fixedLitLenHuffman
-            let distTable ← mkHuffman (Array.replicate 32 5)
-            let (br', out') ← decodeCompressedBlock litLenTable distTable br out
-            br := br'
-            out := out'
+        let (br', out') ← decodeFixedBlock br out
+        br := br'
+        out := out'
       else if btype == 2 then
         let (litLenTable, distTable, br') ← readDynamicTables br
         let (br'', out') ← decodeCompressedBlock litLenTable distTable br' out
@@ -957,58 +1330,6 @@ def inflateStored (data : ByteArray) : Option ByteArray := do
     none
 
 -- Tail-recursive stored-block inflater used for the runtime implementation.
-def inflateStoredLoopFuel (fuel : Nat) (data : ByteArray) (pos : Nat) (out : ByteArray) :
-    Option (ByteArray × Nat) :=
-  match fuel with
-  | 0 => none
-  | fuel + 1 =>
-      if hpos : pos < data.size then
-        let header := data.get pos hpos
-        let bfinal := header &&& (0x01 : UInt8)
-        let btype := (header >>> 1) &&& (0x03 : UInt8)
-        if btype != (0 : UInt8) then
-          none
-        else if hlen : pos + 4 < data.size then
-          let hlen1 : pos + 2 < data.size := by
-            exact lt_of_le_of_lt (by omega) hlen
-          let hlen1' : pos + 1 + 1 < data.size := by
-            simpa [Nat.add_assoc] using hlen1
-          let hlen3 : pos + 3 + 1 < data.size := by
-            simpa [Nat.add_assoc] using hlen
-          let len := readU16LE data (pos + 1) hlen1'
-          let nlen := readU16LE data (pos + 3) hlen3
-          if len + nlen != 0xFFFF then
-            none
-          else
-            let start := pos + 5
-            if hbad : start + len > data.size then
-              none
-            else
-              let payload := data.extract start (start + len)
-              let out := out ++ payload
-              let pos' := start + len
-              if bfinal == (1 : UInt8) then
-                some (out, pos')
-              else
-                inflateStoredLoopFuel fuel data pos' out
-        else
-          none
-      else
-        none
-
-def inflateStoredImpl (data : ByteArray) : Option ByteArray := do
-  if h : 0 < data.size then
-    have _hpos : 0 < data.size := h
-    let (payload, pos) ← inflateStoredLoopFuel (data.size + 1) data 0 ByteArray.empty
-    if pos == data.size then
-      return payload
-    else
-      none
-  else
-    none
-
-attribute [implemented_by inflateStoredImpl] inflateStored
-
 -- Fast path for zlib streams that use only stored (uncompressed) deflate blocks.
 def zlibDecompressStored (data : ByteArray) (hsize : 2 <= data.size) : Option ByteArray := do
   let cmf := data.get 0 (by omega)
@@ -1360,28 +1681,6 @@ def encodeRawFast {px : Type u} [Pixel px] (bmp : Bitmap px) : ByteArray :=
   let raw := ByteArray.mk <| Array.replicate rawSize 0
   encodeRawPrefix bmp.data rowBytes h raw
 
-def encodeRawFastImpl {px : Type u} [Pixel px] (bmp : Bitmap px) : ByteArray :=
-  Id.run do
-    let w := bmp.size.width
-    let h := bmp.size.height
-    let rowBytes := w * Pixel.bytesPerPixel (α := px)
-    let rowStride := rowBytes + 1
-    let rawSize := h * rowStride
-    let mut raw := ByteArray.mk <| Array.replicate rawSize 0
-    let data := bmp.data
-    let mut y : Nat := 0
-    let mut srcOff : Nat := 0
-    let mut dstOff : Nat := 1
-    while y < h do
-      raw := data.copySlice srcOff raw dstOff rowBytes
-      y := y + 1
-      srcOff := srcOff + rowBytes
-      dstOff := dstOff + rowStride
-    return raw
-
-attribute [implemented_by encodeRawFastImpl] encodeRawFast
-attribute [implemented_by encodeRawFast] encodeRaw
-
 def encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
     (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
     (mode : PngEncodeMode := .fixed) : ByteArray :=
@@ -1404,6 +1703,8 @@ def encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
     let out := ByteArray.emptyWithCapacity outSize
     out ++ pngSignature ++ ihdrChunk ++ idatChunk ++ iendChunk
 
+-- Encode a bitmap using the buffered fixed-Huffman deflate blocks (perf testing).
+
 -- Encode a bitmap using fixed-Huffman deflate blocks.
 def encodeBitmapFixed {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
     (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32) : ByteArray :=
@@ -1419,6 +1720,7 @@ def encodeBitmapChecked {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
       Except.error "bitmap height exceeds PNG limit (2^32)"
   else
     Except.error "bitmap width exceeds PNG limit (2^32)"
+
 
 def Bitmap.readPng {px : Type u} [Pixel px] [PngPixel px]
     (path : FilePath) : IO (Except String (Bitmap px)) := do

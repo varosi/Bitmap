@@ -464,11 +464,13 @@ lemma decodeFixedLiteralSym_row7 (br : BitReader) (sym bits7 : Nat) (br7 : BitRe
     decodeFixedLiteralSym br = some (sym, br7) := by
   unfold decodeFixedLiteralSym
   by_cases h : br.bitIndex + 7 ≤ br.data.size * 8
-  · have hbits7' : br.readBits 7 h = (bits7, br7) := by
+  · have hbits7'' : br.readBits 7 h = (bits7, br7) := by
       calc
         br.readBits 7 h = br.readBits 7 hread7 := by
           exact readBits_proof_irrel (br := br) (n := 7) (h1 := h) (h2 := hread7)
         _ = (bits7, br7) := hbits7
+    have hbits7' : br.readBitsFast 7 h = (bits7, br7) := by
+      simpa [readBitsFast_eq_readBits (br := br) (n := 7) (h := h)] using hbits7''
     simp [h, hbits7', hrow7]
   · cases h hread7
 
@@ -482,17 +484,21 @@ lemma decodeFixedLiteralSym_row8 (br : BitReader) (sym bits7 bit8 : Nat) (br7 br
     decodeFixedLiteralSym br = some (sym, br8) := by
   unfold decodeFixedLiteralSym
   by_cases h : br.bitIndex + 7 ≤ br.data.size * 8
-  · have hbits7' : br.readBits 7 h = (bits7, br7) := by
+  · have hbits7'' : br.readBits 7 h = (bits7, br7) := by
       calc
         br.readBits 7 h = br.readBits 7 hread7 := by
           exact readBits_proof_irrel (br := br) (n := 7) (h1 := h) (h2 := hread7)
         _ = (bits7, br7) := hbits7
+    have hbits7' : br.readBitsFast 7 h = (bits7, br7) := by
+      simpa [readBitsFast_eq_readBits (br := br) (n := 7) (h := h)] using hbits7''
     by_cases h1 : br7.bitIndex + 1 ≤ br7.data.size * 8
-    · have hbits8' : br7.readBits 1 h1 = (bit8, br8) := by
+    · have hbits8'' : br7.readBits 1 h1 = (bit8, br8) := by
         calc
           br7.readBits 1 h1 = br7.readBits 1 hread1 := by
             exact readBits_proof_irrel (br := br7) (n := 1) (h1 := h1) (h2 := hread1)
           _ = (bit8, br8) := hbits8
+      have hbits8' : br7.readBitsFast 1 h1 = (bit8, br8) := by
+        simpa [readBitsFast_eq_readBits (br := br7) (n := 1) (h := h1)] using hbits8''
       simp [h, hbits7', hrow7, h1, hbits8', hrow8]
     · cases h1 hread1
   · cases h hread7
@@ -510,23 +516,29 @@ lemma decodeFixedLiteralSym_row9 (br : BitReader) (sym bits7 bit8 bit9 : Nat) (b
     decodeFixedLiteralSym br = some (sym, br9) := by
   unfold decodeFixedLiteralSym
   by_cases h : br.bitIndex + 7 ≤ br.data.size * 8
-  · have hbits7' : br.readBits 7 h = (bits7, br7) := by
+  · have hbits7'' : br.readBits 7 h = (bits7, br7) := by
       calc
         br.readBits 7 h = br.readBits 7 hread7 := by
           exact readBits_proof_irrel (br := br) (n := 7) (h1 := h) (h2 := hread7)
         _ = (bits7, br7) := hbits7
+    have hbits7' : br.readBitsFast 7 h = (bits7, br7) := by
+      simpa [readBitsFast_eq_readBits (br := br) (n := 7) (h := h)] using hbits7''
     by_cases h1 : br7.bitIndex + 1 ≤ br7.data.size * 8
-    · have hbits8' : br7.readBits 1 h1 = (bit8, br8) := by
+    · have hbits8'' : br7.readBits 1 h1 = (bit8, br8) := by
         calc
           br7.readBits 1 h1 = br7.readBits 1 hread1 := by
             exact readBits_proof_irrel (br := br7) (n := 1) (h1 := h1) (h2 := hread1)
           _ = (bit8, br8) := hbits8
+      have hbits8' : br7.readBitsFast 1 h1 = (bit8, br8) := by
+        simpa [readBitsFast_eq_readBits (br := br7) (n := 1) (h := h1)] using hbits8''
       by_cases h2 : br8.bitIndex + 1 ≤ br8.data.size * 8
-      · have hbits9' : br8.readBits 1 h2 = (bit9, br9) := by
+      · have hbits9'' : br8.readBits 1 h2 = (bit9, br9) := by
           calc
             br8.readBits 1 h2 = br8.readBits 1 hread1' := by
               exact readBits_proof_irrel (br := br8) (n := 1) (h1 := h2) (h2 := hread1')
             _ = (bit9, br9) := hbits9
+        have hbits9' : br8.readBitsFast 1 h2 = (bit9, br9) := by
+          simpa [readBitsFast_eq_readBits (br := br8) (n := 1) (h := h2)] using hbits9''
         simp [h, hbits7', hrow7, h1, hbits8', hrow8, h2, hbits9', hrow9]
       · cases h2 hread1'
     · cases h1 hread1
