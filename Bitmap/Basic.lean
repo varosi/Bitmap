@@ -105,13 +105,63 @@ instance instFromJsonPixelRGBA (RangeT) [FromJson RangeT] : FromJson (PixelRGBA 
     return { r, g, b, a }
 
 -- Simple addition of intensities of two pixels
-instance {α : Type} [Add α] : Add (PixelRGBA α) where
+instance (priority := low) {α : Type} [Add α] : Add (PixelRGBA α) where
   add p1 p2 := { r := p1.r + p2.r, g := p1.g + p2.g, b := p1.b + p2.b, a := p1.a + p2.a }
 
-instance {α : Type} [Mul α] : Mul (PixelRGBA α) where
+instance (priority := low) {α : Type} [Mul α] : Mul (PixelRGBA α) where
   mul p1 p2 := { r := p1.r * p2.r, g := p1.g * p2.g, b := p1.b * p2.b, a := p1.a * p2.a }
 
 def PixelRGBA8  := PixelRGBA UInt8
+
+@[inline] def u8DivRound (num den : Nat) : Nat :=
+  if den = 0 then
+    0
+  else
+    (num + den / 2) / den
+
+@[inline] def u8MulNorm (x y : UInt8) : UInt8 :=
+  UInt8.ofNat (Nat.min 255 (u8DivRound (x.toNat * y.toNat) 255))
+
+@[inline] def alphaOverU8 (dstA srcA : UInt8) : UInt8 :=
+  let src := srcA.toNat
+  let dst := dstA.toNat
+  let outA := src + u8DivRound (dst * (255 - src)) 255
+  UInt8.ofNat (Nat.min 255 outA)
+
+@[inline] def blendChannelOverU8
+    (dstC srcC dstA srcA : UInt8) : UInt8 :=
+  let src := srcA.toNat
+  let dst := dstA.toNat
+  let outA := src + u8DivRound (dst * (255 - src)) 255
+  if outA = 0 then
+    0
+  else
+    let srcPremul := srcC.toNat * src
+    let dstPremul := u8DivRound (dstC.toNat * dst * (255 - src)) 255
+    UInt8.ofNat (Nat.min 255 (u8DivRound ((srcPremul + dstPremul) * 255) outA))
+
+-- Alpha compositing: `src` over `dst`.
+@[inline] def rgbaOver (dst src : PixelRGBA8) : PixelRGBA8 :=
+  let outA := alphaOverU8 dst.a src.a
+  { r := blendChannelOverU8 dst.r src.r dst.a src.a
+    g := blendChannelOverU8 dst.g src.g dst.a src.a
+    b := blendChannelOverU8 dst.b src.b dst.a src.a
+    a := outA }
+
+-- Multiply blend mode composed as `src` over `dst`.
+@[inline] def rgbaMultiplyOver (dst src : PixelRGBA8) : PixelRGBA8 :=
+  let srcMul : PixelRGBA8 :=
+    { r := u8MulNorm dst.r src.r
+      g := u8MulNorm dst.g src.g
+      b := u8MulNorm dst.b src.b
+      a := src.a }
+  rgbaOver dst srcMul
+
+instance : Add PixelRGBA8 where
+  add dst src := rgbaOver dst src
+
+instance : Mul PixelRGBA8 where
+  mul dst src := rgbaMultiplyOver dst src
 
 -------------------------------------------------------------------------------
 -- A single grayscale pixel of any type
