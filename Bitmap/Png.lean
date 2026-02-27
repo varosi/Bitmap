@@ -556,8 +556,8 @@ def BitReader.readBitsAuxAcc (br : BitReader) (n shift acc : Nat) : Nat × BitRe
 def BitReader.readBitsAux (br : BitReader) (n : Nat) : Nat × BitReader :=
   readBitsAuxAcc br n 0 0
 
--- Fast path for small bit windows using a 32-bit byte window.
-def BitReader.readBitsFastU32 (br : BitReader) (n : Nat)
+-- Fast implementation for small bit windows using a 32-bit byte window.
+def BitReader.readBitsFastU32Impl (br : BitReader) (n : Nat)
     (_h : br.bitIndex + n <= br.data.size * 8) : Nat × BitReader := by
   by_cases hzero : n = 0
   · subst hzero
@@ -612,6 +612,12 @@ def BitReader.readBitsFastU32 (br : BitReader) (n : Nat)
             exact mk (br.bytePos + 3) (next - 24) hbit'' hlt
     · exact br.readBitsAux n
   · exact br.readBitsAux n
+
+-- Logical specification of reading bits. Runtime uses `readBitsFastU32Impl`.
+@[implemented_by BitReader.readBitsFastU32Impl]
+def BitReader.readBitsFastU32 (br : BitReader) (n : Nat)
+    (_h : br.bitIndex + n <= br.data.size * 8) : Nat × BitReader :=
+  br.readBitsAux n
 
 def BitReader.readBits (br : BitReader) (n : Nat)
     (_h : br.bitIndex + n <= br.data.size * 8) : Nat × BitReader := by
