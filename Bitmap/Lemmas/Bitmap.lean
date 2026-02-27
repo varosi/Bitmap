@@ -94,7 +94,8 @@ lemma decodeBitmap_encodeBitmap_common {px : Type u} [Pixel px] [PngPixel px]
     Png.decodeBitmap (Png.encodeBitmap bmp hw hh mode) = some bmp := by
   -- Basic size bounds.
   have hidat_min : 6 ≤ (encodeBitmapIdat (bmp := bmp) (mode := mode)).size := by
-    cases mode <;> simp [encodeBitmapIdat, zlibCompressStored_size_ge, zlibCompressFixed_size_ge]
+    cases mode <;> simp [encodeBitmapIdat, zlibCompressStored_size_ge,
+      zlibCompressFixed_size_ge, zlibCompressDynamic_size_ge]
   have hsize : 8 ≤ (encodeBitmap bmp hw hh mode).size := by
     have hsize' :
         (encodeBitmap bmp hw hh mode).size =
@@ -161,6 +162,13 @@ lemma decodeBitmap_encodeBitmap_common {px : Type u} [Pixel px] [PngPixel px]
         zlibDecompressStored_zlibCompressFixed_none, zlibDecompress_zlibCompressFixed,
         encodeBitmapIdat] using
         (And.intro hctProp (And.intro hminFixed (And.intro hrawEq' hrowsEq)))
+  | dynamic =>
+      have hminDyn : 2 ≤ (zlibCompressDynamic (PngPixel.encodeRaw (α := px) bmp)).size := by
+        simpa [encodeBitmapIdat] using hmin
+      simpa [hsize, hparse,
+        zlibDecompressStored_zlibCompressDynamic_none, zlibDecompress_zlibCompressDynamic,
+        encodeBitmapIdat] using
+        (And.intro hctProp (And.intro hminDyn (And.intro hrawEq' hrowsEq)))
 
 -- Package the pixel-specific facts needed for PNG round-trips.
 class PngRoundTrip (px : Type u) [Pixel px] [PngPixel px] : Prop where
