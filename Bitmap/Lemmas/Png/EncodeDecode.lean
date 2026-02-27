@@ -24,6 +24,7 @@ def encodeBitmapIdat {px : Type u} [Pixel px] [PngPixel px]
   match mode with
   | .stored => zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)
   | .fixed => zlibCompressFixed (PngPixel.encodeRaw (α := px) bmp)
+  | .dynamic => zlibCompressDynamic (PngPixel.encodeRaw (α := px) bmp)
 
 -- Linear index from (x,y) is within bounds for Nat coordinates.
 lemma arrayCoordSize_nat
@@ -1254,6 +1255,28 @@ lemma zlibCompressFixed_size_ge (raw : ByteArray) :
   rw [hsz]
   exact h6
 
+-- The zlib dynamic-compression header bytes are fixed.
+lemma zlibCompressDynamic_header (raw : ByteArray) :
+    (zlibCompressDynamic raw).extract 0 2 = ByteArray.mk #[u8 0x78, u8 0x01] := by
+  simpa [zlibCompressDynamic, deflateDynamic] using zlibCompressFixed_header raw
+
+-- Size of zlib dynamic-compression output (header + deflate + adler32).
+lemma zlibCompressDynamic_size (raw : ByteArray) :
+    (zlibCompressDynamic raw).size = (deflateDynamic raw).size + 6 := by
+  unfold zlibCompressDynamic
+  have hheader : (ByteArray.mk #[u8 0x78, u8 0x01]).size = 2 := by decide
+  simp [ByteArray.size_append, u32be_size, hheader]
+  omega
+
+-- Zlib dynamic-compression output has at least the 2-byte header and 4-byte Adler32.
+lemma zlibCompressDynamic_size_ge (raw : ByteArray) :
+    6 ≤ (zlibCompressDynamic raw).size := by
+  have hsz : (zlibCompressDynamic raw).size = (deflateDynamic raw).size + 6 :=
+    zlibCompressDynamic_size raw
+  have h6 : 6 ≤ (deflateDynamic raw).size + 6 := Nat.le_add_left _ _
+  rw [hsz]
+  exact h6
+
 set_option maxHeartbeats 5000000 in
 -- Zlib header bytes in fixed-compression output match the expected constants.
 lemma zlibCompressFixed_cmf_flg (raw : ByteArray) :
@@ -1388,6 +1411,17 @@ lemma zlibDecompressStored_zlibCompressFixed_none (raw : ByteArray)
     decide
   unfold zlibDecompressStored
   simp [bytes, hcmf, hflg, hmin, hinflate, hmod, hbtype, hflg0]
+
+-- Stored-only zlib decompressor rejects dynamic-compression streams.
+lemma zlibDecompressStored_zlibCompressDynamic_none (raw : ByteArray)
+    (hsize : 2 ≤ (zlibCompressDynamic raw).size) :
+    zlibDecompressStored (zlibCompressDynamic raw) hsize = none := by
+  have hz : zlibCompressDynamic raw = zlibCompressFixed raw := by
+    rfl
+  have hsizeFixed : 2 ≤ (zlibCompressFixed raw).size := by
+    simpa [hz] using hsize
+  simpa [hz] using
+    (zlibDecompressStored_zlibCompressFixed_none (raw := raw) (hsize := hsizeFixed))
 
 -- Zlib header bytes in stored-compression output match the expected constants.
 lemma zlibCompressStored_cmf_flg (raw : ByteArray) :
@@ -1747,6 +1781,17 @@ lemma zlibDecompress_zlibCompressFixed (raw : ByteArray)
     simpa [hposEq, readU32BE_proof_irrel] using hadler
   -- close the final Adler check
   simp [hAdlerPos', hread, bytes]
+
+-- Zlib decompression of dynamic-compression output yields the original bytes.
+lemma zlibDecompress_zlibCompressDynamic (raw : ByteArray)
+    (hsize : 2 ≤ (zlibCompressDynamic raw).size) :
+    zlibDecompress (zlibCompressDynamic raw) hsize = some raw := by
+  have hz : zlibCompressDynamic raw = zlibCompressFixed raw := by
+    rfl
+  have hsizeFixed : 2 ≤ (zlibCompressFixed raw).size := by
+    simpa [hz] using hsize
+  simpa [hz] using
+    (zlibDecompress_zlibCompressFixed (raw := raw) (hsize := hsizeFixed))
 
 -- Fixed tail bytes in the IHDR payload (bit depth, color type, and flags).
 def ihdrTailColor (ct : UInt8) : ByteArray :=
@@ -2521,6 +2566,15 @@ lemma encodeBitmap_size {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
         Nat.add_comm]
       omega
   | fixed =>
+      unfold encodeBitmap encodeBitmapIdat
+      have htail :
+          (ByteArray.mk #[u8 8, PngPixel.colorType (α := px), u8 0, u8 0, u8 0]).size = 5 := by
+        simp [ByteArray.size]
+      simp [Id.run, ByteArray.size_append, mkChunk_size, pngSignature_size, htail,
+        ihdr_utf8ByteSize, idat_utf8ByteSize, iend_utf8ByteSize, u32be_size,
+        Nat.add_comm]
+      omega
+  | dynamic =>
       unfold encodeBitmap encodeBitmapIdat
       have htail :
           (ByteArray.mk #[u8 8, PngPixel.colorType (α := px), u8 0, u8 0, u8 0]).size = 5 := by
