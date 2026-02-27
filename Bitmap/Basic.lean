@@ -113,54 +113,79 @@ instance (priority := low) {α : Type} [Mul α] : Mul (PixelRGBA α) where
 
 def PixelRGBA8  := PixelRGBA UInt8
 
-@[inline] def u8DivRound (num den : Nat) : Nat :=
+class AlphaChannel (RangeT : Type u) where
+  toNat : RangeT → Nat
+  ofNat : Nat → RangeT
+  maxValue : Nat
+
+instance : AlphaChannel UInt8 where
+  toNat := UInt8.toNat
+  ofNat := UInt8.ofNat
+  maxValue := 255
+
+instance : AlphaChannel UInt16 where
+  toNat := UInt16.toNat
+  ofNat := UInt16.ofNat
+  maxValue := 65535
+
+@[inline] def alphaDivRound (num den : Nat) : Nat :=
   if den = 0 then
     0
   else
     (num + den / 2) / den
 
-@[inline] def u8MulNorm (x y : UInt8) : UInt8 :=
-  UInt8.ofNat (Nat.min 255 (u8DivRound (x.toNat * y.toNat) 255))
+@[inline] def alphaClamp {RangeT : Type u} [AlphaChannel RangeT] (n : Nat) : RangeT :=
+  AlphaChannel.ofNat (Nat.min (AlphaChannel.maxValue (RangeT := RangeT)) n)
 
-@[inline] def alphaOverU8 (dstA srcA : UInt8) : UInt8 :=
-  let src := srcA.toNat
-  let dst := dstA.toNat
-  let outA := src + u8DivRound (dst * (255 - src)) 255
-  UInt8.ofNat (Nat.min 255 outA)
+@[inline] def alphaMulNorm {RangeT : Type u} [AlphaChannel RangeT]
+    (x y : RangeT) : RangeT :=
+  let max := (AlphaChannel.maxValue (RangeT := RangeT))
+  alphaClamp (alphaDivRound (AlphaChannel.toNat x * AlphaChannel.toNat y) max)
 
-@[inline] def blendChannelOverU8
-    (dstC srcC dstA srcA : UInt8) : UInt8 :=
-  let src := srcA.toNat
-  let dst := dstA.toNat
-  let outA := src + u8DivRound (dst * (255 - src)) 255
+@[inline] def alphaOver {RangeT : Type u} [AlphaChannel RangeT]
+    (dstA srcA : RangeT) : RangeT :=
+  let src := AlphaChannel.toNat srcA
+  let dst := AlphaChannel.toNat dstA
+  let max := (AlphaChannel.maxValue (RangeT := RangeT))
+  let outA := src + alphaDivRound (dst * (max - src)) max
+  alphaClamp outA
+
+@[inline] def blendChannelOver {RangeT : Type u} [AlphaChannel RangeT]
+    (dstC srcC dstA srcA : RangeT) : RangeT :=
+  let src := AlphaChannel.toNat srcA
+  let dst := AlphaChannel.toNat dstA
+  let max := (AlphaChannel.maxValue (RangeT := RangeT))
+  let outA := src + alphaDivRound (dst * (max - src)) max
   if outA = 0 then
-    0
+    alphaClamp 0
   else
-    let srcPremul := srcC.toNat * src
-    let dstPremul := u8DivRound (dstC.toNat * dst * (255 - src)) 255
-    UInt8.ofNat (Nat.min 255 (u8DivRound ((srcPremul + dstPremul) * 255) outA))
+    let srcPremul := AlphaChannel.toNat srcC * src
+    let dstPremul := alphaDivRound (AlphaChannel.toNat dstC * dst * (max - src)) max
+    alphaClamp (alphaDivRound ((srcPremul + dstPremul) * max) outA)
 
 -- Alpha compositing: `src` over `dst`.
-@[inline] def rgbaOver (dst src : PixelRGBA8) : PixelRGBA8 :=
-  let outA := alphaOverU8 dst.a src.a
-  { r := blendChannelOverU8 dst.r src.r dst.a src.a
-    g := blendChannelOverU8 dst.g src.g dst.a src.a
-    b := blendChannelOverU8 dst.b src.b dst.a src.a
+@[inline] def rgbaOver {RangeT : Type u} [AlphaChannel RangeT]
+    (dst src : PixelRGBA RangeT) : PixelRGBA RangeT :=
+  let outA := alphaOver dst.a src.a
+  { r := blendChannelOver dst.r src.r dst.a src.a
+    g := blendChannelOver dst.g src.g dst.a src.a
+    b := blendChannelOver dst.b src.b dst.a src.a
     a := outA }
 
 -- Multiply blend mode composed as `src` over `dst`.
-@[inline] def rgbaMultiplyOver (dst src : PixelRGBA8) : PixelRGBA8 :=
-  let srcMul : PixelRGBA8 :=
-    { r := u8MulNorm dst.r src.r
-      g := u8MulNorm dst.g src.g
-      b := u8MulNorm dst.b src.b
+@[inline] def rgbaMultiplyOver {RangeT : Type u} [AlphaChannel RangeT]
+    (dst src : PixelRGBA RangeT) : PixelRGBA RangeT :=
+  let srcMul : PixelRGBA RangeT :=
+    { r := alphaMulNorm dst.r src.r
+      g := alphaMulNorm dst.g src.g
+      b := alphaMulNorm dst.b src.b
       a := src.a }
   rgbaOver dst srcMul
 
-instance : Add PixelRGBA8 where
+instance {RangeT : Type u} [AlphaChannel RangeT] : Add (PixelRGBA RangeT) where
   add dst src := rgbaOver dst src
 
-instance : Mul PixelRGBA8 where
+instance {RangeT : Type u} [AlphaChannel RangeT] : Mul (PixelRGBA RangeT) where
   mul dst src := rgbaMultiplyOver dst src
 
 -------------------------------------------------------------------------------
