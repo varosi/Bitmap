@@ -251,8 +251,8 @@ private def runPerfTest : IO Unit := do
 -- Fixed-size performance test for PNG encode/decode on this machine.
 -- Chosen so 10 runs total about 5 seconds here.
 private def runPngPerfTest : IO Unit := do
-  let w : Nat := 1600
-  let h : Nat := 1600
+  let w : Nat := 2432
+  let h : Nat := 2432
   let iters : Nat := 10
   let hb0 <- IO.getNumHeartbeats
   let mut totalNs : Nat := 0
@@ -269,8 +269,8 @@ private def runPngPerfTest : IO Unit := do
 -- Fixed-size performance test for PNG encode/decode via dynamic blocks.
 -- Chosen so 10 runs total about 5 seconds here.
 private def runPngPerfTestDynamic : IO Unit := do
-  let w : Nat := 1600
-  let h : Nat := 1600
+  let w : Nat := 576
+  let h : Nat := 576
   let iters : Nat := 10
   let hb0 <- IO.getNumHeartbeats
   let mut totalNs : Nat := 0
@@ -287,8 +287,8 @@ private def runPngPerfTestDynamic : IO Unit := do
 -- Fixed-size performance test for PNG encode/decode via stored blocks.
 -- Chosen so 10 runs total about 5 seconds here.
 private def runPngPerfTestStored : IO Unit := do
-  let w : Nat := 1600
-  let h : Nat := 1600
+  let w : Nat := 1984
+  let h : Nat := 1984
   let iters : Nat := 10
   let hb0 <- IO.getNumHeartbeats
   let mut totalNs : Nat := 0
