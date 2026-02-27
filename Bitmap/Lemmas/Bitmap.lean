@@ -307,13 +307,13 @@ lemma decodeBitmap_encodeBitmap_rgb (bmp : BitmapRGB8)
 
 
 -- Re-export: static Huffman length base table size.
-lemma lengthBases_size : lengthBases.size = 29 := Png.lengthBases_size
+lemma lengthBases_size : lengthBases.size = 29 := by decide
 -- Re-export: static Huffman length extra table size.
-lemma lengthExtra_size : lengthExtra.size = 29 := Png.lengthExtra_size
+lemma lengthExtra_size : lengthExtra.size = 29 := by decide
 -- Re-export: static Huffman distance base table size.
-lemma distBases_size : distBases.size = 30 := Png.distBases_size
+lemma distBases_size : distBases.size = 30 := by decide
 -- Re-export: static Huffman distance extra table size.
-lemma distExtra_size : distExtra.size = 30 := Png.distExtra_size
+lemma distExtra_size : distExtra.size = 30 := by decide
 
 end Lemmas
 end Bitmaps
