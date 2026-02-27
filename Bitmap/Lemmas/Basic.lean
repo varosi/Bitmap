@@ -258,6 +258,79 @@ lemma rgbaMultiplyOver_alpha_toNat_le_max {RangeT : Type u} [AlphaChannel RangeT
   simpa [rgbaMultiplyOver_alpha] using
     (alphaOver_toNat_le_max (RangeT := RangeT) dst.a src.a)
 
+lemma alphaOver_dst_full {RangeT : Type u} [AlphaChannel RangeT]
+    [LawfulAlphaChannel RangeT] (srcA : RangeT) :
+    alphaOver (RangeT := RangeT)
+      (Nat.cast (R := RangeT) (AlphaChannel.maxValue (RangeT := RangeT))) srcA =
+      Nat.cast (R := RangeT) (AlphaChannel.maxValue (RangeT := RangeT)) := by
+  have hdstMax : AlphaChannel.toNat
+      (Nat.cast (R := RangeT) (AlphaChannel.maxValue (RangeT := RangeT))) =
+      AlphaChannel.maxValue (RangeT := RangeT) := by
+    exact LawfulAlphaChannel.toNat_natCast_of_le_max (RangeT := RangeT)
+      (AlphaChannel.maxValue (RangeT := RangeT)) (Nat.le_refl _)
+  have hmaxPos : 0 < AlphaChannel.maxValue (RangeT := RangeT) :=
+    LawfulAlphaChannel.maxValue_pos (RangeT := RangeT)
+  have hdiv :
+      alphaDivRound
+        ((AlphaChannel.maxValue (RangeT := RangeT)) *
+          ((AlphaChannel.maxValue (RangeT := RangeT)) - AlphaChannel.toNat srcA))
+        (AlphaChannel.maxValue (RangeT := RangeT)) =
+      (AlphaChannel.maxValue (RangeT := RangeT)) - AlphaChannel.toNat srcA := by
+    simpa [Nat.mul_comm] using
+      (alphaDivRound_mul_right
+        ((AlphaChannel.maxValue (RangeT := RangeT)) - AlphaChannel.toNat srcA)
+        (AlphaChannel.maxValue (RangeT := RangeT)) hmaxPos)
+  have hle : AlphaChannel.toNat srcA ≤ AlphaChannel.maxValue (RangeT := RangeT) :=
+    LawfulAlphaChannel.toNat_le_max (RangeT := RangeT) srcA
+  have hs : AlphaChannel.toNat srcA +
+      ((AlphaChannel.maxValue (RangeT := RangeT)) - AlphaChannel.toNat srcA) =
+      AlphaChannel.maxValue (RangeT := RangeT) := by
+    exact Nat.add_sub_of_le hle
+  have hcast : alphaClamp (RangeT := RangeT) (AlphaChannel.maxValue (RangeT := RangeT)) =
+      Nat.cast (R := RangeT) (AlphaChannel.maxValue (RangeT := RangeT)) := by
+    unfold alphaClamp
+    simp
+  simpa [alphaOver, hdstMax, hdiv, hs] using hcast
+
+lemma alphaOver_zero_zero {RangeT : Type u} [AlphaChannel RangeT]
+    [LawfulAlphaChannel RangeT] :
+    alphaOver (RangeT := RangeT) (Nat.cast (R := RangeT) 0) (Nat.cast (R := RangeT) 0) =
+      (Nat.cast (R := RangeT) 0) := by
+  have h := alphaOver_dst_zero (RangeT := RangeT) (srcA := (Nat.cast (R := RangeT) 0))
+  simpa using h
+
+lemma rgbaOver_alpha_dst_full {RangeT : Type u} [AlphaChannel RangeT]
+    [LawfulAlphaChannel RangeT] (dst src : PixelRGBA RangeT)
+    (hdst : dst.a = Nat.cast (R := RangeT) (AlphaChannel.maxValue (RangeT := RangeT))) :
+    (rgbaOver (RangeT := RangeT) dst src).a =
+      Nat.cast (R := RangeT) (AlphaChannel.maxValue (RangeT := RangeT)) := by
+  rw [rgbaOver_alpha, hdst]
+  exact alphaOver_dst_full (RangeT := RangeT) src.a
+
+lemma rgbaMultiplyOver_alpha_dst_full {RangeT : Type u} [AlphaChannel RangeT]
+    [LawfulAlphaChannel RangeT] (dst src : PixelRGBA RangeT)
+    (hdst : dst.a = Nat.cast (R := RangeT) (AlphaChannel.maxValue (RangeT := RangeT))) :
+    (rgbaMultiplyOver (RangeT := RangeT) dst src).a =
+      Nat.cast (R := RangeT) (AlphaChannel.maxValue (RangeT := RangeT)) := by
+  rw [rgbaMultiplyOver_alpha, hdst]
+  exact alphaOver_dst_full (RangeT := RangeT) src.a
+
+lemma rgbaOver_alpha_zero_zero {RangeT : Type u} [AlphaChannel RangeT]
+    [LawfulAlphaChannel RangeT] (dst src : PixelRGBA RangeT)
+    (hdst : dst.a = Nat.cast (R := RangeT) 0)
+    (hsrc : src.a = Nat.cast (R := RangeT) 0) :
+    (rgbaOver (RangeT := RangeT) dst src).a = Nat.cast (R := RangeT) 0 := by
+  rw [rgbaOver_alpha, hdst, hsrc]
+  exact alphaOver_zero_zero (RangeT := RangeT)
+
+lemma rgbaMultiplyOver_alpha_zero_zero {RangeT : Type u} [AlphaChannel RangeT]
+    [LawfulAlphaChannel RangeT] (dst src : PixelRGBA RangeT)
+    (hdst : dst.a = Nat.cast (R := RangeT) 0)
+    (hsrc : src.a = Nat.cast (R := RangeT) 0) :
+    (rgbaMultiplyOver (RangeT := RangeT) dst src).a = Nat.cast (R := RangeT) 0 := by
+  rw [rgbaMultiplyOver_alpha, hdst, hsrc]
+  exact alphaOver_zero_zero (RangeT := RangeT)
+
 end Lemmas
 
 end Bitmaps
