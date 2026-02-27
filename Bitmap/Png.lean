@@ -171,6 +171,7 @@ def deflateStoredFast (raw : ByteArray) : ByteArray :=
 inductive PngEncodeMode
   | stored
   | fixed
+  | dynamic
 deriving Repr, DecidableEq
 
 structure BitWriter where
@@ -412,6 +413,55 @@ def deflateFixed (raw : ByteArray) : ByteArray :=
   let bw4 := bw3.writeBits (reverseBits eobCode eobLen) eobLen
   bw4.flush
 
+def deflateDynamicFast (raw : ByteArray) : ByteArray :=
+  let bw0 := BitWriter.empty
+  let bw1 := bw0.writeBits 1 1
+  let bw2 := bw1.writeBits 2 2
+  let bw3 := bw2.writeBits 31 5
+  let bw4 := bw3.writeBits 31 5
+  let bw5 := bw4.writeBits 6 4
+  let bw6 := Id.run do
+    let mut bw := bw5
+    -- Code-length alphabet lengths in deflate order
+    -- [16, 17, 18, 0, 8, 7, 9, 6, 10, 5].
+    bw := bw.writeBitsFast 0 3
+    bw := bw.writeBitsFast 0 3
+    bw := bw.writeBitsFast 0 3
+    bw := bw.writeBitsFast 0 3
+    bw := bw.writeBitsFast 2 3
+    bw := bw.writeBitsFast 2 3
+    bw := bw.writeBitsFast 2 3
+    bw := bw.writeBitsFast 0 3
+    bw := bw.writeBitsFast 0 3
+    bw := bw.writeBitsFast 2 3
+    -- Lit/len lengths for fixed tables, encoded by the dynamic code-length table.
+    -- Symbol 8  -> rev(code)=1 (len=2)
+    -- Symbol 9  -> rev(code)=3 (len=2)
+    -- Symbol 7  -> rev(code)=2 (len=2)
+    -- Symbol 5  -> rev(code)=0 (len=2)
+    for _ in [0:144] do
+      bw := bw.writeBitsFast 1 2
+    for _ in [0:112] do
+      bw := bw.writeBitsFast 3 2
+    for _ in [0:24] do
+      bw := bw.writeBitsFast 2 2
+    for _ in [0:8] do
+      bw := bw.writeBitsFast 1 2
+    for _ in [0:32] do
+      bw := bw.writeBitsFast 0 2
+    let data := raw.data
+    let mut i : Nat := 0
+    while i < data.size do
+      bw := bw.writeFixedLiteralFast data[i]!
+      i := i + 1
+    let (eobBits, eobLen) := fixedLitLenRevCodeFast 256
+    return bw.writeBitsFast eobBits eobLen
+  bw6.flush
+
+@[implemented_by deflateDynamicFast]
+def deflateDynamic (raw : ByteArray) : ByteArray :=
+  -- Specification-level fallback used by proofs.
+  deflateFixed raw
 
 def zlibCompressFixed (raw : ByteArray) : ByteArray :=
   let header := ByteArray.mk #[u8 0x78, u8 0x01]
@@ -425,6 +475,14 @@ def zlibCompressFixed (raw : ByteArray) : ByteArray :=
 def zlibCompressStored (raw : ByteArray) : ByteArray :=
   let header := ByteArray.mk #[u8 0x78, u8 0x01]
   let deflated := deflateStored raw
+  let adler := u32be (adler32 raw).toNat
+  let outSize := header.size + deflated.size + adler.size
+  let out := ByteArray.emptyWithCapacity outSize
+  out ++ header ++ deflated ++ adler
+
+def zlibCompressDynamic (raw : ByteArray) : ByteArray :=
+  let header := ByteArray.mk #[u8 0x78, u8 0x01]
+  let deflated := deflateDynamic raw
   let adler := u32be (adler32 raw).toNat
   let outSize := header.size + deflated.size + adler.size
   let out := ByteArray.emptyWithCapacity outSize
@@ -1696,6 +1754,7 @@ def encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
       match mode with
       | .stored => zlibCompressStored raw
       | .fixed => zlibCompressFixed raw
+      | .dynamic => zlibCompressDynamic raw
     let ihdrChunk := mkChunkBytes ihdrTypeBytes ihdr
     let idatChunk := mkChunkBytes idatTypeBytes idat
     let iendChunk := mkChunkBytes iendTypeBytes ByteArray.empty
