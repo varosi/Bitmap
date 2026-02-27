@@ -105,13 +105,87 @@ instance instFromJsonPixelRGBA (RangeT) [FromJson RangeT] : FromJson (PixelRGBA 
     return { r, g, b, a }
 
 -- Simple addition of intensities of two pixels
-instance {α : Type} [Add α] : Add (PixelRGBA α) where
+instance (priority := low) {α : Type} [Add α] : Add (PixelRGBA α) where
   add p1 p2 := { r := p1.r + p2.r, g := p1.g + p2.g, b := p1.b + p2.b, a := p1.a + p2.a }
 
-instance {α : Type} [Mul α] : Mul (PixelRGBA α) where
+instance (priority := low) {α : Type} [Mul α] : Mul (PixelRGBA α) where
   mul p1 p2 := { r := p1.r * p2.r, g := p1.g * p2.g, b := p1.b * p2.b, a := p1.a * p2.a }
 
 def PixelRGBA8  := PixelRGBA UInt8
+
+class AlphaChannel (RangeT : Type u) extends NatCast RangeT where
+  toNat : RangeT → Nat
+  maxValue : Nat
+
+instance : AlphaChannel UInt8 where
+  natCast := UInt8.ofNat
+  toNat := UInt8.toNat
+  maxValue := 255
+
+instance : AlphaChannel UInt16 where
+  natCast := UInt16.ofNat
+  toNat := UInt16.toNat
+  maxValue := 65535
+
+@[inline] def alphaDivRound (num den : Nat) : Nat :=
+  if den = 0 then
+    0
+  else
+    (num + den / 2) / den
+
+@[inline] def alphaClamp {RangeT : Type u} [AlphaChannel RangeT] (n : Nat) : RangeT :=
+  Nat.cast (R := RangeT) (Nat.min (AlphaChannel.maxValue (RangeT := RangeT)) n)
+
+@[inline] def alphaMulNorm {RangeT : Type u} [AlphaChannel RangeT]
+    (x y : RangeT) : RangeT :=
+  let max := (AlphaChannel.maxValue (RangeT := RangeT))
+  alphaClamp (alphaDivRound (AlphaChannel.toNat x * AlphaChannel.toNat y) max)
+
+@[inline] def alphaOver {RangeT : Type u} [AlphaChannel RangeT]
+    (dstA srcA : RangeT) : RangeT :=
+  let src := AlphaChannel.toNat srcA
+  let dst := AlphaChannel.toNat dstA
+  let max := (AlphaChannel.maxValue (RangeT := RangeT))
+  let outA := src + alphaDivRound (dst * (max - src)) max
+  alphaClamp outA
+
+@[inline] def blendChannelOver {RangeT : Type u} [AlphaChannel RangeT]
+    (dstC srcC dstA srcA : RangeT) : RangeT :=
+  let src := AlphaChannel.toNat srcA
+  let dst := AlphaChannel.toNat dstA
+  let max := (AlphaChannel.maxValue (RangeT := RangeT))
+  let outA := src + alphaDivRound (dst * (max - src)) max
+  if outA = 0 then
+    alphaClamp 0
+  else
+    let srcPremul := AlphaChannel.toNat srcC * src
+    let dstPremul := alphaDivRound (AlphaChannel.toNat dstC * dst * (max - src)) max
+    alphaClamp (alphaDivRound ((srcPremul + dstPremul) * max) outA)
+
+-- Alpha compositing: `src` over `dst`.
+@[inline] def rgbaOver {RangeT : Type u} [AlphaChannel RangeT]
+    (dst src : PixelRGBA RangeT) : PixelRGBA RangeT :=
+  let outA := alphaOver dst.a src.a
+  { r := blendChannelOver dst.r src.r dst.a src.a
+    g := blendChannelOver dst.g src.g dst.a src.a
+    b := blendChannelOver dst.b src.b dst.a src.a
+    a := outA }
+
+-- Multiply blend mode composed as `src` over `dst`.
+@[inline] def rgbaMultiplyOver {RangeT : Type u} [AlphaChannel RangeT]
+    (dst src : PixelRGBA RangeT) : PixelRGBA RangeT :=
+  let srcMul : PixelRGBA RangeT :=
+    { r := alphaMulNorm dst.r src.r
+      g := alphaMulNorm dst.g src.g
+      b := alphaMulNorm dst.b src.b
+      a := src.a }
+  rgbaOver dst srcMul
+
+instance {RangeT : Type u} [AlphaChannel RangeT] : Add (PixelRGBA RangeT) where
+  add dst src := rgbaOver dst src
+
+instance {RangeT : Type u} [AlphaChannel RangeT] : Mul (PixelRGBA RangeT) where
+  mul dst src := rgbaMultiplyOver dst src
 
 -------------------------------------------------------------------------------
 -- A single grayscale pixel of any type
