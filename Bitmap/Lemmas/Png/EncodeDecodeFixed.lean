@@ -1,5 +1,5 @@
 import Bitmap.Lemmas.Png.EncodeDecodeBase
-import Bitmap.Lemmas.Png.FixedBlock
+import Bitmap.Lemmas.Png.FixedBlockBase
 
 universe u
 
