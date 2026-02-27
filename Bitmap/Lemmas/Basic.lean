@@ -157,6 +157,75 @@ lemma alphaClamp_idempotent {RangeT : Type u} [AlphaChannel RangeT]
       alphaClamp (RangeT := RangeT) n := by
   exact alphaClamp_toNat_self (RangeT := RangeT) (alphaClamp (RangeT := RangeT) n)
 
+lemma alphaMulNorm_comm {RangeT : Type u} [AlphaChannel RangeT]
+    (x y : RangeT) :
+    alphaMulNorm (RangeT := RangeT) x y = alphaMulNorm (RangeT := RangeT) y x := by
+  unfold alphaMulNorm
+  simp [Nat.mul_comm]
+
+lemma alphaMulNorm_toNat_eq_min {RangeT : Type u} [AlphaChannel RangeT]
+    [LawfulAlphaChannel RangeT] (x y : RangeT) :
+    AlphaChannel.toNat (alphaMulNorm (RangeT := RangeT) x y) =
+      Nat.min (AlphaChannel.maxValue (RangeT := RangeT))
+        (alphaDivRound (AlphaChannel.toNat x * AlphaChannel.toNat y)
+          (AlphaChannel.maxValue (RangeT := RangeT))) := by
+  unfold alphaMulNorm
+  exact alphaClamp_toNat_eq_min (RangeT := RangeT) _
+
+lemma alphaMulNorm_toNat_le_max {RangeT : Type u} [AlphaChannel RangeT]
+    [LawfulAlphaChannel RangeT] (x y : RangeT) :
+    AlphaChannel.toNat (alphaMulNorm (RangeT := RangeT) x y) ≤
+      AlphaChannel.maxValue (RangeT := RangeT) := by
+  rw [alphaMulNorm_toNat_eq_min (RangeT := RangeT) x y]
+  exact Nat.min_le_left _ _
+
+lemma alphaMulNorm_zero_left {RangeT : Type u} [AlphaChannel RangeT]
+    [LawfulAlphaChannel RangeT] (y : RangeT) :
+    alphaMulNorm (RangeT := RangeT) (Nat.cast (R := RangeT) 0) y =
+      Nat.cast (R := RangeT) 0 := by
+  have h0 : AlphaChannel.toNat (Nat.cast (R := RangeT) 0) = 0 := by
+    simpa using (LawfulAlphaChannel.toNat_natCast_of_le_max (RangeT := RangeT) 0 (Nat.zero_le _))
+  unfold alphaMulNorm
+  unfold alphaClamp
+  simp [h0, alphaDivRound_zero_left]
+
+lemma alphaMulNorm_zero_right {RangeT : Type u} [AlphaChannel RangeT]
+    [LawfulAlphaChannel RangeT] (x : RangeT) :
+    alphaMulNorm (RangeT := RangeT) x (Nat.cast (R := RangeT) 0) =
+      Nat.cast (R := RangeT) 0 := by
+  rw [alphaMulNorm_comm]
+  exact alphaMulNorm_zero_left (RangeT := RangeT) x
+
+lemma alphaMulNorm_full_left {RangeT : Type u} [AlphaChannel RangeT]
+    [LawfulAlphaChannel RangeT] (y : RangeT) :
+    alphaMulNorm (RangeT := RangeT)
+      (Nat.cast (R := RangeT) (AlphaChannel.maxValue (RangeT := RangeT))) y = y := by
+  have htoNatMax : AlphaChannel.toNat
+      (Nat.cast (R := RangeT) (AlphaChannel.maxValue (RangeT := RangeT))) =
+      AlphaChannel.maxValue (RangeT := RangeT) := by
+    exact LawfulAlphaChannel.toNat_natCast_of_le_max (RangeT := RangeT)
+      (AlphaChannel.maxValue (RangeT := RangeT)) (Nat.le_refl _)
+  have hmaxPos : 0 < AlphaChannel.maxValue (RangeT := RangeT) :=
+    LawfulAlphaChannel.maxValue_pos (RangeT := RangeT)
+  have hdiv :
+      alphaDivRound
+        ((AlphaChannel.maxValue (RangeT := RangeT)) * AlphaChannel.toNat y)
+        (AlphaChannel.maxValue (RangeT := RangeT)) =
+      AlphaChannel.toNat y := by
+    simpa [Nat.mul_comm] using
+      (alphaDivRound_mul_right (AlphaChannel.toNat y)
+        (AlphaChannel.maxValue (RangeT := RangeT)) hmaxPos)
+  unfold alphaMulNorm
+  rw [htoNatMax]
+  simpa [hdiv] using (alphaClamp_toNat_self (RangeT := RangeT) y)
+
+lemma alphaMulNorm_full_right {RangeT : Type u} [AlphaChannel RangeT]
+    [LawfulAlphaChannel RangeT] (x : RangeT) :
+    alphaMulNorm (RangeT := RangeT) x
+      (Nat.cast (R := RangeT) (AlphaChannel.maxValue (RangeT := RangeT))) = x := by
+  rw [alphaMulNorm_comm]
+  exact alphaMulNorm_full_left (RangeT := RangeT) x
+
 lemma alphaOver_toNat_eq_min {RangeT : Type u} [AlphaChannel RangeT]
     [LawfulAlphaChannel RangeT] (dstA srcA : RangeT) :
     AlphaChannel.toNat (alphaOver (RangeT := RangeT) dstA srcA) =
@@ -510,6 +579,44 @@ lemma rgbaMultiplyOver_b_zero_zero {RangeT : Type u} [AlphaChannel RangeT]
     (blendChannelOver_alpha_zero_zero (RangeT := RangeT)
       dst.b (alphaMulNorm (RangeT := RangeT) dst.b src.b))
 
+lemma rgbaOver_zero_zero {RangeT : Type u} [AlphaChannel RangeT]
+    [LawfulAlphaChannel RangeT] (dst src : PixelRGBA RangeT)
+    (hdst : dst.a = Nat.cast (R := RangeT) 0)
+    (hsrc : src.a = Nat.cast (R := RangeT) 0) :
+    rgbaOver (RangeT := RangeT) dst src =
+      ({ r := Nat.cast (R := RangeT) 0
+       , g := Nat.cast (R := RangeT) 0
+       , b := Nat.cast (R := RangeT) 0
+       , a := Nat.cast (R := RangeT) 0 } : PixelRGBA RangeT) := by
+  cases dst with
+  | mk dr dg db da =>
+    cases src with
+    | mk sr sg sb sa =>
+      simp at hdst hsrc
+      subst da
+      subst sa
+      unfold rgbaOver
+      simp [blendChannelOver_alpha_zero_zero, alphaOver_zero_zero]
+
+lemma rgbaMultiplyOver_zero_zero {RangeT : Type u} [AlphaChannel RangeT]
+    [LawfulAlphaChannel RangeT] (dst src : PixelRGBA RangeT)
+    (hdst : dst.a = Nat.cast (R := RangeT) 0)
+    (hsrc : src.a = Nat.cast (R := RangeT) 0) :
+    rgbaMultiplyOver (RangeT := RangeT) dst src =
+      ({ r := Nat.cast (R := RangeT) 0
+       , g := Nat.cast (R := RangeT) 0
+       , b := Nat.cast (R := RangeT) 0
+       , a := Nat.cast (R := RangeT) 0 } : PixelRGBA RangeT) := by
+  cases dst with
+  | mk dr dg db da =>
+    cases src with
+    | mk sr sg sb sa =>
+      simp at hdst hsrc
+      subst da
+      subst sa
+      unfold rgbaMultiplyOver rgbaOver
+      simp [blendChannelOver_alpha_zero_zero, alphaOver_zero_zero]
+
 lemma pixelRGBA_add_eq_rgbaOver {RangeT : Type u} [AlphaChannel RangeT]
     (dst src : PixelRGBA RangeT) :
     dst + src = rgbaOver (RangeT := RangeT) dst src := rfl
@@ -647,6 +754,30 @@ lemma pixelRGBA_mul_b_zero_zero {RangeT : Type u} [AlphaChannel RangeT]
     (dst * src).b = Nat.cast (R := RangeT) 0 := by
   simpa [pixelRGBA_mul_eq_rgbaMultiplyOver] using
     (rgbaMultiplyOver_b_zero_zero (RangeT := RangeT) dst src hdst hsrc)
+
+lemma pixelRGBA_add_zero_zero {RangeT : Type u} [AlphaChannel RangeT]
+    [LawfulAlphaChannel RangeT] (dst src : PixelRGBA RangeT)
+    (hdst : dst.a = Nat.cast (R := RangeT) 0)
+    (hsrc : src.a = Nat.cast (R := RangeT) 0) :
+    dst + src =
+      ({ r := Nat.cast (R := RangeT) 0
+       , g := Nat.cast (R := RangeT) 0
+       , b := Nat.cast (R := RangeT) 0
+       , a := Nat.cast (R := RangeT) 0 } : PixelRGBA RangeT) := by
+  simpa [pixelRGBA_add_eq_rgbaOver] using
+    (rgbaOver_zero_zero (RangeT := RangeT) dst src hdst hsrc)
+
+lemma pixelRGBA_mul_zero_zero {RangeT : Type u} [AlphaChannel RangeT]
+    [LawfulAlphaChannel RangeT] (dst src : PixelRGBA RangeT)
+    (hdst : dst.a = Nat.cast (R := RangeT) 0)
+    (hsrc : src.a = Nat.cast (R := RangeT) 0) :
+    dst * src =
+      ({ r := Nat.cast (R := RangeT) 0
+       , g := Nat.cast (R := RangeT) 0
+       , b := Nat.cast (R := RangeT) 0
+       , a := Nat.cast (R := RangeT) 0 } : PixelRGBA RangeT) := by
+  simpa [pixelRGBA_mul_eq_rgbaMultiplyOver] using
+    (rgbaMultiplyOver_zero_zero (RangeT := RangeT) dst src hdst hsrc)
 
 lemma pixelRGBA_add_alpha_toNat_le_max {RangeT : Type u} [AlphaChannel RangeT]
     [LawfulAlphaChannel RangeT] (dst src : PixelRGBA RangeT) :
