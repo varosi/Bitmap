@@ -7,7 +7,6 @@ import Init.Data.Range.Lemmas
 import Init.Data.UInt.Lemmas
 import Batteries.Data.ByteArray
 import Bitmap.Lemmas.Png.Core
-import Bitmap.Lemmas.Png.FixedLiteral
 
 universe u
 
