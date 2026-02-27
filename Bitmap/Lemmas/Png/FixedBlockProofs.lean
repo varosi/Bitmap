@@ -153,8 +153,14 @@ lemma pushRepeat_last_eq
               have hpos : 0 < (pushRepeat (out.push b) b n).size := pushRepeat_pos (out.push b) b n hout'
               omega) := by
         simp [pushRepeat]
+      have hb : (if n = 0 then b else b) = b := by
+        cases n <;> rfl
+      have hlhs := hrec.trans hb
+      have hne : n + 1 ≠ 0 := by
+        simpa [Nat.succ_eq_add_one] using (Nat.succ_ne_zero n)
+      have hrhs : (if n + 1 = 0 then last else b) = b := if_neg hne
       rw [hidxSucc]
-      cases n <;> simpa using hrec
+      exact hlhs.trans hrhs.symm
 
 lemma pushRepeat_last_get!
     (out : ByteArray) (b last : UInt8) (n : Nat)
