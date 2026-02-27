@@ -722,6 +722,32 @@ lemma pixelRGBA_mul_toNat_b_le_max {RangeT : Type u} [AlphaChannel RangeT]
   simpa [pixelRGBA_mul_eq_rgbaMultiplyOver] using
     (rgbaMultiplyOver_toNat_b_le_max (RangeT := RangeT) dst src)
 
+lemma pixelRGBA_add_channels_toNat_le_max {RangeT : Type u} [AlphaChannel RangeT]
+    [LawfulAlphaChannel RangeT] (dst src : PixelRGBA RangeT) :
+    AlphaChannel.toNat ((dst + src).r) ≤ AlphaChannel.maxValue (RangeT := RangeT) ∧
+    AlphaChannel.toNat ((dst + src).g) ≤ AlphaChannel.maxValue (RangeT := RangeT) ∧
+    AlphaChannel.toNat ((dst + src).b) ≤ AlphaChannel.maxValue (RangeT := RangeT) ∧
+    AlphaChannel.toNat ((dst + src).a) ≤ AlphaChannel.maxValue (RangeT := RangeT) := by
+  refine ⟨?_, ⟨?_, ⟨?_, ?_⟩⟩⟩
+  · exact pixelRGBA_add_toNat_r_le_max (RangeT := RangeT) dst src
+  · exact pixelRGBA_add_toNat_g_le_max (RangeT := RangeT) dst src
+  · exact pixelRGBA_add_toNat_b_le_max (RangeT := RangeT) dst src
+  · simpa [pixelRGBA_add_eq_rgbaOver] using
+      (rgbaOver_alpha_toNat_le_max (RangeT := RangeT) dst src)
+
+lemma pixelRGBA_mul_channels_toNat_le_max {RangeT : Type u} [AlphaChannel RangeT]
+    [LawfulAlphaChannel RangeT] (dst src : PixelRGBA RangeT) :
+    AlphaChannel.toNat ((dst * src).r) ≤ AlphaChannel.maxValue (RangeT := RangeT) ∧
+    AlphaChannel.toNat ((dst * src).g) ≤ AlphaChannel.maxValue (RangeT := RangeT) ∧
+    AlphaChannel.toNat ((dst * src).b) ≤ AlphaChannel.maxValue (RangeT := RangeT) ∧
+    AlphaChannel.toNat ((dst * src).a) ≤ AlphaChannel.maxValue (RangeT := RangeT) := by
+  refine ⟨?_, ⟨?_, ⟨?_, ?_⟩⟩⟩
+  · exact pixelRGBA_mul_toNat_r_le_max (RangeT := RangeT) dst src
+  · exact pixelRGBA_mul_toNat_g_le_max (RangeT := RangeT) dst src
+  · exact pixelRGBA_mul_toNat_b_le_max (RangeT := RangeT) dst src
+  · simpa [pixelRGBA_mul_eq_rgbaMultiplyOver] using
+      (rgbaMultiplyOver_alpha_toNat_le_max (RangeT := RangeT) dst src)
+
 lemma pixelRGBA_add_r_zero_zero {RangeT : Type u} [AlphaChannel RangeT]
     [LawfulAlphaChannel RangeT] (dst src : PixelRGBA RangeT)
     (hdst : dst.a = Nat.cast (R := RangeT) 0)
