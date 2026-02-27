@@ -226,6 +226,21 @@ lemma alphaMulNorm_full_right {RangeT : Type u} [AlphaChannel RangeT]
   rw [alphaMulNorm_comm]
   exact alphaMulNorm_full_left (RangeT := RangeT) x
 
+lemma alphaMulNorm_zero_zero {RangeT : Type u} [AlphaChannel RangeT]
+    [LawfulAlphaChannel RangeT] :
+    alphaMulNorm (RangeT := RangeT) (Nat.cast (R := RangeT) 0) (Nat.cast (R := RangeT) 0) =
+      Nat.cast (R := RangeT) 0 := by
+  exact alphaMulNorm_zero_left (RangeT := RangeT) (Nat.cast (R := RangeT) 0)
+
+lemma alphaMulNorm_full_full {RangeT : Type u} [AlphaChannel RangeT]
+    [LawfulAlphaChannel RangeT] :
+    alphaMulNorm (RangeT := RangeT)
+      (Nat.cast (R := RangeT) (AlphaChannel.maxValue (RangeT := RangeT)))
+      (Nat.cast (R := RangeT) (AlphaChannel.maxValue (RangeT := RangeT))) =
+      Nat.cast (R := RangeT) (AlphaChannel.maxValue (RangeT := RangeT)) := by
+  exact alphaMulNorm_full_left (RangeT := RangeT)
+    (Nat.cast (R := RangeT) (AlphaChannel.maxValue (RangeT := RangeT)))
+
 lemma alphaOver_toNat_eq_min {RangeT : Type u} [AlphaChannel RangeT]
     [LawfulAlphaChannel RangeT] (dstA srcA : RangeT) :
     AlphaChannel.toNat (alphaOver (RangeT := RangeT) dstA srcA) =
