@@ -331,6 +331,75 @@ lemma rgbaMultiplyOver_alpha_zero_zero {RangeT : Type u} [AlphaChannel RangeT]
   rw [rgbaMultiplyOver_alpha, hdst, hsrc]
   exact alphaOver_zero_zero (RangeT := RangeT)
 
+lemma rgbaOver_r {RangeT : Type u} [AlphaChannel RangeT]
+    (dst src : PixelRGBA RangeT) :
+    (rgbaOver (RangeT := RangeT) dst src).r =
+      blendChannelOver (RangeT := RangeT) dst.r src.r dst.a src.a := by
+  rfl
+
+lemma rgbaOver_g {RangeT : Type u} [AlphaChannel RangeT]
+    (dst src : PixelRGBA RangeT) :
+    (rgbaOver (RangeT := RangeT) dst src).g =
+      blendChannelOver (RangeT := RangeT) dst.g src.g dst.a src.a := by
+  rfl
+
+lemma rgbaOver_b {RangeT : Type u} [AlphaChannel RangeT]
+    (dst src : PixelRGBA RangeT) :
+    (rgbaOver (RangeT := RangeT) dst src).b =
+      blendChannelOver (RangeT := RangeT) dst.b src.b dst.a src.a := by
+  rfl
+
+lemma rgbaMultiplyOver_r {RangeT : Type u} [AlphaChannel RangeT]
+    (dst src : PixelRGBA RangeT) :
+    (rgbaMultiplyOver (RangeT := RangeT) dst src).r =
+      blendChannelOver (RangeT := RangeT)
+        dst.r (alphaMulNorm (RangeT := RangeT) dst.r src.r) dst.a src.a := by
+  simp [rgbaMultiplyOver, rgbaOver]
+
+lemma rgbaMultiplyOver_g {RangeT : Type u} [AlphaChannel RangeT]
+    (dst src : PixelRGBA RangeT) :
+    (rgbaMultiplyOver (RangeT := RangeT) dst src).g =
+      blendChannelOver (RangeT := RangeT)
+        dst.g (alphaMulNorm (RangeT := RangeT) dst.g src.g) dst.a src.a := by
+  simp [rgbaMultiplyOver, rgbaOver]
+
+lemma rgbaMultiplyOver_b {RangeT : Type u} [AlphaChannel RangeT]
+    (dst src : PixelRGBA RangeT) :
+    (rgbaMultiplyOver (RangeT := RangeT) dst src).b =
+      blendChannelOver (RangeT := RangeT)
+        dst.b (alphaMulNorm (RangeT := RangeT) dst.b src.b) dst.a src.a := by
+  simp [rgbaMultiplyOver, rgbaOver]
+
+lemma pixelRGBA_add_eq_rgbaOver {RangeT : Type u} [AlphaChannel RangeT]
+    (dst src : PixelRGBA RangeT) :
+    dst + src = rgbaOver (RangeT := RangeT) dst src := rfl
+
+lemma pixelRGBA_mul_eq_rgbaMultiplyOver {RangeT : Type u} [AlphaChannel RangeT]
+    (dst src : PixelRGBA RangeT) :
+    dst * src = rgbaMultiplyOver (RangeT := RangeT) dst src := rfl
+
+lemma pixelRGBA_add_alpha {RangeT : Type u} [AlphaChannel RangeT]
+    (dst src : PixelRGBA RangeT) :
+    (dst + src).a = alphaOver (RangeT := RangeT) dst.a src.a := by
+  simpa [pixelRGBA_add_eq_rgbaOver] using (rgbaOver_alpha (RangeT := RangeT) dst src)
+
+lemma pixelRGBA_mul_alpha {RangeT : Type u} [AlphaChannel RangeT]
+    (dst src : PixelRGBA RangeT) :
+    (dst * src).a = alphaOver (RangeT := RangeT) dst.a src.a := by
+  simpa [pixelRGBA_mul_eq_rgbaMultiplyOver] using (rgbaMultiplyOver_alpha (RangeT := RangeT) dst src)
+
+lemma pixelRGBA_add_alpha_toNat_le_max {RangeT : Type u} [AlphaChannel RangeT]
+    [LawfulAlphaChannel RangeT] (dst src : PixelRGBA RangeT) :
+    AlphaChannel.toNat ((dst + src).a) ≤ AlphaChannel.maxValue (RangeT := RangeT) := by
+  simpa [pixelRGBA_add_eq_rgbaOver] using
+    (rgbaOver_alpha_toNat_le_max (RangeT := RangeT) dst src)
+
+lemma pixelRGBA_mul_alpha_toNat_le_max {RangeT : Type u} [AlphaChannel RangeT]
+    [LawfulAlphaChannel RangeT] (dst src : PixelRGBA RangeT) :
+    AlphaChannel.toNat ((dst * src).a) ≤ AlphaChannel.maxValue (RangeT := RangeT) := by
+  simpa [pixelRGBA_mul_eq_rgbaMultiplyOver] using
+    (rgbaMultiplyOver_alpha_toNat_le_max (RangeT := RangeT) dst src)
+
 end Lemmas
 
 end Bitmaps
