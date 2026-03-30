@@ -13,6 +13,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Forbid implemented_by on main
+        if: github.ref == 'refs/heads/main' || github.base_ref == 'main'
+        run: ./scripts/check-no-implemented-by-on-main.sh
+
       - name: Install elan
         run: |
           curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y
