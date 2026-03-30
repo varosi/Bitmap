@@ -203,8 +203,9 @@ instance : PngRoundTrip PixelRGB8 where
     simpa [pngPixel_colorType_rgb] using this
   encodeRaw_size := by
     intro bmp
-    have hraw : (encodeRaw bmp).size =
+    have hraw : (encodeRawFast bmp).size =
         bmp.size.height * (bmp.size.width * bytesPerPixelRGB + 1) := by
+      rw [encodeRawFast_eq]
       simpa using encodeRaw_size (bmp := bmp)
     have hbpp :
         (if (u8 2).toNat = 0 then 1 else if (u8 2).toNat = 2 then 3 else 4) = 3 := by
@@ -213,11 +214,12 @@ instance : PngRoundTrip PixelRGB8 where
   decodeRowsLoop_encodeRaw := by
     intro bmp
     have hrows :
-        decodeRowsLoop (encodeRaw bmp) bmp.size.width bmp.size.height bytesPerPixelRGB
+        decodeRowsLoop (encodeRawFast bmp) bmp.size.width bmp.size.height bytesPerPixelRGB
             (bmp.size.width * bytesPerPixelRGB) 0 0 ByteArray.empty
             (ByteArray.mk <| Array.replicate
               (bmp.size.height * (bmp.size.width * bytesPerPixelRGB)) 0) =
           some bmp.data := by
+      rw [encodeRawFast_eq]
       simpa using (decodeRowsLoop_encodeRaw (bmp := bmp))
     have hbpp :
         (if (u8 2).toNat = 0 then 1 else if (u8 2).toNat = 2 then 3 else 4) = 3 := by
@@ -231,8 +233,9 @@ instance : PngRoundTrip PixelRGBA8 where
     simpa [pngPixel_colorType_rgba] using this
   encodeRaw_size := by
     intro bmp
-    have hraw : (encodeRaw bmp).size =
+    have hraw : (encodeRawFast bmp).size =
         bmp.size.height * (bmp.size.width * bytesPerPixelRGBA + 1) := by
+      rw [encodeRawFast_eq]
       simpa [bytesPerPixel_rgba] using encodeRaw_size (bmp := bmp)
     have hbpp :
         (if (u8 6).toNat = 0 then 1 else if (u8 6).toNat = 2 then 3 else 4) = 4 := by
@@ -241,11 +244,12 @@ instance : PngRoundTrip PixelRGBA8 where
   decodeRowsLoop_encodeRaw := by
     intro bmp
     have hrows :
-        decodeRowsLoopRGBA (encodeRaw bmp) bmp.size.width bmp.size.height bytesPerPixelRGBA
+        decodeRowsLoopRGBA (encodeRawFast bmp) bmp.size.width bmp.size.height bytesPerPixelRGBA
             (bmp.size.width * bytesPerPixelRGBA) 0 0 ByteArray.empty
             (ByteArray.mk <| Array.replicate
               (bmp.size.height * (bmp.size.width * bytesPerPixelRGBA)) 0) =
           some bmp.data := by
+      rw [encodeRawFast_eq]
       simpa using (decodeRowsLoopRGBA_encodeRaw (bmp := bmp))
     have hbpp :
         (if (u8 6).toNat = 0 then 1 else if (u8 6).toNat = 2 then 3 else 4) = 4 := by
@@ -259,8 +263,9 @@ instance : PngRoundTrip PixelGray8 where
     simpa [pngPixel_colorType_gray] using this
   encodeRaw_size := by
     intro bmp
-    have hraw : (encodeRaw bmp).size =
+    have hraw : (encodeRawFast bmp).size =
         bmp.size.height * (bmp.size.width * bytesPerPixelGray + 1) := by
+      rw [encodeRawFast_eq]
       simpa [bytesPerPixel_gray] using encodeRaw_size (bmp := bmp)
     have hbpp :
         (if (u8 0).toNat = 0 then 1 else if (u8 0).toNat = 2 then 3 else 4) = 1 := by
@@ -269,11 +274,12 @@ instance : PngRoundTrip PixelGray8 where
   decodeRowsLoop_encodeRaw := by
     intro bmp
     have hrows :
-        decodeRowsLoopGray (encodeRaw bmp) bmp.size.width bmp.size.height bytesPerPixelGray
+        decodeRowsLoopGray (encodeRawFast bmp) bmp.size.width bmp.size.height bytesPerPixelGray
             (bmp.size.width * bytesPerPixelGray) 0 0 ByteArray.empty
             (ByteArray.mk <| Array.replicate
               (bmp.size.height * (bmp.size.width * bytesPerPixelGray)) 0) =
           some bmp.data := by
+      rw [encodeRawFast_eq]
       simpa using (decodeRowsLoopGray_encodeRaw (bmp := bmp))
     have hbpp :
         (if (u8 0).toNat = 0 then 1 else if (u8 0).toNat = 2 then 3 else 4) = 1 := by

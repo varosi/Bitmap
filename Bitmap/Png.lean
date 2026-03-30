@@ -361,7 +361,8 @@ decreasing_by
     exact Nat.sub_lt_sub_left (k := i) (m := data.size) (n := i + 1) hlt (Nat.lt_succ_self i)
   exact hle
 
-def deflateFixedFast (raw : ByteArray) : ByteArray :=
+-- Candidate follow-up encoder that emits length/distance matches for repeated bytes.
+def deflateFixedMatchFast (raw : ByteArray) : ByteArray :=
   let bw0 := BitWriter.empty
   let bw1 := bw0.writeBits 1 1
   let bw2 := bw1.writeBits 1 2
@@ -403,7 +404,7 @@ def deflateFixedFast (raw : ByteArray) : ByteArray :=
   let bw4 := bw3.writeBits eobBits eobLen
   bw4.flush
 
-def deflateFixed (raw : ByteArray) : ByteArray :=
+def deflateFixedSpec (raw : ByteArray) : ByteArray :=
   let bw0 := BitWriter.empty
   let bw1 := bw0.writeBits 1 1
   let bw2 := bw1.writeBits 1 2
@@ -411,6 +412,18 @@ def deflateFixed (raw : ByteArray) : ByteArray :=
   let (eobCode, eobLen) := fixedLitLenCode 256
   let bw4 := bw3.writeBits (reverseBits eobCode eobLen) eobLen
   bw4.flush
+
+def deflateFixedFast (raw : ByteArray) : ByteArray :=
+  let bw0 := BitWriter.empty
+  let bw1 := bw0.writeBits 1 1
+  let bw2 := bw1.writeBits 1 2
+  let bw3 := deflateFixedAuxFast raw.data 0 bw2
+  let (eobCode, eobLen) := fixedLitLenCode 256
+  let bw4 := bw3.writeBits (reverseBits eobCode eobLen) eobLen
+  bw4.flush
+
+def deflateFixed (raw : ByteArray) : ByteArray :=
+  deflateFixedFast raw
 
 def deflateDynamicFast (raw : ByteArray) : ByteArray :=
   let bw0 := BitWriter.empty

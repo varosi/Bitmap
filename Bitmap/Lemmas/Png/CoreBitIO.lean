@@ -3286,6 +3286,60 @@ lemma bit1Inv_deflateFixed (raw : ByteArray) :
             (BitWriter.writeBits (BitWriter.writeBits BitWriter.empty 1 1) 1 2))
           (bits := reverseBits eobCode eobLen) (len := eobLen) h3)
 
+lemma fixedLitLenRevCodeFast_eq_code_core (sym : Nat) (h : sym < 288) :
+    fixedLitLenRevCodeFast sym =
+      let codeLen := fixedLitLenCode sym
+      (reverseBits codeLen.1 codeLen.2, codeLen.2) := by
+  unfold fixedLitLenRevCodeFast
+  have htab : sym < fixedLitLenRevTable.size := by
+    simpa [fixedLitLenRevTable] using h
+  simp [fixedLitLenRevTable]
+
+lemma deflateFixedAuxFast_eq_spec_core (data : Array UInt8) (i : Nat) (bw : BitWriter) :
+    deflateFixedAuxFast data i bw = deflateFixedAux data i bw := by
+  classical
+  have hk :
+      ∀ k, ∀ i bw, data.size - i = k →
+        deflateFixedAuxFast data i bw = deflateFixedAux data i bw := by
+    intro k
+    induction k with
+    | zero =>
+        intro i bw hk
+        have hle : data.size ≤ i := Nat.le_of_sub_eq_zero hk
+        have hlt : ¬ i < data.size := not_lt_of_ge hle
+        simp [deflateFixedAuxFast, deflateFixedAux, hlt]
+    | succ k ih =>
+        intro i bw hk
+        by_cases hlt : i < data.size
+        · have hk' : data.size - (i + 1) = k := by
+            omega
+          let b := data[i]
+          have hsym : b.toNat < 288 := by
+            exact lt_trans (UInt8.toNat_lt b) (by decide)
+          have hcode :
+              fixedLitLenRevCodeFast b.toNat =
+                let codeLen := fixedLitLenCode b.toNat
+                (reverseBits codeLen.1 codeLen.2, codeLen.2) := by
+            simpa using fixedLitLenRevCodeFast_eq_code_core b.toNat hsym
+          rw [deflateFixedAuxFast.eq_1, deflateFixedAux.eq_1]
+          simp [hlt]
+          simpa [b, hcode] using
+            ih (i := i + 1)
+              (bw := bw.writeBitsFast
+                (reverseBits (fixedLitLenCode b.toNat).1 (fixedLitLenCode b.toNat).2)
+                (fixedLitLenCode b.toNat).2)
+              hk'
+        · simp [deflateFixedAuxFast, deflateFixedAux, hlt]
+  exact hk (data.size - i) i bw rfl
+
+lemma deflateFixed_eq_spec_core (raw : ByteArray) :
+    deflateFixed raw = deflateFixedSpec raw := by
+  unfold deflateFixed deflateFixedFast deflateFixedSpec
+  have haux :=
+    deflateFixedAuxFast_eq_spec_core raw.data 0
+      (BitWriter.writeBits (BitWriter.writeBits BitWriter.empty 1 1) 1 2)
+  simp [haux]
+
 lemma bit1Inv_flush_bit1 (bw : BitWriter) (h : bit1Inv bw) :
     ∃ hsize : 0 < bw.flush.size, (bw.flush.get 0 hsize).toNat.testBit 1 = true := by
   classical
@@ -3329,8 +3383,9 @@ lemma bit1Inv_flush_bit1 (bw : BitWriter) (h : bit1Inv bw) :
           simpa [hflush, byteArray_get_eq_getElem] using hget'
         exact ⟨hsize, by simpa [hget] using hbit1⟩
 
-lemma deflateFixed_bit1 (raw : ByteArray) :
-    ∃ h : 0 < (deflateFixed raw).size, ((deflateFixed raw).get 0 h).toNat.testBit 1 = true := by
+lemma deflateFixedSpec_bit1 (raw : ByteArray) :
+    ∃ h : 0 < (deflateFixedSpec raw).size,
+      ((deflateFixedSpec raw).get 0 h).toNat.testBit 1 = true := by
   -- Use the bit1 invariant on the writer and translate to the flushed byte array.
   let bw0 := BitWriter.empty
   let bw1 := bw0.writeBits 1 1
@@ -3341,10 +3396,18 @@ lemma deflateFixed_bit1 (raw : ByteArray) :
   have hinv : bit1Inv bw4 := by
     simpa [bw0, bw1, bw2, bw3, eob, bw4] using (bit1Inv_deflateFixed raw)
   rcases bit1Inv_flush_bit1 (bw := bw4) hinv with ⟨hsize, hbit⟩
-  have hsize' : 0 < (deflateFixed raw).size := by
-    simpa [deflateFixed, bw0, bw1, bw2, bw3, eob, bw4] using hsize
+  have hsize' : 0 < (deflateFixedSpec raw).size := by
+    simpa [deflateFixedSpec, bw0, bw1, bw2, bw3, eob, bw4] using hsize
   refine ⟨hsize', ?_⟩
-  simpa [deflateFixed, bw0, bw1, bw2, bw3, eob, bw4, byteArray_get_proof_irrel] using hbit
+  simpa [deflateFixedSpec, bw0, bw1, bw2, bw3, eob, bw4, byteArray_get_proof_irrel] using hbit
+
+lemma deflateFixed_bit1 (raw : ByteArray) :
+    ∃ h : 0 < (deflateFixed raw).size, ((deflateFixed raw).get 0 h).toNat.testBit 1 = true := by
+  rcases deflateFixedSpec_bit1 raw with ⟨hsize, hbit⟩
+  have hsize' : 0 < (deflateFixed raw).size := by
+    simpa [deflateFixed_eq_spec_core raw] using hsize
+  refine ⟨hsize', ?_⟩
+  simpa [deflateFixed_eq_spec_core raw, byteArray_get_proof_irrel] using hbit
 
 lemma deflateFixed_header_bit1 (raw : ByteArray) (h : 0 < (deflateFixed raw).size) :
     ((deflateFixed raw).get 0 h).toNat.testBit 1 = true := by

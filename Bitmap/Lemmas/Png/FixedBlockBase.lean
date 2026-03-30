@@ -545,15 +545,77 @@ lemma decodeFixedLiteralBlock_fixedLitBitsEob (data : Array UInt8) (i : Nat) (bw
   simpa [decodeFixedLiteralBlock, bitsLen, bits, len, bw', br] using hmain
 
 set_option maxHeartbeats 4000000 in
--- Deflate-fixed output equals writing the fixed literal stream after the block header.
-lemma deflateFixed_eq_writeBits (raw : ByteArray) :
+lemma fixedLitLenRevCodeFast_eq_code (sym : Nat) (h : sym < 288) :
+    fixedLitLenRevCodeFast sym =
+      let codeLen := fixedLitLenCode sym
+      (reverseBits codeLen.1 codeLen.2, codeLen.2) := by
+  unfold fixedLitLenRevCodeFast
+  have htab : sym < fixedLitLenRevTable.size := by
+    simpa [fixedLitLenRevTable] using h
+  simp [htab, fixedLitLenRevTable]
+
+set_option maxHeartbeats 4000000 in
+lemma deflateFixedAuxFast_eq_spec (data : Array UInt8) (i : Nat) (bw : BitWriter) :
+    deflateFixedAuxFast data i bw = deflateFixedAux data i bw := by
+  classical
+  have hk :
+      ∀ k, ∀ i bw, data.size - i = k →
+        deflateFixedAuxFast data i bw = deflateFixedAux data i bw := by
+    intro k
+    induction k with
+    | zero =>
+        intro i bw hk
+        have hle : data.size ≤ i := Nat.le_of_sub_eq_zero hk
+        have hlt : ¬ i < data.size := not_lt_of_ge hle
+        simp [deflateFixedAuxFast, deflateFixedAux, hlt]
+    | succ k ih =>
+        intro i bw hk
+        by_cases hlt : i < data.size
+        · have hk' : data.size - (i + 1) = k := by
+            omega
+          let b := data[i]
+          have hsym : b.toNat < 288 := by
+            exact lt_trans (UInt8.toNat_lt b) (by decide)
+          have hcode :
+              fixedLitLenRevCodeFast b.toNat =
+                let codeLen := fixedLitLenCode b.toNat
+                (reverseBits codeLen.1 codeLen.2, codeLen.2) := by
+            simpa using fixedLitLenRevCodeFast_eq_code b.toNat hsym
+          rw [deflateFixedAuxFast.eq_1, deflateFixedAux.eq_1]
+          simp [hlt]
+          simpa [b, hcode] using
+            ih (i := i + 1)
+              (bw := bw.writeBitsFast
+                (reverseBits (fixedLitLenCode b.toNat).1 (fixedLitLenCode b.toNat).2)
+                (fixedLitLenCode b.toNat).2)
+              hk'
+        · simp [deflateFixedAuxFast, deflateFixedAux, hlt]
+  exact hk (data.size - i) i bw rfl
+
+set_option maxHeartbeats 4000000 in
+lemma deflateFixedFast_eq_spec (raw : ByteArray) :
+    deflateFixedFast raw = deflateFixedSpec raw := by
+  unfold deflateFixedFast deflateFixedSpec
+  have haux :=
+    deflateFixedAuxFast_eq_spec raw.data 0
+      (BitWriter.writeBits (BitWriter.writeBits BitWriter.empty 1 1) 1 2)
+  simp [haux]
+
+set_option maxHeartbeats 4000000 in
+lemma deflateFixed_eq_spec (raw : ByteArray) :
+    deflateFixed raw = deflateFixedSpec raw := by
+  simpa [deflateFixed] using deflateFixedFast_eq_spec raw
+
+set_option maxHeartbeats 4000000 in
+-- Deflate-fixed spec output equals writing the fixed literal stream after the block header.
+lemma deflateFixedSpec_eq_writeBits (raw : ByteArray) :
     let bw0 := BitWriter.empty
     let bw1 := bw0.writeBits 1 1
     let bw2 := bw1.writeBits 1 2
     let bitsLen := fixedLitBitsEob raw.data 0
-    deflateFixed raw = (BitWriter.writeBits bw2 bitsLen.1 bitsLen.2).flush := by
+    deflateFixedSpec raw = (BitWriter.writeBits bw2 bitsLen.1 bitsLen.2).flush := by
   classical
-  unfold deflateFixed
+  unfold deflateFixedSpec
   -- unfold header writers
   simp
   -- relate deflateFixedAux + EOB to fixedLitBitsEob
@@ -562,6 +624,16 @@ lemma deflateFixed_eq_writeBits (raw : ByteArray) :
       (bw := BitWriter.writeBits (BitWriter.writeBits BitWriter.empty 1 1) 1 2)
   -- rewrite the writer equality and flush
   simpa using (congrArg BitWriter.flush hbits).symm
+
+set_option maxHeartbeats 4000000 in
+-- Deflate-fixed output equals writing the fixed literal stream after the block header.
+lemma deflateFixed_eq_writeBits (raw : ByteArray) :
+    let bw0 := BitWriter.empty
+    let bw1 := bw0.writeBits 1 1
+    let bw2 := bw1.writeBits 1 2
+    let bitsLen := fixedLitBitsEob raw.data 0
+    deflateFixed raw = (BitWriter.writeBits bw2 bitsLen.1 bitsLen.2).flush := by
+  simpa [deflateFixed_eq_spec raw] using deflateFixedSpec_eq_writeBits raw
 
 @[simp] lemma fixedLitLenRevTable_size : fixedLitLenRevTable.size = 288 := by
   simp [fixedLitLenRevTable]

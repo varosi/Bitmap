@@ -55,9 +55,14 @@ lemma zlibDecompress_zlibCompressFixed (raw : ByteArray)
   let hdrBfinal := hdr0.writeBits 1 1
   let hdrHeader := hdrBfinal.writeBits 1 2
   let payloadBits := fixedLitBitsEob raw.data 0
+  have hdeflateBitsSpec :
+      deflateFixedSpec raw = (BitWriter.writeBits hdrHeader payloadBits.1 payloadBits.2).flush := by
+    simpa using deflateFixedSpec_eq_writeBits raw
   have hdeflateBits :
       deflateFixed raw = (BitWriter.writeBits hdrHeader payloadBits.1 payloadBits.2).flush := by
-    simpa using deflateFixed_eq_writeBits raw
+    calc
+      deflateFixed raw = deflateFixedSpec raw := deflateFixed_eq_spec raw
+      _ = (BitWriter.writeBits hdrHeader payloadBits.1 payloadBits.2).flush := hdeflateBitsSpec
   have hdecode :
       decodeFixedLiteralBlock
           (BitWriter.readerAt hdrHeader (deflateFixed raw)
