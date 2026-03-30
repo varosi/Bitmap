@@ -403,7 +403,6 @@ def deflateFixedFast (raw : ByteArray) : ByteArray :=
   let bw4 := bw3.writeBits eobBits eobLen
   bw4.flush
 
-@[implemented_by deflateFixedFast]
 def deflateFixed (raw : ByteArray) : ByteArray :=
   let bw0 := BitWriter.empty
   let bw1 := bw0.writeBits 1 1
@@ -458,7 +457,6 @@ def deflateDynamicFast (raw : ByteArray) : ByteArray :=
     return bw.writeBitsFast eobBits eobLen
   bw6.flush
 
-@[implemented_by deflateDynamicFast]
 def deflateDynamic (raw : ByteArray) : ByteArray :=
   -- Specification-level fallback used by proofs.
   deflateFixed raw

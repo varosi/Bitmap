@@ -6,7 +6,8 @@ import Init.Data.ByteArray.Lemmas
 import Init.Data.Range.Lemmas
 import Init.Data.UInt.Lemmas
 import Batteries.Data.ByteArray
-import Bitmap.Lemmas.Png.Core
+import Bitmap.Lemmas.Png.CoreBitIO
+import Bitmap.Lemmas.Png.CoreByteArray
 
 universe u
 
@@ -2463,14 +2464,43 @@ lemma parsePngSimple_encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : 
   let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
   have hlen' : ihdr.size = 13 := by
     simpa [ihdr] using ihdr_payload_size w h ct
+  have hsize' : (encodeBitmap bmp hw hh mode).size = idat.size + 57 := by
+    simpa [idat] using encodeBitmap_size (bmp := bmp) (hw := hw) (hh := hh) (mode := mode)
+  have hlen1 : 8 + 3 < (encodeBitmap bmp hw hh mode).size := by
+    simp [hsize']
+  have hlen2 : 33 + 3 < (encodeBitmap bmp hw hh mode).size := by
+    simp [hsize']
+  have hlen3 : 45 + idat.size + 3 < (encodeBitmap bmp hw hh mode).size := by
+    simp [hsize']
+    omega
+  have hsig : (encodeBitmap bmp hw hh mode).extract 0 8 = pngSignature := by
+    simpa using encodeBitmap_signature (bmp := bmp) (hw := hw) (hh := hh) (mode := mode)
+  have hread1 :
+      readChunk (encodeBitmap bmp hw hh mode) 8 hlen1 =
+        some ("IHDR".toUTF8, ihdr, 33) := by
+    simpa [ihdr] using
+      (readChunk_encodeBitmap_ihdr (bmp := bmp) (hw := hw) (hh := hh)
+        (mode := mode) (hLen := hlen1))
+  have hread2 :
+      readChunk (encodeBitmap bmp hw hh mode) 33 hlen2 =
+        some ("IDAT".toUTF8, idat, 45 + idat.size) := by
+    simpa [idat] using
+      (readChunk_encodeBitmap_idat (bmp := bmp) (hw := hw) (hh := hh)
+        (mode := mode) (hidat := hidat) (hLen := hlen2))
+  have hread3 :
+      readChunk (encodeBitmap bmp hw hh mode) (45 + idat.size) hlen3 =
+        some ("IEND".toUTF8, ByteArray.empty, 57 + idat.size) := by
+    simpa [idat, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm] using
+      (readChunk_encodeBitmap_iend (bmp := bmp) (hw := hw) (hh := hh)
+        (mode := mode) (hLen := hlen3))
   have hsigNe : (pngSignature != pngSignature) = false := by
     exact bne_self_eq_false' (a := pngSignature)
-  have hihdrNe : ("IHDR".toUTF8 != "IHDR".toUTF8) = false := by
-    exact bne_self_eq_false' (a := "IHDR".toUTF8)
-  have hidatNe : ("IDAT".toUTF8 != "IDAT".toUTF8) = false := by
-    exact bne_self_eq_false' (a := "IDAT".toUTF8)
-  have hiendNe : ("IEND".toUTF8 != "IEND".toUTF8) = false := by
-    exact bne_self_eq_false' (a := "IEND".toUTF8)
+  have hihdrNeBA : ("IHDR".toByteArray != "IHDR".toByteArray) = false := by
+    exact bne_self_eq_false' (a := "IHDR".toByteArray)
+  have hidatNeBA : ("IDAT".toByteArray != "IDAT".toByteArray) = false := by
+    exact bne_self_eq_false' (a := "IDAT".toByteArray)
+  have hiendNeBA : ("IEND".toByteArray != "IEND".toByteArray) = false := by
+    exact bne_self_eq_false' (a := "IEND".toByteArray)
   have htailEq : ihdr.extract 8 13 = ihdrTailColor ct := by
     simpa [ihdr] using ihdr_payload_extract_tail w h ct
   have hbitDepth : ((ihdr.extract 8 13).get! 0).toNat = 8 := by
@@ -2518,103 +2548,11 @@ lemma parsePngSimple_encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : 
       readU32BE_proof_irrel (bytes := ihdr) (pos := 4)
         (h1 := by simp [hlen']) (h2 := hpos4)
     exact hproof.trans hheight0
-  have hheader :
-      ∃ x : Nat,
-        readU32BE ihdr 0 (by simp [hlen']) = w ∧
-        readU32BE ihdr 4 (by simp [hlen']) = h ∧
-        ((ihdr.extract 8 13).get! 1).toNat = ct.toNat ∧
-        ((ihdr.extract 8 13).get! 0).toNat = 8 := by
-    refine ⟨0, hwidth, hheight, hctEq, hbitDepth⟩
-  have hbitDepth' :
-      (((u32be w ++ u32be h ++ ihdrTailColor ct).extract 8 13).get! 0).toNat = 8 := by
-    simpa [ihdr] using hbitDepth
-  have hctEq' :
-      (((u32be w ++ u32be h ++ ihdrTailColor ct).extract 8 13).get! 1).toNat = ct.toNat := by
-    simpa [ihdr] using hctEq
-  have hcomp' :
-      (((u32be w ++ u32be h ++ ihdrTailColor ct).extract 8 13).get! 2).toNat = 0 := by
-    simpa [ihdr] using hcomp
-  have hfilter' :
-      (((u32be w ++ u32be h ++ ihdrTailColor ct).extract 8 13).get! 3).toNat = 0 := by
-    simpa [ihdr] using hfilter
-  have hinterlace' :
-      (((u32be w ++ u32be h ++ ihdrTailColor ct).extract 8 13).get! 4).toNat = 0 := by
-    simpa [ihdr] using hinterlace
-  have hctProp' :
-      ¬(((u32be w ++ u32be h ++ ihdrTailColor ct).extract 8 13).get! 1).toNat = 0 →
-      ¬(((u32be w ++ u32be h ++ ihdrTailColor ct).extract 8 13).get! 1).toNat = 2 →
-      (((u32be w ++ u32be h ++ ihdrTailColor ct).extract 8 13).get! 1).toNat = 6 := by
-    simpa [ihdr, hctEq] using hctProp
-  have hpos0' : 0 + 3 < (u32be w ++ u32be h ++ ihdrTailColor ct).size := by
-    have : (u32be w ++ u32be h ++ ihdrTailColor ct).size = 13 := by
-      simpa [ihdr] using hlen'
-    omega
-  have hpos4' : 4 + 3 < (u32be w ++ u32be h ++ ihdrTailColor ct).size := by
-    have : (u32be w ++ u32be h ++ ihdrTailColor ct).size = 13 := by
-      simpa [ihdr] using hlen'
-    omega
-  have hwidth' :
-      readU32BE (u32be w ++ u32be h ++ ihdrTailColor ct) 0 hpos0' = w := by
-    have hproof :=
-      readU32BE_proof_irrel
-        (bytes := u32be w ++ u32be h ++ ihdrTailColor ct)
-        (pos := 0)
-        (h1 := hpos0') (h2 := by exact hpos0)
-    have hwidth0' :
-        readU32BE (u32be w ++ u32be h ++ ihdrTailColor ct) 0 (by exact hpos0) = w := by
-      simpa [ihdr] using hwidth0
-    exact hproof.trans hwidth0'
-  have hheight' :
-      readU32BE (u32be w ++ u32be h ++ ihdrTailColor ct) 4 hpos4' = h := by
-    have hproof :=
-      readU32BE_proof_irrel
-        (bytes := u32be w ++ u32be h ++ ihdrTailColor ct)
-        (pos := 4)
-        (h1 := hpos4') (h2 := by exact hpos4)
-    have hheight0' :
-        readU32BE (u32be w ++ u32be h ++ ihdrTailColor ct) 4 (by exact hpos4) = h := by
-      simpa [ihdr] using hheight0
-    exact hproof.trans hheight0'
-  have hsize8 : (u32be w).size + (u32be h).size = 8 := by
-    simp [u32be_size]
-  have hheader' :
-      ∃ x : (u32be w).size + (u32be h).size = 8,
-        readU32BE (u32be w ++ u32be h ++ ihdrTailColor ct) 0 hpos0' = w ∧
-        readU32BE (u32be w ++ u32be h ++ ihdrTailColor ct) 4 hpos4' = h ∧
-        (((u32be w ++ u32be h ++ ihdrTailColor ct).extract 8 13).get! 1).toNat = ct.toNat ∧
-        (((u32be w ++ u32be h ++ ihdrTailColor ct).extract 8 13).get! 0).toNat = 8 := by
-    exact ⟨hsize8, hwidth', hheight', hctEq', hbitDepth'⟩
-  have hihdrNeBA : ("IHDR".toByteArray != "IHDR".toByteArray) = false := by
-    exact bne_self_eq_false' (a := "IHDR".toByteArray)
-  have hidatNeBA : ("IDAT".toByteArray != "IDAT".toByteArray) = false := by
-    exact bne_self_eq_false' (a := "IDAT".toByteArray)
-  have hiendNeBA : ("IEND".toByteArray != "IEND".toByteArray) = false := by
-    exact bne_self_eq_false' (a := "IEND".toByteArray)
-  have hsize : (encodeBitmap bmp hw hh mode).size = idat.size + 57 := by
-    simpa [idat] using encodeBitmap_size (bmp := bmp) (hw := hw) (hh := hh) (mode := mode)
-  have hlen1 : 8 + 3 < (encodeBitmap bmp hw hh mode).size := by
-    simp [hsize]
-  have hlen2 : 33 + 3 < (encodeBitmap bmp hw hh mode).size := by
-    simp [hsize]
-  have hlen3 :
-      45 + idat.size + 3 < (encodeBitmap bmp hw hh mode).size := by
-    simp [hsize]; omega
-  -- Unfold and simplify the parser using the chunk-level lemmas.
   unfold parsePngSimple
-  simp [encodeBitmap_signature (bmp := bmp) (hw := hw) (hh := hh) (mode := mode),
+  simp [hsig, hlen1, hlen2, hlen3, hread1, hread2, hread3,
     hsigNe, hihdrNeBA, hidatNeBA, hiendNeBA,
-    hlen1, hlen2,
-    readChunk_encodeBitmap_ihdr (bmp := bmp) (hw := hw) (hh := hh) (mode := mode) (hLen := hlen1),
-    readChunk_encodeBitmap_idat (bmp := bmp) (hw := hw) (hh := hh) (mode := mode)
-      (hidat := hidat) (hLen := hlen2),
-    readChunk_encodeBitmap_iend (bmp := bmp) (hw := hw) (hh := hh) (mode := mode) (hLen := hlen3)]
-  refine And.intro hbitDepth' ?_
-  refine And.intro hctProp' ?_
-  refine And.intro ?_ ?_
-  · exact And.intro (And.intro hcomp' hfilter') hinterlace'
-  · refine And.intro ?_ ?_
-    · exact hlen3
-    · exact hheader'
+    hlen', hbitDepth, hctEq, hcomp, hfilter, hinterlace,
+    hcolorOk, hwidth, hheight, w, h, ct, ihdr, idat]
 
 -- Parsing an encoded bitmap with the full PNG parser yields the header and payload.
 lemma parsePng_encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)

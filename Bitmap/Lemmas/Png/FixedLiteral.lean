@@ -1,4 +1,4 @@
-import Bitmap.Lemmas.Png.Core
+import Bitmap.Lemmas.Png.CoreBitIO
 import Bitmap.Png
 import Init.Data.Nat.Bitwise.Basic
 import Init.Data.Nat.Bitwise.Lemmas
