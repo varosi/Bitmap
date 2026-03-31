@@ -347,6 +347,13 @@ def fixedLenMatchInfo (len : Nat) : Nat × Nat × Nat :=
   else
     remaining
 
+@[inline] def quadTailEqbFast (data : Array UInt8) (i : Nat) (b : UInt8) (h3 : i + 3 < data.size) :
+    Bool :=
+  let b1 := data[i + 1]'(by omega)
+  let b2 := data[i + 2]'(by omega)
+  let b3 := data[i + 3]'h3
+  (b1 == b) && (b2 == b) && (b3 == b)
+
 def deflateFixedAuxFast (data : Array UInt8) (i : Nat) (bw : BitWriter) : BitWriter :=
   if h : i < data.size then
     let b := data[i]
@@ -360,6 +367,34 @@ decreasing_by
   have hle : data.size - (i + 1) < data.size - i := by
     exact Nat.sub_lt_sub_left (k := i) (m := data.size) (n := i + 1) hlt (Nat.lt_succ_self i)
   exact hle
+
+def deflateFixedQuadAuxFast (data : Array UInt8) (i : Nat) (bw : BitWriter) : BitWriter :=
+  if h : i < data.size then
+    let b := data[i]
+    if h3 : i + 3 < data.size then
+      if quadTailEqbFast data i b h3 then
+        let bw := bw.writeFixedLiteralFast b
+        let bw := bw.writeFixedMatchDist1Fast 3
+        deflateFixedQuadAuxFast data (i + 4) bw
+      else
+        deflateFixedQuadAuxFast data (i + 1) (bw.writeFixedLiteralFast b)
+    else
+      deflateFixedQuadAuxFast data (i + 1) (bw.writeFixedLiteralFast b)
+  else
+    bw
+termination_by data.size - i
+decreasing_by
+  · have hle : data.size - (i + 4) < data.size - i := by
+      omega
+    exact hle
+  · have hlt : i < data.size := h
+    have hle : data.size - (i + 1) < data.size - i := by
+      exact Nat.sub_lt_sub_left (k := i) (m := data.size) (n := i + 1) hlt (Nat.lt_succ_self i)
+    exact hle
+  · have hlt : i < data.size := h
+    have hle : data.size - (i + 1) < data.size - i := by
+      exact Nat.sub_lt_sub_left (k := i) (m := data.size) (n := i + 1) hlt (Nat.lt_succ_self i)
+    exact hle
 
 -- Candidate follow-up encoder that emits length/distance matches for repeated bytes.
 def deflateFixedMatchFast (raw : ByteArray) : ByteArray :=
@@ -422,8 +457,17 @@ def deflateFixedFast (raw : ByteArray) : ByteArray :=
   let bw4 := bw3.writeBits (reverseBits eobCode eobLen) eobLen
   bw4.flush
 
+def deflateFixedQuadFast (raw : ByteArray) : ByteArray :=
+  let bw0 := BitWriter.empty
+  let bw1 := bw0.writeBits 1 1
+  let bw2 := bw1.writeBits 1 2
+  let bw3 := deflateFixedQuadAuxFast raw.data 0 bw2
+  let (eobCode, eobLen) := fixedLitLenCode 256
+  let bw4 := bw3.writeBits (reverseBits eobCode eobLen) eobLen
+  bw4.flush
+
 def deflateFixed (raw : ByteArray) : ByteArray :=
-  deflateFixedFast raw
+  deflateFixedQuadFast raw
 
 def deflateDynamicFast (raw : ByteArray) : ByteArray :=
   let bw0 := BitWriter.empty
@@ -1225,9 +1269,7 @@ def decodeFixedBlockFuelFast (fuel : Nat) (br : BitReader) (out : ByteArray) :
 
 def decodeFixedBlockFast (br : BitReader) (out : ByteArray) :
     Option (BitReader × ByteArray) :=
-  match decodeFixedLiteralBlock br out with
-  | some res => some res
-  | none => decodeFixedBlockFuelFast (br.data.size * 8 + 1) br out
+  decodeFixedBlockFuelFast (br.data.size * 8 + 1) br out
 
 def decodeFixedBlockSpec (br : BitReader) (out : ByteArray) :
     Option (BitReader × ByteArray) :=

@@ -1509,5 +1509,233 @@ lemma dist1RunOut_eq_pushRepeat (out : ByteArray) (b : UInt8) (remaining : Nat) 
   unfold dist1RunOut
   exact pushRepeat_push_eq out b remaining
 
+lemma chooseFixedMatchChunkLen_three : chooseFixedMatchChunkLen 3 = 3 := by
+  simp [chooseFixedMatchChunkLen]
+
+lemma dist1ChunkLoopSteps_three : dist1ChunkLoopSteps 3 = 1 := by
+  have h3 : 3 ≤ 3 := by decide
+  have hstep := dist1ChunkLoopSteps_of_ge3 3 h3
+  have hrem : 3 - chooseFixedMatchChunkLen 3 = 0 := by
+    simp [chooseFixedMatchChunkLen_three]
+  have h0 : dist1ChunkLoopSteps 0 = 0 := by
+    exact dist1ChunkLoopSteps_of_lt3 0 (by decide)
+  calc
+    dist1ChunkLoopSteps 3 = 1 + dist1ChunkLoopSteps (3 - chooseFixedMatchChunkLen 3) := hstep
+    _ = 1 + dist1ChunkLoopSteps 0 := by simp [hrem]
+    _ = 1 := by simp [h0]
+
+lemma dist1ChunkLoopRem_three : dist1ChunkLoopRem 3 = 0 := by
+  have h3 : 3 ≤ 3 := by decide
+  have hstep := dist1ChunkLoopRem_of_ge3 3 h3
+  have hrem : 3 - chooseFixedMatchChunkLen 3 = 0 := by
+    simp [chooseFixedMatchChunkLen_three]
+  have h0 : dist1ChunkLoopRem 0 = 0 := by
+    exact dist1ChunkLoopRem_of_lt3 0 (by decide)
+  calc
+    dist1ChunkLoopRem 3 = dist1ChunkLoopRem (3 - chooseFixedMatchChunkLen 3) := hstep
+    _ = dist1ChunkLoopRem 0 := by simp [hrem]
+    _ = 0 := h0
+
+lemma dist1RunSteps_three : dist1RunSteps 3 = 2 := by
+  simp [dist1RunSteps, dist1ChunkLoopSteps_three, dist1ChunkLoopRem_three]
+
+@[simp] lemma fixedLenMatchInfo_three : fixedLenMatchInfo 3 = (257, 0, 0) := by
+  simp [fixedLenMatchInfo]
+
+@[simp] lemma dist1RunBitsTail_three (b : UInt8) (tailBits tailLen : Nat) :
+    dist1RunBitsTail b 3 tailBits tailLen =
+      let chunkBits := dist1ChunkLoopBitsTail 3 tailBits tailLen
+      let codeLen := fixedLitLenCode b.toNat
+      let bits := reverseBits codeLen.1 codeLen.2
+      let bitsTot := bits ||| (chunkBits.1 <<< codeLen.2)
+      let lenTot := codeLen.2 + chunkBits.2
+      (bitsTot, lenTot) := by
+  simp [dist1RunBitsTail, dist1ChunkLoopRem_three, literalRepeatBitsTail_zero]
+
+@[simp] lemma dist1ChunkLoopBitsTail_three (tailBits tailLen : Nat) :
+    dist1ChunkLoopBitsTail 3 tailBits tailLen =
+      let info := fixedLenMatchInfo 3
+      let sym := info.1
+      let extraBits := info.2.1
+      let extraLen := info.2.2
+      let codeLen := fixedLitLenCode sym
+      let symBits := reverseBits codeLen.1 codeLen.2
+      let distBitsTot := (0 : Nat) ||| (tailBits <<< 5)
+      let distLenTot := 5 + tailLen
+      let lenBitsTot := extraBits ||| (distBitsTot <<< extraLen)
+      let lenLenTot := extraLen + distLenTot
+      let bitsTot := symBits ||| (lenBitsTot <<< codeLen.2)
+      let lenTot := codeLen.2 + lenLenTot
+      (bitsTot, lenTot) := by
+  have h3 : 3 ≤ 3 := by decide
+  have hge := dist1ChunkLoopBitsTail_of_ge3 3 tailBits tailLen h3
+  have h0 : dist1ChunkLoopBitsTail 0 tailBits tailLen = (tailBits, tailLen) := by
+    exact dist1ChunkLoopBitsTail_of_lt3 0 tailBits tailLen (by decide)
+  simpa [chooseFixedMatchChunkLen_three, h0] using hge
+
+def literalTailWriter (bw : BitWriter) (b : UInt8) (tailBits _tailLen : Nat) : BitWriter :=
+  let codeLen := fixedLitLenCode b.toNat
+  let bits := reverseBits codeLen.1 codeLen.2
+  let bitsTot := bits ||| (tailBits <<< codeLen.2)
+  BitWriter.writeBits bw bitsTot codeLen.2
+
+def flushReader (bw : BitWriter) (hbit : bw.bitPos < 8) : BitReader :=
+  BitWriter.readerAt bw bw.flush (by rfl) hbit
+
+lemma writeBits_or_shift_tail (bw : BitWriter) (bits tailBits len : Nat)
+    (hbits : bits < 2 ^ len) :
+    BitWriter.writeBits bw (bits ||| (tailBits <<< len)) len = BitWriter.writeBits bw bits len := by
+  have hmod : (bits ||| (tailBits <<< len)) % 2 ^ len = bits := by
+    calc
+      (bits ||| (tailBits <<< len)) % 2 ^ len = bits % 2 ^ len := by
+        simpa using (mod_two_pow_or_shift (a := bits) (b := tailBits) (k := len) (len := len) le_rfl)
+      _ = bits := Nat.mod_eq_of_lt hbits
+  calc
+    BitWriter.writeBits bw (bits ||| (tailBits <<< len)) len
+        = BitWriter.writeBits bw ((bits ||| (tailBits <<< len)) % 2 ^ len) len := by
+            simpa using (writeBits_mod bw (bits ||| (tailBits <<< len)) len)
+    _ = BitWriter.writeBits bw bits len := by simp [hmod]
+
+set_option maxRecDepth 200000 in
+set_option maxHeartbeats 4000000 in
+lemma literalTailWriter_eq_writeFixedLiteralFast
+    (bw : BitWriter) (b : UInt8) (tailBits tailLen : Nat) :
+    literalTailWriter bw b tailBits tailLen = BitWriter.writeFixedLiteralFast bw b := by
+  let codeLen := fixedLitLenCode b.toNat
+  let bits := reverseBits codeLen.1 codeLen.2
+  have hbits : bits < 2 ^ codeLen.2 := by
+    simpa [bits] using (reverseBits_lt codeLen.1 codeLen.2)
+  have htail :
+      literalTailWriter bw b tailBits tailLen = BitWriter.writeBits bw bits codeLen.2 := by
+    dsimp [literalTailWriter]
+    simpa [codeLen, bits] using
+      (writeBits_or_shift_tail (bw := bw) (bits := bits) (tailBits := tailBits) (len := codeLen.2) hbits)
+  calc
+    literalTailWriter bw b tailBits tailLen = BitWriter.writeBits bw bits codeLen.2 := htail
+    _ = BitWriter.writeFixedLiteralFast bw b := by
+          simpa [codeLen, bits] using (writeFixedLiteralFast_eq_writeBits (bw := bw) (b := b)).symm
+
+set_option maxRecDepth 200000 in
+set_option maxHeartbeats 4000000 in
+lemma writeBits_dist1ChunkLoopBitsTail_three
+    (bw : BitWriter) (tailBits tailLen : Nat) :
+    BitWriter.writeBits bw (dist1ChunkLoopBitsTail 3 tailBits tailLen).1
+      (dist1ChunkLoopBitsTail 3 tailBits tailLen).2 =
+      BitWriter.writeBits (BitWriter.writeFixedMatchDist1Fast bw 3) tailBits tailLen := by
+  let info := fixedLenMatchInfo 3
+  let sym := info.1
+  let extraBits := info.2.1
+  let extraLen := info.2.2
+  let codeLen := fixedLitLenCode sym
+  let symBits := reverseBits codeLen.1 codeLen.2
+  let distBitsTot := (0 : Nat) ||| (tailBits <<< 5)
+  have hsymBits : symBits < 2 ^ codeLen.2 := by
+    simpa [symBits] using (reverseBits_lt codeLen.1 codeLen.2)
+  have hmod0 : distBitsTot % 2 ^ 5 = 0 := by
+    have h := mod_two_pow_or_shift (a := 0) (b := tailBits) (k := 5) (len := 5) (hk := by decide)
+    simpa [distBitsTot] using h
+  have hprefix0 :
+      BitWriter.writeBits (BitWriter.writeBits bw symBits codeLen.2) distBitsTot 5 =
+        BitWriter.writeBits (BitWriter.writeBits bw symBits codeLen.2) 0 5 := by
+    calc
+      BitWriter.writeBits (BitWriter.writeBits bw symBits codeLen.2) distBitsTot 5
+          = BitWriter.writeBits (BitWriter.writeBits bw symBits codeLen.2) (distBitsTot % 2 ^ 5) 5 := by
+              simpa using (writeBits_mod (BitWriter.writeBits bw symBits codeLen.2) distBitsTot 5)
+      _ = BitWriter.writeBits (BitWriter.writeBits bw symBits codeLen.2) 0 5 := by
+            simp [hmod0]
+  calc
+    BitWriter.writeBits bw (dist1ChunkLoopBitsTail 3 tailBits tailLen).1
+        (dist1ChunkLoopBitsTail 3 tailBits tailLen).2
+        = BitWriter.writeBits bw (symBits ||| (distBitsTot <<< codeLen.2)) (codeLen.2 + (5 + tailLen)) := by
+            simp [dist1ChunkLoopBitsTail_three, info, sym, extraBits, extraLen, codeLen, symBits, distBitsTot,
+              fixedLenMatchInfo_three]
+    _ = BitWriter.writeBits (BitWriter.writeBits bw symBits codeLen.2) distBitsTot (5 + tailLen) := by
+          simpa [Nat.add_assoc] using
+            (writeBits_concat bw symBits distBitsTot codeLen.2 (5 + tailLen) hsymBits)
+    _ = BitWriter.writeBits
+          (BitWriter.writeBits (BitWriter.writeBits bw symBits codeLen.2) distBitsTot 5)
+          tailBits tailLen := by
+            simpa [distBitsTot] using
+              (writeBits_dist1Prefix_concat
+                (bw := BitWriter.writeBits bw symBits codeLen.2)
+                (tailBits := tailBits) (tailLen := tailLen))
+    _ = BitWriter.writeBits
+          (BitWriter.writeBits (BitWriter.writeBits bw symBits codeLen.2) 0 5)
+          tailBits tailLen := by
+            simp [hprefix0]
+    _ = BitWriter.writeBits (BitWriter.writeFixedMatchDist1Fast bw 3) tailBits tailLen := by
+          symm
+          simpa [info, sym, extraBits, extraLen, codeLen, symBits,
+            fixedLenMatchInfo_three, writeBits_zero] using
+            congrArg (fun bw' => BitWriter.writeBits bw' tailBits tailLen)
+              (writeFixedMatchDist1Fast_eq_writeBits_chain (bw := bw) (matchLen := 3) (hlen := by decide))
+
+set_option maxRecDepth 200000 in
+set_option maxHeartbeats 4000000 in
+lemma writeBits_dist1RunBitsTail_three
+    (bw : BitWriter) (b : UInt8) (tailBits tailLen : Nat) :
+    BitWriter.writeBits bw (dist1RunBitsTail b 3 tailBits tailLen).1
+      (dist1RunBitsTail b 3 tailBits tailLen).2 =
+      BitWriter.writeBits ((BitWriter.writeFixedLiteralFast bw b).writeFixedMatchDist1Fast 3) tailBits tailLen := by
+  let chunkBits := dist1ChunkLoopBitsTail 3 tailBits tailLen
+  let codeLen := fixedLitLenCode b.toNat
+  let bits := reverseBits codeLen.1 codeLen.2
+  have hbits : bits < 2 ^ codeLen.2 := by
+    simpa [bits] using (reverseBits_lt codeLen.1 codeLen.2)
+  calc
+    BitWriter.writeBits bw (dist1RunBitsTail b 3 tailBits tailLen).1
+        (dist1RunBitsTail b 3 tailBits tailLen).2
+        = BitWriter.writeBits bw (bits ||| (chunkBits.1 <<< codeLen.2)) (codeLen.2 + chunkBits.2) := by
+            simp [dist1RunBitsTail_three, chunkBits, codeLen, bits]
+    _ = BitWriter.writeBits (BitWriter.writeBits bw bits codeLen.2) chunkBits.1 chunkBits.2 := by
+          simpa [chunkBits, Nat.add_assoc] using
+            (writeBits_concat bw bits chunkBits.1 codeLen.2 chunkBits.2 hbits)
+    _ = BitWriter.writeBits (BitWriter.writeFixedLiteralFast bw b) chunkBits.1 chunkBits.2 := by
+          simpa [codeLen, bits] using congrArg (fun bw' => BitWriter.writeBits bw' chunkBits.1 chunkBits.2)
+            (writeFixedLiteralFast_eq_writeBits (bw := bw) (b := b))
+    _ = BitWriter.writeBits ((BitWriter.writeFixedLiteralFast bw b).writeFixedMatchDist1Fast 3) tailBits tailLen := by
+          simpa [chunkBits] using
+            (writeBits_dist1ChunkLoopBitsTail_three
+              (bw := BitWriter.writeFixedLiteralFast bw b)
+              (tailBits := tailBits) (tailLen := tailLen))
+
+set_option maxRecDepth 200000 in
+set_option maxHeartbeats 4000000 in
+lemma writeBits_literalRepeatBitsTail_one
+    (bw : BitWriter) (b : UInt8) (tailBits tailLen : Nat) :
+    BitWriter.writeBits bw (literalRepeatBitsTail b 1 tailBits tailLen).1
+      (literalRepeatBitsTail b 1 tailBits tailLen).2 =
+      BitWriter.writeBits (BitWriter.writeFixedLiteralFast bw b) tailBits tailLen := by
+  let codeLen := fixedLitLenCode b.toNat
+  let bits := reverseBits codeLen.1 codeLen.2
+  have hbits : bits < 2 ^ codeLen.2 := by
+    simpa [bits] using (reverseBits_lt codeLen.1 codeLen.2)
+  calc
+    BitWriter.writeBits bw (literalRepeatBitsTail b 1 tailBits tailLen).1
+        (literalRepeatBitsTail b 1 tailBits tailLen).2
+        = BitWriter.writeBits bw (bits ||| (tailBits <<< codeLen.2)) (codeLen.2 + tailLen) := by
+            simp [literalRepeatBitsTail_succ, literalRepeatBitsTail_zero, codeLen, bits]
+    _ = BitWriter.writeBits (BitWriter.writeBits bw bits codeLen.2) tailBits tailLen := by
+          simpa [Nat.add_assoc] using (writeBits_concat bw bits tailBits codeLen.2 tailLen hbits)
+    _ = BitWriter.writeBits (BitWriter.writeFixedLiteralFast bw b) tailBits tailLen := by
+          simpa [codeLen, bits] using congrArg (fun bw' => BitWriter.writeBits bw' tailBits tailLen)
+            (writeFixedLiteralFast_eq_writeBits (bw := bw) (b := b))
+
+set_option maxRecDepth 200000 in
+set_option maxHeartbeats 4000000 in
+lemma writeBits_literalRepeatBitsTail_one_helper
+    (bw : BitWriter) (b : UInt8) (tailBits tailLen : Nat) :
+    BitWriter.writeBits bw (literalRepeatBitsTail b 1 tailBits tailLen).1
+      (literalRepeatBitsTail b 1 tailBits tailLen).2 =
+      BitWriter.writeBits (literalTailWriter bw b tailBits tailLen) tailBits tailLen := by
+  calc
+    BitWriter.writeBits bw (literalRepeatBitsTail b 1 tailBits tailLen).1
+        (literalRepeatBitsTail b 1 tailBits tailLen).2
+        = BitWriter.writeBits (BitWriter.writeFixedLiteralFast bw b) tailBits tailLen := by
+            exact writeBits_literalRepeatBitsTail_one (bw := bw) (b := b)
+              (tailBits := tailBits) (tailLen := tailLen)
+    _ = BitWriter.writeBits (literalTailWriter bw b tailBits tailLen) tailBits tailLen := by
+          simp [literalTailWriter_eq_writeFixedLiteralFast]
+
 end Png
 end Bitmaps
