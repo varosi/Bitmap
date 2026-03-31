@@ -222,7 +222,7 @@ def literalThenMatch3Dist1AfterReader (bw : BitWriter) (b : UInt8) (tailBits tai
           (reverseBits (fixedLitLenCode b.toNat).1 (fixedLitLenCode b.toNat).2)
           (fixedLitLenCode b.toNat).2 hbit))
 
-def literalThenMatch3Dist1TailWriter (bw : BitWriter) (b : UInt8) (tailBits tailLen : Nat) : BitWriter :=
+def literalThenMatch3Dist1TailWriter (bw : BitWriter) (b : UInt8) (_tailBits _tailLen : Nat) : BitWriter :=
   (BitWriter.writeFixedLiteralFast bw b).writeFixedMatchDist1Fast 3
 
 set_option maxRecDepth 200000 in

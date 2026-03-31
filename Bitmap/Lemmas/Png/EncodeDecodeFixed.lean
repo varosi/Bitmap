@@ -272,8 +272,8 @@ lemma decodeFixedBlockFast_fixedQuadBitsEob_readerAt_writeBits
     have hcount :
         (fixedQuadBitsEob data i).2 ≤ bwAll.bitCount := by
       dsimp [bwAll]
-      simpa [bitCount_writeBits, Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using
-        (Nat.le_add_left (fixedQuadBitsEob data i).2 bw.bitCount)
+      rw [bitCount_writeBits]
+      exact Nat.le_add_left (fixedQuadBitsEob data i).2 bw.bitCount
     have hflush : bwAll.bitCount ≤ bwAll.flush.size * 8 := by
       exact flush_size_mul_ge_bitCount (bw := bwAll) hbitAll
     simpa [br0, bwAll, Png.fixedQuadStartReader] using le_trans hcount hflush
@@ -500,7 +500,7 @@ lemma zlibDecompress_zlibCompressFixed (raw : ByteArray)
     have hpayloadSize :
         (BitWriter.writeBits hdrHeader payloadBits.1 payloadBits.2).flush.size =
           streamWriter.flush.size := by
-      simpa [hpayloadData]
+      simp [hpayloadData]
     calc
       streamReaderFinal.alignByte.bytePos =
           (BitWriter.writeBits hdrHeader payloadBits.1 payloadBits.2).flush.size := by
