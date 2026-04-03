@@ -897,6 +897,37 @@ private def fixedRunMatchNextWriter (bw : BitWriter) (b : UInt8) (runLen : Nat) 
 private def fixedRunLiteralNextWriter (bw : BitWriter) (b : UInt8) (runLen : Nat) : BitWriter :=
   bw.writeFixedLiteralRepeatFast b runLen
 
+private lemma fixedRunMatchNextWriter_bitPos_lt
+    (bw : BitWriter) (b : UInt8) (runLen : Nat) (hbit : bw.bitPos < 8) :
+    (fixedRunMatchNextWriter bw b runLen).bitPos < 8 := by
+  dsimp [fixedRunMatchNextWriter]
+  exact writeFixedMatchDist1ChunksFast_bitPos_lt
+    (BitWriter.writeFixedLiteralFast bw b) (runLen - 1)
+    (writeFixedLiteralFast_bitPos_lt bw b hbit)
+
+private lemma fixedRunMatchNextWriter_curClearAbove
+    (bw : BitWriter) (b : UInt8) (runLen : Nat)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    (fixedRunMatchNextWriter bw b runLen).curClearAbove := by
+  dsimp [fixedRunMatchNextWriter]
+  exact writeFixedMatchDist1ChunksFast_curClearAbove
+    (BitWriter.writeFixedLiteralFast bw b) (runLen - 1)
+    (writeFixedLiteralFast_bitPos_lt bw b hbit)
+    (writeFixedLiteralFast_curClearAbove bw b hbit hcur)
+
+private lemma fixedRunLiteralNextWriter_bitPos_lt
+    (bw : BitWriter) (b : UInt8) (runLen : Nat) (hbit : bw.bitPos < 8) :
+    (fixedRunLiteralNextWriter bw b runLen).bitPos < 8 := by
+  dsimp [fixedRunLiteralNextWriter]
+  exact writeFixedLiteralRepeatFast_bitPos_lt bw b runLen hbit
+
+private lemma fixedRunLiteralNextWriter_curClearAbove
+    (bw : BitWriter) (b : UInt8) (runLen : Nat)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    (fixedRunLiteralNextWriter bw b runLen).curClearAbove := by
+  dsimp [fixedRunLiteralNextWriter]
+  exact writeFixedLiteralRepeatFast_curClearAbove bw b runLen hbit hcur
+
 private lemma deflateFixedRunAuxFast_of_match
     (data : Array UInt8) (i : Nat) (bw : BitWriter) (b : UInt8) (j runLen : Nat)
     (hlt : i < data.size)
@@ -1064,7 +1095,7 @@ lemma deflateFixedRunAuxFast_writeBits (data : Array UInt8) (i : Nat) (bw : BitW
             exact deflateFixedRunAuxFast_writeBits_literal_branch
               data i bw b j runLen tailBits tailLen hbits hbw1
               (by simpa [bwNext, tailBits, tailLen, deflateFixedRunGoal] using hih)
-        · simpa [deflateFixedRunGoal, fixedRunFastBitsEob, deflateFixedRunAuxFast, hlt, fixedLitLenCode]
+        · simp [deflateFixedRunGoal, fixedRunFastBitsEob, deflateFixedRunAuxFast, hlt, fixedLitLenCode]
   exact hk (data.size - i) i bw rfl
 
 set_option maxRecDepth 200000 in
@@ -1122,6 +1153,33 @@ private lemma fixedRunFastOut_of_literal
     (BitWriter.writeBits bw (fixedRunFastBitsEob data i).1 (fixedRunFastBitsEob data i).2)
     (bitPos_lt_8_writeBits bw (fixedRunFastBitsEob data i).1 (fixedRunFastBitsEob data i).2 hbit)
 
+private lemma fixedRunAfterReader_eq_of_write_eq
+    (data : Array UInt8) (i j : Nat) (bw bw' : BitWriter)
+    (hbit : bw.bitPos < 8) (hbit' : bw'.bitPos < 8)
+    (hwrite :
+      BitWriter.writeBits bw (fixedRunFastBitsEob data i).1 (fixedRunFastBitsEob data i).2 =
+        BitWriter.writeBits bw' (fixedRunFastBitsEob data j).1 (fixedRunFastBitsEob data j).2) :
+    fixedRunAfterReader data j bw' hbit' = fixedRunAfterReader data i bw hbit := by
+  unfold fixedRunAfterReader
+  exact flushReader_eq_of_writer_eq
+    (h := hwrite.symm)
+    (hbit1 := bitPos_lt_8_writeBits bw'
+      (fixedRunFastBitsEob data j).1 (fixedRunFastBitsEob data j).2 hbit')
+    (hbit2 := bitPos_lt_8_writeBits bw
+      (fixedRunFastBitsEob data i).1 (fixedRunFastBitsEob data i).2 hbit)
+
+private lemma some_fixedRunState_eq_of_eqs
+    (data : Array UInt8) (i j : Nat) (bw bw' : BitWriter)
+    (hbit : bw.bitPos < 8) (hbit' : bw'.bitPos < 8)
+    (out out' : ByteArray)
+    (hafter :
+      fixedRunAfterReader data j bw' hbit' = fixedRunAfterReader data i bw hbit)
+    (hout :
+      fixedRunFastOut data i out = fixedRunFastOut data j out') :
+    some (fixedRunAfterReader data j bw' hbit', fixedRunFastOut data j out') =
+      some (fixedRunAfterReader data i bw hbit, fixedRunFastOut data i out) := by
+  simp [hafter, hout]
+
 set_option maxRecDepth 200000 in
 set_option maxHeartbeats 0 in
 private lemma decodeFixedBlockFuelFast_fixedRunFastBitsEob_exact
@@ -1172,18 +1230,10 @@ private lemma decodeFixedBlockFuelFast_fixedRunFastBitsEob_exact
               exact fixedRunFastBitsEob_len_ge_two data j
             have hrem : 3 ≤ runLen - 1 := by
               omega
-            have hbitLit : (BitWriter.writeFixedLiteralFast bw b).bitPos < 8 := by
-              exact writeFixedLiteralFast_bitPos_lt bw b hbit
-            have hcurLit : (BitWriter.writeFixedLiteralFast bw b).curClearAbove := by
-              exact writeFixedLiteralFast_curClearAbove bw b hbit hcur
             have hbitNext : bwNext.bitPos < 8 := by
-              dsimp [bwNext, fixedRunMatchNextWriter]
-              exact writeFixedMatchDist1ChunksFast_bitPos_lt
-                (BitWriter.writeFixedLiteralFast bw b) (runLen - 1) hbitLit
+              simpa [bwNext] using fixedRunMatchNextWriter_bitPos_lt bw b runLen hbit
             have hcurNext : bwNext.curClearAbove := by
-              dsimp [bwNext, fixedRunMatchNextWriter]
-              exact writeFixedMatchDist1ChunksFast_curClearAbove
-                (BitWriter.writeFixedLiteralFast bw b) (runLen - 1) hbitLit hcurLit
+              simpa [bwNext] using fixedRunMatchNextWriter_curClearAbove bw b runLen hbit hcur
             have hstep :=
               decodeFixedBlockFuelFast_dist1Run_readerAt_writeBits_tail
                 (fuel := fixedRunFastStepsEob data j) (bw := bw) (b := b)
@@ -1192,18 +1242,18 @@ private lemma decodeFixedBlockFuelFast_fixedRunFastBitsEob_exact
             have hreaderRec :
                 dist1ChunkLoopTailLitsTailStartReader
                     (BitWriter.writeFixedLiteralFast bw b)
-                    (runLen - 1) b tailBits tailLen hbitLit =
+                    (runLen - 1) b tailBits tailLen (writeFixedLiteralFast_bitPos_lt bw b hbit) =
                   fixedRunStartReader data j bwNext hbitNext := by
               simpa [fixedRunStartReader, bwNext, fixedRunMatchNextWriter] using
                 dist1ChunkLoopTailLitsTailStartReader_eq_runtimeStartReader
                   (bw := BitWriter.writeFixedLiteralFast bw b) (remaining := runLen - 1)
                   (b := b) (tailBits := tailBits) (tailLen := tailLen)
-                  (hbit := hbitLit) hrem
+                  (hbit := writeFixedLiteralFast_bitPos_lt bw b hbit) hrem
             have hrec :
                 decodeFixedBlockFuelFast (fixedRunFastStepsEob data j)
                   (dist1ChunkLoopTailLitsTailStartReader
                     (BitWriter.writeFixedLiteralFast bw b)
-                    (runLen - 1) b tailBits tailLen hbitLit)
+                    (runLen - 1) b tailBits tailLen (writeFixedLiteralFast_bitPos_lt bw b hbit))
                   (dist1RunOut out b (runLen - 1)) =
                 some (fixedRunAfterReader data j bwNext hbitNext,
                   fixedRunFastOut data j (dist1RunOut out b (runLen - 1))) := by
@@ -1220,12 +1270,11 @@ private lemma decodeFixedBlockFuelFast_fixedRunFastBitsEob_exact
             have hafter :
                 fixedRunAfterReader data j bwNext hbitNext =
                   fixedRunAfterReader data i bw hbit := by
-              unfold fixedRunAfterReader
-              exact flushReader_eq_of_writer_eq
-                (h := hwrite.symm)
-                (hbit1 := bitPos_lt_8_writeBits bwNext tailBits tailLen hbitNext)
-                (hbit2 := bitPos_lt_8_writeBits bw
-                  (fixedRunFastBitsEob data i).1 (fixedRunFastBitsEob data i).2 hbit)
+              simpa [tailBits, tailLen] using
+                fixedRunAfterReader_eq_of_write_eq
+                  (data := data) (i := i) (j := j)
+                  (bw := bw) (bw' := bwNext)
+                  (hbit := hbit) (hbit' := hbitNext) hwrite
             calc
               decodeFixedBlockFuelFast (fixedRunFastStepsEob data i)
                   (fixedRunStartReader data i bw hbit) out
@@ -1233,7 +1282,7 @@ private lemma decodeFixedBlockFuelFast_fixedRunFastBitsEob_exact
                 decodeFixedBlockFuelFast (fixedRunFastStepsEob data j)
                   (dist1ChunkLoopTailLitsTailStartReader
                     (BitWriter.writeFixedLiteralFast bw b)
-                    (runLen - 1) b tailBits tailLen hbitLit)
+                    (runLen - 1) b tailBits tailLen (writeFixedLiteralFast_bitPos_lt bw b hbit))
                   (dist1RunOut out b (runLen - 1)) := by
                     simpa [fixedRunStartReader, hsteps, hbits,
                       Nat.add_assoc, Nat.add_left_comm, Nat.add_comm] using hstep
@@ -1242,7 +1291,12 @@ private lemma decodeFixedBlockFuelFast_fixedRunFastBitsEob_exact
                   fixedRunFastOut data j (dist1RunOut out b (runLen - 1))) := hrec
               _ =
                 some (fixedRunAfterReader data i bw hbit, fixedRunFastOut data i out) := by
-                  simp [hafter, hout]
+                  exact some_fixedRunState_eq_of_eqs
+                    (data := data) (i := i) (j := j)
+                    (bw := bw) (bw' := bwNext)
+                    (hbit := hbit) (hbit' := hbitNext)
+                    (out := out) (out' := dist1RunOut out b (runLen - 1))
+                    hafter hout
           · let tailBits := (fixedRunFastBitsEob data j).1
             let tailLen := (fixedRunFastBitsEob data j).2
             let bwNext := fixedRunLiteralNextWriter bw b runLen
@@ -1263,11 +1317,9 @@ private lemma decodeFixedBlockFuelFast_fixedRunFastBitsEob_exact
               dsimp [tailLen]
               exact fixedRunFastBitsEob_len_ge_two data j
             have hbitNext : bwNext.bitPos < 8 := by
-              dsimp [bwNext, fixedRunLiteralNextWriter]
-              exact writeFixedLiteralRepeatFast_bitPos_lt bw b runLen hbit
+              simpa [bwNext] using fixedRunLiteralNextWriter_bitPos_lt bw b runLen hbit
             have hcurNext : bwNext.curClearAbove := by
-              dsimp [bwNext, fixedRunLiteralNextWriter]
-              exact writeFixedLiteralRepeatFast_curClearAbove bw b runLen hbit hcur
+              simpa [bwNext] using fixedRunLiteralNextWriter_curClearAbove bw b runLen hbit hcur
             have hstep :=
               decodeFixedBlockFuelFast_literalRepeatBitsTail_readerAt_writeBits_tail
                 (fuel := fixedRunFastStepsEob data j) (bw := bw) (b := b)
@@ -1298,12 +1350,11 @@ private lemma decodeFixedBlockFuelFast_fixedRunFastBitsEob_exact
             have hafter :
                 fixedRunAfterReader data j bwNext hbitNext =
                   fixedRunAfterReader data i bw hbit := by
-              unfold fixedRunAfterReader
-              exact flushReader_eq_of_writer_eq
-                (h := hwrite.symm)
-                (hbit1 := bitPos_lt_8_writeBits bwNext tailBits tailLen hbitNext)
-                (hbit2 := bitPos_lt_8_writeBits bw
-                  (fixedRunFastBitsEob data i).1 (fixedRunFastBitsEob data i).2 hbit)
+              simpa [tailBits, tailLen] using
+                fixedRunAfterReader_eq_of_write_eq
+                  (data := data) (i := i) (j := j)
+                  (bw := bw) (bw' := bwNext)
+                  (hbit := hbit) (hbit' := hbitNext) hwrite
             calc
               decodeFixedBlockFuelFast (fixedRunFastStepsEob data i)
                   (fixedRunStartReader data i bw hbit) out
@@ -1318,7 +1369,12 @@ private lemma decodeFixedBlockFuelFast_fixedRunFastBitsEob_exact
                   fixedRunFastOut data j (pushRepeat out b runLen)) := hrec
               _ =
                 some (fixedRunAfterReader data i bw hbit, fixedRunFastOut data i out) := by
-                  simp [hafter, hout]
+                  exact some_fixedRunState_eq_of_eqs
+                    (data := data) (i := i) (j := j)
+                    (bw := bw) (bw' := bwNext)
+                    (hbit := hbit) (hbit' := hbitNext)
+                    (out := out) (out' := pushRepeat out b runLen)
+                    hafter hout
         · have hbase :=
             decodeFixedBlockFuelFast_step_eob_eobNoTail
               (fuel := 0) (bw := bw) (out := out) (hbit := hbit) (hcur := hcur)
