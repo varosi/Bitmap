@@ -231,11 +231,17 @@ private def perfPngRoundTripStored (w h : Nat) : IO (Nat × Bool) := do
   return (t1 - t0, ok)
 
 -- Fixed-size performance test for putPixel/getPixel on this machine.
--- Chosen so 10 runs total about 5 seconds here.
+-- Shared with the PNG perf checks so all runtime comparisons use the same image size.
+-- Calibrated so the full benchmark section lands near 30 seconds here.
+private def perfResolution : Nat := 3200
+
+private def perfIters : Nat := 10
+
+-- Fixed-size performance test for putPixel/getPixel on this machine.
 private def runPerfTest : IO Unit := do
-  let w : Nat := 2688
-  let h : Nat := 2688
-  let iters : Nat := 10
+  let w : Nat := perfResolution
+  let h : Nat := perfResolution
+  let iters : Nat := perfIters
   let hb0 <- IO.getNumHeartbeats
   let mut totalNs : Nat := 0
   let mut totalChecksum : Nat := 0
@@ -249,11 +255,10 @@ private def runPerfTest : IO Unit := do
   IO.println s!"perf put/get: {w}x{h} pixels, avg {avgMs} ms over {iters} runs, checksum {totalChecksum}, heartbeats {hb1 - hb0}"
 
 -- Fixed-size performance test for PNG encode/decode on this machine.
--- Chosen so 10 runs total about 5 seconds here.
 private def runPngPerfTest : IO Unit := do
-  let w : Nat := 2432
-  let h : Nat := 2432
-  let iters : Nat := 10
+  let w : Nat := perfResolution
+  let h : Nat := perfResolution
+  let iters : Nat := perfIters
   let hb0 <- IO.getNumHeartbeats
   let mut totalNs : Nat := 0
   for _ in [0:iters] do
@@ -267,11 +272,10 @@ private def runPngPerfTest : IO Unit := do
   IO.println s!"perf png round-trip: {w}x{h} pixels, avg {avgMs} ms over {iters} runs, heartbeats {hb1 - hb0}"
 
 -- Fixed-size performance test for PNG encode/decode via dynamic blocks.
--- Chosen so 10 runs total about 5 seconds here.
 private def runPngPerfTestDynamic : IO Unit := do
-  let w : Nat := 576
-  let h : Nat := 576
-  let iters : Nat := 10
+  let w : Nat := perfResolution
+  let h : Nat := perfResolution
+  let iters : Nat := perfIters
   let hb0 <- IO.getNumHeartbeats
   let mut totalNs : Nat := 0
   for _ in [0:iters] do
@@ -285,11 +289,10 @@ private def runPngPerfTestDynamic : IO Unit := do
   IO.println s!"perf png dynamic round-trip: {w}x{h} pixels, avg {avgMs} ms over {iters} runs, heartbeats {hb1 - hb0}"
 
 -- Fixed-size performance test for PNG encode/decode via stored blocks.
--- Chosen so 10 runs total about 5 seconds here.
 private def runPngPerfTestStored : IO Unit := do
-  let w : Nat := 1984
-  let h : Nat := 1984
-  let iters : Nat := 10
+  let w : Nat := perfResolution
+  let h : Nat := perfResolution
+  let iters : Nat := perfIters
   let hb0 <- IO.getNumHeartbeats
   let mut totalNs : Nat := 0
   for _ in [0:iters] do
