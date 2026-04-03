@@ -1,5 +1,8 @@
 import Bitmap.Lemmas.Png.EncodeDecodeBase
 import Bitmap.Lemmas.Png.FixedBlockBase
+import Bitmap.Lemmas.Png.FixedBlockProofsCommon
+import Bitmap.Lemmas.Png.FixedBlockProofsRunEncode
+import Bitmap.Lemmas.Png.FixedBlockProofsScanDecode
 
 universe u
 
@@ -9,6 +12,311 @@ namespace Lemmas
 
 open Png
 attribute [local simp] Png.byteArray_get_proof_irrel
+
+lemma quadTailEqbFast_eq_quadTailEqb
+    (data : Array UInt8) (i : Nat) (b : UInt8) (h3 : i + 3 < data.size) :
+    quadTailEqbFast data i b h3 = quadTailEqb data i b h3 := by
+  unfold quadTailEqbFast quadTailEqb
+  rfl
+
+lemma one_le_fixedLitLenCode_len_u8 (b : UInt8) :
+    1 ≤ (fixedLitLenCode b.toNat).2 := by
+  exact fixedLitLenCode_len_pos b.toNat (lt_trans (UInt8.toNat_lt b) (by decide))
+
+set_option maxRecDepth 200000 in
+set_option maxHeartbeats 0 in
+lemma deflateFixedQuadAuxFast_writeBits (data : Array UInt8) (i : Nat) (bw : BitWriter) :
+    let bitsLen := fixedQuadBitsEob data i
+    let bw1 := deflateFixedQuadAuxFast data i bw
+    let eob := fixedLitLenCode 256
+    BitWriter.writeBits bw bitsLen.1 bitsLen.2 =
+      BitWriter.writeBits bw1 (reverseBits eob.1 eob.2) eob.2 := by
+  classical
+  have hk :
+      ∀ k, ∀ i bw, data.size - i = k →
+        let bitsLen := fixedQuadBitsEob data i
+        let bw1 := deflateFixedQuadAuxFast data i bw
+        let eob := fixedLitLenCode 256
+        BitWriter.writeBits bw bitsLen.1 bitsLen.2 =
+          BitWriter.writeBits bw1 (reverseBits eob.1 eob.2) eob.2 := by
+    intro k
+    induction k using Nat.strongRecOn with
+    | ind k ih =>
+        intro i bw hk
+        by_cases hlt : i < data.size
+        · let b := data[i]
+          by_cases h3 : i + 3 < data.size
+          · by_cases hq : quadTailEqb data i b h3 = true
+            · let tailBits := (fixedQuadBitsEob data (i + 4)).1
+              let tailLen := (fixedQuadBitsEob data (i + 4)).2
+              have hk' : data.size - (i + 4) < k := by
+                have hlt' : data.size - (i + 4) < data.size - i := by omega
+                simpa [hk] using hlt'
+              have hih :=
+                ih (data.size - (i + 4)) hk' (i := i + 4)
+                  (bw := (BitWriter.writeFixedLiteralFast bw b).writeFixedMatchDist1Fast 3) rfl
+              have hbits :
+                  fixedQuadBitsEob data i = dist1RunBitsTail b 3 tailBits tailLen := by
+                simpa [b, tailBits, tailLen] using
+                  (fixedQuadBitsEob_of_quad (data := data) (i := i) (h := hlt) (h3 := h3)
+                    (hq := by simpa [quadTailEqbFast_eq_quadTailEqb] using hq))
+              have hbw1 :
+                  deflateFixedQuadAuxFast data i bw =
+                    deflateFixedQuadAuxFast data (i + 4)
+                      ((BitWriter.writeFixedLiteralFast bw b).writeFixedMatchDist1Fast 3) := by
+                rw [deflateFixedQuadAuxFast.eq_1]
+                simp [hlt, b, h3, hq, quadTailEqbFast_eq_quadTailEqb]
+              calc
+                BitWriter.writeBits bw (fixedQuadBitsEob data i).1 (fixedQuadBitsEob data i).2
+                    = BitWriter.writeBits ((BitWriter.writeFixedLiteralFast bw b).writeFixedMatchDist1Fast 3)
+                        tailBits tailLen := by
+                          simpa [hbits, tailBits, tailLen] using
+                            (writeBits_dist1RunBitsTail_three (bw := bw) (b := b)
+                              (tailBits := tailBits) (tailLen := tailLen))
+                _ = BitWriter.writeBits
+                      (deflateFixedQuadAuxFast data (i + 4)
+                        ((BitWriter.writeFixedLiteralFast bw b).writeFixedMatchDist1Fast 3))
+                      (reverseBits (fixedLitLenCode 256).1 (fixedLitLenCode 256).2)
+                      (fixedLitLenCode 256).2 := by
+                        simpa [tailBits, tailLen] using hih
+                _ = BitWriter.writeBits (deflateFixedQuadAuxFast data i bw)
+                      (reverseBits (fixedLitLenCode 256).1 (fixedLitLenCode 256).2)
+                      (fixedLitLenCode 256).2 := by
+                        simp [hbw1]
+            · let tailBits := (fixedQuadBitsEob data (i + 1)).1
+              let tailLen := (fixedQuadBitsEob data (i + 1)).2
+              have hk' : data.size - (i + 1) < k := by
+                have hlt' : data.size - (i + 1) < data.size - i := by
+                  exact Nat.sub_lt_sub_left (k := i) (m := data.size) (n := i + 1) hlt
+                    (Nat.lt_succ_self i)
+                simpa [hk] using hlt'
+              have hih :=
+                ih (data.size - (i + 1)) hk' (i := i + 1)
+                  (bw := BitWriter.writeFixedLiteralFast bw b) rfl
+              have hbits :
+                  fixedQuadBitsEob data i = literalRepeatBitsTail b 1 tailBits tailLen := by
+                simpa [b, tailBits, tailLen] using
+                  (fixedQuadBitsEob_of_lit_hqFalse (data := data) (i := i) (h := hlt) (h3 := h3)
+                    (hq := by simpa [quadTailEqbFast_eq_quadTailEqb] using hq))
+              have hbw1 :
+                  deflateFixedQuadAuxFast data i bw =
+                    deflateFixedQuadAuxFast data (i + 1) (BitWriter.writeFixedLiteralFast bw b) := by
+                rw [deflateFixedQuadAuxFast.eq_1]
+                simp [hlt, b, h3, hq, quadTailEqbFast_eq_quadTailEqb]
+              calc
+                BitWriter.writeBits bw (fixedQuadBitsEob data i).1 (fixedQuadBitsEob data i).2
+                    = BitWriter.writeBits (BitWriter.writeFixedLiteralFast bw b) tailBits tailLen := by
+                        simpa [hbits, tailBits, tailLen] using
+                          (writeBits_literalRepeatBitsTail_one (bw := bw) (b := b)
+                            (tailBits := tailBits) (tailLen := tailLen))
+                _ = BitWriter.writeBits
+                      (deflateFixedQuadAuxFast data (i + 1) (BitWriter.writeFixedLiteralFast bw b))
+                      (reverseBits (fixedLitLenCode 256).1 (fixedLitLenCode 256).2)
+                      (fixedLitLenCode 256).2 := by
+                        simpa [tailBits, tailLen] using hih
+                _ = BitWriter.writeBits (deflateFixedQuadAuxFast data i bw)
+                      (reverseBits (fixedLitLenCode 256).1 (fixedLitLenCode 256).2)
+                      (fixedLitLenCode 256).2 := by
+                        simp [hbw1]
+          · let tailBits := (fixedQuadBitsEob data (i + 1)).1
+            let tailLen := (fixedQuadBitsEob data (i + 1)).2
+            have hk' : data.size - (i + 1) < k := by
+              have hlt' : data.size - (i + 1) < data.size - i := by
+                exact Nat.sub_lt_sub_left (k := i) (m := data.size) (n := i + 1) hlt
+                  (Nat.lt_succ_self i)
+              simpa [hk] using hlt'
+            have hih :=
+              ih (data.size - (i + 1)) hk' (i := i + 1)
+                (bw := BitWriter.writeFixedLiteralFast bw b) rfl
+            have hbits :
+                fixedQuadBitsEob data i = literalRepeatBitsTail b 1 tailBits tailLen := by
+              simpa [b, tailBits, tailLen] using
+                (fixedQuadBitsEob_of_lit_noh3 (data := data) (i := i) (h := hlt) (h3 := h3))
+            have hbw1 :
+                deflateFixedQuadAuxFast data i bw =
+                  deflateFixedQuadAuxFast data (i + 1) (BitWriter.writeFixedLiteralFast bw b) := by
+              rw [deflateFixedQuadAuxFast.eq_1]
+              simp [hlt, b, h3]
+            calc
+              BitWriter.writeBits bw (fixedQuadBitsEob data i).1 (fixedQuadBitsEob data i).2
+                  = BitWriter.writeBits (BitWriter.writeFixedLiteralFast bw b) tailBits tailLen := by
+                      simpa [hbits, tailBits, tailLen] using
+                        (writeBits_literalRepeatBitsTail_one (bw := bw) (b := b)
+                          (tailBits := tailBits) (tailLen := tailLen))
+              _ = BitWriter.writeBits
+                    (deflateFixedQuadAuxFast data (i + 1) (BitWriter.writeFixedLiteralFast bw b))
+                    (reverseBits (fixedLitLenCode 256).1 (fixedLitLenCode 256).2)
+                    (fixedLitLenCode 256).2 := by
+                      simpa [tailBits, tailLen] using hih
+              _ = BitWriter.writeBits (deflateFixedQuadAuxFast data i bw)
+                    (reverseBits (fixedLitLenCode 256).1 (fixedLitLenCode 256).2)
+                    (fixedLitLenCode 256).2 := by
+                      simp [hbw1]
+        · have hle : data.size ≤ i := Nat.le_of_not_gt hlt
+          simp [fixedQuadBitsEob_unfold, deflateFixedQuadAuxFast, hlt, fixedLitLenCode]
+  exact hk (data.size - i) i bw rfl
+
+set_option maxRecDepth 200000 in
+set_option maxHeartbeats 0 in
+lemma deflateFixedQuadFast_eq_writeBits (raw : ByteArray) :
+    let bw0 := BitWriter.empty
+    let bw1 := bw0.writeBits 1 1
+    let bw2 := bw1.writeBits 1 2
+    let bitsLen := fixedQuadBitsEob raw.data 0
+    deflateFixedQuadFast raw = (BitWriter.writeBits bw2 bitsLen.1 bitsLen.2).flush := by
+  unfold deflateFixedQuadFast
+  have hbits :=
+    deflateFixedQuadAuxFast_writeBits raw.data 0
+      (BitWriter.writeBits (BitWriter.writeBits BitWriter.empty 1 1) 1 2)
+  simp at hbits
+  simpa using (congrArg BitWriter.flush hbits).symm
+
+lemma fixedQuadStepsEob_le_fixedQuadBitsEob_len
+    (data : Array UInt8) (i : Nat) :
+    fixedQuadStepsEob data i ≤ (fixedQuadBitsEob data i).2 := by
+  classical
+  by_cases hlt : i < data.size
+  ·
+    let b := data[i]
+    by_cases h3 : i + 3 < data.size
+    · dsimp [b]
+      by_cases hq : quadTailEqb data i b h3 = true
+      · have htail : fixedQuadStepsEob data (i + 4) ≤ (fixedQuadBitsEob data (i + 4)).2 := by
+          exact fixedQuadStepsEob_le_fixedQuadBitsEob_len data (i + 4)
+        have hsteps :
+            fixedQuadStepsEob data i = 2 + fixedQuadStepsEob data (i + 4) := by
+          have hsteps0 :=
+            fixedQuadStepsEob_of_quad (data := data) (i := i) (h := hlt) (h3 := h3)
+              (hq := by simpa [b] using hq)
+          simpa [dist1RunSteps_three, Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using hsteps0
+        have hbits :
+            fixedQuadBitsEob data i =
+              dist1RunBitsTail b 3 (fixedQuadBitsEob data (i + 4)).1 (fixedQuadBitsEob data (i + 4)).2 := by
+          simpa [b] using
+            (fixedQuadBitsEob_of_quad (data := data) (i := i) (h := hlt) (h3 := h3)
+              (hq := by simpa [b] using hq))
+        have hlen :
+            2 + (fixedQuadBitsEob data (i + 4)).2 ≤
+              (dist1RunBitsTail b 3 (fixedQuadBitsEob data (i + 4)).1
+                (fixedQuadBitsEob data (i + 4)).2).2 := by
+          simp [dist1RunBitsTail_three, dist1ChunkLoopBitsTail_three, fixedLenMatchInfo_three]
+          omega
+        simpa [hsteps, hbits] using le_trans (Nat.add_le_add_left htail 2) hlen
+      · have htail : fixedQuadStepsEob data (i + 1) ≤ (fixedQuadBitsEob data (i + 1)).2 := by
+          exact fixedQuadStepsEob_le_fixedQuadBitsEob_len data (i + 1)
+        have hsteps :
+            fixedQuadStepsEob data i = 1 + fixedQuadStepsEob data (i + 1) := by
+          simpa [b] using
+            (fixedQuadStepsEob_of_lit_hqFalse (data := data) (i := i) (h := hlt) (h3 := h3)
+              (hq := by simpa [b] using hq))
+        have hbits :
+            fixedQuadBitsEob data i =
+              literalRepeatBitsTail b 1 (fixedQuadBitsEob data (i + 1)).1 (fixedQuadBitsEob data (i + 1)).2 := by
+          simpa [b] using
+            (fixedQuadBitsEob_of_lit_hqFalse (data := data) (i := i) (h := hlt) (h3 := h3)
+              (hq := by simpa [quadTailEqbFast_eq_quadTailEqb] using hq))
+        have hlen :
+            1 + (fixedQuadBitsEob data (i + 1)).2 ≤
+              (literalRepeatBitsTail b 1 (fixedQuadBitsEob data (i + 1)).1
+                (fixedQuadBitsEob data (i + 1)).2).2 := by
+          have hcode : 1 ≤ (fixedLitLenCode b.toNat).2 := one_le_fixedLitLenCode_len_u8 b
+          simp [literalRepeatBitsTail_succ, literalRepeatBitsTail_zero]
+          omega
+        simpa [hsteps, hbits] using le_trans (Nat.add_le_add_left htail 1) hlen
+    · dsimp [b]
+      have htail : fixedQuadStepsEob data (i + 1) ≤ (fixedQuadBitsEob data (i + 1)).2 := by
+        exact fixedQuadStepsEob_le_fixedQuadBitsEob_len data (i + 1)
+      have hsteps :
+          fixedQuadStepsEob data i = 1 + fixedQuadStepsEob data (i + 1) := by
+        simpa [b] using
+          (fixedQuadStepsEob_of_lit_noh3 (data := data) (i := i) (h := hlt) (h3 := h3))
+      have hbits :
+          fixedQuadBitsEob data i =
+            literalRepeatBitsTail b 1 (fixedQuadBitsEob data (i + 1)).1 (fixedQuadBitsEob data (i + 1)).2 := by
+        simpa [b] using
+          (fixedQuadBitsEob_of_lit_noh3 (data := data) (i := i) (h := hlt) (h3 := h3))
+      have hlen :
+          1 + (fixedQuadBitsEob data (i + 1)).2 ≤
+            (literalRepeatBitsTail b 1 (fixedQuadBitsEob data (i + 1)).1
+              (fixedQuadBitsEob data (i + 1)).2).2 := by
+        have hcode : 1 ≤ (fixedLitLenCode b.toNat).2 := one_le_fixedLitLenCode_len_u8 b
+        simp [literalRepeatBitsTail_succ, literalRepeatBitsTail_zero]
+        omega
+      simpa [hsteps, hbits] using le_trans (Nat.add_le_add_left htail 1) hlen
+  · have hsteps : fixedQuadStepsEob data i = 1 := by
+        simp [fixedQuadStepsEob_unfold, hlt]
+    have hbits : (fixedQuadBitsEob data i).2 = (fixedLitLenCode 256).2 := by
+        simp [fixedQuadBitsEob_unfold, hlt]
+    simpa [hsteps, hbits] using (show 1 ≤ (fixedLitLenCode 256).2 by decide)
+
+set_option maxRecDepth 200000 in
+set_option maxHeartbeats 0 in
+lemma decodeFixedBlockFast_fixedQuadBitsEob_readerAt_writeBits
+    (data : Array UInt8) (i : Nat) (bw : BitWriter) (out : ByteArray)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    decodeFixedBlockFast
+      (BitWriter.readerAt bw
+        (BitWriter.writeBits bw (fixedQuadBitsEob data i).1 (fixedQuadBitsEob data i).2).flush
+        (flush_size_writeBits_le bw (fixedQuadBitsEob data i).1 (fixedQuadBitsEob data i).2) hbit) out =
+      some (flushReader
+        (BitWriter.writeBits bw (fixedQuadBitsEob data i).1 (fixedQuadBitsEob data i).2)
+        (bitPos_lt_8_writeBits bw (fixedQuadBitsEob data i).1 (fixedQuadBitsEob data i).2 hbit),
+      fixedQuadOut data i out) := by
+  let br0 := Png.fixedQuadStartReader data i bw hbit
+  have hstepsBits : fixedQuadStepsEob data i ≤ (fixedQuadBitsEob data i).2 := by
+    exact fixedQuadStepsEob_le_fixedQuadBitsEob_len data i
+  have hbitsLe : (fixedQuadBitsEob data i).2 ≤ br0.data.size * 8 := by
+    let bwAll := BitWriter.writeBits bw (fixedQuadBitsEob data i).1 (fixedQuadBitsEob data i).2
+    have hbitAll : bwAll.bitPos < 8 := by
+      dsimp [bwAll]
+      exact bitPos_lt_8_writeBits bw (fixedQuadBitsEob data i).1 (fixedQuadBitsEob data i).2 hbit
+    have hcount :
+        (fixedQuadBitsEob data i).2 ≤ bwAll.bitCount := by
+      dsimp [bwAll]
+      rw [bitCount_writeBits]
+      exact Nat.le_add_left (fixedQuadBitsEob data i).2 bw.bitCount
+    have hflush : bwAll.bitCount ≤ bwAll.flush.size * 8 := by
+      exact flush_size_mul_ge_bitCount (bw := bwAll) hbitAll
+    simpa [br0, bwAll, Png.fixedQuadStartReader] using le_trans hcount hflush
+  have hstepsLe : fixedQuadStepsEob data i ≤ br0.data.size * 8 + 1 := by
+    exact le_trans hstepsBits (le_trans hbitsLe (Nat.le_add_right _ _))
+  let fuel := br0.data.size * 8 + 1 - fixedQuadStepsEob data i
+  have hfuel : fuel + fixedQuadStepsEob data i = br0.data.size * 8 + 1 := by
+    dsimp [fuel]
+    exact Nat.sub_add_cancel hstepsLe
+  have hfuel' : fixedQuadStepsEob data i + fuel = br0.data.size * 8 + 1 := by
+    simpa [Nat.add_comm] using hfuel
+  rcases
+    (Png.decodeFixedBlockFuelFast_fixedQuadBitsEob_readerAt_writeBits_exists
+      (data := data) (i := i) (bw := bw) (out := out) (hbit := hbit) (hcur := hcur))
+    with ⟨brAfter, hexists⟩
+  have hreader :
+      brAfter =
+        Png.fixedQuadAfterReader data i bw hbit := by
+    exact
+      Png.decodeFixedBlockFuelFast_fixedQuadBitsEob_readerAt_writeBits_reader_eq
+        (data := data) (i := i) (bw := bw) (out := out) (hbit := hbit) (hcur := hcur)
+        (brAfter := brAfter) (by simpa [br0] using hexists)
+  have hexact :
+      decodeFixedBlockFuelFast (fixedQuadStepsEob data i) br0 out =
+        some
+          (Png.fixedQuadAfterReader data i bw hbit,
+          fixedQuadOut data i out) := by
+    simpa [br0, hreader] using hexists
+  have hdecode' :
+      decodeFixedBlockFuelFast (br0.data.size * 8 + 1) br0 out =
+        some
+          (Png.fixedQuadAfterReader data i bw hbit,
+          fixedQuadOut data i out) := by
+    have hplus :=
+      decodeFixedBlockFuelFast_add_of_some
+        (fuel := fixedQuadStepsEob data i) (extra := fuel) (br := br0) (out := out)
+        (res := (Png.fixedQuadAfterReader data i bw hbit,
+          fixedQuadOut data i out)) (by
+            simpa using hexact)
+    rw [hfuel'] at hplus
+    simpa using hplus
+  simpa [decodeFixedBlockFast, br0, Png.fixedQuadStartReader, Png.fixedQuadAfterReader, Png.flushReader] using hdecode'
 
 set_option maxHeartbeats 6000000 in
 -- Zlib decompression of fixed-compression output yields the original bytes.
@@ -50,40 +358,22 @@ lemma zlibDecompress_zlibCompressFixed (raw : ByteArray)
     decide
   have hflg0 : (u8 0x01 &&& (0x20 : UInt8)) = 0 := by
     decide
-  -- prepare the fixed literal bitstream decoder
+  -- prepare the fixed block decoder
   let hdr0 := BitWriter.empty
   let hdrBfinal := hdr0.writeBits 1 1
   let hdrHeader := hdrBfinal.writeBits 1 2
-  let payloadBits := fixedLitBitsEob raw.data 0
+  let payloadBits := fixedRunFastBitsEob raw.data 0
+  have hcur0 : hdr0.curClearAbove := curClearAbove_empty
+  have hcur1 : hdrBfinal.curClearAbove := curClearAbove_writeBits hdr0 1 1 (by decide) hcur0
+  have hcur2 : hdrHeader.curClearAbove := curClearAbove_writeBits hdrBfinal 1 2 (by decide) hcur1
+  have hbitHdr : hdrHeader.bitPos < 8 := by
+    exact bitPos_lt_8_writeBits hdrBfinal 1 2 (bitPos_lt_8_writeBits hdr0 1 1 (by decide))
   have hdeflateBits :
       deflateFixed raw = (BitWriter.writeBits hdrHeader payloadBits.1 payloadBits.2).flush := by
-    simpa using deflateFixed_eq_writeBits raw
-  have hdecode :
-      decodeFixedLiteralBlock
-          (BitWriter.readerAt hdrHeader (deflateFixed raw)
-            (by
-              -- `hdrHeader` is a prefix of the deflated stream
-              simpa [hdeflateBits] using
-                (flush_size_writeBits_le (bw := hdrHeader) (bits := payloadBits.1) (len := payloadBits.2)))
-            (bitPos_lt_8_writeBits hdrBfinal 1 2 (bitPos_lt_8_writeBits hdr0 1 1 (by decide))))
-          ByteArray.empty =
-        some (BitWriter.readerAt (BitWriter.writeBits hdrHeader payloadBits.1 payloadBits.2) (deflateFixed raw)
-          (by
-            simp [hdeflateBits])
-          (bitPos_lt_8_writeBits hdrHeader payloadBits.1 payloadBits.2
-            (bitPos_lt_8_writeBits hdrBfinal 1 2 (bitPos_lt_8_writeBits hdr0 1 1 (by decide)))),
-          raw) := by
-    have hcur0 : hdr0.curClearAbove := curClearAbove_empty
-    have hcur1 : hdrBfinal.curClearAbove := curClearAbove_writeBits hdr0 1 1 (by decide) hcur0
-    have hcur2 : hdrHeader.curClearAbove := curClearAbove_writeBits hdrBfinal 1 2 (by decide) hcur1
-    have hbits := decodeFixedLiteralBlock_fixedLitBitsEob (data := raw.data) (i := 0)
-      (bw := hdrHeader) (out := ByteArray.empty)
-      (hbit := bitPos_lt_8_writeBits hdrBfinal 1 2 (bitPos_lt_8_writeBits hdr0 1 1 (by decide)))
-      (hcur := hcur2)
-    -- rewrite the output ByteArray
-    have hraw : byteArrayFromArray raw.data 0 ByteArray.empty = raw := by
-      simpa using byteArrayFromArray_empty (data := raw.data)
-    simpa [payloadBits, hdeflateBits, hraw] using hbits
+    calc
+      deflateFixed raw = deflateFixedRunFast raw := deflateFixed_eq_runFast raw
+      _ = (BitWriter.writeBits hdrHeader payloadBits.1 payloadBits.2).flush := by
+            simpa [payloadBits] using deflateFixedRunFast_eq_writeBits raw
   -- Collapse the header bits into one write.
   let streamBits := 3 ||| (payloadBits.1 <<< 3)
   let streamLen := 3 + payloadBits.2
@@ -140,6 +430,15 @@ lemma zlibDecompress_zlibCompressFixed (raw : ByteArray)
       (by
         simpa [hprefix] using
           (bitPos_lt_8_writeBits hdr0 streamBits 3 (by decide)))
+  let payloadReaderStart := BitWriter.readerAt hdrHeader
+      (BitWriter.writeBits hdrHeader payloadBits.1 payloadBits.2).flush
+      (flush_size_writeBits_le hdrHeader payloadBits.1 payloadBits.2)
+      hbitHdr
+  have hpayloadData :
+      (BitWriter.writeBits hdrHeader payloadBits.1 payloadBits.2).flush = streamWriter.flush := by
+    exact hdeflateBits.symm.trans hdeflateTotal
+  have hpayloadStart : streamReaderHeader = payloadReaderStart := by
+    apply BitReader.ext <;> simp [streamReaderHeader, payloadReaderStart, hpayloadData]
   have hread0_at :
       (BitWriter.readerAt hdr0 streamWriter.flush
         (flush_size_writeBits_le hdr0 streamBits streamLen) (by decide)).bitIndex + 3 ≤
@@ -162,27 +461,33 @@ lemma zlibDecompress_zlibCompressFixed (raw : ByteArray)
     have hirrel : streamReader0.readBits 3 hread0 = streamReader0.readBits 3 hread0_at :=
       readBits_proof_irrel (br := streamReader0) (n := 3) hread0 hread0_at
     exact hirrel.trans h'br
-  -- Final reader after the fixed literal stream.
-  have hflushFinal :
-      (BitWriter.writeBits hdrHeader payloadBits.1 payloadBits.2).flush.size ≤ streamWriter.flush.size := by
-    have hEq : streamWriter.flush = (BitWriter.writeBits hdrHeader payloadBits.1 payloadBits.2).flush := by
-      exact hdeflateTotal.symm.trans hdeflateBits
-    simp [hEq]
-  let streamReaderFinal := BitWriter.readerAt (BitWriter.writeBits hdrHeader payloadBits.1 payloadBits.2) streamWriter.flush
-    hflushFinal
-    (bitPos_lt_8_writeBits hdrHeader payloadBits.1 payloadBits.2
-      (bitPos_lt_8_writeBits hdrBfinal 1 2 (bitPos_lt_8_writeBits hdr0 1 1 (by decide))))
+  have hrawOut : fixedRunFastOut raw.data 0 ByteArray.empty = raw := by
+    calc
+      fixedRunFastOut raw.data 0 ByteArray.empty
+          = byteArrayFromArray raw.data 0 ByteArray.empty :=
+            fixedRunFastOut_eq_byteArrayFromArray raw.data 0 ByteArray.empty
+      _ = raw := by simpa using byteArrayFromArray_empty (data := raw.data)
+  let streamReaderFinal := BitWriter.readerAt
+    (BitWriter.writeBits hdrHeader payloadBits.1 payloadBits.2)
+    (BitWriter.writeBits hdrHeader payloadBits.1 payloadBits.2).flush
+    (by rfl)
+    (bitPos_lt_8_writeBits hdrHeader payloadBits.1 payloadBits.2 hbitHdr)
+  have hdecodeFast :
+      decodeFixedBlockFast payloadReaderStart ByteArray.empty =
+        some (streamReaderFinal, raw) := by
+    simpa [payloadReaderStart, payloadBits, streamReaderFinal, decodeFixedBlock, hrawOut,
+      fixedRunStartReader, fixedRunAfterReader, flushReader] using
+      (decodeFixedBlockFast_fixedRunFastBitsEob_readerAt_writeBits
+        (data := raw.data) (i := 0) (bw := hdrHeader) (out := ByteArray.empty)
+        (hbit := hbitHdr) (hcur := hcur2))
   -- Evaluate the block decoder once.
   have hloop :
       zlibDecompressLoop streamReader0 ByteArray.empty =
         some (streamReaderFinal, raw) := by
-    -- unfold and simplify the fixed-block path
-    have hdecodeLit : decodeFixedLiteralBlock streamReaderHeader ByteArray.empty =
-        some (streamReaderFinal, raw) := by
-      simpa [streamReaderFinal, hdeflateTotal, streamWriter] using hdecode
     have hdecode' : decodeFixedBlock streamReaderHeader ByteArray.empty =
         some (streamReaderFinal, raw) := by
-      simp [decodeFixedBlock, decodeFixedBlockFast, hdecodeLit]
+      rw [hpayloadStart]
+      simpa [decodeFixedBlock, hrawOut] using hdecodeFast
     -- Evaluate the loop body (bfinal = 1, btype = 1).
     have hbfinal : (3 % 2) = 1 := by decide
     have hbtype' : ((3 >>> 1) % 4) = 1 := by decide
@@ -198,15 +503,18 @@ lemma zlibDecompress_zlibCompressFixed (raw : ByteArray)
   rw [hloop]
   -- compute the Adler position and value
   have hAlign : streamReaderFinal.alignByte.bytePos = streamWriter.flush.size := by
-    -- `streamReaderFinal` reads from the flush itself
-    simpa [streamReaderFinal] using
-      (readerAt_alignByte_bytePos_eq_data
-        (bw := BitWriter.writeBits hdrHeader payloadBits.1 payloadBits.2)
-        (data := streamWriter.flush)
-        (hflush := hflushFinal)
-        (hbit := bitPos_lt_8_writeBits hdrHeader payloadBits.1 payloadBits.2
-          (bitPos_lt_8_writeBits hdrBfinal 1 2 (bitPos_lt_8_writeBits hdr0 1 1 (by decide))))
-        (hdata := hdeflateTotal.symm.trans hdeflateBits))
+    have hpayloadSize :
+        (BitWriter.writeBits hdrHeader payloadBits.1 payloadBits.2).flush.size =
+          streamWriter.flush.size := by
+      simp [hpayloadData]
+    calc
+      streamReaderFinal.alignByte.bytePos =
+          (BitWriter.writeBits hdrHeader payloadBits.1 payloadBits.2).flush.size := by
+            simpa [streamReaderFinal] using
+              (readerAt_alignByte_bytePos_eq_flush
+                (bw := BitWriter.writeBits hdrHeader payloadBits.1 payloadBits.2)
+                (hbit := bitPos_lt_8_writeBits hdrHeader payloadBits.1 payloadBits.2 hbitHdr))
+      _ = streamWriter.flush.size := hpayloadSize
   have hsize : bytes.size = streamWriter.flush.size + 6 := by
     -- size = deflate + header + adler
     have hsz := zlibCompressFixed_size raw

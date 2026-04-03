@@ -288,17 +288,17 @@ lemma bytesPerPixel_gray : Pixel.bytesPerPixel (α := PixelGray8) = bytesPerPixe
   rfl
 
 instance : PngPixel PixelRGB8 where
-  encodeRaw := encodeRaw
+  encodeRaw := encodeRawFast
   colorType := u8 2
   decodeRowsLoop := decodeRowsLoop
 
 instance : PngPixel PixelRGBA8 where
-  encodeRaw := encodeRaw
+  encodeRaw := encodeRawFast
   colorType := u8 6
   decodeRowsLoop := decodeRowsLoopRGBA
 
 instance : PngPixel PixelGray8 where
-  encodeRaw := encodeRaw
+  encodeRaw := encodeRawFast
   colorType := u8 0
   decodeRowsLoop := decodeRowsLoopGray
 
@@ -315,15 +315,15 @@ instance : PngPixel PixelGray8 where
   rfl
 
 -- PNG raw encoding for RGB8.
-@[simp] lemma pngPixel_encodeRaw_rgb : PngPixel.encodeRaw (α := PixelRGB8) = encodeRaw := by
+@[simp] lemma pngPixel_encodeRaw_rgb : PngPixel.encodeRaw (α := PixelRGB8) = encodeRawFast := by
   rfl
 
 -- PNG raw encoding for RGBA8.
-@[simp] lemma pngPixel_encodeRaw_rgba : PngPixel.encodeRaw (α := PixelRGBA8) = encodeRaw := by
+@[simp] lemma pngPixel_encodeRaw_rgba : PngPixel.encodeRaw (α := PixelRGBA8) = encodeRawFast := by
   rfl
 
 -- PNG raw encoding for Gray8.
-@[simp] lemma pngPixel_encodeRaw_gray : PngPixel.encodeRaw (α := PixelGray8) = encodeRaw := by
+@[simp] lemma pngPixel_encodeRaw_gray : PngPixel.encodeRaw (α := PixelGray8) = encodeRawFast := by
   rfl
 
 -- PNG row decoder for RGB8.

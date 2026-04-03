@@ -161,12 +161,6 @@ lemma decodeFixedBlockFuelFast_step_literal_readerAt_writeBits
       (fuel := fuel) (br := br0) (br' := br1) (out := out) (sym := sym)
       (hdecodeSym := hdecodeSym0) (hlit := hlit))
 
-def literalTailWriter (bw : BitWriter) (b : UInt8) (tailBits _tailLen : Nat) : BitWriter :=
-  let codeLen := fixedLitLenCode b.toNat
-  let bits := reverseBits codeLen.1 codeLen.2
-  let bitsTot := bits ||| (tailBits <<< codeLen.2)
-  BitWriter.writeBits bw bitsTot codeLen.2
-
 lemma literalTailWriter_bitPos_lt
     (bw : BitWriter) (b : UInt8) (tailBits tailLen : Nat) (hbit : bw.bitPos < 8) :
     (literalTailWriter bw b tailBits tailLen).bitPos < 8 := by
@@ -1312,6 +1306,161 @@ lemma decodeFixedLiteralSymFast9_readerAt_writeBits_fixedLenMatchInfo
     (decodeFixedLiteralSymFast9_readerAt_writeBits_matchSym (bw := bw)
       (sym := (fixedLenMatchInfo matchLen).1) (restBits := restBits) (restLen := restLen)
       (hsym := hsym) (hrest2 := hrest2) (hbit := hbit) (hcur := hcur))
+
+set_option maxRecDepth 200000 in
+set_option maxHeartbeats 0 in
+lemma decodeFixedBlockFuelFast_succ_of_some
+    (fuel : Nat) (br : BitReader) (out : ByteArray) (res : BitReader × ByteArray)
+    (h : decodeFixedBlockFuelFast fuel br out = some res) :
+    decodeFixedBlockFuelFast (fuel + 1) br out = some res := by
+  induction fuel generalizing br out res with
+  | zero =>
+      simpa [decodeFixedBlockFuelFast] using h
+  | succ fuel ih =>
+      cases hsym : decodeFixedLiteralSymFast9 br with
+      | none =>
+          simp [decodeFixedBlockFuelFast.eq_2, hsym] at h
+      | some symBr =>
+          cases symBr with
+          | mk sym br' =>
+              by_cases hlit : sym < 256
+              · have hrec : decodeFixedBlockFuelFast fuel br' (out.push (u8 sym)) = some res := by
+                  simpa [decodeFixedBlockFuelFast.eq_2, hsym, hlit] using h
+                calc
+                  decodeFixedBlockFuelFast (fuel + 1 + 1) br out
+                      = decodeFixedBlockFuelFast (fuel + 1) br' (out.push (u8 sym)) := by
+                          simpa [Nat.add_assoc] using
+                            (decodeFixedBlockFuelFast_step_literal_of_decodes
+                              (fuel := fuel + 1) (br := br) (br' := br') (out := out) (sym := sym)
+                              (hdecodeSym := hsym) (hlit := hlit))
+                  _ = some res := ih _ _ _ hrec
+              · cases heob : (sym == 256) with
+                | true =>
+                    have hs : sym = 256 := by
+                      simpa using heob
+                    have hres : (br', out) = res := by
+                      simpa [decodeFixedBlockFuelFast.eq_2, hsym, hlit, heob, hs] using h
+                    calc
+                      decodeFixedBlockFuelFast (fuel + 1 + 1) br out = some (br', out) := by
+                        simpa [Nat.add_assoc] using
+                          (decodeFixedBlockFuelFast_step_eob_of_decodes
+                            (fuel := fuel + 1) (br := br) (br' := br') (out := out) (sym := sym)
+                            (hdecodeSym := hsym) (hnotLit := hlit) (heob := heob))
+                      _ = some res := by cases hres; rfl
+                | false =>
+                    have hs : sym ≠ 256 := by
+                      intro hs
+                      simpa [hs] using heob
+                    by_cases hlen : 257 ≤ sym ∧ sym ≤ 285
+                    · let extra :=
+                        Array.getInternal lengthExtra (sym - 257) (by
+                          have hidxle : sym - 257 ≤ 28 := by
+                            omega
+                          have hidxlt : sym - 257 < 29 := Nat.lt_succ_of_le hidxle
+                          have hsize : lengthExtra.size = 29 := by decide
+                          simpa [hsize] using hidxlt)
+                      by_cases hbits : br'.bitIndex + extra ≤ br'.data.size * 8
+                      · let lenBr := decodeLength sym br' hlen (by simpa using hbits)
+                        let len := lenBr.1
+                        let br'' := lenBr.2
+                        cases hdistSym : decodeFixedDistanceSym br'' with
+                        | none =>
+                            simp [decodeFixedBlockFuelFast.eq_2, hsym, hlit, heob, hlen,
+                              hs, extra, hbits, lenBr, len, br'', hdistSym] at h
+                        | some distPair =>
+                            cases distPair with
+                            | mk distSym br''' =>
+                                by_cases hdist : distSym < distBases.size
+                                · let extraD :=
+                                    Array.getInternal distExtra distSym (by
+                                      have hDistExtraSize : distExtra.size = 30 := by decide
+                                      have hDistBasesSize : distBases.size = 30 := by decide
+                                      simpa [hDistExtraSize, hDistBasesSize] using hdist)
+                                  by_cases hbitsD : br'''.bitIndex + extraD ≤ br'''.data.size * 8
+                                  · let distBr := decodeDistance distSym br''' hdist (by simpa using hbitsD)
+                                    let distance := distBr.1
+                                    let br'''' := distBr.2
+                                    cases hcopy : copyDistance out distance len with
+                                    | none =>
+                                        simp [decodeFixedBlockFuelFast.eq_2, hsym, hlit, heob, hlen,
+                                          hs, extra, hbits, lenBr, len, br'', hdistSym, hdist, extraD, hbitsD,
+                                          distBr, distance, br'''', hcopy] at h
+                                    | some out' =>
+                                        have hdecodeLen :
+                                            decodeLength sym br' hlen (by simpa [extra] using hbits) =
+                                              (len, br'') := by
+                                          simp [lenBr, len, br'']
+                                        have hdecodeDist :
+                                            decodeDistance distSym br''' hdist
+                                              (by simpa [extraD] using hbitsD) = (distance, br'''') := by
+                                          simp [distBr, distance, br'''']
+                                        have hrecAll :
+                                            br'.bitIndex + extra ≤ br'.data.size * 8 ∧
+                                              br'''.bitIndex + extraD ≤ br'''.data.size * 8 ∧
+                                              decodeFixedBlockFuelFast fuel br'''' out' = some res := by
+                                          simpa [decodeFixedBlockFuelFast.eq_2, hsym, hlit, heob, hlen,
+                                            hs, extra, hbits, hdecodeLen, hdistSym, hdist, extraD, hbitsD,
+                                            hdecodeDist, hcopy] using h
+                                        have hrec : decodeFixedBlockFuelFast fuel br'''' out' = some res := by
+                                          exact hrecAll.2.2
+                                        calc
+                                          decodeFixedBlockFuelFast (fuel + 1 + 1) br out
+                                              = decodeFixedBlockFuelFast (fuel + 1) br'''' out' := by
+                                                  simpa [Nat.add_assoc, extra, extraD, lenBr, len, br'', distBr,
+                                                    distance, br''''] using
+                                                    (decodeFixedBlockFuelFast_step_match_of_decodes
+                                                      (fuel := fuel + 1) (br := br) (br' := br')
+                                                      (br'' := br'') (br''' := br''') (br'''' := br'''')
+                                                      (out := out) (out' := out') (sym := sym) (extra := extra)
+                                                      (len := len) (distSym := distSym) (extraD := extraD)
+                                                      (distance := distance) (hdecodeSym := hsym)
+                                                      (hnotLit := hlit) (hnotEob := heob) (hsym := hlen)
+                                                      (hextra := rfl) (hbits := by simpa [extra] using hbits)
+                                                      (hdecodeLen := hdecodeLen)
+                                                      (hdecodeDistSym := hdistSym) (hdist := hdist)
+                                                      (hextraD := rfl)
+                                                      (hbitsD := by simpa [extraD] using hbitsD)
+                                                      (hdecodeDist := hdecodeDist) (hcopy := hcopy))
+                                          _ = some res := ih _ _ _ hrec
+                                  · have hbitsDFalse :
+                                        ¬ br'''.bitIndex +
+                                            distExtra[distSym]'(by
+                                              have hDistExtraSize : distExtra.size = 30 := by decide
+                                              have hDistBasesSize : distBases.size = 30 := by decide
+                                              simpa [hDistExtraSize, hDistBasesSize] using hdist) ≤
+                                              br'''.data.size * 8 := by
+                                      simpa [extraD] using hbitsD
+                                    simp [decodeFixedBlockFuelFast.eq_2, hsym, hlit, heob, hlen,
+                                      hs, hbitsDFalse, extra, hbits, lenBr, len, br'', hdistSym, hdist] at h
+                                · simp [decodeFixedBlockFuelFast.eq_2, hsym, hlit, heob, hlen,
+                                      hs, extra, hbits, lenBr, len, br'', hdistSym, hdist] at h
+                      · have hbitsFalse :
+                            ¬ br'.bitIndex +
+                                lengthExtra[sym - 257]'(by
+                                  have hidxle : sym - 257 ≤ 28 := by
+                                    omega
+                                  have hidxlt : sym - 257 < 29 := Nat.lt_succ_of_le hidxle
+                                  have hsize : lengthExtra.size = 29 := by decide
+                                  simpa [hsize] using hidxlt) ≤ br'.data.size * 8 := by
+                          simpa [extra] using hbits
+                        simp [decodeFixedBlockFuelFast.eq_2, hsym, hlit, heob, hlen, hs, hbitsFalse] at h
+                    · simp [decodeFixedBlockFuelFast.eq_2, hsym, hlit, heob, hlen, hs] at h
+
+set_option maxRecDepth 200000 in
+set_option maxHeartbeats 0 in
+lemma decodeFixedBlockFuelFast_add_of_some
+    (fuel extra : Nat) (br : BitReader) (out : ByteArray) (res : BitReader × ByteArray)
+    (h : decodeFixedBlockFuelFast fuel br out = some res) :
+    decodeFixedBlockFuelFast (fuel + extra) br out = some res := by
+  induction extra generalizing fuel br out res with
+  | zero =>
+      simpa using h
+  | succ extra ih =>
+      have hbase : decodeFixedBlockFuelFast (fuel + extra) br out = some res := by
+        exact ih (fuel := fuel) (br := br) (out := out) (res := res) h
+      simpa [Nat.add_assoc] using
+        (decodeFixedBlockFuelFast_succ_of_some
+          (fuel := fuel + extra) (br := br) (out := out) (res := res) hbase)
 
 set_option maxRecDepth 100000 in
 lemma decodeLength_fixedLenMatchInfo_readerAt_writeBits_prefix_exists

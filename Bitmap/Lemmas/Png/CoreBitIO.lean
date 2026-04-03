@@ -3246,6 +3246,280 @@ lemma bit1Inv_deflateFixedAux (data : Array UInt8) (i : Nat) (bw : BitWriter)
         · simp [deflateFixedAux, hlt, hbw]
   exact hk (data.size - i) i bw rfl h
 
+lemma bit1Inv_writeFixedLiteralFast (bw : BitWriter) (b : UInt8) (h : bit1Inv bw) :
+    bit1Inv (BitWriter.writeFixedLiteralFast bw b) := by
+  unfold BitWriter.writeFixedLiteralFast
+  simp [writeBitsFast_eq_writeBits]
+  exact bit1Inv_writeBits bw (fixedLitLenRevCodeFast b.toNat).1
+    (fixedLitLenRevCodeFast b.toNat).2 h
+
+set_option maxRecDepth 200000 in
+lemma bit1Inv_writeFixedMatchDist1Fast (bw : BitWriter) (matchLen : Nat) (h : bit1Inv bw) :
+    bit1Inv (BitWriter.writeFixedMatchDist1Fast bw matchLen) := by
+  unfold BitWriter.writeFixedMatchDist1Fast
+  simp [writeBitsFast_eq_writeBits]
+  let info := fixedLenMatchInfo matchLen
+  let sym := info.1
+  let extraBits := info.2.1
+  let extraLen := info.2.2
+  exact bit1Inv_writeBits _ 0 5
+    (bit1Inv_writeBits _ extraBits extraLen
+      (bit1Inv_writeBits _ (fixedLitLenRevCodeFast sym).1 (fixedLitLenRevCodeFast sym).2 h))
+
+lemma bit1Inv_writeFixedLiteralRepeatFast (bw : BitWriter) (b : UInt8) (n : Nat)
+    (h : bit1Inv bw) :
+    bit1Inv (bw.writeFixedLiteralRepeatFast b n) := by
+  induction n generalizing bw with
+  | zero =>
+      simpa [BitWriter.writeFixedLiteralRepeatFast]
+  | succ n ih =>
+      simpa [BitWriter.writeFixedLiteralRepeatFast] using
+        ih (bw := bw.writeFixedLiteralFast b) (bit1Inv_writeFixedLiteralFast _ _ h)
+
+lemma chooseFixedMatchChunkLen_bounds_core (remaining : Nat) (hrem : 3 ≤ remaining) :
+    3 ≤ chooseFixedMatchChunkLen remaining ∧
+    chooseFixedMatchChunkLen remaining ≤ 258 ∧
+    chooseFixedMatchChunkLen remaining ≤ remaining := by
+  by_cases hgt : remaining > 258
+  · have hge258 : 258 ≤ remaining := Nat.le_of_lt hgt
+    by_cases hr1 : (remaining % 258 == 1)
+    · refine ⟨by simp [chooseFixedMatchChunkLen, hgt, hr1], by simp [chooseFixedMatchChunkLen, hgt, hr1], ?_⟩
+      have h256 : chooseFixedMatchChunkLen remaining = 256 := by
+        simp [chooseFixedMatchChunkLen, hgt, hr1]
+      omega
+    · by_cases hr2 : (remaining % 258 == 2)
+      · refine ⟨by simp [chooseFixedMatchChunkLen, hgt, hr1, hr2], by simp [chooseFixedMatchChunkLen, hgt, hr1, hr2], ?_⟩
+        have h257 : chooseFixedMatchChunkLen remaining = 257 := by
+          simp [chooseFixedMatchChunkLen, hgt, hr1, hr2]
+        omega
+      · refine ⟨by simp [chooseFixedMatchChunkLen, hgt, hr1, hr2], by simp [chooseFixedMatchChunkLen, hgt, hr1, hr2], ?_⟩
+        have h258 : chooseFixedMatchChunkLen remaining = 258 := by
+          simp [chooseFixedMatchChunkLen, hgt, hr1, hr2]
+        omega
+  · have hle258 : remaining ≤ 258 := Nat.le_of_not_gt hgt
+    simp [chooseFixedMatchChunkLen, hgt, hrem, hle258]
+
+lemma chooseFixedMatchChunkLen_sub_lt_core (remaining : Nat) (hrem : 3 ≤ remaining) :
+    remaining - chooseFixedMatchChunkLen remaining < remaining := by
+  have hbounds := chooseFixedMatchChunkLen_bounds_core remaining hrem
+  have hchunk_ge3 : 3 ≤ chooseFixedMatchChunkLen remaining := hbounds.1
+  have hchunk_pos : 0 < chooseFixedMatchChunkLen remaining := by
+    exact lt_of_lt_of_le (by decide : 0 < 3) hchunk_ge3
+  exact Nat.sub_lt (show 0 < remaining by omega) hchunk_pos
+
+set_option maxRecDepth 200000 in
+lemma bit1Inv_writeFixedMatchDist1ChunksFast (bw : BitWriter) (remaining : Nat) (h : bit1Inv bw) :
+    bit1Inv (bw.writeFixedMatchDist1ChunksFast remaining) := by
+  have hk : ∀ remaining bw, bit1Inv bw → bit1Inv (bw.writeFixedMatchDist1ChunksFast remaining) := by
+    intro remaining
+    refine Nat.strong_induction_on remaining ?_
+    intro remaining ih bw hbw
+    by_cases hrem : 3 ≤ remaining
+    · let chunk := chooseFixedMatchChunkLen remaining
+      have hbw' : bit1Inv ((bw.writeFixedMatchDist1Fast chunk)) := by
+        exact bit1Inv_writeFixedMatchDist1Fast _ chunk hbw
+      have hlt : remaining - chunk < remaining := by
+        simpa [chunk] using (chooseFixedMatchChunkLen_sub_lt_core remaining hrem)
+      rw [BitWriter.writeFixedMatchDist1ChunksFast.eq_1]
+      simp [hrem]
+      exact ih (remaining - chunk) hlt (bw.writeFixedMatchDist1Fast chunk) hbw'
+    · simp [BitWriter.writeFixedMatchDist1ChunksFast, hrem, hbw]
+  exact hk remaining bw h
+
+lemma bit1Inv_deflateFixedRunAuxFast (data : Array UInt8) (i : Nat) (bw : BitWriter)
+    (h : bit1Inv bw) : bit1Inv (deflateFixedRunAuxFast data i bw) := by
+  classical
+  have hk :
+      ∀ k, ∀ i bw, data.size - i = k → bit1Inv bw →
+        bit1Inv (deflateFixedRunAuxFast data i bw) := by
+    intro k
+    induction k using Nat.strongRecOn with
+    | ind k ih =>
+        intro i bw hk hbw
+        by_cases hlt : i < data.size
+        · let b := data[i]
+          let j := sameByteRunEndFast data b (i + 1)
+          let runLen := j - i
+          rw [deflateFixedRunAuxFast.eq_1]
+          simp [hlt]
+          by_cases h4 : 4 ≤ runLen
+          · have hbw' : bit1Inv ((bw.writeFixedLiteralFast b).writeFixedMatchDist1ChunksFast (runLen - 1)) := by
+              exact bit1Inv_writeFixedMatchDist1ChunksFast _ _
+                (bit1Inv_writeFixedLiteralFast _ _ hbw)
+            have hk' : data.size - j < k := by
+              have hge : i + 1 ≤ j := by
+                dsimp [j]
+                have hkge :
+                    ∀ k', ∀ j0, data.size - j0 = k' →
+                      j0 ≤ sameByteRunEndFast data data[i] j0 := by
+                  intro k'
+                  induction k' with
+                  | zero =>
+                      intro j0 hk0
+                      have hle0 : data.size ≤ j0 := Nat.le_of_sub_eq_zero hk0
+                      have hlt0 : ¬ j0 < data.size := not_lt_of_ge hle0
+                      simp [sameByteRunEndFast, hlt0]
+                  | succ k' ih' =>
+                      intro j0 hk0
+                      rw [sameByteRunEndFast.eq_def]
+                      by_cases hlt0 : j0 < data.size
+                      · by_cases heq : data[j0]'hlt0 = data[i]
+                        · simp [hlt0, heq]
+                          have hk0' : data.size - (j0 + 1) = k' := by omega
+                          have hrec := ih' (j0 + 1) hk0'
+                          omega
+                        · simp [hlt0, heq]
+                      · simp [hlt0]
+                have hrun := hkge (data.size - (i + 1)) (i + 1) rfl
+                simpa [j] using hrun
+              have hle : j ≤ data.size := by
+                dsimp [j]
+                have hkle :
+                    ∀ k', ∀ j0, data.size - j0 = k' →
+                      j0 ≤ data.size →
+                      sameByteRunEndFast data data[i] j0 ≤ data.size := by
+                  intro k'
+                  induction k' with
+                  | zero =>
+                      intro j0 hk0 hj0
+                      have hle0 : data.size ≤ j0 := Nat.le_of_sub_eq_zero hk0
+                      have hlt0 : ¬ j0 < data.size := not_lt_of_ge hle0
+                      simpa [sameByteRunEndFast, hlt0] using hj0
+                  | succ k' ih' =>
+                      intro j0 hk0 hj0
+                      rw [sameByteRunEndFast.eq_def]
+                      by_cases hlt0 : j0 < data.size
+                      · by_cases heq : data[j0]'hlt0 = data[i]
+                        · simp [hlt0, heq]
+                          have hk0' : data.size - (j0 + 1) = k' := by omega
+                          exact ih' (j0 + 1) hk0' (Nat.succ_le_of_lt hlt0)
+                        · simp [hlt0, heq]
+                          omega
+                      · simp [hlt0]
+                        exact hj0
+                have hrun := hkle (data.size - (i + 1)) (i + 1) rfl (Nat.succ_le_of_lt hlt)
+                simpa [j] using hrun
+              have hlt' : data.size - j < data.size - i := by omega
+              simpa [hk] using hlt'
+            simpa [b, j, runLen, h4] using
+              ih (data.size - j) hk' (i := j)
+                (bw := (bw.writeFixedLiteralFast b).writeFixedMatchDist1ChunksFast (runLen - 1)) rfl hbw'
+          · have hbw' : bit1Inv (bw.writeFixedLiteralRepeatFast b runLen) := by
+              exact bit1Inv_writeFixedLiteralRepeatFast _ _ _ hbw
+            have hk' : data.size - j < k := by
+              have hge : i + 1 ≤ j := by
+                dsimp [j]
+                have hkge :
+                    ∀ k', ∀ j0, data.size - j0 = k' →
+                      j0 ≤ sameByteRunEndFast data data[i] j0 := by
+                  intro k'
+                  induction k' with
+                  | zero =>
+                      intro j0 hk0
+                      have hle0 : data.size ≤ j0 := Nat.le_of_sub_eq_zero hk0
+                      have hlt0 : ¬ j0 < data.size := not_lt_of_ge hle0
+                      simp [sameByteRunEndFast, hlt0]
+                  | succ k' ih' =>
+                      intro j0 hk0
+                      rw [sameByteRunEndFast.eq_def]
+                      by_cases hlt0 : j0 < data.size
+                      · by_cases heq : data[j0]'hlt0 = data[i]
+                        · simp [hlt0, heq]
+                          have hk0' : data.size - (j0 + 1) = k' := by omega
+                          have hrec := ih' (j0 + 1) hk0'
+                          omega
+                        · simp [hlt0, heq]
+                      · simp [hlt0]
+                have hrun := hkge (data.size - (i + 1)) (i + 1) rfl
+                simpa [j] using hrun
+              have hle : j ≤ data.size := by
+                dsimp [j]
+                have hkle :
+                    ∀ k', ∀ j0, data.size - j0 = k' →
+                      j0 ≤ data.size →
+                      sameByteRunEndFast data data[i] j0 ≤ data.size := by
+                  intro k'
+                  induction k' with
+                  | zero =>
+                      intro j0 hk0 hj0
+                      have hle0 : data.size ≤ j0 := Nat.le_of_sub_eq_zero hk0
+                      have hlt0 : ¬ j0 < data.size := not_lt_of_ge hle0
+                      simpa [sameByteRunEndFast, hlt0] using hj0
+                  | succ k' ih' =>
+                      intro j0 hk0 hj0
+                      rw [sameByteRunEndFast.eq_def]
+                      by_cases hlt0 : j0 < data.size
+                      · by_cases heq : data[j0]'hlt0 = data[i]
+                        · simp [hlt0, heq]
+                          have hk0' : data.size - (j0 + 1) = k' := by omega
+                          exact ih' (j0 + 1) hk0' (Nat.succ_le_of_lt hlt0)
+                        · simp [hlt0, heq]
+                          omega
+                      · simp [hlt0]
+                        exact hj0
+                have hrun := hkle (data.size - (i + 1)) (i + 1) rfl (Nat.succ_le_of_lt hlt)
+                simpa [j] using hrun
+              have hlt' : data.size - j < data.size - i := by omega
+              simpa [hk] using hlt'
+            simpa [b, j, runLen, h4] using
+              ih (data.size - j) hk' (i := j)
+                (bw := bw.writeFixedLiteralRepeatFast b runLen) rfl hbw'
+        · have hle : data.size ≤ i := by
+            exact Nat.le_of_not_gt hlt
+          simp [deflateFixedRunAuxFast, hlt, hbw]
+  exact hk (data.size - i) i bw rfl h
+
+lemma bit1Inv_deflateFixedQuadAuxFast (data : Array UInt8) (i : Nat) (bw : BitWriter)
+    (h : bit1Inv bw) : bit1Inv (deflateFixedQuadAuxFast data i bw) := by
+  classical
+  have hk :
+      ∀ k, ∀ i bw, data.size - i = k → bit1Inv bw →
+        bit1Inv (deflateFixedQuadAuxFast data i bw) := by
+    intro k
+    induction k using Nat.strongRecOn with
+    | ind k ih =>
+        intro i bw hk hbw
+        by_cases hlt : i < data.size
+        · let b := data[i]
+          rw [deflateFixedQuadAuxFast.eq_1]
+          simp [hlt]
+          by_cases h3 : i + 3 < data.size
+          · by_cases hq : quadTailEqbFast data i b h3
+            · have hbw' : bit1Inv ((bw.writeFixedLiteralFast b).writeFixedMatchDist1Fast 3) := by
+                exact bit1Inv_writeFixedMatchDist1Fast _ 3
+                  (bit1Inv_writeFixedLiteralFast _ _ hbw)
+              have hk' : data.size - (i + 4) < k := by
+                have hlt' : data.size - (i + 4) < data.size - i := by
+                  omega
+                simpa [hk] using hlt'
+              simpa [b, h3, hq] using
+                ih (data.size - (i + 4)) hk' (i := i + 4)
+                  (bw := (bw.writeFixedLiteralFast b).writeFixedMatchDist1Fast 3) rfl hbw'
+            · have hbw' : bit1Inv (bw.writeFixedLiteralFast b) := by
+                exact bit1Inv_writeFixedLiteralFast _ _ hbw
+              have hk' : data.size - (i + 1) < k := by
+                have hlt' : data.size - (i + 1) < data.size - i := by
+                  exact Nat.sub_lt_sub_left (k := i) (m := data.size) (n := i + 1) hlt
+                    (Nat.lt_succ_self i)
+                simpa [hk] using hlt'
+              simpa [b, h3, hq] using
+                ih (data.size - (i + 1)) hk' (i := i + 1) (bw := bw.writeFixedLiteralFast b) rfl
+                  hbw'
+          · have hbw' : bit1Inv (bw.writeFixedLiteralFast b) := by
+              exact bit1Inv_writeFixedLiteralFast _ _ hbw
+            have hk' : data.size - (i + 1) < k := by
+              have hlt' : data.size - (i + 1) < data.size - i := by
+                exact Nat.sub_lt_sub_left (k := i) (m := data.size) (n := i + 1) hlt
+                  (Nat.lt_succ_self i)
+              simpa [hk] using hlt'
+            simpa [b, h3] using
+              ih (data.size - (i + 1)) hk' (i := i + 1) (bw := bw.writeFixedLiteralFast b) rfl
+                hbw'
+        · have hle : data.size ≤ i := by
+            exact Nat.le_of_not_gt hlt
+          simp [deflateFixedQuadAuxFast, hlt, hbw]
+  exact hk (data.size - i) i bw rfl h
+
 lemma bit1Inv_deflateFixed_header :
     let bw0 := BitWriter.empty
     let bw1 := bw0.writeBits 1 1
@@ -3285,6 +3559,56 @@ lemma bit1Inv_deflateFixed (raw : ByteArray) :
           (bw := deflateFixedAux raw.data 0
             (BitWriter.writeBits (BitWriter.writeBits BitWriter.empty 1 1) 1 2))
           (bits := reverseBits eobCode eobLen) (len := eobLen) h3)
+
+lemma fixedLitLenRevCodeFast_eq_code_core (sym : Nat) (h : sym < 288) :
+    fixedLitLenRevCodeFast sym =
+      let codeLen := fixedLitLenCode sym
+      (reverseBits codeLen.1 codeLen.2, codeLen.2) := by
+  unfold fixedLitLenRevCodeFast
+  have htab : sym < fixedLitLenRevTable.size := by
+    simpa [fixedLitLenRevTable] using h
+  simp [fixedLitLenRevTable]
+
+lemma deflateFixedAuxFast_eq_spec_core (data : Array UInt8) (i : Nat) (bw : BitWriter) :
+    deflateFixedAuxFast data i bw = deflateFixedAux data i bw := by
+  classical
+  have hk :
+      ∀ k, ∀ i bw, data.size - i = k →
+        deflateFixedAuxFast data i bw = deflateFixedAux data i bw := by
+    intro k
+    induction k with
+    | zero =>
+        intro i bw hk
+        have hle : data.size ≤ i := Nat.le_of_sub_eq_zero hk
+        have hlt : ¬ i < data.size := not_lt_of_ge hle
+        simp [deflateFixedAuxFast, deflateFixedAux, hlt]
+    | succ k ih =>
+        intro i bw hk
+        by_cases hlt : i < data.size
+        · have hk' : data.size - (i + 1) = k := by
+            omega
+          let b := data[i]
+          have hsym : b.toNat < 288 := by
+            exact lt_trans (UInt8.toNat_lt b) (by decide)
+          have hcode :
+              fixedLitLenRevCodeFast b.toNat =
+                let codeLen := fixedLitLenCode b.toNat
+                (reverseBits codeLen.1 codeLen.2, codeLen.2) := by
+            simpa using fixedLitLenRevCodeFast_eq_code_core b.toNat hsym
+          rw [deflateFixedAuxFast.eq_1, deflateFixedAux.eq_1]
+          simp [hlt]
+          simpa [b, hcode] using
+            ih (i := i + 1)
+              (bw := bw.writeBitsFast
+                (reverseBits (fixedLitLenCode b.toNat).1 (fixedLitLenCode b.toNat).2)
+                (fixedLitLenCode b.toNat).2)
+              hk'
+        · simp [deflateFixedAuxFast, deflateFixedAux, hlt]
+  exact hk (data.size - i) i bw rfl
+
+lemma deflateFixed_eq_runFast_core (raw : ByteArray) :
+    deflateFixed raw = deflateFixedRunFast raw := by
+  rfl
 
 lemma bit1Inv_flush_bit1 (bw : BitWriter) (h : bit1Inv bw) :
     ∃ hsize : 0 < bw.flush.size, (bw.flush.get 0 hsize).toNat.testBit 1 = true := by
@@ -3329,8 +3653,9 @@ lemma bit1Inv_flush_bit1 (bw : BitWriter) (h : bit1Inv bw) :
           simpa [hflush, byteArray_get_eq_getElem] using hget'
         exact ⟨hsize, by simpa [hget] using hbit1⟩
 
-lemma deflateFixed_bit1 (raw : ByteArray) :
-    ∃ h : 0 < (deflateFixed raw).size, ((deflateFixed raw).get 0 h).toNat.testBit 1 = true := by
+lemma deflateFixedSpec_bit1 (raw : ByteArray) :
+    ∃ h : 0 < (deflateFixedSpec raw).size,
+      ((deflateFixedSpec raw).get 0 h).toNat.testBit 1 = true := by
   -- Use the bit1 invariant on the writer and translate to the flushed byte array.
   let bw0 := BitWriter.empty
   let bw1 := bw0.writeBits 1 1
@@ -3341,10 +3666,39 @@ lemma deflateFixed_bit1 (raw : ByteArray) :
   have hinv : bit1Inv bw4 := by
     simpa [bw0, bw1, bw2, bw3, eob, bw4] using (bit1Inv_deflateFixed raw)
   rcases bit1Inv_flush_bit1 (bw := bw4) hinv with ⟨hsize, hbit⟩
-  have hsize' : 0 < (deflateFixed raw).size := by
-    simpa [deflateFixed, bw0, bw1, bw2, bw3, eob, bw4] using hsize
+  have hsize' : 0 < (deflateFixedSpec raw).size := by
+    simpa [deflateFixedSpec, bw0, bw1, bw2, bw3, eob, bw4] using hsize
   refine ⟨hsize', ?_⟩
-  simpa [deflateFixed, bw0, bw1, bw2, bw3, eob, bw4, byteArray_get_proof_irrel] using hbit
+  simpa [deflateFixedSpec, bw0, bw1, bw2, bw3, eob, bw4, byteArray_get_proof_irrel] using hbit
+
+lemma deflateFixed_bit1 (raw : ByteArray) :
+    ∃ h : 0 < (deflateFixed raw).size, ((deflateFixed raw).get 0 h).toNat.testBit 1 = true := by
+  let bw0 := BitWriter.empty
+  let bw1 := bw0.writeBits 1 1
+  let bw2 := bw1.writeBits 1 2
+  let bw3 := deflateFixedRunAuxFast raw.data 0 bw2
+  let eob := fixedLitLenCode 256
+  let bw4 := bw3.writeBits (reverseBits eob.1 eob.2) eob.2
+  have h2 : bit1Inv (BitWriter.writeBits (BitWriter.writeBits BitWriter.empty 1 1) 1 2) := by
+    simpa using bit1Inv_deflateFixed_header
+  have h3 : bit1Inv (deflateFixedRunAuxFast raw.data 0
+      (BitWriter.writeBits (BitWriter.writeBits BitWriter.empty 1 1) 1 2)) := by
+    simpa using
+      (bit1Inv_deflateFixedRunAuxFast (data := raw.data) (i := 0)
+        (bw := BitWriter.writeBits (BitWriter.writeBits BitWriter.empty 1 1) 1 2) h2)
+  have hinv : bit1Inv bw4 := by
+    simpa [bw0, bw1, bw2, bw3, eob, bw4] using
+      (bit1Inv_writeBits
+        (bw := deflateFixedRunAuxFast raw.data 0
+          (BitWriter.writeBits (BitWriter.writeBits BitWriter.empty 1 1) 1 2))
+        (bits := reverseBits eob.1 eob.2) (len := eob.2) h3)
+  rcases bit1Inv_flush_bit1 (bw := bw4) hinv with ⟨hsize, hbit⟩
+  have hsize' : 0 < (deflateFixed raw).size := by
+    simpa [deflateFixed_eq_runFast_core raw, deflateFixedRunFast, bw0, bw1, bw2, bw3, eob, bw4]
+      using hsize
+  refine ⟨hsize', ?_⟩
+  simpa [deflateFixed_eq_runFast_core raw, deflateFixedRunFast, bw0, bw1, bw2, bw3, eob, bw4,
+    byteArray_get_proof_irrel] using hbit
 
 lemma deflateFixed_header_bit1 (raw : ByteArray) (h : 0 < (deflateFixed raw).size) :
     ((deflateFixed raw).get 0 h).toNat.testBit 1 = true := by
