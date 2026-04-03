@@ -1,6 +1,7 @@
 import Bitmap.Lemmas.Png.EncodeDecodeBase
 import Bitmap.Lemmas.Png.FixedBlockBase
 import Bitmap.Lemmas.Png.FixedBlockProofsCommon
+import Bitmap.Lemmas.Png.FixedBlockProofsRunEncode
 import Bitmap.Lemmas.Png.FixedBlockProofsScanDecode
 
 universe u
@@ -361,7 +362,7 @@ lemma zlibDecompress_zlibCompressFixed (raw : ByteArray)
   let hdr0 := BitWriter.empty
   let hdrBfinal := hdr0.writeBits 1 1
   let hdrHeader := hdrBfinal.writeBits 1 2
-  let payloadBits := fixedQuadBitsEob raw.data 0
+  let payloadBits := fixedRunFastBitsEob raw.data 0
   have hcur0 : hdr0.curClearAbove := curClearAbove_empty
   have hcur1 : hdrBfinal.curClearAbove := curClearAbove_writeBits hdr0 1 1 (by decide) hcur0
   have hcur2 : hdrHeader.curClearAbove := curClearAbove_writeBits hdrBfinal 1 2 (by decide) hcur1
@@ -370,9 +371,9 @@ lemma zlibDecompress_zlibCompressFixed (raw : ByteArray)
   have hdeflateBits :
       deflateFixed raw = (BitWriter.writeBits hdrHeader payloadBits.1 payloadBits.2).flush := by
     calc
-      deflateFixed raw = deflateFixedQuadFast raw := deflateFixed_eq_quadFast raw
+      deflateFixed raw = deflateFixedRunFast raw := deflateFixed_eq_runFast raw
       _ = (BitWriter.writeBits hdrHeader payloadBits.1 payloadBits.2).flush := by
-            simpa [payloadBits] using deflateFixedQuadFast_eq_writeBits raw
+            simpa [payloadBits] using deflateFixedRunFast_eq_writeBits raw
   -- Collapse the header bits into one write.
   let streamBits := 3 ||| (payloadBits.1 <<< 3)
   let streamLen := 3 + payloadBits.2
@@ -460,8 +461,12 @@ lemma zlibDecompress_zlibCompressFixed (raw : ByteArray)
     have hirrel : streamReader0.readBits 3 hread0 = streamReader0.readBits 3 hread0_at :=
       readBits_proof_irrel (br := streamReader0) (n := 3) hread0 hread0_at
     exact hirrel.trans h'br
-  have hrawOut : fixedQuadOut raw.data 0 ByteArray.empty = raw := by
-    simpa using fixedQuadOut_empty raw.data
+  have hrawOut : fixedRunFastOut raw.data 0 ByteArray.empty = raw := by
+    calc
+      fixedRunFastOut raw.data 0 ByteArray.empty
+          = byteArrayFromArray raw.data 0 ByteArray.empty :=
+            fixedRunFastOut_eq_byteArrayFromArray raw.data 0 ByteArray.empty
+      _ = raw := by simpa using byteArrayFromArray_empty (data := raw.data)
   let streamReaderFinal := BitWriter.readerAt
     (BitWriter.writeBits hdrHeader payloadBits.1 payloadBits.2)
     (BitWriter.writeBits hdrHeader payloadBits.1 payloadBits.2).flush
@@ -470,8 +475,9 @@ lemma zlibDecompress_zlibCompressFixed (raw : ByteArray)
   have hdecodeFast :
       decodeFixedBlockFast payloadReaderStart ByteArray.empty =
         some (streamReaderFinal, raw) := by
-    simpa [payloadReaderStart, payloadBits, streamReaderFinal, decodeFixedBlock, hrawOut] using
-      (decodeFixedBlockFast_fixedQuadBitsEob_readerAt_writeBits
+    simpa [payloadReaderStart, payloadBits, streamReaderFinal, decodeFixedBlock, hrawOut,
+      fixedRunStartReader, fixedRunAfterReader, flushReader] using
+      (decodeFixedBlockFast_fixedRunFastBitsEob_readerAt_writeBits
         (data := raw.data) (i := 0) (bw := hdrHeader) (out := ByteArray.empty)
         (hbit := hbitHdr) (hcur := hcur2))
   -- Evaluate the block decoder once.
