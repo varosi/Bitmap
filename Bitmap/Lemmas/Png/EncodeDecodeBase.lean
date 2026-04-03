@@ -389,6 +389,7 @@ lemma readU16LE_extract (bytes : ByteArray) (pos : Nat) (h : pos + 1 < bytes.siz
   cases bytes with
   | mk data =>
       simp [readU16LE, ByteArray.extract, ByteArray.get]
+      rfl
 
 -- `readU16LE` is proof-irrelevant in its bounds argument.
 lemma readU16LE_proof_irrel {bytes : ByteArray} {pos : Nat}
@@ -578,6 +579,7 @@ lemma readU32BE_extract (bytes : ByteArray) (pos : Nat) (h : pos + 3 < bytes.siz
   cases bytes with
   | mk data =>
       simp [readU32BE, ByteArray.extract, ByteArray.get]
+      rfl
 
 -- `readU32BE` is proof-irrelevant in its bounds argument.
 lemma readU32BE_proof_irrel {bytes : ByteArray} {pos : Nat}
