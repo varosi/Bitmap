@@ -179,7 +179,7 @@ structure BitWriter where
   cur : UInt8
   bitPos : Nat
   hbit : bitPos < 8
-deriving Repr
+deriving Repr, DecidableEq
 
 def BitWriter.empty : BitWriter :=
   { out := ByteArray.empty, cur := 0, bitPos := 0, hbit := by decide }
@@ -649,15 +649,9 @@ def deflateFixedRunFast (raw : ByteArray) : ByteArray :=
 def deflateFixed (raw : ByteArray) : ByteArray :=
   deflateFixedRunFast raw
 
-def deflateDynamicFast (raw : ByteArray) : ByteArray :=
-  let bw0 := BitWriter.empty
-  let bw1 := bw0.writeBits 1 1
-  let bw2 := bw1.writeBits 2 2
-  let bw3 := bw2.writeBits 31 5
-  let bw4 := bw3.writeBits 31 5
-  let bw5 := bw4.writeBits 6 4
-  let bw6 := Id.run do
-    let mut bw := bw5
+@[inline] def writeDynamicFixedTables (bw : BitWriter) : BitWriter :=
+  Id.run do
+    let mut bw := bw
     -- Code-length alphabet lengths in deflate order
     -- [16, 17, 18, 0, 8, 7, 9, 6, 10, 5].
     bw := bw.writeBitsFast 0 3
@@ -685,14 +679,20 @@ def deflateDynamicFast (raw : ByteArray) : ByteArray :=
       bw := bw.writeBitsFast 1 2
     for _ in [0:32] do
       bw := bw.writeBitsFast 0 2
-    let data := raw.data
-    let mut i : Nat := 0
-    while i < data.size do
-      bw := bw.writeFixedLiteralFast data[i]!
-      i := i + 1
-    let (eobBits, eobLen) := fixedLitLenRevCodeFast 256
-    return bw.writeBitsFast eobBits eobLen
-  bw6.flush
+    return bw
+
+def deflateDynamicFast (raw : ByteArray) : ByteArray :=
+  let bw0 := BitWriter.empty
+  let bw1 := bw0.writeBits 1 1
+  let bw2 := bw1.writeBits 2 2
+  let bw3 := bw2.writeBits 31 5
+  let bw4 := bw3.writeBits 31 5
+  let bw5 := bw4.writeBits 6 4
+  let bw6 := writeDynamicFixedTables bw5
+  let bw7 := deflateFixedAuxFast raw.data 0 bw6
+  let (eobBits, eobLen) := fixedLitLenRevCodeFast 256
+  let bw8 := bw7.writeBitsFast eobBits eobLen
+  bw8.flush
 
 def deflateDynamic (raw : ByteArray) : ByteArray :=
   -- Specification-level fallback used by proofs.
@@ -915,7 +915,7 @@ def BitReader.alignByte (br : BitReader) : BitReader :=
 structure Huffman where
   maxLen : Nat
   table : Array (Array (Option Nat))
-deriving Repr
+deriving Repr, DecidableEq
 
 def mkHuffman (lengths : Array Nat) : Option Huffman := do
   let mut maxLen := 0
