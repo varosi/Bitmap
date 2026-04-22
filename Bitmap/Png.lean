@@ -2057,6 +2057,21 @@ def BitmapGray8.writePng [Pixel PixelGray8] [PngPixel PixelGray8]
   | Except.error err => pure (Except.error err)
   | Except.ok bytes => ioToExcept (IO.FS.writeBinFile path bytes)
 
+instance : PngPixel PixelRGB8 where
+  encodeRaw := encodeRawFast
+  colorType := u8 2
+  decodeRowsLoop := decodeRowsLoop
+
+instance : PngPixel PixelRGBA8 where
+  encodeRaw := encodeRawFast
+  colorType := u8 6
+  decodeRowsLoop := decodeRowsLoopRGBA
+
+instance : PngPixel PixelGray8 where
+  encodeRaw := encodeRawFast
+  colorType := u8 0
+  decodeRowsLoop := decodeRowsLoopGray
+
 end Png
 
 instance [Pixel PixelRGB8] [Png.PngPixel PixelRGB8] : FileWritable BitmapRGB8 where
