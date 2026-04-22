@@ -1,9 +1,11 @@
 import Bitmap.Lemmas.Png.DynamicBlockProofsLoop
+import Bitmap.Lemmas.Png.EncodeDecodeBaseU32
 
 namespace Bitmaps
 
 namespace Lemmas
 
+open U32Helpers
 open Png
 attribute [local simp] Png.byteArray_get_proof_irrel
 

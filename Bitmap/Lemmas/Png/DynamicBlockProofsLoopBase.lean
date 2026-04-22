@@ -1,4 +1,3 @@
-import Bitmap.Lemmas.Png.EncodeDecodeBase
 import Bitmap.Lemmas.Png.DynamicBlockProofsReadTablesHeaderReads
 import Bitmap.Lemmas.Png.DynamicBlockProofsReadTablesWriteBitsEq
 import Bitmap.Lemmas.Png.DynamicBlockProofsConcreteHeader

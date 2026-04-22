@@ -1,6 +1,6 @@
 import Bitmap.Lemmas.Png.DynamicBlockProofsReadTables
 import Bitmap.Lemmas.Png.FixedBlockProofsCommon
-import Bitmap.Lemmas.Png.FixedBlockProofsDecode
+import Bitmap.Lemmas.Png.FixedBlockProofsDecodeEob
 import Bitmap.Lemmas.Png.FixedLiteral
 
 universe u

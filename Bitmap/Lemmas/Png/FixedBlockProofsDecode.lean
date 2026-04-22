@@ -1,4 +1,4 @@
-import Bitmap.Lemmas.Png.FixedBlockProofsCommon
+import Bitmap.Lemmas.Png.FixedBlockProofsDecodeEob
 
 universe u
 
@@ -309,34 +309,6 @@ lemma decodeFixedBlockFuelFast_step_eob_readerAt_writeBits
     (decodeFixedBlockFuelFast_step_eob_of_decodes
       (fuel := fuel) (br := br0) (br' := br1) (out := out) (sym := sym)
       (hdecodeSym := hdecodeSym0) (hnotLit := hnotLit) (heob := heob))
-
-def eobNoTailWriter (bw : BitWriter) : BitWriter :=
-  let sym : Nat := 256
-  let codeLen := fixedLitLenCode sym
-  let bits := reverseBits codeLen.1 codeLen.2
-  BitWriter.writeBits bw bits codeLen.2
-
-def eobNoTailStartReader (bw : BitWriter) (hbit : bw.bitPos < 8) : BitReader :=
-  let bwAll := eobNoTailWriter bw
-  BitWriter.readerAt bw bwAll.flush
-    (by
-      have symEq : (256 : Nat) = 256 := rfl
-      simpa [eobNoTailWriter, symEq] using
-        (flush_size_writeBits_le (bw := bw)
-          (bits := reverseBits (fixedLitLenCode 256).1 (fixedLitLenCode 256).2)
-          (len := (fixedLitLenCode 256).2)))
-    hbit
-
-def eobNoTailAfterReader (bw : BitWriter) (hbit : bw.bitPos < 8) : BitReader :=
-  let bwAll := eobNoTailWriter bw
-  BitWriter.readerAt bwAll bwAll.flush
-    (by rfl)
-    (by
-      have symEq : (256 : Nat) = 256 := rfl
-      simpa [eobNoTailWriter, symEq] using
-        (bitPos_lt_8_writeBits (bw := bw)
-          (bits := reverseBits (fixedLitLenCode 256).1 (fixedLitLenCode 256).2)
-          (len := (fixedLitLenCode 256).2) hbit))
 
 set_option maxRecDepth 200000 in
 set_option maxHeartbeats 0 in

@@ -1,4 +1,3 @@
-import Bitmap.Lemmas.Png.EncodeDecodeBase
 import Bitmap.Lemmas.Png.FixedBlockBase
 import Bitmap.Lemmas.Png.FixedBlockProofsCommon
 import Bitmap.Lemmas.Png.FixedBlockProofsDecode
