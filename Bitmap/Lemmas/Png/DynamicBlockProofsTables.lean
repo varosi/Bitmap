@@ -106,50 +106,64 @@ def dynamicCodeLenLengthsFilled : Array Nat :=
       codeLenLengths := codeLenLengths.set! order[i]! (dynamicHeaderCodeLenLens[i]!)
     codeLenLengths
 
+/-- Records the canonical code-length alphabet size so later table proofs can rewrite sizes quickly. -/
 lemma dynamicCodeLenLengths_size : dynamicCodeLenLengths.size = 19 := by
   decide
 
+/-- Fixes the emitted literal/length table width at the DEFLATE-required 288 entries. -/
 lemma dynamicLitLenLengths_size : dynamicLitLenLengths.size = 288 := by
   simp [dynamicLitLenLengths]
 
+/-- Fixes the emitted distance table width at the DEFLATE-required 32 entries. -/
 lemma dynamicDistLengths_size : dynamicDistLengths.size = 32 := by
   simp [dynamicDistLengths]
 
+/-- Expands the concrete dynamic header length into the exact bit budget used by the proof. -/
 lemma dynamicHeaderTableLen_eq :
     dynamicHeaderTableLen = 5 + 5 + 4 + 10 * 3 + 320 * 2 := by
   decide
 
+/-- Notes that the code-length stream writes one symbol for every lit/len and distance entry. -/
 lemma dynamicHeaderCodeLenSyms_length :
     dynamicHeaderCodeLenSyms.length = 320 := by
   native_decide
 
+/-- Identifies the fixed ten code-length lengths written by the dynamic header. -/
 lemma dynamicHeaderCodeLenLen_eq :
     dynamicHeaderCodeLenLen = 10 * 3 := by
   decide
 
+/-- Splits the dynamic header tail into the code-length-length prefix and the symbol stream. -/
 lemma dynamicHeaderTailLen_eq_split :
     dynamicHeaderTailLen = dynamicHeaderCodeLenLen + 2 * dynamicHeaderCodeLenSyms.length := by
   simp [dynamicHeaderTailLen, dynamicHeaderCodeLenLen, dynamicHeaderCodeLenSyms_length]
 
+/-- Records the reversed two-bit code used for code-length symbol `5`. -/
 lemma dynamicCodeLenSymRevBits_five : dynamicCodeLenSymRevBits 5 = 0 := by
   simp [dynamicCodeLenSymRevBits]
 
+/-- Records the reversed two-bit code used for code-length symbol `7`. -/
 lemma dynamicCodeLenSymRevBits_seven : dynamicCodeLenSymRevBits 7 = 2 := by
   simp [dynamicCodeLenSymRevBits]
 
+/-- Records the reversed two-bit code used for code-length symbol `8`. -/
 lemma dynamicCodeLenSymRevBits_eight : dynamicCodeLenSymRevBits 8 = 1 := by
   simp [dynamicCodeLenSymRevBits]
 
+/-- Records the reversed two-bit code used for code-length symbol `9`. -/
 lemma dynamicCodeLenSymRevBits_nine : dynamicCodeLenSymRevBits 9 = 3 := by
   simp [dynamicCodeLenSymRevBits]
 
+/-- Shows that the fixed code-length lengths decode to the intended 2-bit helper Huffman table. -/
 lemma mkHuffman_dynamicCodeLenLengths :
     mkHuffman dynamicCodeLenLengths = some dynamicCodeLenHuffman := by
   native_decide
 
+/-- Fixes the size of the synthetic fixed distance row used by the dynamic stream. -/
 lemma fixedDistRow5_size : fixedDistRow5.size = 1 <<< 5 := by
   simp [fixedDistRow5]
 
+/-- Identifies the concrete entry selected in the synthetic distance row after bit reversal. -/
 lemma fixedDistRow5_get (code : Nat) (hcode : code < 32) :
     fixedDistRow5[reverseBits code 5]'(by
       simpa [fixedDistRow5_size, Nat.shiftLeft_eq] using reverseBits_lt code 5) =
@@ -158,24 +172,29 @@ lemma fixedDistRow5_get (code : Nat) (hcode : code < 32) :
     exact reverseBits_reverseBits code 5 (by simpa [Nat.shiftLeft_eq] using hcode)
   simp [fixedDistRow5, Array.getElem_ofFn, hrev]
 
+/-- Shows that the dynamic stream reuses the fixed literal/length decoder table exactly. -/
 lemma mkHuffman_dynamicLitLenLengths :
     mkHuffman dynamicLitLenLengths = some fixedLitLenHuffman := by
   native_decide
 
+/-- Shows that the dynamic stream reuses the fixed distance decoder table exactly. -/
 lemma mkHuffman_dynamicDistLengths :
     mkHuffman dynamicDistLengths = some fixedDistHuffman := by
   native_decide
 
+/-- Confirms that replaying the header order reconstructs the intended code-length-length array. -/
 lemma dynamicCodeLenLengthsFilled_eq :
     dynamicCodeLenLengthsFilled = dynamicCodeLenLengths := by
   native_decide
 
+/-- Splits the tail bit payload into the code-length lengths and the encoded symbol stream. -/
 lemma dynamicHeaderTailBits_eq_split :
     dynamicHeaderTailBits =
       dynamicHeaderCodeLenLenBits |||
         (dynamicCodeLenSymBits dynamicHeaderCodeLenSyms <<< dynamicHeaderCodeLenLen) := by
   native_decide
 
+/-- Rewrites the concrete table writer into one bulk `writeBits`, which later reader proofs consume. -/
 lemma writeDynamicFixedTables_eq_writeBits :
     let bw0 := BitWriter.empty
     let bw1 := bw0.writeBits 1 1
@@ -189,6 +208,7 @@ lemma writeDynamicFixedTables_eq_writeBits :
 
 set_option maxHeartbeats 5000000 in
 set_option maxRecDepth 2000 in
+/-- Collapses the runtime dynamic encoder into a single header-plus-fixed-payload `writeBits` form. -/
 lemma deflateDynamicFast_eq_writeBits (raw : ByteArray) :
     let payloadBits := fixedLitBitsEob raw.data 0
     deflateDynamicFast raw =

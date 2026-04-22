@@ -9,6 +9,7 @@ namespace Png
 set_option linter.unnecessarySimpa false
 set_option linter.unusedSimpArgs false
 
+/-- Turns a bit-index bound into the byte-index bound needed by `readBit` simplifications. -/
 lemma bytePos_lt_of_bitIndex_lt_dataBits (br : BitReader)
     (h : br.bitIndex < br.data.size * 8) :
     br.bytePos < br.data.size := by
@@ -19,6 +20,7 @@ lemma bytePos_lt_of_bitIndex_lt_dataBits (br : BitReader)
     omega
   · exact lt_of_le_of_ne br.hpos hEq
 
+/-- Records that any well-formed reader stays within its backing byte array. -/
 lemma bitIndex_le_dataBits (br : BitReader) :
     br.bitIndex ≤ br.data.size * 8 := by
   by_cases hEq : br.bytePos = br.data.size
@@ -33,26 +35,32 @@ lemma bitIndex_le_dataBits (br : BitReader) :
         _ ≤ 8 := by decide
     simpa using readBits_within_byte_bound br 0 hspan hlt
 
+/-- Exposes the only populated decode row of the fixed dynamic code-length Huffman table. -/
 lemma dynamicCodeLenHuffman_row2_get :
     dynamicCodeLenHuffman.table[2]! = #[some 5, some 8, some 7, some 9] := by
   rfl
 
+/-- Specializes the row-2 table lookup to the code for symbol `5`. -/
 lemma dynamicCodeLenHuffman_row2_get_zero :
     dynamicCodeLenHuffman.table[2]![0] = some 5 := by
   decide
 
+/-- Specializes the row-2 table lookup to the code for symbol `8`. -/
 lemma dynamicCodeLenHuffman_row2_get_one :
     dynamicCodeLenHuffman.table[2]![1] = some 8 := by
   decide
 
+/-- Specializes the row-2 table lookup to the code for symbol `7`. -/
 lemma dynamicCodeLenHuffman_row2_get_two :
     dynamicCodeLenHuffman.table[2]![2] = some 7 := by
   decide
 
+/-- Specializes the row-2 table lookup to the code for symbol `9`. -/
 lemma dynamicCodeLenHuffman_row2_get_three :
     dynamicCodeLenHuffman.table[2]![3] = some 9 := by
   decide
 
+/-- Shows that the low bit of `1 ||| (x <<< 2)` is fixed, matching symbol `5`'s first decode step. -/
 lemma one_or_shift_two_mod_two (x : Nat) :
     (1 ||| (x <<< 2)) % 2 = 1 := by
   have hmod4 : (1 ||| (x <<< 2)) % 4 = 1 := by
@@ -64,6 +72,7 @@ lemma one_or_shift_two_mod_two (x : Nat) :
     _ = 1 % 2 := by rw [hmod4]
     _ = 1 := by decide
 
+/-- Shows that the low bit of `2 ||| (x <<< 2)` is fixed, matching symbol `7`'s first decode step. -/
 lemma two_or_shift_two_mod_two (x : Nat) :
     (2 ||| (x <<< 2)) % 2 = 0 := by
   have hmod4 : (2 ||| (x <<< 2)) % 4 = 2 := by
@@ -75,6 +84,7 @@ lemma two_or_shift_two_mod_two (x : Nat) :
     _ = 2 % 2 := by rw [hmod4]
     _ = 0 := by decide
 
+/-- Shows that the low bit of `3 ||| (x <<< 2)` is fixed, matching symbol `9`'s first decode step. -/
 lemma three_or_shift_two_mod_two (x : Nat) :
     (3 ||| (x <<< 2)) % 2 = 1 := by
   have hmod4 : (3 ||| (x <<< 2)) % 4 = 3 := by
@@ -86,6 +96,7 @@ lemma three_or_shift_two_mod_two (x : Nat) :
     _ = 3 % 2 := by rw [hmod4]
     _ = 1 := by decide
 
+/-- Computes the second decode bit for the `1 ||| (x <<< 2)` family used by symbol `5`. -/
 lemma one_or_shift_two_shiftRight_mod_two (x : Nat) :
     ((1 ||| (x <<< 2)) >>> 1) % 2 = 0 := by
   have hmod4 : (1 ||| (x <<< 2)) % 4 = 1 := by
@@ -97,6 +108,7 @@ lemma one_or_shift_two_shiftRight_mod_two (x : Nat) :
   · exact hz
   · simp [ho] at hdecomp
 
+/-- Computes the second decode bit for the `2 ||| (x <<< 2)` family used by symbol `7`. -/
 lemma two_or_shift_two_shiftRight_mod_two (x : Nat) :
     ((2 ||| (x <<< 2)) >>> 1) % 2 = 1 := by
   have hmod4 : (2 ||| (x <<< 2)) % 4 = 2 := by
@@ -108,6 +120,7 @@ lemma two_or_shift_two_shiftRight_mod_two (x : Nat) :
   · simp [hz] at hdecomp
   · exact ho
 
+/-- Computes the second decode bit for the `3 ||| (x <<< 2)` family used by symbol `9`. -/
 lemma three_or_shift_two_shiftRight_mod_two (x : Nat) :
     ((3 ||| (x <<< 2)) >>> 1) % 2 = 1 := by
   have hmod4 : (3 ||| (x <<< 2)) % 4 = 3 := by
@@ -119,6 +132,7 @@ lemma three_or_shift_two_shiftRight_mod_two (x : Nat) :
   · simp [hz] at hdecomp
   · exact ho
 
+/-- Decodes symbol `5` from a reader positioned at the concrete 2-bit code written by the encoder. -/
 lemma dynamicCodeLenHuffman_decode_readerAt_writeBits_five
     (bw : BitWriter) (restBits restLen : Nat)
     (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
@@ -197,6 +211,7 @@ lemma dynamicCodeLenHuffman_decode_readerAt_writeBits_five
       dynamicCodeLenHuffman_row2_get_zero]
   simpa [br2, br, bw', bitsTot, lenTot] using hdecode
 
+/-- Decodes symbol `8` from a reader positioned at the concrete 2-bit code written by the encoder. -/
 lemma dynamicCodeLenHuffman_decode_readerAt_writeBits_eight
     (bw : BitWriter) (restBits restLen : Nat)
     (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
@@ -273,6 +288,7 @@ lemma dynamicCodeLenHuffman_decode_readerAt_writeBits_eight
       dynamicCodeLenHuffman_row2_get_one]
   simpa [br2, br, bw', bitsTot, lenTot] using hdecode
 
+/-- Decodes symbol `7` from a reader positioned at the concrete 2-bit code written by the encoder. -/
 lemma dynamicCodeLenHuffman_decode_readerAt_writeBits_seven
     (bw : BitWriter) (restBits restLen : Nat)
     (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
@@ -349,6 +365,7 @@ lemma dynamicCodeLenHuffman_decode_readerAt_writeBits_seven
       dynamicCodeLenHuffman_row2_get_two]
   simpa [br2, br, bw', bitsTot, lenTot] using hdecode
 
+/-- Decodes symbol `9` from a reader positioned at the concrete 2-bit code written by the encoder. -/
 lemma dynamicCodeLenHuffman_decode_readerAt_writeBits_nine
     (bw : BitWriter) (restBits restLen : Nat)
     (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
@@ -425,6 +442,7 @@ lemma dynamicCodeLenHuffman_decode_readerAt_writeBits_nine
       dynamicCodeLenHuffman_row2_get_three]
   simpa [br2, br, bw', bitsTot, lenTot] using hdecode
 
+/-- Packages the four concrete symbol decoders into the single case split needed downstream. -/
 lemma dynamicCodeLenHuffman_decode_readerAt_writeBits
     (bw : BitWriter) (sym restBits restLen : Nat)
     (hsym : sym = 5 ∨ sym = 8 ∨ sym = 7 ∨ sym = 9)
@@ -459,6 +477,7 @@ def pushNatList (lengths : Array Nat) : List Nat → Array Nat
   | sym :: syms => pushNatList (lengths.push sym) syms
 
 set_option maxRecDepth 200000 in
+/-- Unfolds one literal step of the code-length reader once the Huffman decode result is known. -/
 lemma readDynamicTablesLengthsFuel_step_literal
     (fuel total sym : Nat) (br br' : BitReader) (lengths : Array Nat)
     (hsize : lengths.size < total)
@@ -480,6 +499,7 @@ private lemma readerAt_eq_of_eqs
   subst hdata
   apply BitReader.ext <;> simp [BitWriter.readerAt]
 
+/-- Replays a whole list of concrete code-length symbols against `readDynamicTablesLengthsFuel`. -/
 lemma readDynamicTablesLengthsFuel_dynamicCodeLenSymBits_readerAt_writeBits
     (bw : BitWriter) (syms : List Nat) (fuel restBits restLen : Nat) (lengths : Array Nat)
     (hsyms : ∀ sym ∈ syms, sym = 5 ∨ sym = 8 ∨ sym = 7 ∨ sym = 9)
@@ -743,12 +763,14 @@ lemma readDynamicTablesLengthsFuel_dynamicCodeLenSymBits_readerAt_writeBits
       simpa [bwFull, brStart, pushNatList, hbitsTotNorm, hlenTotNorm] using hmain
 
 set_option maxRecDepth 200000 in
+/-- Evaluates the concrete code-length symbol list into the final lit/len and distance lengths arrays. -/
 lemma pushNatList_empty_dynamicHeaderCodeLenSyms :
     pushNatList #[] dynamicHeaderCodeLenSyms =
       dynamicLitLenLengths ++ dynamicDistLengths := by
   native_decide
 
 set_option maxRecDepth 200000 in
+/-- Runs the code-length reader over the encoder's exact ten-symbol code-length stream. -/
 lemma readDynamicTablesLengthsFuel_dynamicHeaderCodeLenSyms_readerAt_writeBits
     (bw : BitWriter) (fuel restBits restLen : Nat)
     (hfuel : dynamicHeaderCodeLenSyms.length + 1 ≤ fuel)

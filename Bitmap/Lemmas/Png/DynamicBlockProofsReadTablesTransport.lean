@@ -6,6 +6,7 @@ namespace Png
 
 set_option maxRecDepth 200000 in
 set_option maxHeartbeats 20000000 in
+/-- Moves the after-header table reader onto the concrete writer-produced reader state. -/
 lemma readDynamicTablesAfterHeader_readerAt_writeBits_full
     (bw : BitWriter) (restBits restLen : Nat)
     (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :

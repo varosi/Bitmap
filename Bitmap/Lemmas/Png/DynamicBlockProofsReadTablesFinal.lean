@@ -1,4 +1,4 @@
-import Bitmap.Lemmas.Png.DynamicBlockProofsReadTablesPrefix
+import Bitmap.Lemmas.Png.DynamicBlockProofsReadTablesHeaderReads
 import Bitmap.Lemmas.Png.DynamicBlockProofsReadTablesTransport
 
 namespace Bitmaps
@@ -44,6 +44,7 @@ private lemma readDynamicTablesAfterPrefix_readerAt_writeBits
 
 set_option maxRecDepth 200000 in
 set_option maxHeartbeats 20000000 in
+/-- Replays the complete dynamic-table reader on the concrete writer-produced bitstream. -/
 lemma readDynamicTables_readerAt_writeBits
     (bw : BitWriter) (restBits restLen : Nat)
     (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
@@ -78,9 +79,6 @@ lemma readDynamicTables_readerAt_writeBits
         simpa [lenTot] using dynamicHeaderReadLen_ge_14 restLen
       simpa [bw', lenTot] using flush_size_writeBits_prefix bw bitsTot 14 lenTot hk)
     (bitPos_lt_8_writeBits bw bitsTot 14 hbit)
-  have hprefix :=
-    readDynamicTablesPrefix_readerAt_writeBits
-      (bw := bw) (restBits := restBits) (restLen := restLen) hbit hcur
   have hreadHlit :
       br.readBits 5
           (by
@@ -88,7 +86,9 @@ lemma readDynamicTables_readerAt_writeBits
               simpa [lenTot] using dynamicHeaderReadLen_ge_5 restLen
             simpa [br, bw', lenTot] using
               (readerAt_writeBits_bound (bw := bw) (bits := bitsTot) (len := lenTot) (k := 5) hk hbit)) =
-        (31, br5) := hprefix.1
+        (31, br5) :=
+    readDynamicTables_hlit_readerAt_writeBits
+      (bw := bw) (restBits := restBits) (restLen := restLen) hbit hcur
   have hreadHdist :
       br5.readBits 5
           (by
@@ -98,7 +98,9 @@ lemma readDynamicTables_readerAt_writeBits
               (readerAt_writeBits_bound
                 (bw := BitWriter.writeBits bw bitsTot 5) (bits := bitsTot >>> 5) (len := lenTot - 5)
                 (k := 5) hk (bitPos_lt_8_writeBits bw bitsTot 5 hbit))) =
-        (31, br10) := hprefix.2.1
+        (31, br10) :=
+    readDynamicTables_hdist_readerAt_writeBits
+      (bw := bw) (restBits := restBits) (restLen := restLen) hbit hcur
   have hreadHclen :
       br10.readBits 4
           (by
@@ -108,7 +110,9 @@ lemma readDynamicTables_readerAt_writeBits
               (readerAt_writeBits_bound
                 (bw := BitWriter.writeBits bw bitsTot 10) (bits := bitsTot >>> 10) (len := lenTot - 10)
                 (k := 4) hk (bitPos_lt_8_writeBits bw bitsTot 10 hbit))) =
-        (6, br14) := hprefix.2.2
+        (6, br14) :=
+    readDynamicTables_hclen_readerAt_writeBits
+      (bw := bw) (restBits := restBits) (restLen := restLen) hbit hcur
   have hafterHeader :
       readDynamicTablesAfterHeader br14 =
         some (fixedLitLenHuffman, fixedDistHuffman, dynamicTablesReaderAt bw restBits restLen hbit) := by
