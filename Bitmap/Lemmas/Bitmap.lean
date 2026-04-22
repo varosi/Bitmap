@@ -6,6 +6,7 @@ import Init.Data.ByteArray.Lemmas
 import Init.Data.Range.Lemmas
 import Init.Data.UInt.Lemmas
 import Batteries.Data.ByteArray
+import Bitmap.Lemmas.Png.EncodeDecodeBase
 import Bitmap.Lemmas.Png.EncodeDecode
 
 universe u

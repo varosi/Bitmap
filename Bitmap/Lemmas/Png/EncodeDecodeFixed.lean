@@ -1,4 +1,5 @@
-import Bitmap.Lemmas.Png.EncodeDecodeBase
+import Bitmap.Lemmas.Png.EncodeDecodeBaseU32
+import Bitmap.Lemmas.Png.EncodeDecodeFixedZlib
 import Bitmap.Lemmas.Png.FixedBlockBase
 import Bitmap.Lemmas.Png.FixedBlockProofsCommon
 import Bitmap.Lemmas.Png.FixedBlockProofsRunEncode
@@ -11,6 +12,8 @@ namespace Bitmaps
 namespace Lemmas
 
 open Png
+open U32Helpers
+open ZlibFixedHelpers
 attribute [local simp] Png.byteArray_get_proof_irrel
 
 lemma quadTailEqbFast_eq_quadTailEqb
@@ -325,13 +328,13 @@ lemma zlibDecompress_zlibCompressFixed (raw : ByteArray)
     zlibDecompress (zlibCompressFixed raw) hsize = some raw := by
   classical
   let bytes := zlibCompressFixed raw
-  have hmin : 6 ≤ bytes.size := zlibCompressFixed_size_ge raw
+  have hmin : 6 ≤ bytes.size := zlibFixedWrapper_size_ge raw
   have h0 : 0 < bytes.size := lt_of_lt_of_le (by decide : 0 < 6) hmin
   have h1 : 1 < bytes.size := lt_of_lt_of_le (by decide : 1 < 6) hmin
   have h0' : 0 < bytes.size := h0
   have h1' : 1 < bytes.size := h1
-  have hcmf' : bytes[0]'h0' = u8 0x78 := (zlibCompressFixed_cmf_flg raw).1
-  have hflg' : bytes[1]'h1' = u8 0x01 := (zlibCompressFixed_cmf_flg raw).2
+  have hcmf' : bytes[0]'h0' = u8 0x78 := (zlibFixedWrapper_cmf_flg raw).1
+  have hflg' : bytes[1]'h1' = u8 0x01 := (zlibFixedWrapper_cmf_flg raw).2
   have hcmf : bytes.get 0 h0 = u8 0x78 := by
     have htmp : bytes.get 0 h0' = u8 0x78 := by
       simpa [byteArray_get_eq_getElem] using hcmf'
@@ -341,13 +344,13 @@ lemma zlibDecompress_zlibCompressFixed (raw : ByteArray)
       simpa [byteArray_get_eq_getElem] using hflg'
     simpa using htmp
   have hdeflated : bytes.extract 2 (bytes.size - 4) = deflateFixed raw := by
-    simpa [bytes] using zlibCompressFixed_extract_deflated raw
+    simpa [bytes] using zlibFixedWrapper_extract_deflated raw
   have hAdlerPos : bytes.size - 4 + 3 < bytes.size := by omega
   have hadler : readU32BE bytes (bytes.size - 4) hAdlerPos = (adler32 raw).toNat := by
     have hextract :
         bytes.extract (bytes.size - 4) (bytes.size - 4 + 4) =
           u32be (adler32 raw).toNat := by
-      simpa [bytes] using zlibCompressFixed_extract_adler raw
+      simpa [bytes] using zlibFixedWrapper_extract_adler raw
     have hlt : (adler32 raw).toNat < 2 ^ 32 := by
       simpa using (UInt32.toNat_lt (adler32 raw))
     exact readU32BE_of_extract_eq (bytes := bytes) (pos := bytes.size - 4)
@@ -517,7 +520,7 @@ lemma zlibDecompress_zlibCompressFixed (raw : ByteArray)
       _ = streamWriter.flush.size := hpayloadSize
   have hsize : bytes.size = streamWriter.flush.size + 6 := by
     -- size = deflate + header + adler
-    have hsz := zlibCompressFixed_size raw
+    have hsz := zlibFixedWrapper_size raw
     simpa [bytes, hdeflateTotal] using hsz
   have hposEq : streamReaderFinal.alignByte.bytePos + 2 = bytes.size - 4 := by
     -- bytes.size = streamWriter.flush.size + 6
