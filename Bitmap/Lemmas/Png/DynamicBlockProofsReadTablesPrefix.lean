@@ -113,7 +113,7 @@ private lemma readTablesPrefixReader5_bound5
         (readTablesPrefixBits restBits >>> 5)
         (readTablesPrefixLen restLen - 5)).flush =
         (readTablesPrefixWriter bw restBits restLen).flush := by
-    simpa [readTablesPrefixWriter_eq_split5] using
+    exact
       congrArg BitWriter.flush
         (readTablesPrefixWriter_eq_split5 (bw := bw) (restBits := restBits) (restLen := restLen)).symm
   let bw5 := BitWriter.writeBits bw (readTablesPrefixBits restBits) 5
@@ -194,7 +194,7 @@ private lemma readTablesPrefixReader10_bound4
         (readTablesPrefixBits restBits >>> 10)
         (readTablesPrefixLen restLen - 10)).flush =
         (readTablesPrefixWriter bw restBits restLen).flush := by
-    simpa [readTablesPrefixWriter_eq_split10] using
+    exact
       congrArg BitWriter.flush
         (readTablesPrefixWriter_eq_split10 (bw := bw) (restBits := restBits) (restLen := restLen)).symm
   let bw10 := BitWriter.writeBits bw (readTablesPrefixBits restBits) 10
@@ -288,7 +288,7 @@ lemma readDynamicTablesPrefix_hdist_readerAt_writeBits
         (readTablesPrefixBits restBits >>> 5)
         (readTablesPrefixLen restLen - 5)).flush =
         (readTablesPrefixWriter bw restBits restLen).flush := by
-    simpa [readTablesPrefixWriter_eq_split5] using
+    exact
       congrArg BitWriter.flush
         (readTablesPrefixWriter_eq_split5 (bw := bw) (restBits := restBits) (restLen := restLen)).symm
   have hstep' :
@@ -325,7 +325,7 @@ lemma readDynamicTablesPrefix_hclen_readerAt_writeBits
         (readTablesPrefixBits restBits >>> 10)
         (readTablesPrefixLen restLen - 10)).flush =
         (readTablesPrefixWriter bw restBits restLen).flush := by
-    simpa [readTablesPrefixWriter_eq_split10] using
+    exact
       congrArg BitWriter.flush
         (readTablesPrefixWriter_eq_split10 (bw := bw) (restBits := restBits) (restLen := restLen)).symm
   have hstep' :

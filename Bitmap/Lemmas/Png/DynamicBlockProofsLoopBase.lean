@@ -82,8 +82,7 @@ lemma deflateDynamicFast_eq_streamWriter (raw : ByteArray) :
         5 ||| (streamBits <<< 3) := by
     dsimp [streamBits]
     rw [dynamicHeaderReadBits_eq_table_append]
-    simp [Nat.or_assoc, Nat.shiftLeft_or_distrib, shiftLeft_shiftLeft, Nat.add_assoc,
-      Nat.add_left_comm, Nat.add_comm]
+    simp [Nat.or_assoc, Nat.shiftLeft_or_distrib, shiftLeft_shiftLeft, Nat.add_comm]
   have hlen :
       3 + dynamicHeaderTableLen + payloadBits.2 = 3 + streamLen := by
     dsimp [streamLen]

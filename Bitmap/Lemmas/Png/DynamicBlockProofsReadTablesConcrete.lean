@@ -244,7 +244,7 @@ lemma readDynamicTables_readerAt_writeBits_concrete
         ((((fun r : Array Nat × BitReader => (⟨r.snd, r.fst⟩ : MProd BitReader (Array Nat))) <$>
             readDynamicCodeLenLengths10 br14)).bind tailM) =
           (readDynamicCodeLenLengths10 br14).bind tail := by
-      cases hread : readDynamicCodeLenLengths10 br14 <;> simp [hread, tailM, tail]
+      cases hread : readDynamicCodeLenLengths10 br14 <;> simp [tailM, tail]
     have hloopBind := hloopBind0.trans hswapBind
     have hafter :
         (readDynamicCodeLenLengths10 br14).bind tail =

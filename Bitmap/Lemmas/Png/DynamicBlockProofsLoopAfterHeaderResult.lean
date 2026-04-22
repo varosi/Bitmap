@@ -76,8 +76,7 @@ lemma dynamicStreamBr14_eq_readerAt_afterHeader (raw : ByteArray) :
           (dynamicHeaderCodeLenLensLen (dynamicStreamPayloadBits raw).2))
         (dynamicStreamBw14_bitPos_lt raw) := by
   apply readerAt_eq_of_eqs (hbw := rfl)
-  · simpa [dynamicStreamBwAfterHeader_eq_bwPrime raw] using
-      congrArg BitWriter.flush (dynamicStreamBwAfterHeader_eq_bwPrime raw).symm
+  · exact congrArg BitWriter.flush (dynamicStreamBwAfterHeader_eq_bwPrime raw).symm
 
 set_option maxRecDepth 400000 in
 set_option maxHeartbeats 6000000 in

@@ -191,7 +191,7 @@ lemma readerAt_eq_of_eqs
   subst hdata
   apply BitReader.ext <;> simp [BitWriter.readerAt]
 
-private lemma readBits_readerAt_writeBits_step
+  private lemma readBits_readerAt_writeBits_step
     (bw : BitWriter) (n w restBits restLen : Nat)
     (hn : n < 2 ^ w) (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
     let bitsTot := n ||| (restBits <<< w)
@@ -1021,28 +1021,28 @@ lemma readDynamicCodeLenLengthsHead5_readerAt_writeBits
     simpa [bitsTot, br, bw', lenTot] using
       dynamicCodeLenLensReaderAt_step
         (bw := bw) (restBits := restBits) (restLen := restLen) (skip := 0) (expected := 0)
-        (by simpa [dynamicHeaderCodeLenLens_length]) hexpected hbit hcur
+        (by simp [dynamicHeaderCodeLenLens_length]) hexpected hbit hcur
   have hread1 : read3Bits? br1 = some (0, br2) := by
     have hexpected : ((dynamicHeaderCodeLenLenBits % 2 ^ (3 + 3)) >>> 3) = 0 := by
       native_decide
     simpa [bitsTot, br1, bw', br2, lenTot, hlenTot] using
       dynamicCodeLenLensReaderAt_step
         (bw := bw) (restBits := restBits) (restLen := restLen) (skip := 3) (expected := 0)
-        (by simpa [dynamicHeaderCodeLenLens_length]) hexpected hbit hcur
+        (by simp [dynamicHeaderCodeLenLens_length]) hexpected hbit hcur
   have hread2 : read3Bits? br2 = some (0, br3) := by
     have hexpected : ((dynamicHeaderCodeLenLenBits % 2 ^ (6 + 3)) >>> 6) = 0 := by
       native_decide
     simpa [bitsTot, br2, bw', br3, lenTot, hlenTot] using
       dynamicCodeLenLensReaderAt_step
         (bw := bw) (restBits := restBits) (restLen := restLen) (skip := 6) (expected := 0)
-        (by simpa [dynamicHeaderCodeLenLens_length]) hexpected hbit hcur
+        (by simp [dynamicHeaderCodeLenLens_length]) hexpected hbit hcur
   have hread3 : read3Bits? br3 = some (0, br4) := by
     have hexpected : ((dynamicHeaderCodeLenLenBits % 2 ^ (9 + 3)) >>> 9) = 0 := by
       native_decide
     simpa [bitsTot, br3, bw', br4, lenTot, hlenTot] using
       dynamicCodeLenLensReaderAt_step
         (bw := bw) (restBits := restBits) (restLen := restLen) (skip := 9) (expected := 0)
-        (by simpa [dynamicHeaderCodeLenLens_length]) hexpected hbit hcur
+        (by simp [dynamicHeaderCodeLenLens_length]) hexpected hbit hcur
   have hread4 : read3Bits? br4 = some (2, br5) := by
     have hexpected : ((dynamicHeaderCodeLenLenBits % 2 ^ (12 + 3)) >>> 12) = 2 := by
       native_decide
@@ -1050,10 +1050,10 @@ lemma readDynamicCodeLenLengthsHead5_readerAt_writeBits
         read3Bits? (dynamicCodeLenLensReaderAt bw restBits restLen 12 (by omega) hbit) =
           some (2, dynamicCodeLenLensReaderAt bw restBits restLen 15 (by omega) hbit) :=
       @dynamicCodeLenLensReaderAt_step bw restBits restLen 12 2
-        (by simpa [dynamicHeaderCodeLenLens_length]) hexpected hbit hcur
+        (by simp [dynamicHeaderCodeLenLens_length]) hexpected hbit hcur
     simpa [bitsTot, br4, bw', br5, lenTot, hlenTot] using hstep4
   unfold readDynamicCodeLenLengthsHead5
-  simpa [bitsTot, lenTot, bw', br, br5, hread0, hread1, hread2, hread3, hread4,
+  simp [bitsTot, lenTot, bw', br, br5, hread0, hread1, hread2, hread3, hread4,
     dynamicCodeLenLengthsHead5]
 
 set_option maxRecDepth 200000 in
@@ -1064,7 +1064,7 @@ lemma readDynamicCodeLenLengthsTail5_readerAt_writeBits
     (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
     let bitsTot := dynamicHeaderCodeLenLensBits restBits
     let lenTot := dynamicHeaderCodeLenLensLen restLen
-    let bw' := BitWriter.writeBits bw bitsTot lenTot
+    let _bw := BitWriter.writeBits bw bitsTot lenTot
     let br5 := dynamicCodeLenLensReaderAt bw restBits restLen 15 (by
       have hlenTot : lenTot = 670 + restLen := by
         simp [lenTot, dynamicHeaderCodeLenLensLen, dynamicHeaderCodeLenSymsRestLen,
@@ -1090,37 +1090,37 @@ lemma readDynamicCodeLenLengthsTail5_readerAt_writeBits
     simpa [bitsTot, br5, bw', br6, lenTot, hlenTot] using
       dynamicCodeLenLensReaderAt_step
         (bw := bw) (restBits := restBits) (restLen := restLen) (skip := 15) (expected := 2)
-        (by simpa [dynamicHeaderCodeLenLens_length]) hexpected hbit hcur
+        (by simp [dynamicHeaderCodeLenLens_length]) hexpected hbit hcur
   have hread6 : read3Bits? br6 = some (2, br7) := by
     have hexpected : ((dynamicHeaderCodeLenLenBits % 2 ^ (18 + 3)) >>> 18) = 2 := by
       native_decide
     simpa [bitsTot, br6, bw', br7, lenTot, hlenTot] using
       dynamicCodeLenLensReaderAt_step
         (bw := bw) (restBits := restBits) (restLen := restLen) (skip := 18) (expected := 2)
-        (by simpa [dynamicHeaderCodeLenLens_length]) hexpected hbit hcur
+        (by simp [dynamicHeaderCodeLenLens_length]) hexpected hbit hcur
   have hread7 : read3Bits? br7 = some (0, br8) := by
     have hexpected : ((dynamicHeaderCodeLenLenBits % 2 ^ (21 + 3)) >>> 21) = 0 := by
       native_decide
     simpa [bitsTot, br7, bw', br8, lenTot, hlenTot] using
       dynamicCodeLenLensReaderAt_step
         (bw := bw) (restBits := restBits) (restLen := restLen) (skip := 21) (expected := 0)
-        (by simpa [dynamicHeaderCodeLenLens_length]) hexpected hbit hcur
+        (by simp [dynamicHeaderCodeLenLens_length]) hexpected hbit hcur
   have hread8 : read3Bits? br8 = some (0, br9) := by
     have hexpected : ((dynamicHeaderCodeLenLenBits % 2 ^ (24 + 3)) >>> 24) = 0 := by
       native_decide
     simpa [bitsTot, br8, bw', br9, lenTot, hlenTot] using
       dynamicCodeLenLensReaderAt_step
         (bw := bw) (restBits := restBits) (restLen := restLen) (skip := 24) (expected := 0)
-        (by simpa [dynamicHeaderCodeLenLens_length]) hexpected hbit hcur
+        (by simp [dynamicHeaderCodeLenLens_length]) hexpected hbit hcur
   have hread9 : read3Bits? br9 = some (2, br10) := by
     have hexpected : ((dynamicHeaderCodeLenLenBits % 2 ^ (27 + 3)) >>> 27) = 2 := by
       native_decide
     simpa [bitsTot, br9, bw', br10, lenTot, hlenTot] using
       dynamicCodeLenLensReaderAt_step
         (bw := bw) (restBits := restBits) (restLen := restLen) (skip := 27) (expected := 2)
-        (by simpa [dynamicHeaderCodeLenLens_length]) hexpected hbit hcur
+        (by simp [dynamicHeaderCodeLenLens_length]) hexpected hbit hcur
   have hbr10 : br10 = dynamicCodeLenLensAfterReader bw restBits restLen hbit := by
-    simp [br10, dynamicCodeLenLensAfterReader, dynamicCodeLenLensReaderAt, hlenTot,
+    simp [br10, dynamicCodeLenLensAfterReader, dynamicCodeLenLensReaderAt,
       dynamicHeaderCodeLenLens_length]
   have hgoal :=
     readDynamicCodeLenLengthsTail5_of_reads
@@ -1207,7 +1207,7 @@ private lemma finishDynamicTablesAfterCodeLenLengths_readerAt_writeBits
       calc
         dynamicHeaderCodeLenSyms.length ≤ bw'.bitCount := hcount
         _ ≤ bw'.flush.size * 8 := by omega
-        _ = br.data.size * 8 := by simpa [hdata]
+        _ = br.data.size * 8 := by simp [hdata]
     exact Nat.succ_le_succ hsize
   have hreadLengths :=
     readDynamicTablesLengthsFuel_dynamicHeaderCodeLenSyms_readerAt_writeBits
