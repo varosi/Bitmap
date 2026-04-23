@@ -60,94 +60,54 @@ lemma dynamicCodeLenHuffman_row2_get_three :
     dynamicCodeLenHuffman.table[2]![3] = some 9 := by
   decide
 
-/-- Shows that the low bit of `1 ||| (x <<< 2)` is fixed, matching symbol `5`'s first decode step. -/
-lemma one_or_shift_two_mod_two (x : Nat) :
-    (1 ||| (x <<< 2)) % 2 = 1 := by
-  have hmod4 : (1 ||| (x <<< 2)) % 4 = 1 := by
-    simpa using (mod_two_pow_or_shift (a := 1) (b := x) (k := 2) (len := 2) (hk := by decide))
+/-- The low bit of `code ||| (x <<< 2)` equals `code % 2` when `code < 4`. -/
+private lemma code_or_shift_two_mod_two (code x : Nat) (hcode : code < 4) :
+    (code ||| (x <<< 2)) % 2 = code % 2 := by
+  have hmod4 : (code ||| (x <<< 2)) % 4 = code := by
+    simpa [Nat.mod_eq_of_lt hcode] using
+      (mod_two_pow_or_shift (a := code) (b := x) (k := 2) (len := 2) (hk := by decide))
+  have h2dvd4 : (2 : Nat) ∣ 4 := by decide
   calc
-    (1 ||| (x <<< 2)) % 2 = ((1 ||| (x <<< 2)) % 4) % 2 := by
-      symm
-      exact Nat.mod_mod_of_dvd _ (by decide : 2 ∣ 4)
-    _ = 1 % 2 := by rw [hmod4]
-    _ = 1 := by decide
+    (code ||| (x <<< 2)) % 2
+        = ((code ||| (x <<< 2)) % 4) % 2 := (Nat.mod_mod_of_dvd _ h2dvd4).symm
+    _ = code % 2 := by rw [hmod4]
 
-/-- Shows that the low bit of `2 ||| (x <<< 2)` is fixed, matching symbol `7`'s first decode step. -/
-lemma two_or_shift_two_mod_two (x : Nat) :
-    (2 ||| (x <<< 2)) % 2 = 0 := by
-  have hmod4 : (2 ||| (x <<< 2)) % 4 = 2 := by
-    simpa using (mod_two_pow_or_shift (a := 2) (b := x) (k := 2) (len := 2) (hk := by decide))
-  calc
-    (2 ||| (x <<< 2)) % 2 = ((2 ||| (x <<< 2)) % 4) % 2 := by
-      symm
-      exact Nat.mod_mod_of_dvd _ (by decide : 2 ∣ 4)
-    _ = 2 % 2 := by rw [hmod4]
-    _ = 0 := by decide
-
-/-- Shows that the low bit of `3 ||| (x <<< 2)` is fixed, matching symbol `9`'s first decode step. -/
-lemma three_or_shift_two_mod_two (x : Nat) :
-    (3 ||| (x <<< 2)) % 2 = 1 := by
-  have hmod4 : (3 ||| (x <<< 2)) % 4 = 3 := by
-    simpa using (mod_two_pow_or_shift (a := 3) (b := x) (k := 2) (len := 2) (hk := by decide))
-  calc
-    (3 ||| (x <<< 2)) % 2 = ((3 ||| (x <<< 2)) % 4) % 2 := by
-      symm
-      exact Nat.mod_mod_of_dvd _ (by decide : 2 ∣ 4)
-    _ = 3 % 2 := by rw [hmod4]
-    _ = 1 := by decide
-
-/-- Computes the second decode bit for the `1 ||| (x <<< 2)` family used by symbol `5`. -/
-lemma one_or_shift_two_shiftRight_mod_two (x : Nat) :
-    ((1 ||| (x <<< 2)) >>> 1) % 2 = 0 := by
-  have hmod4 : (1 ||| (x <<< 2)) % 4 = 1 := by
-    simpa using (mod_two_pow_or_shift (a := 1) (b := x) (k := 2) (len := 2) (hk := by decide))
-  have hmod0 : (1 ||| (x <<< 2)) % 2 = 1 := one_or_shift_two_mod_two x
-  have hdecomp := mod_two_pow_decomp_high (1 ||| (x <<< 2)) 1
+/-- The second bit of `code ||| (x <<< 2)` equals `code / 2` when `code < 4`. -/
+private lemma code_or_shift_two_shiftRight_mod_two (code x : Nat) (hcode : code < 4) :
+    ((code ||| (x <<< 2)) >>> 1) % 2 = code / 2 := by
+  have hmod4 : (code ||| (x <<< 2)) % 4 = code := by
+    simpa [Nat.mod_eq_of_lt hcode] using
+      (mod_two_pow_or_shift (a := code) (b := x) (k := 2) (len := 2) (hk := by decide))
+  have hmod0 : (code ||| (x <<< 2)) % 2 = code % 2 :=
+    code_or_shift_two_mod_two code x hcode
+  have hdecomp := mod_two_pow_decomp_high (code ||| (x <<< 2)) 1
   rw [hmod4, hmod0] at hdecomp
-  rcases Nat.mod_two_eq_zero_or_one ((1 ||| (x <<< 2)) >>> 1) with hz | ho
-  · exact hz
-  · simp [ho] at hdecomp
+  -- hdecomp : code = (code % 2) ||| ((((code ||| (x <<< 2)) >>> 1) % 2) <<< 1)
+  -- The two operands are disjoint (bit 0 vs bit 1), so ||| equals +. Split on the unknown bit.
+  rcases Nat.mod_two_eq_zero_or_one ((code ||| (x <<< 2)) >>> 1) with hz | ho
+  · rw [hz]; simp [hz] at hdecomp; omega
+  · rw [ho]; simp [ho] at hdecomp; omega
 
-/-- Computes the second decode bit for the `2 ||| (x <<< 2)` family used by symbol `7`. -/
-lemma two_or_shift_two_shiftRight_mod_two (x : Nat) :
-    ((2 ||| (x <<< 2)) >>> 1) % 2 = 1 := by
-  have hmod4 : (2 ||| (x <<< 2)) % 4 = 2 := by
-    simpa using (mod_two_pow_or_shift (a := 2) (b := x) (k := 2) (len := 2) (hk := by decide))
-  have hmod0 : (2 ||| (x <<< 2)) % 2 = 0 := two_or_shift_two_mod_two x
-  have hdecomp := mod_two_pow_decomp_high (2 ||| (x <<< 2)) 1
-  rw [hmod4, hmod0] at hdecomp
-  rcases Nat.mod_two_eq_zero_or_one ((2 ||| (x <<< 2)) >>> 1) with hz | ho
-  · simp [hz] at hdecomp
-  · exact ho
-
-/-- Computes the second decode bit for the `3 ||| (x <<< 2)` family used by symbol `9`. -/
-lemma three_or_shift_two_shiftRight_mod_two (x : Nat) :
-    ((3 ||| (x <<< 2)) >>> 1) % 2 = 1 := by
-  have hmod4 : (3 ||| (x <<< 2)) % 4 = 3 := by
-    simpa using (mod_two_pow_or_shift (a := 3) (b := x) (k := 2) (len := 2) (hk := by decide))
-  have hmod0 : (3 ||| (x <<< 2)) % 2 = 1 := three_or_shift_two_mod_two x
-  have hdecomp := mod_two_pow_decomp_high (3 ||| (x <<< 2)) 1
-  rw [hmod4, hmod0] at hdecomp
-  rcases Nat.mod_two_eq_zero_or_one ((3 ||| (x <<< 2)) >>> 1) with hz | ho
-  · simp [hz] at hdecomp
-  · exact ho
-
-/-- Decodes symbol `5` from a reader positioned at the concrete 2-bit code written by the encoder. -/
-lemma dynamicCodeLenHuffman_decode_readerAt_writeBits_five
-    (bw : BitWriter) (restBits restLen : Nat)
+/-- Generic single-step decode for any 2-bit code (0..3) in the fixed dynamic code-length Huffman
+    table. The four concrete symbols (5, 8, 7, 9) all reduce to this by picking the matching
+    `code`/`sym` row lookup. -/
+lemma dynamicCodeLenHuffman_decode_readerAt_writeBits_code
+    (bw : BitWriter) (code sym restBits restLen : Nat)
+    (hcode : code < 4)
+    (hsym : dynamicCodeLenHuffman.table[2]![code] = some sym)
     (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
-    let bitsTot := restBits <<< 2
+    let bitsTot := code ||| (restBits <<< 2)
     let lenTot := 2 + restLen
     let bw' := BitWriter.writeBits bw bitsTot lenTot
     let br := BitWriter.readerAt bw bw'.flush (flush_size_writeBits_le bw bitsTot lenTot) hbit
     dynamicCodeLenHuffman.decode br =
-      some (5,
+      some (sym,
         BitWriter.readerAt (BitWriter.writeBits bw bitsTot 2) bw'.flush
           (by
             have hk : 2 ≤ lenTot := by omega
             simpa [lenTot] using (flush_size_writeBits_prefix bw bitsTot 2 lenTot hk))
           (bitPos_lt_8_writeBits bw bitsTot 2 hbit)) := by
-  let bitsTot := restBits <<< 2
+  let bitsTot := code ||| (restBits <<< 2)
   let lenTot := 2 + restLen
   let bw' := BitWriter.writeBits bw bitsTot lenTot
   let br := BitWriter.readerAt bw bw'.flush (flush_size_writeBits_le bw bitsTot lenTot) hbit
@@ -162,6 +122,9 @@ lemma dynamicCodeLenHuffman_decode_readerAt_writeBits_five
       have hk : 2 ≤ lenTot := by omega
       simpa [bw', lenTot] using (flush_size_writeBits_prefix bw bitsTot 2 lenTot hk))
     (bitPos_lt_8_writeBits bw bitsTot 2 hbit)
+  have hmod0 : bitsTot % 2 = code % 2 := code_or_shift_two_mod_two code restBits hcode
+  have hmod1 : (bitsTot >>> 1) % 2 = code / 2 :=
+    code_or_shift_two_shiftRight_mod_two code restBits hcode
   have hread2 :
       br.bitIndex + 2 ≤ br.data.size * 8 := by
     simpa [br, bw', lenTot] using
@@ -177,13 +140,10 @@ lemma dynamicCodeLenHuffman_decode_readerAt_writeBits_five
       bw' = BitWriter.writeBits bw1 (bitsTot >>> 1) (lenTot - 1) := by
     cases restLen <;> simp [bw', bw1, lenTot, BitWriter.writeBits]
   have hread0 :
-      br.readBit = (0, br1) := by
+      br.readBit = (code % 2, br1) := by
     have hstep :=
       readBit_readerAt_writeBits (bw := bw) (bits := bitsTot) (len := lenTot)
         hbit hcur (by omega)
-    have hmod0 : bitsTot % 2 = 0 := by
-      dsimp [bitsTot]
-      omega
     simpa [br, bw', br1, bw1, hmod0, bitsTot, lenTot] using hstep
   have hread1Bound :
       br1.bitIndex + 1 ≤ br1.data.size * 8 := by
@@ -193,253 +153,18 @@ lemma dynamicCodeLenHuffman_decode_readerAt_writeBits_five
   have hbr1 : br1.bytePos < br1.data.size := by
     exact bytePos_lt_of_bitIndex_lt_dataBits br1 (by omega)
   have hread1 :
-      br1.readBit = (0, br2) := by
+      br1.readBit = (code / 2, br2) := by
     have hstep :=
       readBit_readerAt_writeBits (bw := bw1) (bits := bitsTot >>> 1) (len := lenTot - 1)
         hbit1 hcur1 (by omega)
-    have hmod1 : (bitsTot >>> 1) % 2 = 0 := by
-      dsimp [bitsTot]
-      omega
     have hbw2 :
-        BitWriter.writeBit bw1 0 = BitWriter.writeBits bw bitsTot 2 := by
-      simp [bw1, BitWriter.writeBits, hmod1]
+        BitWriter.writeBit bw1 (code / 2) = BitWriter.writeBits bw bitsTot 2 := by
+      simp [bw1, BitWriter.writeBits, hmod0, hmod1]
     simpa [br1, bw', br2, bw1, hsplit1, hbw2, hmod1, bitsTot, lenTot] using hstep
   have hdecode :
-      dynamicCodeLenHuffman.decode br = some (5, br2) := by
+      dynamicCodeLenHuffman.decode br = some (sym, br2) := by
     unfold Huffman.decode
-    simp [Huffman.decodeFuel, dynamicCodeLenHuffman, hbr, hbr1, hread0, hread1,
-      dynamicCodeLenHuffman_row2_get_zero]
-  simpa [br2, br, bw', bitsTot, lenTot] using hdecode
-
-/-- Decodes symbol `8` from a reader positioned at the concrete 2-bit code written by the encoder. -/
-lemma dynamicCodeLenHuffman_decode_readerAt_writeBits_eight
-    (bw : BitWriter) (restBits restLen : Nat)
-    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
-    let bitsTot := 1 ||| (restBits <<< 2)
-    let lenTot := 2 + restLen
-    let bw' := BitWriter.writeBits bw bitsTot lenTot
-    let br := BitWriter.readerAt bw bw'.flush (flush_size_writeBits_le bw bitsTot lenTot) hbit
-    dynamicCodeLenHuffman.decode br =
-      some (8,
-        BitWriter.readerAt (BitWriter.writeBits bw bitsTot 2) bw'.flush
-          (by
-            have hk : 2 ≤ lenTot := by omega
-            simpa [lenTot] using (flush_size_writeBits_prefix bw bitsTot 2 lenTot hk))
-          (bitPos_lt_8_writeBits bw bitsTot 2 hbit)) := by
-  let bitsTot := 1 ||| (restBits <<< 2)
-  let lenTot := 2 + restLen
-  let bw' := BitWriter.writeBits bw bitsTot lenTot
-  let br := BitWriter.readerAt bw bw'.flush (flush_size_writeBits_le bw bitsTot lenTot) hbit
-  let bw1 := BitWriter.writeBit bw (bitsTot % 2)
-  let br1 := BitWriter.readerAt bw1 bw'.flush
-    (by
-      have hk : 1 ≤ lenTot := by omega
-      simpa [bw', lenTot] using (flush_size_writeBits_prefix bw bitsTot 1 lenTot hk))
-    (bitPos_lt_8_writeBit bw (bitsTot % 2) hbit)
-  let br2 := BitWriter.readerAt (BitWriter.writeBits bw bitsTot 2) bw'.flush
-    (by
-      have hk : 2 ≤ lenTot := by omega
-      simpa [bw', lenTot] using (flush_size_writeBits_prefix bw bitsTot 2 lenTot hk))
-    (bitPos_lt_8_writeBits bw bitsTot 2 hbit)
-  have hread2 :
-      br.bitIndex + 2 ≤ br.data.size * 8 := by
-    simpa [br, bw', lenTot] using
-      (readerAt_writeBits_bound (bw := bw) (bits := bitsTot) (len := lenTot) (k := 2)
-        (hk := by omega) hbit)
-  have hbr : br.bytePos < br.data.size := by
-    exact bytePos_lt_of_bitIndex_lt_dataBits br (by omega)
-  have hcur1 : bw1.curClearAbove := by
-    simpa [bw1] using (curClearAbove_writeBit bw (bitsTot % 2) hbit hcur)
-  have hbit1 : bw1.bitPos < 8 := by
-    simpa [bw1] using (bitPos_lt_8_writeBit bw (bitsTot % 2) hbit)
-  have hsplit1 :
-      bw' = BitWriter.writeBits bw1 (bitsTot >>> 1) (lenTot - 1) := by
-    cases restLen <;> simp [bw', bw1, lenTot, BitWriter.writeBits]
-  have hread0 :
-      br.readBit = (1, br1) := by
-    have hstep :=
-      readBit_readerAt_writeBits (bw := bw) (bits := bitsTot) (len := lenTot)
-        hbit hcur (by omega)
-    have hmod0 : bitsTot % 2 = 1 := by
-      simpa [bitsTot] using one_or_shift_two_mod_two restBits
-    simpa [br, bw', br1, bw1, hmod0, bitsTot, lenTot] using hstep
-  have hread1Bound :
-      br1.bitIndex + 1 ≤ br1.data.size * 8 := by
-    simpa [br1, bw1, bw', lenTot, hsplit1] using
-      (readerAt_writeBits_bound (bw := bw1) (bits := bitsTot >>> 1) (len := lenTot - 1) (k := 1)
-        (hk := by omega) hbit1)
-  have hbr1 : br1.bytePos < br1.data.size := by
-    exact bytePos_lt_of_bitIndex_lt_dataBits br1 (by omega)
-  have hread1 :
-      br1.readBit = (0, br2) := by
-    have hstep :=
-      readBit_readerAt_writeBits (bw := bw1) (bits := bitsTot >>> 1) (len := lenTot - 1)
-        hbit1 hcur1 (by omega)
-    have hmod1 : (bitsTot >>> 1) % 2 = 0 := by
-      simpa [bitsTot] using one_or_shift_two_shiftRight_mod_two restBits
-    have hbw2 :
-        BitWriter.writeBit bw1 0 = BitWriter.writeBits bw bitsTot 2 := by
-      simp [bw1, BitWriter.writeBits, hmod1]
-    simpa [br1, bw', br2, bw1, hsplit1, hbw2, hmod1, bitsTot, lenTot] using hstep
-  have hdecode :
-      dynamicCodeLenHuffman.decode br = some (8, br2) := by
-    unfold Huffman.decode
-    simp [Huffman.decodeFuel, dynamicCodeLenHuffman, hbr, hbr1, hread0, hread1,
-      dynamicCodeLenHuffman_row2_get_one]
-  simpa [br2, br, bw', bitsTot, lenTot] using hdecode
-
-/-- Decodes symbol `7` from a reader positioned at the concrete 2-bit code written by the encoder. -/
-lemma dynamicCodeLenHuffman_decode_readerAt_writeBits_seven
-    (bw : BitWriter) (restBits restLen : Nat)
-    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
-    let bitsTot := 2 ||| (restBits <<< 2)
-    let lenTot := 2 + restLen
-    let bw' := BitWriter.writeBits bw bitsTot lenTot
-    let br := BitWriter.readerAt bw bw'.flush (flush_size_writeBits_le bw bitsTot lenTot) hbit
-    dynamicCodeLenHuffman.decode br =
-      some (7,
-        BitWriter.readerAt (BitWriter.writeBits bw bitsTot 2) bw'.flush
-          (by
-            have hk : 2 ≤ lenTot := by omega
-            simpa [lenTot] using (flush_size_writeBits_prefix bw bitsTot 2 lenTot hk))
-          (bitPos_lt_8_writeBits bw bitsTot 2 hbit)) := by
-  let bitsTot := 2 ||| (restBits <<< 2)
-  let lenTot := 2 + restLen
-  let bw' := BitWriter.writeBits bw bitsTot lenTot
-  let br := BitWriter.readerAt bw bw'.flush (flush_size_writeBits_le bw bitsTot lenTot) hbit
-  let bw1 := BitWriter.writeBit bw (bitsTot % 2)
-  let br1 := BitWriter.readerAt bw1 bw'.flush
-    (by
-      have hk : 1 ≤ lenTot := by omega
-      simpa [bw', lenTot] using (flush_size_writeBits_prefix bw bitsTot 1 lenTot hk))
-    (bitPos_lt_8_writeBit bw (bitsTot % 2) hbit)
-  let br2 := BitWriter.readerAt (BitWriter.writeBits bw bitsTot 2) bw'.flush
-    (by
-      have hk : 2 ≤ lenTot := by omega
-      simpa [bw', lenTot] using (flush_size_writeBits_prefix bw bitsTot 2 lenTot hk))
-    (bitPos_lt_8_writeBits bw bitsTot 2 hbit)
-  have hread2 :
-      br.bitIndex + 2 ≤ br.data.size * 8 := by
-    simpa [br, bw', lenTot] using
-      (readerAt_writeBits_bound (bw := bw) (bits := bitsTot) (len := lenTot) (k := 2)
-        (hk := by omega) hbit)
-  have hbr : br.bytePos < br.data.size := by
-    exact bytePos_lt_of_bitIndex_lt_dataBits br (by omega)
-  have hcur1 : bw1.curClearAbove := by
-    simpa [bw1] using (curClearAbove_writeBit bw (bitsTot % 2) hbit hcur)
-  have hbit1 : bw1.bitPos < 8 := by
-    simpa [bw1] using (bitPos_lt_8_writeBit bw (bitsTot % 2) hbit)
-  have hsplit1 :
-      bw' = BitWriter.writeBits bw1 (bitsTot >>> 1) (lenTot - 1) := by
-    cases restLen <;> simp [bw', bw1, lenTot, BitWriter.writeBits]
-  have hread0 :
-      br.readBit = (0, br1) := by
-    have hstep :=
-      readBit_readerAt_writeBits (bw := bw) (bits := bitsTot) (len := lenTot)
-        hbit hcur (by omega)
-    have hmod0 : bitsTot % 2 = 0 := by
-      simpa [bitsTot] using two_or_shift_two_mod_two restBits
-    simpa [br, bw', br1, bw1, hmod0, bitsTot, lenTot] using hstep
-  have hread1Bound :
-      br1.bitIndex + 1 ≤ br1.data.size * 8 := by
-    simpa [br1, bw1, bw', lenTot, hsplit1] using
-      (readerAt_writeBits_bound (bw := bw1) (bits := bitsTot >>> 1) (len := lenTot - 1) (k := 1)
-        (hk := by omega) hbit1)
-  have hbr1 : br1.bytePos < br1.data.size := by
-    exact bytePos_lt_of_bitIndex_lt_dataBits br1 (by omega)
-  have hread1 :
-      br1.readBit = (1, br2) := by
-    have hstep :=
-      readBit_readerAt_writeBits (bw := bw1) (bits := bitsTot >>> 1) (len := lenTot - 1)
-        hbit1 hcur1 (by omega)
-    have hmod1 : (bitsTot >>> 1) % 2 = 1 := by
-      simpa [bitsTot] using two_or_shift_two_shiftRight_mod_two restBits
-    have hbw2 :
-        BitWriter.writeBit bw1 1 = BitWriter.writeBits bw bitsTot 2 := by
-      simp [bw1, BitWriter.writeBits, hmod1]
-    simpa [br1, bw', br2, bw1, hsplit1, hbw2, hmod1, bitsTot, lenTot] using hstep
-  have hdecode :
-      dynamicCodeLenHuffman.decode br = some (7, br2) := by
-    unfold Huffman.decode
-    simp [Huffman.decodeFuel, dynamicCodeLenHuffman, hbr, hbr1, hread0, hread1,
-      dynamicCodeLenHuffman_row2_get_two]
-  simpa [br2, br, bw', bitsTot, lenTot] using hdecode
-
-/-- Decodes symbol `9` from a reader positioned at the concrete 2-bit code written by the encoder. -/
-lemma dynamicCodeLenHuffman_decode_readerAt_writeBits_nine
-    (bw : BitWriter) (restBits restLen : Nat)
-    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
-    let bitsTot := 3 ||| (restBits <<< 2)
-    let lenTot := 2 + restLen
-    let bw' := BitWriter.writeBits bw bitsTot lenTot
-    let br := BitWriter.readerAt bw bw'.flush (flush_size_writeBits_le bw bitsTot lenTot) hbit
-    dynamicCodeLenHuffman.decode br =
-      some (9,
-        BitWriter.readerAt (BitWriter.writeBits bw bitsTot 2) bw'.flush
-          (by
-            have hk : 2 ≤ lenTot := by omega
-            simpa [lenTot] using (flush_size_writeBits_prefix bw bitsTot 2 lenTot hk))
-          (bitPos_lt_8_writeBits bw bitsTot 2 hbit)) := by
-  let bitsTot := 3 ||| (restBits <<< 2)
-  let lenTot := 2 + restLen
-  let bw' := BitWriter.writeBits bw bitsTot lenTot
-  let br := BitWriter.readerAt bw bw'.flush (flush_size_writeBits_le bw bitsTot lenTot) hbit
-  let bw1 := BitWriter.writeBit bw (bitsTot % 2)
-  let br1 := BitWriter.readerAt bw1 bw'.flush
-    (by
-      have hk : 1 ≤ lenTot := by omega
-      simpa [bw', lenTot] using (flush_size_writeBits_prefix bw bitsTot 1 lenTot hk))
-    (bitPos_lt_8_writeBit bw (bitsTot % 2) hbit)
-  let br2 := BitWriter.readerAt (BitWriter.writeBits bw bitsTot 2) bw'.flush
-    (by
-      have hk : 2 ≤ lenTot := by omega
-      simpa [bw', lenTot] using (flush_size_writeBits_prefix bw bitsTot 2 lenTot hk))
-    (bitPos_lt_8_writeBits bw bitsTot 2 hbit)
-  have hread2 :
-      br.bitIndex + 2 ≤ br.data.size * 8 := by
-    simpa [br, bw', lenTot] using
-      (readerAt_writeBits_bound (bw := bw) (bits := bitsTot) (len := lenTot) (k := 2)
-        (hk := by omega) hbit)
-  have hbr : br.bytePos < br.data.size := by
-    exact bytePos_lt_of_bitIndex_lt_dataBits br (by omega)
-  have hcur1 : bw1.curClearAbove := by
-    simpa [bw1] using (curClearAbove_writeBit bw (bitsTot % 2) hbit hcur)
-  have hbit1 : bw1.bitPos < 8 := by
-    simpa [bw1] using (bitPos_lt_8_writeBit bw (bitsTot % 2) hbit)
-  have hsplit1 :
-      bw' = BitWriter.writeBits bw1 (bitsTot >>> 1) (lenTot - 1) := by
-    cases restLen <;> simp [bw', bw1, lenTot, BitWriter.writeBits]
-  have hread0 :
-      br.readBit = (1, br1) := by
-    have hstep :=
-      readBit_readerAt_writeBits (bw := bw) (bits := bitsTot) (len := lenTot)
-        hbit hcur (by omega)
-    have hmod0 : bitsTot % 2 = 1 := by
-      simpa [bitsTot] using three_or_shift_two_mod_two restBits
-    simpa [br, bw', br1, bw1, hmod0, bitsTot, lenTot] using hstep
-  have hread1Bound :
-      br1.bitIndex + 1 ≤ br1.data.size * 8 := by
-    simpa [br1, bw1, bw', lenTot, hsplit1] using
-      (readerAt_writeBits_bound (bw := bw1) (bits := bitsTot >>> 1) (len := lenTot - 1) (k := 1)
-        (hk := by omega) hbit1)
-  have hbr1 : br1.bytePos < br1.data.size := by
-    exact bytePos_lt_of_bitIndex_lt_dataBits br1 (by omega)
-  have hread1 :
-      br1.readBit = (1, br2) := by
-    have hstep :=
-      readBit_readerAt_writeBits (bw := bw1) (bits := bitsTot >>> 1) (len := lenTot - 1)
-        hbit1 hcur1 (by omega)
-    have hmod1 : (bitsTot >>> 1) % 2 = 1 := by
-      simpa [bitsTot] using three_or_shift_two_shiftRight_mod_two restBits
-    have hbw2 :
-        BitWriter.writeBit bw1 1 = BitWriter.writeBits bw bitsTot 2 := by
-      simp [bw1, BitWriter.writeBits, hmod1]
-    simpa [br1, bw', br2, bw1, hsplit1, hbw2, hmod1, bitsTot, lenTot] using hstep
-  have hdecode :
-      dynamicCodeLenHuffman.decode br = some (9, br2) := by
-    unfold Huffman.decode
-    simp [Huffman.decodeFuel, dynamicCodeLenHuffman, hbr, hbr1, hread0, hread1,
-      dynamicCodeLenHuffman_row2_get_three]
+    simp [Huffman.decodeFuel, dynamicCodeLenHuffman, hbr, hbr1, hread0, hread1, hsym]
   simpa [br2, br, bw', bitsTot, lenTot] using hdecode
 
 /-- Packages the four concrete symbol decoders into the single case split needed downstream. -/
@@ -460,17 +185,21 @@ lemma dynamicCodeLenHuffman_decode_readerAt_writeBits
           (bitPos_lt_8_writeBits bw bitsTot 2 hbit)) := by
   rcases hsym with rfl | rfl | rfl | rfl
   · simpa [dynamicCodeLenSymRevBits] using
-      (dynamicCodeLenHuffman_decode_readerAt_writeBits_five
-        (bw := bw) (restBits := restBits) (restLen := restLen) hbit hcur)
+      dynamicCodeLenHuffman_decode_readerAt_writeBits_code
+        (bw := bw) (code := 0) (sym := 5) (restBits := restBits) (restLen := restLen)
+        (by decide) dynamicCodeLenHuffman_row2_get_zero hbit hcur
   · simpa [dynamicCodeLenSymRevBits] using
-      (dynamicCodeLenHuffman_decode_readerAt_writeBits_eight
-        (bw := bw) (restBits := restBits) (restLen := restLen) hbit hcur)
+      dynamicCodeLenHuffman_decode_readerAt_writeBits_code
+        (bw := bw) (code := 1) (sym := 8) (restBits := restBits) (restLen := restLen)
+        (by decide) dynamicCodeLenHuffman_row2_get_one hbit hcur
   · simpa [dynamicCodeLenSymRevBits] using
-      (dynamicCodeLenHuffman_decode_readerAt_writeBits_seven
-        (bw := bw) (restBits := restBits) (restLen := restLen) hbit hcur)
+      dynamicCodeLenHuffman_decode_readerAt_writeBits_code
+        (bw := bw) (code := 2) (sym := 7) (restBits := restBits) (restLen := restLen)
+        (by decide) dynamicCodeLenHuffman_row2_get_two hbit hcur
   · simpa [dynamicCodeLenSymRevBits] using
-      (dynamicCodeLenHuffman_decode_readerAt_writeBits_nine
-        (bw := bw) (restBits := restBits) (restLen := restLen) hbit hcur)
+      dynamicCodeLenHuffman_decode_readerAt_writeBits_code
+        (bw := bw) (code := 3) (sym := 9) (restBits := restBits) (restLen := restLen)
+        (by decide) dynamicCodeLenHuffman_row2_get_three hbit hcur
 
 def pushNatList (lengths : Array Nat) : List Nat → Array Nat
   | [] => lengths
