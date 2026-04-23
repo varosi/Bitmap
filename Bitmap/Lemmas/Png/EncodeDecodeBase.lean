@@ -8,6 +8,7 @@ import Init.Data.UInt.Lemmas
 import Batteries.Data.ByteArray
 import Bitmap.Lemmas.Png.CoreBitIO
 import Bitmap.Lemmas.Png.CoreByteArray
+import Bitmap.Lemmas.Png.ZlibEnvelope
 
 universe u
 
@@ -950,93 +951,48 @@ lemma inflateStored_deflateStored (raw : ByteArray) :
 -- The zlib stored-compression header bytes are fixed.
 lemma zlibCompressStored_header (raw : ByteArray) :
     (zlibCompressStored raw).extract 0 2 = ByteArray.mk #[u8 0x78, u8 0x01] := by
-  let header : ByteArray := ByteArray.mk #[u8 0x78, u8 0x01]
-  let deflated := deflateStored raw
-  let adler := u32be (adler32 raw).toNat
-  have hsize : header.size = 2 := by decide
-  have hprefix :
-      (header ++ deflated ++ adler).extract 0 2 = header.extract 0 2 := by
-    apply byteArray_extract_append_prefix (a := header) (b := deflated ++ adler) (n := 2)
-    simp [hsize]
-  have hheader : header.extract 0 2 = header := by
-    rw [← hsize, ByteArray.extract_zero_size]
-  simp [zlibCompressStored, header, deflated, adler, hprefix, hheader]
+  rw [zlibCompressStored_eq]; exact zlibCompressOf_header _ _
 
 -- Size of zlib stored-compression output (header + deflate + adler32).
 lemma zlibCompressStored_size (raw : ByteArray) :
     (zlibCompressStored raw).size = (deflateStored raw).size + 6 := by
-  unfold zlibCompressStored
-  have hheader : (ByteArray.mk #[u8 0x78, u8 0x01]).size = 2 := by decide
-  simp [ByteArray.size_append, u32be_size, hheader]
-  omega
+  rw [zlibCompressStored_eq]; exact zlibCompressOf_size _ _
 
 -- Zlib stored-compression output has at least the 2-byte header and 4-byte Adler32.
 lemma zlibCompressStored_size_ge (raw : ByteArray) :
     6 ≤ (zlibCompressStored raw).size := by
-  have hsz : (zlibCompressStored raw).size = (deflateStored raw).size + 6 :=
-    zlibCompressStored_size raw
-  have h6 : 6 ≤ (deflateStored raw).size + 6 := Nat.le_add_left _ _
-  rw [hsz]
-  exact h6
+  rw [zlibCompressStored_eq]; exact zlibCompressOf_size_ge _ _
 
-set_option maxHeartbeats 5000000 in
 -- The zlib fixed-compression header bytes are fixed.
 lemma zlibCompressFixed_header (raw : ByteArray) :
     (zlibCompressFixed raw).extract 0 2 = ByteArray.mk #[u8 0x78, u8 0x01] := by
-  let header : ByteArray := ByteArray.mk #[u8 0x78, u8 0x01]
-  let deflated := deflateFixed raw
-  let adler := u32be (adler32 raw).toNat
-  have hsize : header.size = 2 := by decide
-  have hprefix :
-      (header ++ deflated ++ adler).extract 0 2 = header.extract 0 2 := by
-    apply byteArray_extract_append_prefix (a := header) (b := deflated ++ adler) (n := 2)
-    simp [hsize]
-  have hheader : header.extract 0 2 = header := by
-    rw [← hsize, ByteArray.extract_zero_size]
-  simp [zlibCompressFixed, header, deflated, adler, hprefix, hheader]
+  rw [zlibCompressFixed_eq]; exact zlibCompressOf_header _ _
 
-set_option maxHeartbeats 5000000 in
 -- Size of zlib fixed-compression output (header + deflate + adler32).
 lemma zlibCompressFixed_size (raw : ByteArray) :
     (zlibCompressFixed raw).size = (deflateFixed raw).size + 6 := by
-  unfold zlibCompressFixed
-  have hheader : (ByteArray.mk #[u8 0x78, u8 0x01]).size = 2 := by decide
-  simp [ByteArray.size_append, u32be_size, hheader]
-  omega
+  rw [zlibCompressFixed_eq]; exact zlibCompressOf_size _ _
 
-set_option maxHeartbeats 5000000 in
 -- Zlib fixed-compression output has at least the 2-byte header and 4-byte Adler32.
 lemma zlibCompressFixed_size_ge (raw : ByteArray) :
     6 ≤ (zlibCompressFixed raw).size := by
-  have hsz : (zlibCompressFixed raw).size = (deflateFixed raw).size + 6 :=
-    zlibCompressFixed_size raw
-  have h6 : 6 ≤ (deflateFixed raw).size + 6 := Nat.le_add_left _ _
-  rw [hsz]
-  exact h6
+  rw [zlibCompressFixed_eq]; exact zlibCompressOf_size_ge _ _
 
 -- The zlib dynamic-compression header bytes are fixed.
 lemma zlibCompressDynamic_header (raw : ByteArray) :
     (zlibCompressDynamic raw).extract 0 2 = ByteArray.mk #[u8 0x78, u8 0x01] := by
-  simpa [zlibCompressDynamic, deflateDynamic] using zlibCompressFixed_header raw
+  rw [zlibCompressDynamic_eq]; exact zlibCompressOf_header _ _
 
 -- Size of zlib dynamic-compression output (header + deflate + adler32).
 lemma zlibCompressDynamic_size (raw : ByteArray) :
     (zlibCompressDynamic raw).size = (deflateDynamic raw).size + 6 := by
-  unfold zlibCompressDynamic
-  have hheader : (ByteArray.mk #[u8 0x78, u8 0x01]).size = 2 := by decide
-  simp [ByteArray.size_append, u32be_size, hheader]
-  omega
+  rw [zlibCompressDynamic_eq]; exact zlibCompressOf_size _ _
 
 -- Zlib dynamic-compression output has at least the 2-byte header and 4-byte Adler32.
 lemma zlibCompressDynamic_size_ge (raw : ByteArray) :
     6 ≤ (zlibCompressDynamic raw).size := by
-  have hsz : (zlibCompressDynamic raw).size = (deflateDynamic raw).size + 6 :=
-    zlibCompressDynamic_size raw
-  have h6 : 6 ≤ (deflateDynamic raw).size + 6 := Nat.le_add_left _ _
-  rw [hsz]
-  exact h6
+  rw [zlibCompressDynamic_eq]; exact zlibCompressOf_size_ge _ _
 
-set_option maxHeartbeats 5000000 in
 -- Zlib header bytes in fixed-compression output match the expected constants.
 lemma zlibCompressFixed_cmf_flg (raw : ByteArray) :
     let bytes := zlibCompressFixed raw
@@ -1044,99 +1000,19 @@ lemma zlibCompressFixed_cmf_flg (raw : ByteArray) :
       exact lt_of_lt_of_le (by decide : 0 < 6) (zlibCompressFixed_size_ge raw)
     let h1 : 1 < bytes.size := by
       exact lt_of_lt_of_le (by decide : 1 < 6) (zlibCompressFixed_size_ge raw)
-    bytes[0]'h0 = u8 0x78 ∧ bytes[1]'h1 = u8 0x01 := by
-  let bytes := zlibCompressFixed raw
-  let header : ByteArray := ByteArray.mk #[u8 0x78, u8 0x01]
-  let deflated := deflateFixed raw
-  let adler := u32be (adler32 raw).toNat
-  have h0h : 0 < header.size := by decide
-  have h1h : 1 < header.size := by decide
-  have h0 : 0 < bytes.size := by
-    exact lt_of_lt_of_le (by decide : 0 < 6) (zlibCompressFixed_size_ge raw)
-  have h1 : 1 < bytes.size := by
-    exact lt_of_lt_of_le (by decide : 1 < 6) (zlibCompressFixed_size_ge raw)
-  have hle : header.size ≤ (header ++ deflated ++ adler).size := by
-    simp [ByteArray.size_append]
-    omega
-  have h0' : 0 < (header ++ deflated ++ adler).size := lt_of_lt_of_le h0h hle
-  have h1' : 1 < (header ++ deflated ++ adler).size := lt_of_lt_of_le h1h hle
-  have hget0 :
-      (header ++ deflated ++ adler)[0]'h0' = header[0]'h0h := by
-    have hget := ByteArray.get_append_left (a := header) (b := deflated ++ adler) (i := 0) h0h
-    simpa [ByteArray.append_assoc] using hget
-  have hget1 :
-      (header ++ deflated ++ adler)[1]'h1' = header[1]'h1h := by
-    have hget := ByteArray.get_append_left (a := header) (b := deflated ++ adler) (i := 1) h1h
-    simpa [ByteArray.append_assoc] using hget
-  have hheader0 : header[0]'h0h = u8 0x78 := by
-    rfl
-  have hheader1 : header[1]'h1h = u8 0x01 := by
-    rfl
-  have hget0' : bytes[0]'h0 = u8 0x78 := by
-    simpa [bytes, zlibCompressFixed, hget0, hheader0]
-  have hget1' : bytes[1]'h1 = u8 0x01 := by
-    simpa [bytes, zlibCompressFixed, hget1, hheader1]
-  exact ⟨hget0', hget1'⟩
+    bytes[0]'h0 = u8 0x78 ∧ bytes[1]'h1 = u8 0x01 :=
+  zlibCompressOf_cmf_flg (deflated := deflateFixed raw) (raw := raw)
 
 -- Extracting the deflated payload from zlib fixed-compression output.
 lemma zlibCompressFixed_extract_deflated (raw : ByteArray) :
     (zlibCompressFixed raw).extract 2 ((zlibCompressFixed raw).size - 4) = deflateFixed raw := by
-  let header : ByteArray := ByteArray.mk #[u8 0x78, u8 0x01]
-  let deflated := deflateFixed raw
-  let adler := u32be (adler32 raw).toNat
-  have hheader : header.size = 2 := by decide
-  have hadler : adler.size = 4 := by
-    simpa using (u32be_size (adler32 raw).toNat)
-  have hsize'' : header.size + deflated.size + adler.size - 4 = deflated.size + 2 := by
-    simp [hheader, hadler]
-    omega
-  calc
-    (zlibCompressFixed raw).extract 2 ((zlibCompressFixed raw).size - 4)
-        = (header ++ deflated ++ adler).extract 2 (header.size + deflated.size + adler.size - 4) := by
-            simp [zlibCompressFixed, header, deflated, adler, ByteArray.size_append, hheader, hadler]
-    _ = (header ++ deflated ++ adler).extract 2 (deflated.size + 2) := by
-          simp [hsize'']
-    _ = (deflated ++ adler).extract 0 deflated.size := by
-          have h :=
-            (ByteArray.extract_append_size_add
-              (a := header) (b := deflated ++ adler) (i := 0) (j := deflated.size))
-          simpa [hheader, ByteArray.append_assoc, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using h
-    _ = deflated := by
-          have hprefix :
-              (deflated ++ adler).extract 0 deflated.size = deflated.extract 0 deflated.size := by
-            exact byteArray_extract_append_prefix (a := deflated) (b := adler) (n := deflated.size) (by exact le_rfl)
-          simp [hprefix, ByteArray.extract_zero_size]
+  rw [zlibCompressFixed_eq]; exact zlibCompressOf_extract_deflated _ _
 
 -- Extracting the Adler32 trailer from zlib fixed-compression output.
 lemma zlibCompressFixed_extract_adler (raw : ByteArray) :
     (zlibCompressFixed raw).extract ((zlibCompressFixed raw).size - 4)
         ((zlibCompressFixed raw).size - 4 + 4) = u32be (adler32 raw).toNat := by
-  let header : ByteArray := ByteArray.mk #[u8 0x78, u8 0x01]
-  let deflated := deflateFixed raw
-  let adler := u32be (adler32 raw).toNat
-  have hheader : header.size = 2 := by decide
-  have hadler : adler.size = 4 := by
-    simpa using (u32be_size (adler32 raw).toNat)
-  have hsize'' : header.size + deflated.size + adler.size - 4 = deflated.size + 2 := by
-    simp [hheader, hadler]
-    omega
-  have hprefix : (header ++ deflated).size = deflated.size + 2 := by
-    simp [ByteArray.size_append, hheader, Nat.add_comm]
-  calc
-    (zlibCompressFixed raw).extract ((zlibCompressFixed raw).size - 4)
-        ((zlibCompressFixed raw).size - 4 + 4)
-        = (header ++ deflated ++ adler).extract (header.size + deflated.size + adler.size - 4)
-            (header.size + deflated.size + adler.size - 4 + 4) := by
-              simp [zlibCompressFixed, header, deflated, adler, ByteArray.size_append, hheader, hadler]
-    _ = (header ++ deflated ++ adler).extract (deflated.size + 2) (deflated.size + 2 + 4) := by
-          simp [hsize'']
-    _ = adler.extract 0 adler.size := by
-          have h :=
-            (ByteArray.extract_append_size_add
-              (a := header ++ deflated) (b := adler) (i := 0) (j := adler.size))
-          simpa [hprefix, hadler, ByteArray.append_assoc, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using h
-    _ = adler := by
-          simp [ByteArray.extract_zero_size]
+  rw [zlibCompressFixed_eq]; exact zlibCompressOf_extract_adler _ _
 
 -- Stored-only zlib decompressor rejects fixed-Huffman streams.
 lemma zlibDecompressStored_zlibCompressFixed_none (raw : ByteArray)
@@ -1189,99 +1065,19 @@ lemma zlibCompressStored_cmf_flg (raw : ByteArray) :
       exact lt_of_lt_of_le (by decide : 0 < 6) (zlibCompressStored_size_ge raw)
     let h1 : 1 < bytes.size := by
       exact lt_of_lt_of_le (by decide : 1 < 6) (zlibCompressStored_size_ge raw)
-    bytes[0]'h0 = u8 0x78 ∧ bytes[1]'h1 = u8 0x01 := by
-  let bytes := zlibCompressStored raw
-  let header : ByteArray := ByteArray.mk #[u8 0x78, u8 0x01]
-  let deflated := deflateStored raw
-  let adler := u32be (adler32 raw).toNat
-  have h0h : 0 < header.size := by decide
-  have h1h : 1 < header.size := by decide
-  have h0 : 0 < bytes.size := by
-    exact lt_of_lt_of_le (by decide : 0 < 6) (zlibCompressStored_size_ge raw)
-  have h1 : 1 < bytes.size := by
-    exact lt_of_lt_of_le (by decide : 1 < 6) (zlibCompressStored_size_ge raw)
-  have hle : header.size ≤ (header ++ deflated ++ adler).size := by
-    simp [ByteArray.size_append]
-    omega
-  have h0' : 0 < (header ++ deflated ++ adler).size := lt_of_lt_of_le h0h hle
-  have h1' : 1 < (header ++ deflated ++ adler).size := lt_of_lt_of_le h1h hle
-  have hget0 :
-      (header ++ deflated ++ adler)[0]'h0' = header[0]'h0h := by
-    have hget := ByteArray.get_append_left (a := header) (b := deflated ++ adler) (i := 0) h0h
-    simpa [ByteArray.append_assoc] using hget
-  have hget1 :
-      (header ++ deflated ++ adler)[1]'h1' = header[1]'h1h := by
-    have hget := ByteArray.get_append_left (a := header) (b := deflated ++ adler) (i := 1) h1h
-    simpa [ByteArray.append_assoc] using hget
-  have hheader0 : header[0]'h0h = u8 0x78 := by
-    rfl
-  have hheader1 : header[1]'h1h = u8 0x01 := by
-    rfl
-  have hget0' : bytes[0]'h0 = u8 0x78 := by
-    simpa [bytes, zlibCompressStored, hget0, hheader0]
-  have hget1' : bytes[1]'h1 = u8 0x01 := by
-    simpa [bytes, zlibCompressStored, hget1, hheader1]
-  exact ⟨hget0', hget1'⟩
+    bytes[0]'h0 = u8 0x78 ∧ bytes[1]'h1 = u8 0x01 :=
+  zlibCompressOf_cmf_flg (deflated := deflateStored raw) (raw := raw)
 
 -- Extracting the deflated payload from zlib stored-compression output.
 lemma zlibCompressStored_extract_deflated (raw : ByteArray) :
     (zlibCompressStored raw).extract 2 ((zlibCompressStored raw).size - 4) = deflateStored raw := by
-  let header : ByteArray := ByteArray.mk #[u8 0x78, u8 0x01]
-  let deflated := deflateStored raw
-  let adler := u32be (adler32 raw).toNat
-  have hheader : header.size = 2 := by decide
-  have hadler : adler.size = 4 := by
-    simpa using (u32be_size (adler32 raw).toNat)
-  have hsize'' : header.size + deflated.size + adler.size - 4 = deflated.size + 2 := by
-    simp [hheader, hadler]
-    omega
-  calc
-    (zlibCompressStored raw).extract 2 ((zlibCompressStored raw).size - 4)
-        = (header ++ deflated ++ adler).extract 2 (header.size + deflated.size + adler.size - 4) := by
-            simp [zlibCompressStored, header, deflated, adler, ByteArray.size_append, hheader, hadler]
-    _ = (header ++ deflated ++ adler).extract 2 (deflated.size + 2) := by
-          simp [hsize'']
-    _ = (deflated ++ adler).extract 0 deflated.size := by
-          have h :=
-            (ByteArray.extract_append_size_add
-              (a := header) (b := deflated ++ adler) (i := 0) (j := deflated.size))
-          simpa [hheader, ByteArray.append_assoc, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using h
-    _ = deflated := by
-          have hprefix :
-              (deflated ++ adler).extract 0 deflated.size = deflated.extract 0 deflated.size := by
-            exact byteArray_extract_append_prefix (a := deflated) (b := adler) (n := deflated.size) (by exact le_rfl)
-          simp [hprefix, ByteArray.extract_zero_size]
+  rw [zlibCompressStored_eq]; exact zlibCompressOf_extract_deflated _ _
 
 -- Extracting the Adler32 trailer from zlib stored-compression output.
 lemma zlibCompressStored_extract_adler (raw : ByteArray) :
     (zlibCompressStored raw).extract ((zlibCompressStored raw).size - 4)
         ((zlibCompressStored raw).size - 4 + 4) = u32be (adler32 raw).toNat := by
-  let header : ByteArray := ByteArray.mk #[u8 0x78, u8 0x01]
-  let deflated := deflateStored raw
-  let adler := u32be (adler32 raw).toNat
-  have hheader : header.size = 2 := by decide
-  have hadler : adler.size = 4 := by
-    simpa using (u32be_size (adler32 raw).toNat)
-  have hsize'' : header.size + deflated.size + adler.size - 4 = deflated.size + 2 := by
-    simp [hheader, hadler]
-    omega
-  have hprefix : (header ++ deflated).size = deflated.size + 2 := by
-    simp [ByteArray.size_append, hheader, Nat.add_comm]
-  calc
-    (zlibCompressStored raw).extract ((zlibCompressStored raw).size - 4)
-        ((zlibCompressStored raw).size - 4 + 4)
-        = (header ++ deflated ++ adler).extract (header.size + deflated.size + adler.size - 4)
-            (header.size + deflated.size + adler.size - 4 + 4) := by
-              simp [zlibCompressStored, header, deflated, adler, ByteArray.size_append, hheader, hadler]
-    _ = (header ++ deflated ++ adler).extract (deflated.size + 2) (deflated.size + 2 + 4) := by
-          simp [hsize'']
-    _ = adler.extract 0 adler.size := by
-          have h :=
-            (ByteArray.extract_append_size_add
-              (a := header ++ deflated) (b := adler) (i := 0) (j := adler.size))
-          simpa [hprefix, hadler, ByteArray.append_assoc, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using h
-    _ = adler := by
-          simp [ByteArray.extract_zero_size]
+  rw [zlibCompressStored_eq]; exact zlibCompressOf_extract_adler _ _
 
 -- Zlib decompression of stored-compression output yields the original bytes.
 lemma zlibDecompressStored_zlibCompressStored (raw : ByteArray)
