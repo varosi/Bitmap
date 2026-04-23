@@ -1062,68 +1062,28 @@ termination_by remaining
 decreasing_by
   exact chooseFixedMatchChunkLen_sub_lt remaining _h
 
-lemma dist1ChunkLoopOut_unfold (out : ByteArray) (remaining : Nat) :
-    dist1ChunkLoopOut out remaining =
-      (if _h : 3 ≤ remaining then
-        dist1ChunkLoopOut
-          (pushRepeat out (out.get! (out.size - 1)) (chooseFixedMatchChunkLen remaining))
-          (remaining - chooseFixedMatchChunkLen remaining)
-      else
-        out) := by
-  exact dist1ChunkLoopOut.eq_1 (out := out) (remaining := remaining)
-
-lemma dist1ChunkLoopSteps_unfold (remaining : Nat) :
-    dist1ChunkLoopSteps remaining =
-      (if _h : 3 ≤ remaining then
-        1 + dist1ChunkLoopSteps (remaining - chooseFixedMatchChunkLen remaining)
-      else
-        0) := by
-  exact dist1ChunkLoopSteps.eq_1 (remaining := remaining)
-
-lemma dist1ChunkLoopBits_unfold (remaining : Nat) :
-    dist1ChunkLoopBits remaining =
-      (if _h : 3 ≤ remaining then
-        let chunk := chooseFixedMatchChunkLen remaining
-        let info := fixedLenMatchInfo chunk
-        let sym := info.1
-        let extraBits := info.2.1
-        let extraLen := info.2.2
-        let codeLen := fixedLitLenCode sym
-        let symBits := reverseBits codeLen.1 codeLen.2
-        let distBitsTot := (0 : Nat)
-        let distLenTot := 5
-        let lenBitsTot := extraBits ||| (distBitsTot <<< extraLen)
-        let lenLenTot := extraLen + distLenTot
-        let matchBits := symBits ||| (lenBitsTot <<< codeLen.2)
-        let matchLen := codeLen.2 + lenLenTot
-        let rest := dist1ChunkLoopBits (remaining - chunk)
-        (matchBits ||| (rest.1 <<< matchLen), matchLen + rest.2)
-      else
-        (0, 0)) := by
-  exact dist1ChunkLoopBits.eq_1 (remaining := remaining)
-
 lemma dist1ChunkLoopOut_of_ge3 (out : ByteArray) (remaining : Nat) (h : 3 ≤ remaining) :
     dist1ChunkLoopOut out remaining =
       dist1ChunkLoopOut
         (pushRepeat out (out.get! (out.size - 1)) (chooseFixedMatchChunkLen remaining))
         (remaining - chooseFixedMatchChunkLen remaining) := by
-  rw [dist1ChunkLoopOut_unfold]
+  rw [dist1ChunkLoopOut.eq_1]
   simp [h]
 
 lemma dist1ChunkLoopOut_of_lt3 (out : ByteArray) (remaining : Nat) (h : ¬ 3 ≤ remaining) :
     dist1ChunkLoopOut out remaining = out := by
-  rw [dist1ChunkLoopOut_unfold]
+  rw [dist1ChunkLoopOut.eq_1]
   simp [h]
 
 lemma dist1ChunkLoopSteps_of_ge3 (remaining : Nat) (h : 3 ≤ remaining) :
     dist1ChunkLoopSteps remaining =
       1 + dist1ChunkLoopSteps (remaining - chooseFixedMatchChunkLen remaining) := by
-  rw [dist1ChunkLoopSteps_unfold]
+  rw [dist1ChunkLoopSteps.eq_1]
   simp [h]
 
 lemma dist1ChunkLoopSteps_of_lt3 (remaining : Nat) (h : ¬ 3 ≤ remaining) :
     dist1ChunkLoopSteps remaining = 0 := by
-  rw [dist1ChunkLoopSteps_unfold]
+  rw [dist1ChunkLoopSteps.eq_1]
   simp [h]
 
 lemma dist1ChunkLoopBits_of_ge3 (remaining : Nat) (h : 3 ≤ remaining) :
@@ -1142,12 +1102,12 @@ lemma dist1ChunkLoopBits_of_ge3 (remaining : Nat) (h : 3 ≤ remaining) :
     let matchLen := codeLen.2 + lenLenTot
     let rest := dist1ChunkLoopBits (remaining - chunk)
     dist1ChunkLoopBits remaining = (matchBits ||| (rest.1 <<< matchLen), matchLen + rest.2) := by
-  rw [dist1ChunkLoopBits_unfold]
+  rw [dist1ChunkLoopBits.eq_1]
   simp [h]
 
 lemma dist1ChunkLoopBits_of_lt3 (remaining : Nat) (h : ¬ 3 ≤ remaining) :
     dist1ChunkLoopBits remaining = (0, 0) := by
-  rw [dist1ChunkLoopBits_unfold]
+  rw [dist1ChunkLoopBits.eq_1]
   simp [h]
 
 def dist1ChunkLoopBitsTail (remaining tailBits tailLen : Nat) : Nat × Nat :=
@@ -1175,30 +1135,6 @@ termination_by remaining
 decreasing_by
   exact chooseFixedMatchChunkLen_sub_lt remaining _h
 
-lemma dist1ChunkLoopBitsTail_unfold (remaining tailBits tailLen : Nat) :
-    dist1ChunkLoopBitsTail remaining tailBits tailLen =
-      (if _h : 3 ≤ remaining then
-        let chunk := chooseFixedMatchChunkLen remaining
-        let rest := dist1ChunkLoopBitsTail (remaining - chunk) tailBits tailLen
-        let tailBits' := rest.1
-        let tailLen' := rest.2
-        let info := fixedLenMatchInfo chunk
-        let sym := info.1
-        let extraBits := info.2.1
-        let extraLen := info.2.2
-        let codeLen := fixedLitLenCode sym
-        let symBits := reverseBits codeLen.1 codeLen.2
-        let distBitsTot := (0 : Nat) ||| (tailBits' <<< 5)
-        let distLenTot := 5 + tailLen'
-        let lenBitsTot := extraBits ||| (distBitsTot <<< extraLen)
-        let lenLenTot := extraLen + distLenTot
-        let bitsTot := symBits ||| (lenBitsTot <<< codeLen.2)
-        let lenTot := codeLen.2 + lenLenTot
-        (bitsTot, lenTot)
-      else
-        (tailBits, tailLen)) := by
-  exact dist1ChunkLoopBitsTail.eq_1 (remaining := remaining) (tailBits := tailBits) (tailLen := tailLen)
-
 lemma dist1ChunkLoopBitsTail_of_ge3 (remaining tailBits tailLen : Nat) (h : 3 ≤ remaining) :
     let chunk := chooseFixedMatchChunkLen remaining
     let rest := dist1ChunkLoopBitsTail (remaining - chunk) tailBits tailLen
@@ -1217,12 +1153,12 @@ lemma dist1ChunkLoopBitsTail_of_ge3 (remaining tailBits tailLen : Nat) (h : 3 �
     let bitsTot := symBits ||| (lenBitsTot <<< codeLen.2)
     let lenTot := codeLen.2 + lenLenTot
     dist1ChunkLoopBitsTail remaining tailBits tailLen = (bitsTot, lenTot) := by
-  rw [dist1ChunkLoopBitsTail_unfold]
+  rw [dist1ChunkLoopBitsTail.eq_1]
   simp [h]
 
 lemma dist1ChunkLoopBitsTail_of_lt3 (remaining tailBits tailLen : Nat) (h : ¬ 3 ≤ remaining) :
     dist1ChunkLoopBitsTail remaining tailBits tailLen = (tailBits, tailLen) := by
-  rw [dist1ChunkLoopBitsTail_unfold]
+  rw [dist1ChunkLoopBitsTail.eq_1]
   simp [h]
 
 lemma dist1ChunkLoopOut_pos (out : ByteArray) (remaining : Nat) (hout : 0 < out.size) :
@@ -1230,7 +1166,7 @@ lemma dist1ChunkLoopOut_pos (out : ByteArray) (remaining : Nat) (hout : 0 < out.
   revert out hout
   refine Nat.strong_induction_on remaining ?_
   intro remaining ih out hout
-  rw [dist1ChunkLoopOut_unfold]
+  rw [dist1ChunkLoopOut.eq_1]
   by_cases h : 3 ≤ remaining
   · simp [h]
     have hout' : 0 < (pushRepeat out (out.get! (out.size - 1)) (chooseFixedMatchChunkLen remaining)).size := by
@@ -1248,7 +1184,7 @@ lemma dist1ChunkLoopOut_last_eq
   revert out hout hlast
   refine Nat.strong_induction_on remaining ?_
   intro remaining ih out hout hlast
-  rw [dist1ChunkLoopOut_unfold]
+  rw [dist1ChunkLoopOut.eq_1]
   by_cases h : 3 ≤ remaining
   · simp [h]
     let chunk := chooseFixedMatchChunkLen remaining
@@ -1279,23 +1215,15 @@ termination_by remaining
 decreasing_by
   exact chooseFixedMatchChunkLen_sub_lt remaining _h
 
-lemma dist1ChunkLoopRem_unfold (remaining : Nat) :
-    dist1ChunkLoopRem remaining =
-      (if _h : 3 ≤ remaining then
-        dist1ChunkLoopRem (remaining - chooseFixedMatchChunkLen remaining)
-      else
-        remaining) := by
-  exact dist1ChunkLoopRem.eq_1 (remaining := remaining)
-
 lemma dist1ChunkLoopRem_of_ge3 (remaining : Nat) (h : 3 ≤ remaining) :
     dist1ChunkLoopRem remaining =
       dist1ChunkLoopRem (remaining - chooseFixedMatchChunkLen remaining) := by
-  rw [dist1ChunkLoopRem_unfold]
+  rw [dist1ChunkLoopRem.eq_1]
   simp [h]
 
 lemma dist1ChunkLoopRem_of_lt3 (remaining : Nat) (h : ¬ 3 ≤ remaining) :
     dist1ChunkLoopRem remaining = remaining := by
-  rw [dist1ChunkLoopRem_unfold]
+  rw [dist1ChunkLoopRem.eq_1]
   simp [h]
 
 lemma dist1ChunkLoopRem_le (remaining : Nat) :
