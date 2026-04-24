@@ -118,6 +118,233 @@ def pngRoundTripPropertyGray (trials : Nat) : IO Bool := do
       ok := false
   return ok
 
+private def byteArrayOfNats (xs : List Nat) : ByteArray :=
+  ByteArray.mk <| xs.toArray.map randByte
+
+private def repeatBytes (chunk : ByteArray) (count : Nat) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (chunk.size * count)
+    for _ in [0:count] do
+      out := out ++ chunk
+    return out
+
+private def rangeBytes (count : Nat) : ByteArray :=
+  ByteArray.mk <| (List.range count).toArray.map randByte
+
+private def deterministicPrefix (size : Nat) : ByteArray :=
+  ByteArray.mk <| (List.range size).toArray.map (fun i => randByte (17 * i + 3))
+
+private def zlibFirstBlockType? (bytes : ByteArray) : Option Nat :=
+  if h : 2 < bytes.size then
+    some (((bytes.get 2 h).toNat >>> 1) % 4)
+  else
+    none
+
+private def zlibDecompressFixture (bytes : ByteArray) : Option ByteArray :=
+  if h : 2 ≤ bytes.size then
+    Png.zlibDecompress bytes h
+  else
+    none
+
+private def dynamicRepeatZlibFixture : ByteArray :=
+  byteArrayOfNats
+    [120, 218, 237, 195, 49, 13, 0, 0, 8, 3, 48, 109, 131, 249, 215, 132, 12, 158,
+      54, 105, 102, 27, 85, 85, 85, 85, 85, 85, 85, 85, 85, 85, 85, 85, 85, 85, 85,
+      245, 245, 1, 110, 73, 160, 241]
+
+private def dynamicRepeatRawFixture : ByteArray :=
+  repeatBytes "ABCD".toUTF8 4096
+
+private def dynamicRepeatCodeZlibFixture : ByteArray :=
+  byteArrayOfNats
+    [120, 1, 5, 192, 39, 13, 0, 0, 0, 3, 48, 206, 57, 231, 28, 237, 248, 231, 156,
+      115, 220, 164, 59, 2, 152, 1, 11]
+
+private def dynamicRepeatCodeRawFixture : ByteArray :=
+  "ABCD".toUTF8
+
+private def dynamicLiteralOnlyZeroDistZlibFixture : ByteArray :=
+  byteArrayOfNats
+    [120, 1, 5, 192, 129, 8, 0, 0, 0, 0, 32, 182, 253, 165, 78, 0, 66, 0, 66]
+
+private def dynamicLiteralOnlyZeroDistRawFixture : ByteArray :=
+  byteArrayOfNats [65]
+
+private def dynamicMixedZlibFixture : ByteArray :=
+  byteArrayOfNats
+    [120, 218, 237, 203, 201, 82, 1, 0, 0, 0, 80, 145, 173, 100, 45, 42, 251, 90,
+      18, 217, 74, 40, 102, 58, 251, 9, 135, 14, 14, 153, 14, 254, 127, 252, 131,
+      147, 195, 187, 189, 203, 219, 252, 110, 247, 63, 187, 195, 223, 246, 191, 191,
+      65, 68, 68, 68, 68, 68, 68, 68, 68, 68, 68, 68, 68, 68, 68, 68, 68, 68, 68, 68,
+      68, 68, 68, 68, 68, 68, 68, 68, 68, 68, 68, 68, 68, 68, 68, 68, 68, 68, 68, 68,
+      68, 68, 196, 211, 25, 184, 8, 134, 46, 195, 145, 104, 44, 126, 117, 157, 184,
+      73, 166, 210, 153, 108, 238, 246, 46, 95, 184, 127, 120, 44, 150, 202, 149, 106,
+      173, 222, 104, 182, 218, 157, 167, 231, 238, 75, 239, 181, 63, 120, 27, 142,
+      198, 147, 233, 251, 199, 236, 115, 190, 88, 126, 125, 175, 214, 190, 239, 251,
+      190, 239, 251, 190, 239, 251, 190, 239, 251, 190, 239, 251, 190, 239, 251, 231,
+      246, 143, 26, 166, 163, 159]
+
+private def dynamicMixedRawFixture : ByteArray :=
+  repeatBytes "LeanBitmap-".toUTF8 2000 ++ repeatBytes (rangeBytes 64) 100
+
+private def dynamicMultiBlockZlibFixture : ByteArray :=
+  byteArrayOfNats
+    [120, 218, 236, 195, 1, 9, 0, 0, 8, 3, 176, 108, 215, 247, 207, 100, 14, 97,
+      131, 101, 182, 81, 85, 85, 85, 85, 85, 85, 85, 95, 63, 0, 0, 0, 255, 255, 236,
+      194, 1, 13, 0, 0, 12, 2, 160, 218, 247, 233, 237, 225, 96, 92, 94, 85, 85, 85,
+      85, 85, 85, 85, 85, 231, 23, 0, 0, 255, 255, 99, 96, 100, 98, 102, 97, 101, 99,
+      231, 224, 228, 226, 230, 225, 229, 227, 23, 16, 20, 18, 22, 17, 21, 19, 151,
+      144, 148, 146, 150, 145, 149, 147, 87, 80, 84, 82, 86, 81, 85, 83, 215, 208,
+      212, 210, 214, 209, 213, 211, 55, 48, 52, 50, 54, 49, 53, 51, 183, 176, 180,
+      178, 182, 177, 181, 179, 119, 0, 45, 182, 113, 117, 115, 247, 240, 244, 242,
+      246, 241, 245, 243, 15, 8, 12, 10, 14, 9, 13, 11, 143, 136, 140, 138, 142, 137,
+      141, 139, 79, 72, 76, 74, 78, 73, 77, 75, 207, 200, 204, 202, 206, 201, 205,
+      203, 47, 40, 44, 42, 46, 41, 45, 43, 7, 90, 93, 93, 83, 91, 87, 223, 208, 216,
+      212, 220, 210, 218, 214, 222, 209, 217, 213, 221, 211, 219, 215, 63, 97, 226,
+      164, 201, 83, 166, 78, 155, 62, 99, 230, 172, 217, 115, 230, 206, 155, 191, 96,
+      225, 162, 197, 75, 150, 46, 91, 190, 98, 229, 170, 213, 107, 214, 174, 91, 191,
+      97, 227, 166, 205, 91, 182, 110, 219, 190, 99, 231, 174, 221, 123, 246, 238,
+      219, 127, 224, 224, 161, 195, 71, 142, 30, 59, 126, 226, 228, 169, 211, 103,
+      206, 158, 59, 127, 225, 226, 165, 203, 87, 174, 94, 187, 126, 227, 230, 173,
+      219, 119, 238, 222, 187, 255, 224, 225, 163, 199, 79, 158, 62, 123, 254, 226,
+      229, 171, 215, 111, 222, 190, 123, 255, 225, 227, 167, 207, 95, 190, 126, 251,
+      254, 227, 231, 175, 223, 127, 254, 254, 251, 63, 234, 255, 81, 255, 143, 250,
+      127, 212, 255, 163, 254, 31, 245, 255, 168, 255, 71, 253, 63, 234, 255, 81,
+      255, 143, 250, 127, 212, 255, 163, 254, 31, 245, 255, 168, 255, 71, 253, 63,
+      234, 255, 81, 255, 15, 103, 255, 3, 0, 52, 50, 229, 231]
+
+private def dynamicMultiBlockRawFixture : ByteArray :=
+  repeatBytes "ABCD".toUTF8 2048 ++
+    repeatBytes "xyz".toUTF8 3000 ++
+    repeatBytes (rangeBytes 256) 20
+
+private def badHeaderChecksumZlibFixture : ByteArray :=
+  byteArrayOfNats
+    [120, 219, 237, 195, 49, 13, 0, 0, 8, 3, 48, 109, 131, 249, 215, 132, 12, 158,
+      54, 105, 102, 27, 85, 85, 85, 85, 85, 85, 85, 85, 85, 85, 85, 85, 85, 85, 85,
+      245, 245, 1, 110, 73, 160, 241]
+
+private def invalidBitLengthRepeatZlibFixture : ByteArray :=
+  byteArrayOfNats
+    [120, 1, 13, 192, 129, 8, 0, 0, 0, 0, 32, 182, 253, 165, 78, 0, 66, 0, 66]
+
+private def invalidCodeLengthsSetZlibFixture : ByteArray :=
+  byteArrayOfNats
+    [120, 1, 5, 224, 129, 8, 0, 0, 0, 0, 32, 182, 253, 165, 78, 0, 66, 0, 66]
+
+private def truncatedDynamicZlibFixture : ByteArray :=
+  byteArrayOfNats
+    [120, 218, 237, 195, 49, 13, 0, 0, 8, 3, 48, 109, 131, 249, 215, 132, 12, 158,
+      54, 105, 102, 27, 85, 85, 85, 85, 85, 85, 85, 85, 85, 85, 85, 85, 85, 85, 85,
+      245, 245, 1, 110, 73]
+
+private def incorrectDataCheckZlibFixture : ByteArray :=
+  byteArrayOfNats
+    [120, 1, 5, 192, 129, 8, 0, 0, 0, 0, 32, 182, 253, 165, 78, 0, 66, 0, 67]
+
+private def copyDistanceSlow (out : ByteArray) (distance len : Nat) : Option ByteArray :=
+  if _hbad : distance = 0 ∨ distance > out.size then
+    none
+  else
+    some <| Id.run do
+      let mut out := out
+      for _ in [0:len] do
+        let src := out.size - distance
+        out := out.push (out.get! src)
+      return out
+
+private def validateDynamicZlibFixtures : IO Unit := do
+  let cases :=
+    [("literal-only-zero-distance", dynamicLiteralOnlyZeroDistZlibFixture,
+        dynamicLiteralOnlyZeroDistRawFixture),
+      ("repeat-codes", dynamicRepeatCodeZlibFixture, dynamicRepeatCodeRawFixture),
+      ("repeat", dynamicRepeatZlibFixture, dynamicRepeatRawFixture),
+      ("mixed", dynamicMixedZlibFixture, dynamicMixedRawFixture),
+      ("multi-block", dynamicMultiBlockZlibFixture, dynamicMultiBlockRawFixture)]
+  for case in cases do
+    let name := case.1
+    let zlibBytes := case.2.1
+    let raw := case.2.2
+    if zlibFirstBlockType? zlibBytes != some 2 then
+      throw (IO.userError s!"dynamic zlib fixture {name} is not using a dynamic first block")
+    match zlibDecompressFixture zlibBytes with
+    | some raw' =>
+        if raw' != raw then
+          throw (IO.userError s!"dynamic zlib fixture {name} decompressed to the wrong payload")
+    | none =>
+        throw (IO.userError s!"dynamic zlib fixture {name} failed to decompress")
+
+private def validateMalformedDynamicFixtures : IO Unit := do
+  let cases :=
+    [("bad-header-checksum", badHeaderChecksumZlibFixture),
+      ("invalid-bit-length-repeat", invalidBitLengthRepeatZlibFixture),
+      ("invalid-code-lengths-set", invalidCodeLengthsSetZlibFixture),
+      ("truncated-dynamic", truncatedDynamicZlibFixture),
+      ("incorrect-data-check", incorrectDataCheckZlibFixture)]
+  for case in cases do
+    let name := case.1
+    let zlibBytes := case.2
+    match zlibDecompressFixture zlibBytes with
+    | none => pure ()
+    | some _ =>
+        throw (IO.userError s!"malformed dynamic fixture {name} unexpectedly decompressed")
+
+/-- Exhaustively checks one `(base, distance)` pair against the slow overlap reference. -/
+private def validateCopyDistanceLens (base : ByteArray) (size distance : Nat) :
+    List Nat -> IO Unit :=
+  fun lens =>
+    match lens with
+    | [] => pure ()
+    | len :: lens => do
+        let fast := Png.copyDistanceFast base distance len
+        let slow := copyDistanceSlow base distance len
+        if fast != slow then
+          throw (IO.userError
+            s!"copyDistanceFast mismatch for size={size}, distance={distance}, len={len}")
+        validateCopyDistanceLens base size distance lens
+
+/-- Runs the overlap regression across every valid distance for a fixed base size. -/
+private def validateCopyDistanceDistances (base : ByteArray) (size : Nat) :
+    List Nat -> IO Unit :=
+  fun distances =>
+    match distances with
+    | [] => pure ()
+    | distance0 :: distances => do
+        let distance := distance0 + 1
+        validateCopyDistanceLens base size distance (List.range 13)
+        validateCopyDistanceDistances base size distances
+
+/-- Walks the fixed family of bases used to validate `copyDistanceFast`. -/
+private def validateCopyDistanceSizes : List Nat -> IO Unit :=
+  fun sizes =>
+    match sizes with
+    | [] => pure ()
+    | size0 :: sizes => do
+        let size := size0 + 1
+        let base := deterministicPrefix size
+        validateCopyDistanceDistances base size (List.range size)
+        validateCopyDistanceSizes sizes
+
+private def validateCopyDistanceFast : IO Unit := do
+  validateCopyDistanceSizes (List.range 8)
+  let base := deterministicPrefix 4
+  if Png.copyDistanceFast base 0 3 != none then
+    throw (IO.userError "copyDistanceFast accepted distance = 0")
+  if Png.copyDistanceFast base 5 3 != none then
+    throw (IO.userError "copyDistanceFast accepted distance beyond the output size")
+
+private def validateDynamicTableValidationBoundary : IO Unit := do
+  if Png.mkHuffman #[1, 1, 1] != none then
+    throw (IO.userError "mkHuffman accepted an oversubscribed 1-bit code set")
+  if Png.mkHuffman #[2, 2, 2, 2, 2] != none then
+    throw (IO.userError "mkHuffman accepted an oversubscribed 2-bit code set")
+  if Png.buildDynamicDistTable #[0] != some Png.emptyHuffman then
+    throw (IO.userError "buildDynamicDistTable rejected the all-zero distance alphabet")
+  match Png.buildDynamicDistTable #[1, 1] with
+  | some _ => pure ()
+  | none =>
+      throw (IO.userError "buildDynamicDistTable rejected a valid non-empty distance alphabet")
+
 -- Decode PNG fixtures that use fixed-Huffman deflate blocks.
 private def pngDecodeFixedHuffmanFixtures : IO Unit := do
   let grayBytes <- IO.FS.readBinFile "test_gray.png"
@@ -328,6 +555,10 @@ def run : IO Unit := do
   else
     throw (IO.userError "png round-trip Gray property failed")
   pngDecodeFixedHuffmanFixtures
+  validateDynamicTableValidationBoundary
+  validateDynamicZlibFixtures
+  validateMalformedDynamicFixtures
+  validateCopyDistanceFast
   runPerfTest
   runPngPerfTest
   runPngPerfTestDynamic

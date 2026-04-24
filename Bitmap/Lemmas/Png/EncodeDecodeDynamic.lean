@@ -1,4 +1,6 @@
 import Bitmap.Lemmas.Png.DynamicBlockProofsLoop
+import Bitmap.Lemmas.Png.DynamicBlockProofsSpec
+import Bitmap.Lemmas.Png.DynamicBlockProofsSpecConcrete
 import Bitmap.Lemmas.Png.EncodeDecodeBaseU32
 
 namespace Bitmaps

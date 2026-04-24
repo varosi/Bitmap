@@ -1,5 +1,6 @@
 import Bitmap.Lemmas.Png.DynamicBlockProofsLoopAfterHeader
 import Bitmap.Lemmas.Png.DynamicBlockProofsReadTablesConcrete
+import Bitmap.Lemmas.Png.DynamicBlockProofsSpec
 
 namespace Bitmaps
 
@@ -37,6 +38,22 @@ lemma readDynamicTables_dynamicStream (raw : ByteArray) :
         some (fixedLitLenHuffman, fixedDistHuffman, dynamicStreamAfterHeaderReader raw) := hcore'
     _ = some (fixedLitLenHuffman, fixedDistHuffman, dynamicStreamPayloadReaderStart raw) := by
       simp [dynamicTablesAfterHeader_dynamicStream_readerEq raw]
+
+/-- Repackages the concrete dynamic-fast table read as a generic `DynamicTableSpec` witness,
+showing the concrete proof path now factors through the generalized read-table layer. -/
+lemma readDynamicTables_dynamicStream_spec (raw : ByteArray) :
+    ∃ spec,
+      readDynamicTablesSpec? (dynamicStreamReaderHeader raw) =
+        some (spec, dynamicStreamPayloadReaderStart raw) ∧
+        spec.litLenTable = fixedLitLenHuffman ∧
+        spec.distTable = fixedDistHuffman := by
+  simpa using
+    (Png.readDynamicTables_exists_spec
+      (br := dynamicStreamReaderHeader raw)
+      (litLenTable := fixedLitLenHuffman)
+      (distTable := fixedDistHuffman)
+      (br' := dynamicStreamPayloadReaderStart raw)
+      (readDynamicTables_dynamicStream raw))
 
 end Lemmas
 

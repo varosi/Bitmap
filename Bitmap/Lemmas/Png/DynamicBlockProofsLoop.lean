@@ -121,24 +121,85 @@ private lemma dynamicStreamReader0_readBits3 (raw : ByteArray) :
 
 set_option maxRecDepth 400000 in
 set_option maxHeartbeats 6000000 in
-private lemma decodeCompressedBlock_dynamicStream (raw : ByteArray) :
-    let payloadBits := fixedLitBitsEob raw.data 0
-    let hdr0 := BitWriter.empty
-    let hdrHeader := BitWriter.writeBits hdr0 5 3
-    let bwTables := BitWriter.writeBits hdrHeader dynamicHeaderTableBits dynamicHeaderTableLen
-    let streamWriter := BitWriter.writeBits bwTables payloadBits.1 payloadBits.2
-    let hbitHeader : hdrHeader.bitPos < 8 := by
-      simpa [hdrHeader] using bitPos_lt_8_writeBits hdr0 5 3 (by decide)
-    let hbitTables : bwTables.bitPos < 8 := by
-      simpa [bwTables] using
-        bitPos_lt_8_writeBits hdrHeader dynamicHeaderTableBits dynamicHeaderTableLen hbitHeader
-    let payloadReaderStart := BitWriter.readerAt bwTables streamWriter.flush
-      (flush_size_writeBits_le bwTables payloadBits.1 payloadBits.2)
-      hbitTables
-    let streamReaderFinal := BitWriter.readerAt streamWriter streamWriter.flush (by rfl)
-      (bitPos_lt_8_writeBits bwTables payloadBits.1 payloadBits.2 hbitTables)
-    decodeCompressedBlock fixedLitLenHuffman fixedDistHuffman payloadReaderStart ByteArray.empty =
-      some (streamReaderFinal, raw) := by
+/-- Packages the final-block dynamic branch of `zlibDecompressLoopFuel` so later proofs can plug
+in any validated `DynamicTableSpec` and payload decode theorem. -/
+lemma zlibDecompressLoopFuel_step_dynamic_final_of_spec
+    (fuel : Nat) (br brHeader brPayload brFinal : BitReader)
+    (out out' : ByteArray) (spec : DynamicTableSpec)
+    (hcond : br.bitIndex + 3 ≤ br.data.size * 8)
+    (hread3 : br.readBits 3 hcond = (5, brHeader))
+    (hspec : readDynamicTablesSpec? brHeader = some (spec, brPayload))
+    (hdecode : decodeCompressedBlock spec.litLenTable spec.distTable brPayload out =
+      some (brFinal, out')) :
+    zlibDecompressLoopFuel (fuel + 1) br out = some (brFinal, out') := by
+  have htables :
+      readDynamicTables brHeader = some (spec.litLenTable, spec.distTable, brPayload) :=
+    readDynamicTablesSpec?_sound hspec
+  rw [zlibDecompressLoopFuel]
+  simp [hcond, hread3, htables, hdecode]
+
+set_option maxRecDepth 400000 in
+set_option maxHeartbeats 6000000 in
+/-- Packages the final-block dynamic branch from a validated payload trace, so later generalized
+decoder proofs can avoid unfolding `decodeCompressedBlock` directly. -/
+lemma zlibDecompressLoopFuel_step_dynamic_final_of_trace
+    {steps : Nat}
+    (fuel : Nat) (br brHeader brPayload brFinal : BitReader)
+    (out out' : ByteArray) (spec : DynamicTableSpec)
+    (hcond : br.bitIndex + 3 ≤ br.data.size * 8)
+    (hread3 : br.readBits 3 hcond = (5, brHeader))
+    (hspec : readDynamicTablesSpec? brHeader = some (spec, brPayload))
+    (htrace : DynamicPayloadTrace spec steps brPayload out brFinal out')
+    (hsteps : steps ≤ brPayload.data.size * 8 + 1) :
+    zlibDecompressLoopFuel (fuel + 1) br out = some (brFinal, out') := by
+  have hdecode :
+      decodeCompressedBlock spec.litLenTable spec.distTable brPayload out =
+        some (brFinal, out') :=
+    decodeCompressedBlock_of_trace htrace hsteps
+  exact zlibDecompressLoopFuel_step_dynamic_final_of_spec
+    (fuel := fuel) (br := br) (brHeader := brHeader)
+    (brPayload := brPayload) (brFinal := brFinal)
+    (out := out) (out' := out') (spec := spec)
+    hcond hread3 hspec hdecode
+
+set_option maxRecDepth 400000 in
+set_option maxHeartbeats 6000000 in
+/-- Specializes the generic final-block trace theorem to the public `zlibDecompressLoop` entry
+point, so arbitrary validated final dynamic blocks can close the DEFLATE loop directly. -/
+lemma zlibDecompressLoop_step_dynamic_final_of_trace
+    {steps : Nat}
+    (br brHeader brPayload brFinal : BitReader)
+    (out out' : ByteArray) (spec : DynamicTableSpec)
+    (hcond : br.bitIndex + 3 ≤ br.data.size * 8)
+    (hread3 : br.readBits 3 hcond = (5, brHeader))
+    (hspec : readDynamicTablesSpec? brHeader = some (spec, brPayload))
+    (htrace : DynamicPayloadTrace spec steps brPayload out brFinal out')
+    (hsteps : steps ≤ brPayload.data.size * 8 + 1) :
+    zlibDecompressLoop br out = some (brFinal, out') := by
+  change zlibDecompressLoopFuel (br.data.size * 8 + 1) br out = some (brFinal, out')
+  exact zlibDecompressLoopFuel_step_dynamic_final_of_trace
+    (fuel := br.data.size * 8) (br := br) (brHeader := brHeader)
+    (brPayload := brPayload) (brFinal := brFinal)
+    (out := out) (out' := out') (spec := spec)
+    hcond hread3 hspec htrace hsteps
+
+set_option maxRecDepth 400000 in
+set_option maxHeartbeats 6000000 in
+/-- Re-expresses the concrete dynamic-fast payload decode through a generic `DynamicTableSpec`
+witness, so the concrete round-trip theorem depends on the generalized payload layer. -/
+private lemma decodeCompressedBlock_dynamicStream_spec (raw : ByteArray) :
+    ∃ spec,
+      readDynamicTablesSpec? (dynamicStreamReaderHeader raw) =
+        some (spec, dynamicStreamPayloadReaderStart raw) ∧
+        spec.litLenTable = fixedLitLenHuffman ∧
+        spec.distTable = fixedDistHuffman ∧
+        decodeCompressedBlock spec.litLenTable spec.distTable
+          (dynamicStreamPayloadReaderStart raw) ByteArray.empty =
+            some
+              (BitWriter.readerAt (dynamicStreamBwPrime raw) (dynamicStreamBwPrime raw).flush
+                (by rfl) dynamicStreamBwPrime_bitPos_lt,
+              raw) := by
+  obtain ⟨spec, hspec, hlit, hdist⟩ := readDynamicTables_dynamicStream_spec raw
   let payloadBits := fixedLitBitsEob raw.data 0
   let hdr0 := BitWriter.empty
   let hdrHeader := BitWriter.writeBits hdr0 5 3
@@ -163,10 +224,38 @@ private lemma decodeCompressedBlock_dynamicStream (raw : ByteArray) :
     (bitPos_lt_8_writeBits bwTables payloadBits.1 payloadBits.2 hbitTables)
   have hrawOut : byteArrayFromArray raw.data 0 ByteArray.empty = raw := by
     simpa using byteArrayFromArray_empty (data := raw.data)
-  simpa [payloadReaderStart, streamReaderFinal, payloadBits, hrawOut] using
-    (decodeCompressedBlock_fixedLitBitsEob
-      (data := raw.data) (i := 0) (bw := bwTables) (dist := fixedDistHuffman)
-      (out := ByteArray.empty) hbitTables hcurTables)
+  have hdecode :
+      decodeCompressedBlock spec.litLenTable spec.distTable payloadReaderStart ByteArray.empty =
+        some (streamReaderFinal, raw) := by
+    simpa [payloadReaderStart, streamReaderFinal, payloadBits, hrawOut] using
+      (decodeCompressedBlock_fixedLitBitsEob_spec
+        (data := raw.data) (i := 0) (bw := bwTables) (spec := spec)
+        (out := ByteArray.empty) hbitTables hcurTables hlit)
+  refine ⟨spec, hspec, hlit, hdist, ?_⟩
+  simpa [dynamicStreamBwPrime] using hdecode
+
+set_option maxRecDepth 400000 in
+set_option maxHeartbeats 6000000 in
+private lemma decodeCompressedBlock_dynamicStream (raw : ByteArray) :
+    let payloadBits := fixedLitBitsEob raw.data 0
+    let hdr0 := BitWriter.empty
+    let hdrHeader := BitWriter.writeBits hdr0 5 3
+    let bwTables := BitWriter.writeBits hdrHeader dynamicHeaderTableBits dynamicHeaderTableLen
+    let streamWriter := BitWriter.writeBits bwTables payloadBits.1 payloadBits.2
+    let hbitHeader : hdrHeader.bitPos < 8 := by
+      simpa [hdrHeader] using bitPos_lt_8_writeBits hdr0 5 3 (by decide)
+    let hbitTables : bwTables.bitPos < 8 := by
+      simpa [bwTables] using
+        bitPos_lt_8_writeBits hdrHeader dynamicHeaderTableBits dynamicHeaderTableLen hbitHeader
+    let payloadReaderStart := BitWriter.readerAt bwTables streamWriter.flush
+      (flush_size_writeBits_le bwTables payloadBits.1 payloadBits.2)
+      hbitTables
+    let streamReaderFinal := BitWriter.readerAt streamWriter streamWriter.flush (by rfl)
+      (bitPos_lt_8_writeBits bwTables payloadBits.1 payloadBits.2 hbitTables)
+    decodeCompressedBlock fixedLitLenHuffman fixedDistHuffman payloadReaderStart ByteArray.empty =
+      some (streamReaderFinal, raw) := by
+  obtain ⟨spec, _hspec, hlit, hdist, hdecode⟩ := decodeCompressedBlock_dynamicStream_spec raw
+  simpa [hlit, hdist] using hdecode
 
 set_option maxRecDepth 400000 in
 set_option maxHeartbeats 6000000 in
@@ -243,32 +332,26 @@ lemma zlibDecompressLoop_deflateDynamicFast_stream (raw : ByteArray) :
     simpa [payloadBits, hdr0, hdrHeader, streamBits, streamLen, streamBitsFull, streamLenFull,
       collapsedWriter, streamReader0, streamReaderHeader] using
       dynamicStreamReader0_readBits3 raw
-  have htables :
-      readDynamicTables streamReaderHeader =
-        some (fixedLitLenHuffman, fixedDistHuffman, payloadReaderStart) := by
-    simpa [payloadBits, hdr0, hdrHeader, bwTables, streamWriter, streamBits, streamLen,
-      streamReaderHeader, payloadReaderStart] using
-      readDynamicTables_dynamicStream raw
   let streamReaderFinal := BitWriter.readerAt streamWriter streamWriter.flush (by rfl)
     (bitPos_lt_8_writeBits bwTables payloadBits.1 payloadBits.2 hbitTables)
-  have hdecode :
-      decodeCompressedBlock fixedLitLenHuffman fixedDistHuffman payloadReaderStart ByteArray.empty =
-        some (streamReaderFinal, raw) := by
-    simpa [payloadBits, hdr0, hdrHeader, bwTables, streamWriter, payloadReaderStart,
-      streamReaderFinal] using
-      decodeCompressedBlock_dynamicStream raw
-  have hbfinal : (5 % 2) = 1 := by decide
+  obtain ⟨spec, hspec, _hlit, _hdist, hdecode⟩ := decodeCompressedBlock_dynamicStream_spec raw
   have hcond : streamReader0.bitIndex + 3 ≤ streamReader0.data.size * 8 := by
     simpa [streamReader0, BitWriter.readerAt, hdr0, BitWriter.empty] using
       (readerAt_writeBits_bound (bw := hdr0) (bits := streamBitsFull) (len := streamLenFull)
         (k := 3) (hk := by omega) (hbit := by decide))
-  have hfuel :
-      streamReader0.data.size * 8 + 1 = Nat.succ (streamReader0.data.size * 8) := by
-    omega
   change zlibDecompressLoopFuel (streamReader0.data.size * 8 + 1) streamReader0 ByteArray.empty =
       some (streamReaderFinal, raw)
-  rw [hfuel, zlibDecompressLoopFuel]
-  simp [hcond, hread3, hbfinal, htables, hdecode]
+  simpa [payloadBits, hdr0, hdrHeader, bwTables, streamWriter, streamBits, streamLen,
+    streamBitsFull, streamLenFull, collapsedWriter, streamReader0, streamReaderHeader,
+    payloadReaderStart, streamReaderFinal] using
+    (zlibDecompressLoopFuel_step_dynamic_final_of_spec
+      (fuel := streamReader0.data.size * 8)
+      (br := streamReader0) (brHeader := streamReaderHeader)
+      (brPayload := payloadReaderStart) (brFinal := streamReaderFinal)
+      (out := ByteArray.empty) (out' := raw) (spec := spec)
+      hcond hread3 hspec
+      (by simpa [payloadBits, hdr0, hdrHeader, bwTables, streamWriter, payloadReaderStart,
+          streamReaderFinal] using hdecode))
 
 end Lemmas
 

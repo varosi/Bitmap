@@ -917,6 +917,10 @@ structure Huffman where
   table : Array (Array (Option Nat))
 deriving Repr, DecidableEq
 
+/-- Represents the valid DEFLATE edge case where a dynamic block has no distance codes at all. -/
+def emptyHuffman : Huffman :=
+  { maxLen := 0, table := #[#[]] }
+
 def mkHuffman (lengths : Array Nat) : Option Huffman := do
   let mut maxLen := 0
   for l in lengths do
@@ -941,6 +945,8 @@ def mkHuffman (lengths : Array Nat) : Option Huffman := do
     let len := lengths[idx]!
     if len > 0 then
       let codeVal := nextCode[len]!
+      if codeVal >= (1 <<< len) then
+        none
       nextCode := nextCode.set! len (codeVal + 1)
       let rev := reverseBits codeVal len
       let row := table[len]!
@@ -949,6 +955,20 @@ def mkHuffman (lengths : Array Nat) : Option Huffman := do
       let row' := row.set! rev (some idx)
       table := table.set! len row'
   return { maxLen, table }
+
+/-- Detects the dynamic-table special case where every advertised code length is zero. -/
+def allZeroCodeLengths (lengths : Array Nat) : Bool :=
+  lengths.toList.all (fun len => len == 0)
+
+/-- Builds the dynamic distance table at the parser boundary, including literal-only blocks. -/
+def buildDynamicDistTable (distLengths : Array Nat) : Option Huffman :=
+  match mkHuffman distLengths with
+  | some table => some table
+  | none =>
+      if allZeroCodeLengths distLengths then
+        some emptyHuffman
+      else
+        none
 
 def Huffman.decodeFuel (h : Huffman) (fuel code len : Nat) (br : BitReader) :
     Option (Nat × BitReader) :=
@@ -1232,7 +1252,7 @@ def readDynamicTables (br : BitReader) : Option (Huffman × Huffman × BitReader
   let litLenLengths := lengths.extract 0 hlit
   let distLengths := lengths.extract hlit (hlit + hdist)
   let litLenTable ← mkHuffman litLenLengths
-  let distTable ← mkHuffman distLengths
+  let distTable ← buildDynamicDistTable distLengths
   return (litLenTable, distTable, brCur)
 
 def fixedLitLenRow7 : Array (Option Nat) :=
