@@ -3,6 +3,8 @@
 ## Project Documentation
 
 - The main project description is in `README.md` at the repository root.
+- If a change affects PNG encoder or decoder feature support — adding or removing a color type, bit depth, filter type, compression mode, chunk, or any item in the "Not supported" list — update the "Supported PNG features" section of `README.md` in the same commit.
+- If a change affects proof coverage — adding or removing a top-level correctness theorem, or changing what "PNG encode/decode round-trip is proved" means in scope — update the proofs bullet list at the top of `README.md` in the same commit.
 
 ## Testing
 
