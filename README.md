@@ -61,15 +61,15 @@ which the library carries full round-trip correctness proofs.
 | Compression | `inflateStored` tried first, then fixed- and dynamic-Huffman zlib streams (full `HLIT`/`HDIST`/`HCLEN` + code-length-code + literal/length and distance tables) |
 | LZ77 | Length codes 257–285 and distance codes 0–29 with extra bits; `copyDistance` supports overlap (distance < length) |
 | Color conversion | RGB PNGs can be decoded into `BitmapRGBA8` (fills α = 255) and RGBA PNGs into `BitmapRGB8` (drops alpha) |
-| PNG structure | 8-byte signature, `IHDR` + `IDAT` + `IEND`, rejects compression/filter method ≠ 0 and interlace ≠ 0 |
-| Integrity | Adler-32 verified at end of stream; chunk layout enforced by length bounds |
+| PNG structure | 8-byte signature, `IHDR` first, consecutive `IDAT`, `IEND` last, required `PLTE` ordering checks, rejects unknown critical chunks, compression/filter method ≠ 0, and interlace ≠ 0 |
+| Integrity | CRC-32 verified for every parsed chunk, Adler-32 verified at end of stream; chunk layout enforced by length bounds |
 
 ### Not supported
 
 - Bit depths other than 8 (1, 2, 4, 16)
 - Color type 3 (palette / `PLTE`) and color type 4 (gray + alpha)
 - Adam7 interlacing
-- Ancillary chunks (`tRNS`, `gAMA`, `sRGB`, `cHRM`, `pHYs`, `tEXt`, `zTXt`, `iTXt`, `sBIT`, `bKGD`, `hIST`, `sPLT`, `tIME`)
+- Ancillary chunk semantics (`tRNS`, `gAMA`, `sRGB`, `cHRM`, `pHYs`, `tEXt`, `zTXt`, `iTXt`, `sBIT`, `bKGD`, `hIST`, `sPLT`, `tIME`) — structurally valid ancillary chunks are ignored
 - Encoder-side filter selection (always emits filter 0)
 - Genuinely-distinct dynamic-Huffman encoding — `.dynamic` emits a dynamic-block header but delegates the deflate payload to fixed-Huffman
 

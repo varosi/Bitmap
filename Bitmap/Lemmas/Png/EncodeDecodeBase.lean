@@ -1416,6 +1416,35 @@ lemma mkChunk_extract_data (typ : String) (data : ByteArray) (htyp : typ.utf8Byt
         (i := data.size) rfl)
   simpa [h1, h2]
 
+/-- Exposes the chunk CRC trailer for `readChunk` proofs.
+It extracts the final four bytes of an encoded PNG chunk. -/
+lemma mkChunk_extract_crc (typ : String) (data : ByteArray) (htyp : typ.utf8ByteSize = 4) :
+    (mkChunk typ data).extract (8 + data.size) (12 + data.size) =
+      u32be (crc32Chunk typ.toUTF8 data).toNat := by
+  have hlen : (u32be data.size).size = 4 := u32be_size _
+  have htyp' : typ.toUTF8.size = 4 := by
+    simpa [String.toUTF8_eq_toByteArray, String.size_toByteArray] using htyp
+  have hprefix : (u32be data.size ++ typ.toUTF8 ++ data).size = 8 + data.size := by
+    simp [ByteArray.size_append, hlen, String.toUTF8_eq_toByteArray,
+      String.size_toByteArray, htyp, Nat.add_comm]
+  have h1 :
+      (mkChunk typ data).extract (8 + data.size) (12 + data.size) =
+        (u32be (crc32Chunk typ.toUTF8 data).toNat).extract 0 4 := by
+    simpa [mkChunk, mkChunkBytes_def, hprefix, ByteArray.append_assoc,
+      String.toUTF8_eq_toByteArray, String.size_toByteArray, htyp,
+      Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using
+      (ByteArray.extract_append_size_add
+        (a := u32be data.size ++ typ.toUTF8 ++ data)
+        (b := u32be (crc32Chunk typ.toUTF8 data).toNat)
+        (i := 0) (j := 4))
+  have h2 :
+      (u32be (crc32Chunk typ.toUTF8 data).toNat).extract 0 4 =
+        u32be (crc32Chunk typ.toUTF8 data).toNat := by
+    have hsize : (u32be (crc32Chunk typ.toUTF8 data).toNat).size = 4 := u32be_size _
+    rw [← hsize]
+    exact ByteArray.extract_zero_size
+  simpa [h1, h2]
+
 -- The IHDR length field in the encoded PNG is 13.
 lemma encodeBitmap_extract_ihdr_len {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
     (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
@@ -1905,6 +1934,194 @@ lemma encodeBitmap_size {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
         Nat.add_comm]
       omega
 
+/-- Supplies the CRC equality needed by `readChunk` for encoded IHDR chunks.
+It reads the IHDR trailer and identifies it with the computed chunk CRC. -/
+lemma readU32BE_encodeBitmap_ihdr_crc {px : Type u} [Pixel px] [PngPixel px]
+    (bmp : Bitmap px) (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (mode : PngEncodeMode := .stored)
+    (h : 29 + 3 < (encodeBitmap bmp hw hh mode).size) :
+    readU32BE (encodeBitmap bmp hw hh mode) 29 h =
+      (crc32Chunk "IHDR".toUTF8
+        (u32be bmp.size.width ++ u32be bmp.size.height ++
+          ihdrTailColor (PngPixel.colorType (α := px)))).toNat := by
+  let ihdr :=
+    u32be bmp.size.width ++ u32be bmp.size.height ++
+      ihdrTailColor (PngPixel.colorType (α := px))
+  let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
+  have hsig : pngSignature.size = 8 := pngSignature_size
+  have hihdr : ihdr.size = 13 := by
+    simpa [ihdr] using ihdr_payload_size bmp.size.width bmp.size.height (PngPixel.colorType (α := px))
+  have hchunk_ge : 25 ≤ (mkChunk "IHDR" ihdr).size := by
+    have hsize : (mkChunk "IHDR" ihdr).size = ihdr.size + "IHDR".utf8ByteSize + 8 :=
+      mkChunk_size _ _
+    calc
+      25 ≤ ihdr.size + "IHDR".utf8ByteSize + 8 := by
+        simp [hihdr, ihdr_utf8ByteSize]
+      _ = (mkChunk "IHDR" ihdr).size := by simp [hsize]
+  have hextract :
+      (encodeBitmap bmp hw hh mode).extract 29 33 =
+        u32be (crc32Chunk "IHDR".toUTF8 ihdr).toNat := by
+    have hshift :
+        (encodeBitmap bmp hw hh mode).extract 29 33 =
+          (mkChunk "IHDR" ihdr ++ mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty).extract
+            21 25 := by
+      simpa [encodeBitmap, hsig, idat, encodeBitmapIdat, ihdr] using
+        (ByteArray.extract_append_size_add
+          (a := pngSignature)
+          (b := mkChunk "IHDR" ihdr ++ mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty)
+          (i := 21) (j := 25))
+    have hleft :
+        (mkChunk "IHDR" ihdr ++ mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty).extract
+            21 25 =
+          (mkChunk "IHDR" ihdr).extract 21 25 := by
+      simpa using
+        (byteArray_extract_append_left
+          (a := mkChunk "IHDR" ihdr)
+          (b := mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty)
+          (i := 21) (j := 25)
+          (hi := by omega) (hj := hchunk_ge))
+    have hcrc : (mkChunk "IHDR" ihdr).extract 21 25 =
+        u32be (crc32Chunk "IHDR".toUTF8 ihdr).toNat := by
+      simpa [hihdr] using mkChunk_extract_crc "IHDR" ihdr ihdr_utf8ByteSize
+    simp [hshift, hleft, hcrc]
+  exact readU32BE_of_extract_eq (bytes := encodeBitmap bmp hw hh mode) (pos := 29)
+    (n := (crc32Chunk "IHDR".toUTF8 ihdr).toNat) h hextract
+    (by simpa using (UInt32.toNat_lt (crc32Chunk "IHDR".toUTF8 ihdr)))
+
+/-- Supplies the CRC equality needed by `readChunk` for encoded IDAT chunks.
+It reads the IDAT trailer and identifies it with the computed chunk CRC. -/
+lemma readU32BE_encodeBitmap_idat_crc {px : Type u} [Pixel px] [PngPixel px]
+    (bmp : Bitmap px) (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (mode : PngEncodeMode := .stored)
+    (h : 41 + (encodeBitmapIdat (bmp := bmp) (mode := mode)).size + 3 <
+      (encodeBitmap bmp hw hh mode).size) :
+    readU32BE (encodeBitmap bmp hw hh mode)
+        (41 + (encodeBitmapIdat (bmp := bmp) (mode := mode)).size) h =
+      (crc32Chunk "IDAT".toUTF8 (encodeBitmapIdat (bmp := bmp) (mode := mode))).toNat := by
+  let ihdr :=
+    u32be bmp.size.width ++ u32be bmp.size.height ++
+      ihdrTailColor (PngPixel.colorType (α := px))
+  let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
+  let sigIhdr := pngSignature ++ mkChunk "IHDR" ihdr
+  let tail := mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty
+  have hsig : sigIhdr.size = 33 := by
+    simpa [sigIhdr, ihdr] using encodeBitmap_sig_ihdr_size (bmp := bmp)
+  have hdef : encodeBitmap bmp hw hh mode = sigIhdr ++ tail := by
+    simp [encodeBitmap, sigIhdr, tail, ihdr, idat, ihdrTailColor,
+      encodeBitmapIdat, ByteArray.append_assoc, Id.run]
+    rfl
+  have hchunk_ge : 12 + idat.size ≤ (mkChunk "IDAT" idat).size := by
+    have hsize : (mkChunk "IDAT" idat).size = idat.size + "IDAT".utf8ByteSize + 8 :=
+      mkChunk_size _ _
+    calc
+      12 + idat.size ≤ idat.size + "IDAT".utf8ByteSize + 8 := by
+        rw [idat_utf8ByteSize]
+        omega
+      _ = (mkChunk "IDAT" idat).size := by simp [hsize]
+  have hextract :
+      (encodeBitmap bmp hw hh mode).extract (41 + idat.size) (41 + idat.size + 4) =
+        u32be (crc32Chunk "IDAT".toUTF8 idat).toNat := by
+    have hshift :
+        (encodeBitmap bmp hw hh mode).extract (sigIhdr.size + (8 + idat.size))
+            (sigIhdr.size + (12 + idat.size)) =
+          tail.extract (8 + idat.size) (12 + idat.size) := by
+      simpa [hdef] using
+        (ByteArray.extract_append_size_add
+          (a := sigIhdr) (b := tail) (i := 8 + idat.size) (j := 12 + idat.size))
+    have hleft :
+        tail.extract (8 + idat.size) (12 + idat.size) =
+          (mkChunk "IDAT" idat).extract (8 + idat.size) (12 + idat.size) := by
+      simpa [tail] using
+        (byteArray_extract_append_left
+          (a := mkChunk "IDAT" idat) (b := mkChunk "IEND" ByteArray.empty)
+          (i := 8 + idat.size) (j := 12 + idat.size)
+          (hi := by omega) (hj := hchunk_ge))
+    have hcrc :
+        (mkChunk "IDAT" idat).extract (8 + idat.size) (12 + idat.size) =
+          u32be (crc32Chunk "IDAT".toByteArray idat).toNat := by
+      simpa [String.toUTF8_eq_toByteArray] using
+        mkChunk_extract_crc "IDAT" idat idat_utf8ByteSize
+    have h41 : sigIhdr.size + (8 + idat.size) = 41 + idat.size := by omega
+    have h45 : sigIhdr.size + (12 + idat.size) = 45 + idat.size := by omega
+    have hend : 45 + idat.size = 41 + idat.size + 4 := by omega
+    have hmain :
+        (encodeBitmap bmp hw hh mode).extract (41 + idat.size) (45 + idat.size) =
+          u32be (crc32Chunk "IDAT".toByteArray idat).toNat := by
+      calc
+        (encodeBitmap bmp hw hh mode).extract (41 + idat.size) (45 + idat.size) =
+            tail.extract (8 + idat.size) (12 + idat.size) := by
+          simpa [h41, h45] using hshift
+        _ = (mkChunk "IDAT" idat).extract (8 + idat.size) (12 + idat.size) := hleft
+        _ = u32be (crc32Chunk "IDAT".toByteArray idat).toNat := hcrc
+    simpa [hend, String.toUTF8_eq_toByteArray] using hmain
+  have hpos : 41 + idat.size + 3 < (encodeBitmap bmp hw hh mode).size := by
+    simpa [idat] using h
+  exact readU32BE_of_extract_eq (bytes := encodeBitmap bmp hw hh mode)
+    (pos := 41 + idat.size) (n := (crc32Chunk "IDAT".toUTF8 idat).toNat)
+    hpos hextract (by simpa using (UInt32.toNat_lt (crc32Chunk "IDAT".toUTF8 idat)))
+
+/-- Supplies the CRC equality needed by `readChunk` for encoded IEND chunks.
+It reads the IEND trailer and identifies it with the computed chunk CRC. -/
+lemma readU32BE_encodeBitmap_iend_crc {px : Type u} [Pixel px] [PngPixel px]
+    (bmp : Bitmap px) (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (mode : PngEncodeMode := .stored)
+    (h : 53 + (encodeBitmapIdat (bmp := bmp) (mode := mode)).size + 3 <
+      (encodeBitmap bmp hw hh mode).size) :
+    readU32BE (encodeBitmap bmp hw hh mode)
+        (53 + (encodeBitmapIdat (bmp := bmp) (mode := mode)).size) h =
+      (crc32Chunk "IEND".toUTF8 ByteArray.empty).toNat := by
+  let ihdr :=
+    u32be bmp.size.width ++ u32be bmp.size.height ++
+      ihdrTailColor (PngPixel.colorType (α := px))
+  let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
+  let pre := pngSignature ++ mkChunk "IHDR" ihdr ++ mkChunk "IDAT" idat
+  let iend := mkChunk "IEND" ByteArray.empty
+  have hpre : pre.size = 45 + idat.size := by
+    have hsigIhdr : (pngSignature ++ mkChunk "IHDR" ihdr).size = 33 := by
+      simpa [ihdr] using encodeBitmap_sig_ihdr_size (bmp := bmp)
+    have hidat : (mkChunk "IDAT" idat).size = idat.size + 12 := by
+      have hsize : (mkChunk "IDAT" idat).size = idat.size + "IDAT".utf8ByteSize + 8 :=
+        mkChunk_size _ _
+      calc
+        (mkChunk "IDAT" idat).size = idat.size + "IDAT".utf8ByteSize + 8 := hsize
+        _ = idat.size + 12 := by simp [idat_utf8ByteSize]
+    simp [pre, ByteArray.size_append, hsigIhdr, hidat]
+    omega
+  have hdef : encodeBitmap bmp hw hh mode = pre ++ iend := by
+    simp [encodeBitmap, pre, iend, ihdr, idat, ihdrTailColor,
+      encodeBitmapIdat, ByteArray.append_assoc, Id.run]
+    rfl
+  have hextract :
+      (encodeBitmap bmp hw hh mode).extract (53 + idat.size) (53 + idat.size + 4) =
+        u32be (crc32Chunk "IEND".toUTF8 ByteArray.empty).toNat := by
+    have hshift :
+        (encodeBitmap bmp hw hh mode).extract (pre.size + 8) (pre.size + 12) =
+          iend.extract 8 12 := by
+      simpa [hdef] using
+        (ByteArray.extract_append_size_add (a := pre) (b := iend) (i := 8) (j := 12))
+    have hcrc :
+        iend.extract 8 12 = u32be (crc32Chunk "IEND".toByteArray ByteArray.empty).toNat := by
+      simpa [iend, String.toUTF8_eq_toByteArray] using
+        mkChunk_extract_crc "IEND" ByteArray.empty iend_utf8ByteSize
+    have h53 : pre.size + 8 = 53 + idat.size := by omega
+    have h57 : pre.size + 12 = 57 + idat.size := by omega
+    have hend : 57 + idat.size = 53 + idat.size + 4 := by omega
+    have hmain :
+        (encodeBitmap bmp hw hh mode).extract (53 + idat.size) (57 + idat.size) =
+          u32be (crc32Chunk "IEND".toByteArray ByteArray.empty).toNat := by
+      calc
+        (encodeBitmap bmp hw hh mode).extract (53 + idat.size) (57 + idat.size) =
+            iend.extract 8 12 := by
+          simpa [h53, h57] using hshift
+        _ = u32be (crc32Chunk "IEND".toByteArray ByteArray.empty).toNat := hcrc
+    simpa [hend, String.toUTF8_eq_toByteArray] using hmain
+  have hpos : 53 + idat.size + 3 < (encodeBitmap bmp hw hh mode).size := by
+    simpa [idat] using h
+  exact readU32BE_of_extract_eq (bytes := encodeBitmap bmp hw hh mode)
+    (pos := 53 + idat.size) (n := (crc32Chunk "IEND".toUTF8 ByteArray.empty).toNat)
+    hpos hextract
+    (by simpa using (UInt32.toNat_lt (crc32Chunk "IEND".toUTF8 ByteArray.empty)))
+
 -- Reading the IHDR chunk from an encoded bitmap yields its header payload.
 lemma readChunk_encodeBitmap_ihdr {px : Type u} [Pixel px] [PngPixel px]
     (bmp : Bitmap px) (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
@@ -1928,10 +2145,23 @@ lemma readChunk_encodeBitmap_ihdr {px : Type u} [Pixel px] [PngPixel px]
     have hsz' : 33 ≤ idat.size + 57 := by omega
     simp [hsize, hsz']
   have hcrcEnd : 8 + 8 + 13 + 4 = 33 := by omega
+  have hcrcPos : 29 + 3 < (encodeBitmap bmp hw hh mode).size := by
+    omega
+  have hcrcRead :
+      readU32BE (encodeBitmap bmp hw hh mode) 29 (by omega) =
+        (crc32Chunk "IHDR".toUTF8 ihdr).toNat := by
+    have hproof :=
+      readU32BE_proof_irrel (bytes := encodeBitmap bmp hw hh mode) (pos := 29)
+        (h1 := by omega) (h2 := hcrcPos)
+    exact hproof.trans
+      (readU32BE_encodeBitmap_ihdr_crc (bmp := bmp) (hw := hw) (hh := hh)
+        (mode := mode) (h := hcrcPos))
   unfold readChunk
   simp [hlenval, hcrc, hcrcEnd,
+    hcrcRead,
     encodeBitmap_extract_ihdr_type (bmp := bmp) (hw := hw) (hh := hh) (mode := mode),
-    encodeBitmap_extract_ihdr_data (bmp := bmp) (hw := hw) (hh := hh) (mode := mode)]
+    encodeBitmap_extract_ihdr_data (bmp := bmp) (hw := hw) (hh := hh) (mode := mode),
+    ihdr, String.toUTF8_eq_toByteArray]
 
 -- Reading the IDAT chunk from an encoded bitmap yields the compressed payload.
 lemma readChunk_encodeBitmap_idat {px : Type u} [Pixel px] [PngPixel px]
@@ -1953,11 +2183,23 @@ lemma readChunk_encodeBitmap_idat {px : Type u} [Pixel px] [PngPixel px]
     have hsz' : 45 + idat.size ≤ idat.size + 57 := by omega
     simpa [hsize] using hsz'
   have hcrcEnd : 33 + 8 + idat.size + 4 = 45 + idat.size := by omega
+  have hcrcPos : 41 + idat.size + 3 < (encodeBitmap bmp hw hh mode).size := by
+    omega
+  have hcrcRead :
+      readU32BE (encodeBitmap bmp hw hh mode) (41 + idat.size) (by omega) =
+        (crc32Chunk "IDAT".toUTF8 idat).toNat := by
+    have hproof :=
+      readU32BE_proof_irrel (bytes := encodeBitmap bmp hw hh mode) (pos := 41 + idat.size)
+        (h1 := by omega) (h2 := hcrcPos)
+    exact hproof.trans
+      (readU32BE_encodeBitmap_idat_crc (bmp := bmp) (hw := hw) (hh := hh)
+        (mode := mode) (h := by simpa [idat] using hcrcPos))
   unfold readChunk
   simp [hlenval, hcrc, hcrcEnd,
+    hcrcRead,
     encodeBitmap_extract_idat_type (bmp := bmp) (hw := hw) (hh := hh) (mode := mode),
     encodeBitmap_extract_idat_data (bmp := bmp) (hw := hw) (hh := hh) (mode := mode),
-    idat]
+    idat, String.toUTF8_eq_toByteArray]
 
 -- Reading the IEND chunk from an encoded bitmap yields an empty payload.
 lemma readChunk_encodeBitmap_iend {px : Type u} [Pixel px] [PngPixel px]
@@ -1983,10 +2225,20 @@ lemma readChunk_encodeBitmap_iend {px : Type u} [Pixel px] [PngPixel px]
   have htype : 45 + idat.size + 4 = 49 + idat.size := by omega
   have htypeEnd : 49 + idat.size + 4 = 53 + idat.size := by omega
   have hcrcEnd : 45 + idat.size + 8 + 4 = 57 + idat.size := by omega
+  have hcrcPos : 53 + idat.size + 3 < (encodeBitmap bmp hw hh mode).size := by
+    omega
+  have hcrcRead :
+      readU32BE (encodeBitmap bmp hw hh mode) (45 + idat.size + 8) (by omega) =
+        (crc32Chunk "IEND".toUTF8 ByteArray.empty).toNat := by
+    have hposEq : 45 + idat.size + 8 = 53 + idat.size := by omega
+    simpa [hposEq] using
+      (readU32BE_encodeBitmap_iend_crc (bmp := bmp) (hw := hw) (hh := hh)
+        (mode := mode) (h := by simpa [idat] using hcrcPos))
   unfold readChunk
   simp [hlenval, hcrc, htype, htypeEnd, hcrcEnd,
+    hcrcRead,
     encodeBitmap_extract_iend_type (bmp := bmp) (hw := hw) (hh := hh) (mode := mode),
-    idat]
+    idat, String.toUTF8_eq_toByteArray]
 
 -- Parsing an encoded bitmap with the simple PNG parser recovers the header and payload.
 set_option maxHeartbeats 5000000 in
@@ -2093,11 +2345,23 @@ lemma parsePngSimple_encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : 
       readU32BE_proof_irrel (bytes := ihdr) (pos := 4)
         (h1 := by simp [hlen']) (h2 := hpos4)
     exact hproof.trans hheight0
+  have hparseIHDR :
+      parseIHDRData ihdr =
+        some ({ width := w, height := h, colorType := ct.toNat, bitDepth := 8 } : PngHeader) := by
+    unfold parseIHDRData
+    simp [hlen', hwidth, hheight, hbitDepth, hctEq, hcomp, hfilter, hinterlace]
+  have hnotColorBad :
+      ¬ ((¬ct.toNat = 0 ∧ ¬ct.toNat = 2) ∧ ¬ct.toNat = 6) := by
+    rintro ⟨⟨h0, h2⟩, h6⟩
+    exact h6 (hctProp h0 h2)
+  have hend : 57 + idat.size = (encodeBitmap bmp hw hh mode).size := by
+    omega
   unfold parsePngSimple
   simp [hsig, hlen1, hlen2, hlen3, hread1, hread2, hread3,
     hsigNe, hihdrNeBA, hidatNeBA, hiendNeBA,
-    hlen', hbitDepth, hctEq, hcomp, hfilter, hinterlace,
-    hcolorOk, hwidth, hheight, w, h, ct, ihdr, idat]
+    hnotColorBad, hparseIHDR, hend,
+    w, h, ct, ihdr, idat,
+    ihdrTypeBytes, idatTypeBytes, iendTypeBytes, String.toUTF8_eq_toByteArray]
 
 -- Parsing an encoded bitmap with the full PNG parser yields the header and payload.
 lemma parsePng_encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)

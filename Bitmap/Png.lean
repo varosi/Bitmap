@@ -95,6 +95,7 @@ def pngSignature : ByteArray :=
 def ihdrTypeBytes : ByteArray := "IHDR".toUTF8
 def idatTypeBytes : ByteArray := "IDAT".toUTF8
 def iendTypeBytes : ByteArray := "IEND".toUTF8
+def plteTypeBytes : ByteArray := "PLTE".toUTF8
 
 def mkChunkBytes (typBytes : ByteArray) (data : ByteArray) : ByteArray :=
   let lenBytes := u32be data.size
@@ -1683,9 +1684,44 @@ def readChunk (bytes : ByteArray) (pos : Nat)
     let crcEnd := dataEnd + 4
     let typBytes := bytes.extract typeStart (typeStart + 4)
     let data := bytes.extract dataStart dataEnd
-    some (typBytes, data, crcEnd)
+    let crcExpected := readU32BE bytes dataEnd (by omega)
+    let crcActual := (crc32Chunk typBytes data).toNat
+    if crcExpected == crcActual then
+      some (typBytes, data, crcEnd)
+    else
+      none
   else
     none
+
+def parseIHDRData (data : ByteArray) : Option PngHeader := do
+  if hlen : data.size = 13 then
+    let w := readU32BE data 0 (by omega)
+    let h := readU32BE data 4 (by omega)
+    let tail := data.extract 8 13
+    let bitDepth := (tail.get! 0).toNat
+    let colorType := (tail.get! 1).toNat
+    let comp := (tail.get! 2).toNat
+    let filter := (tail.get! 3).toNat
+    let interlace := (tail.get! 4).toNat
+    if comp != 0 || filter != 0 || interlace != 0 then
+      none
+    return { width := w, height := h, colorType, bitDepth }
+  else
+    none
+
+def isCriticalChunkType (typBytes : ByteArray) : Bool :=
+  ((typBytes.get! 0).toNat &&& 0x20) == 0
+
+def plteAllowedForColorType (colorType : Nat) : Bool :=
+  colorType != 0 && colorType != 4
+
+structure PngParseState where
+  header : Option PngHeader
+  idat : ByteArray
+  seenPLTE : Bool
+  seenIDAT : Bool
+  closedIDAT : Bool
+deriving Repr
 
 def parsePngSimple (bytes : ByteArray) (_hsize : 8 <= bytes.size) :
     Option (PngHeader × ByteArray) := do
@@ -1695,49 +1731,36 @@ def parsePngSimple (bytes : ByteArray) (_hsize : 8 <= bytes.size) :
   if hLen1 : pos + 3 < bytes.size then
     match readChunk bytes pos hLen1 with
     | some (typ1, data1, pos2) =>
-        if typ1 != "IHDR".toUTF8 then
+        if typ1 != ihdrTypeBytes then
           none
-        if hlen : data1.size ≠ 13 then
+        let hdr ← parseIHDRData data1
+        if hdr.bitDepth != 8 then
           none
-        else
-          let hlen' : data1.size = 13 := by
-            exact not_ne_iff.mp hlen
-          let w := readU32BE data1 0 (by simp [hlen'])
-          let h := readU32BE data1 4 (by simp [hlen'])
-          let tail := data1.extract 8 13
-          let bitDepth := (tail.get! 0).toNat
-          let colorType := (tail.get! 1).toNat
-          let comp := (tail.get! 2).toNat
-          let filter := (tail.get! 3).toNat
-          let interlace := (tail.get! 4).toNat
-          if bitDepth != 8 then
-            none
-          if colorType != 0 && colorType != 2 && colorType != 6 then
-            none
-          if comp != 0 || filter != 0 || interlace != 0 then
-            none
-          let hdr : PngHeader := { width := w, height := h, colorType, bitDepth }
-          if hLen2 : pos2 + 3 < bytes.size then
-            match readChunk bytes pos2 hLen2 with
-            | some (typ2, data2, pos3) =>
-                if typ2 != "IDAT".toUTF8 then
-                  none
-                if hLen3 : pos3 + 3 < bytes.size then
-                  match readChunk bytes pos3 hLen3 with
-                  | some (typ3, data3, _) =>
-                      if typ3 != "IEND".toUTF8 then
-                        none
-                      if data3.size != 0 then
-                        none
-                      return (hdr, data2)
-                  | none =>
-                      none
-                else
-                  none
-            | none =>
+        if hdr.colorType != 0 && hdr.colorType != 2 && hdr.colorType != 6 then
+          none
+        if hLen2 : pos2 + 3 < bytes.size then
+          match readChunk bytes pos2 hLen2 with
+          | some (typ2, data2, pos3) =>
+              if typ2 != idatTypeBytes then
                 none
-          else
-            none
+              if hLen3 : pos3 + 3 < bytes.size then
+                match readChunk bytes pos3 hLen3 with
+                | some (typ3, data3, pos4) =>
+                    if typ3 != iendTypeBytes then
+                      none
+                    if data3.size != 0 then
+                      none
+                    if pos4 != bytes.size then
+                      none
+                    return (hdr, data2)
+                | none =>
+                    none
+              else
+                none
+          | none =>
+              none
+        else
+          none
     | none =>
         none
   else
@@ -1745,49 +1768,64 @@ def parsePngSimple (bytes : ByteArray) (_hsize : 8 <= bytes.size) :
 
 
 def parsePngLoopFuel (fuel : Nat) (bytes : ByteArray) (pos : Nat)
-    (header : Option PngHeader) (idat : ByteArray) : Option (PngHeader × ByteArray) :=
+    (state : PngParseState) : Option (PngHeader × ByteArray) :=
   match fuel with
   | 0 => none
   | fuel + 1 => do
-      if hpos : pos + 8 <= bytes.size then
+      if _hpos : pos + 8 <= bytes.size then
         if hLen : pos + 3 < bytes.size then
           let len := readU32BE bytes pos hLen
-          let dataStart := pos + 8
           match readChunk bytes pos hLen with
           | some (typBytes, chunkData, posNext) =>
-              if typBytes == "IHDR".toUTF8 then
-                if len != 13 then
-                  none
-                if hIH : dataStart + 12 < bytes.size then
-                  let w := readU32BE bytes dataStart (by omega)
-                  let h := readU32BE bytes (dataStart + 4) (by omega)
-                  let bitDepth := (bytes.get (dataStart + 8) (by omega)).toNat
-                  let colorType := (bytes.get (dataStart + 9) (by omega)).toNat
-                  let comp := (bytes.get (dataStart + 10) (by omega)).toNat
-                  let filter := (bytes.get (dataStart + 11) (by omega)).toNat
-                  let interlace := (bytes.get (dataStart + 12) (by omega)).toNat
-                  if comp != 0 || filter != 0 || interlace != 0 then
+              match state.header with
+              | none =>
+                  if typBytes == ihdrTypeBytes then
+                    if len != 13 then
+                      none
+                    let hdr ← parseIHDRData chunkData
+                    parsePngLoopFuel fuel bytes posNext { state with header := some hdr }
+                  else
                     none
-                  let header := some { width := w, height := h, colorType, bitDepth }
-                  parsePngLoopFuel fuel bytes posNext header idat
-                else
-                  none
-              else if typBytes == "IDAT".toUTF8 then
-                parsePngLoopFuel fuel bytes posNext header (idat ++ chunkData)
-              else if typBytes == "IEND".toUTF8 then
-                match header with
-                | none => none
-                | some h => some (h, idat)
-              else
-                parsePngLoopFuel fuel bytes posNext header idat
+              | some hdr =>
+                  if typBytes == ihdrTypeBytes then
+                    none
+                  else if typBytes == plteTypeBytes then
+                    if state.seenPLTE || state.seenIDAT then
+                      none
+                    if !plteAllowedForColorType hdr.colorType then
+                      none
+                    if chunkData.size % 3 != 0 then
+                      none
+                    parsePngLoopFuel fuel bytes posNext { state with seenPLTE := true }
+                  else if typBytes == idatTypeBytes then
+                    if state.closedIDAT then
+                      none
+                    if hdr.colorType == 3 && !state.seenPLTE then
+                      none
+                    parsePngLoopFuel fuel bytes posNext
+                      { state with
+                          idat := state.idat ++ chunkData
+                          seenIDAT := true }
+                  else if typBytes == iendTypeBytes then
+                    if chunkData.size != 0 then
+                      none
+                    if !state.seenIDAT then
+                      none
+                    if posNext != bytes.size then
+                      none
+                    some (hdr, state.idat)
+                  else if isCriticalChunkType typBytes then
+                    none
+                  else if state.seenIDAT then
+                    parsePngLoopFuel fuel bytes posNext { state with closedIDAT := true }
+                  else
+                    parsePngLoopFuel fuel bytes posNext state
           | none =>
               none
         else
           none
       else
-        match header with
-        | none => none
-        | some h => some (h, idat)
+        none
 
 def parsePng (bytes : ByteArray) (_hsize : 8 <= bytes.size) :
     Option (PngHeader × ByteArray) := do
@@ -1795,7 +1833,12 @@ def parsePng (bytes : ByteArray) (_hsize : 8 <= bytes.size) :
     return res
   if bytes.extract 0 8 != pngSignature then
     none
-  parsePngLoopFuel (bytes.size + 1) bytes 8 none ByteArray.empty
+  parsePngLoopFuel (bytes.size + 1) bytes 8
+    { header := none
+      idat := ByteArray.empty
+      seenPLTE := false
+      seenIDAT := false
+      closedIDAT := false }
 
 def paethPredictor (a b c : Nat) : Nat :=
   let p : Int := (a : Int) + (b : Int) - (c : Int)
