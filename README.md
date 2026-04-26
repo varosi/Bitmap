@@ -2,9 +2,13 @@
 
 Lean 4 bitmap image utilities with PNG encode/decode support, plus a small widget for visualization.
 
-This library have proofs about:
+This library has proofs about:
 - putPixel and getPixel correspondence (Bitmap.Lemmas.putPixel_getPixel);
 - PNG format encode and decode correspondence (Bitmap.Lemmas.decodeBitmap_encodeBitmap);
+- dynamic DEFLATE decoder correctness for proof-specified dynamic table reads,
+  payload traces, dynamic-only multi-block streams, and zlib envelopes
+  (`dynamicTableReaderSpec_readDynamicTables`, `dynamicPayloadTrace_decode_correct`,
+  `dynamicDeflateStreamSpec_decode_correct`, `zlibDecompress_dynamicStreamSpec_correct`);
 - there are no buffer overflows;
 - PNG encode and decode are total functions.
 
@@ -14,18 +18,19 @@ The PNG round-trip proofs are encoder-to-decoder proofs for streams produced by 
 library. They do not yet prove that the decoder accepts every valid PNG file or every
 valid zlib/DEFLATE stream produced by another implementation.
 
-In particular, the dynamic DEFLATE proof currently covers the concrete dynamic block
-shape emitted by the library's dynamic-fast encoder: a dynamic block header whose
-Huffman tables reconstruct the fixed literal/length and distance tables, followed by
-the proven fixed-style payload. This exercises the dynamic table reader and dynamic
-block dispatch, but it is not a full DEFLATE specification proof for arbitrary valid
-dynamic Huffman tables, all valid code-length repeat encodings, or all valid dynamic
-multi-block streams.
+The dynamic DEFLATE proof now has a generic operational spec layer: successful
+`readDynamicTablesSpec?` parses project to the runtime table reader, any validated
+`DynamicPayloadTrace` decodes to the specified bytes, `DynamicDeflateStreamSpec`
+covers dynamic-only multi-block streams through `BFINAL`, and
+`ZlibDynamicStreamSpec` adds the zlib header and Adler-32 trailer checks. The
+concrete dynamic-fast encoder proof is a regression client of that generic layer.
 
-Runtime decoding is broader than the current proof boundary: the decoder has a
-general dynamic-table reader and compressed-block loop. The missing work is a formal
-specification of arbitrary valid dynamic DEFLATE streams and a proof that the runtime
-decoder implements that specification.
+This is still not a standalone RFC-1951 grammar/completeness theorem independent of
+the runtime parser, nor a single mixed stored/fixed/dynamic block-stream theorem.
+The proof-level dynamic table boundary delegates bit-level header parsing to
+`readDynamicTables`; runtime tests cover code-length repeats `16`, `17`, and `18`,
+repeat overflow shape, literal-only zero-distance blocks, LZ77 matches, and dynamic
+multi-block fixtures.
 
 ## Supported PNG features
 

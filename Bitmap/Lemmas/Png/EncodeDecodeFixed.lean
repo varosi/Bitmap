@@ -534,17 +534,6 @@ lemma zlibDecompress_zlibCompressFixed (raw : ByteArray)
   -- close the final Adler check
   simp [hAdlerPos', hread, bytes]
 
--- Zlib decompression of dynamic-compression output yields the original bytes.
-lemma zlibDecompress_zlibCompressDynamic (raw : ByteArray)
-    (hsize : 2 ≤ (zlibCompressDynamic raw).size) :
-    zlibDecompress (zlibCompressDynamic raw) hsize = some raw := by
-  have hz : zlibCompressDynamic raw = zlibCompressFixed raw := by
-    rfl
-  have hsizeFixed : 2 ≤ (zlibCompressFixed raw).size := by
-    simpa [hz] using hsize
-  simpa [hz] using
-    (zlibDecompress_zlibCompressFixed (raw := raw) (hsize := hsizeFixed))
-
 end Lemmas
 
 end Bitmaps

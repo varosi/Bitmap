@@ -1047,17 +1047,6 @@ lemma zlibDecompressStored_zlibCompressFixed_none (raw : ByteArray)
   unfold zlibDecompressStored
   simp [bytes, hcmf, hflg, hmin, hinflate, hmod, hbtype, hflg0]
 
--- Stored-only zlib decompressor rejects dynamic-compression streams.
-lemma zlibDecompressStored_zlibCompressDynamic_none (raw : ByteArray)
-    (hsize : 2 ≤ (zlibCompressDynamic raw).size) :
-    zlibDecompressStored (zlibCompressDynamic raw) hsize = none := by
-  have hz : zlibCompressDynamic raw = zlibCompressFixed raw := by
-    rfl
-  have hsizeFixed : 2 ≤ (zlibCompressFixed raw).size := by
-    simpa [hz] using hsize
-  simpa [hz] using
-    (zlibDecompressStored_zlibCompressFixed_none (raw := raw) (hsize := hsizeFixed))
-
 -- Zlib header bytes in stored-compression output match the expected constants.
 lemma zlibCompressStored_cmf_flg (raw : ByteArray) :
     let bytes := zlibCompressStored raw

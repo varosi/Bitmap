@@ -695,8 +695,7 @@ def deflateDynamicFast (raw : ByteArray) : ByteArray :=
   bw8.flush
 
 def deflateDynamic (raw : ByteArray) : ByteArray :=
-  -- Specification-level fallback used by proofs.
-  deflateFixed raw
+  deflateDynamicFast raw
 
 def zlibCompressFixed (raw : ByteArray) : ByteArray :=
   let header := ByteArray.mk #[u8 0x78, u8 0x01]

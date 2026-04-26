@@ -164,10 +164,21 @@ lemma dynamicCodeLenHuffman_decode_readerAt_writeBits_code
   have hidxEq : code % 2 ||| ((code / 2) <<< 1) = code := by
     have hcases : code = 0 ∨ code = 1 ∨ code = 2 ∨ code = 3 := by omega
     rcases hcases with rfl | rfl | rfl | rfl <;> decide
+  have hlookup : [some 5, some 8, some 7, some 9][code] = some sym := by
+    simpa [dynamicCodeLenHuffman] using hsym
   have hdecode :
       dynamicCodeLenHuffman.decode br = some (sym, br2) := by
     unfold Huffman.decode
-    simp [Huffman.decodeFuel, dynamicCodeLenHuffman, hbr, hbr1, hread0, hread1, hsym, hidxEq, hcode]
+    simp [Huffman.decodeFuel, dynamicCodeLenHuffman, hbr, hbr1, hread0, hread1, hidxEq, hcode]
+    cases hcase : [some 5, some 8, some 7, some 9][code] with
+    | none =>
+        rw [hlookup] at hcase
+        cases hcase
+    | some val =>
+        rw [hlookup] at hcase
+        injection hcase with hval
+        subst hval
+        simp
   simpa [br2, br, bw', bitsTot, lenTot] using hdecode
 
 /-- Packages the four concrete symbol decoders into the single case split needed downstream. -/

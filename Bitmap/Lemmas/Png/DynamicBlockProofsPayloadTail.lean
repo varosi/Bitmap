@@ -12,6 +12,197 @@ namespace Png
 set_option linter.unnecessarySimpa false
 set_option linter.unusedSimpArgs false
 
+set_option maxRecDepth 200000 in
+/-- Decodes a low fixed literal through the generic Huffman decoder used by dynamic blocks. -/
+lemma fixedLitLenHuffman_decode_readerAt_writeBits_lo
+    (bw : BitWriter) (sym : Nat) (restBits restLen : Nat)
+    (h143 : sym ≤ 143) (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let codeLen := fixedLitLenCode sym
+    let code := codeLen.1
+    let len := codeLen.2
+    let bits := reverseBits code len
+    let bitsTot := bits ||| (restBits <<< len)
+    let lenTot := len + restLen
+    let bw' := BitWriter.writeBits bw bitsTot lenTot
+    let br := BitWriter.readerAt bw bw'.flush (flush_size_writeBits_le bw bitsTot lenTot) hbit
+    fixedLitLenHuffman.decode br =
+      some (sym,
+        BitWriter.readerAt (BitWriter.writeBits bw bitsTot len) bw'.flush
+          (by
+            have hk : len ≤ lenTot := by omega
+            simpa [lenTot] using (flush_size_writeBits_prefix bw bitsTot len lenTot hk))
+          (bitPos_lt_8_writeBits bw bitsTot len hbit)) := by
+  have hcode : fixedLitLenCode sym = (sym + 48, 8) := fixedLitLenCode_lo sym h143
+  let code := sym + 48
+  let bits := reverseBits code 8
+  let bitsTot := bits ||| (restBits <<< 8)
+  have hbits7_eq : bitsTot % 2 ^ 7 = bits % 2 ^ 7 := by
+    simpa [bitsTot] using (mod_two_pow_or_shift bits restBits 7 8 (by decide))
+  have hbits7_lt : bitsTot % 2 ^ 7 < fixedLitLenRow7.size := by
+    have hlt : bits % 2 ^ 7 < 2 ^ 7 := Nat.mod_lt _ (by decide)
+    simpa [hbits7_eq, fixedLitLenRow7_size, Nat.shiftLeft_eq] using hlt
+  have hcode8 : code < 2 ^ 8 := by
+    have hlt : code < 192 := by omega
+    have hle : 192 ≤ 2 ^ 8 := by decide
+    exact lt_of_lt_of_le hlt hle
+  have hrev7 : reverseBits (bits % 2 ^ 7) 7 = code >>> 1 := by
+    simpa [bits] using
+      (reverseBits_prefix_shift (code := code) (len := 8) (k := 7) hcode8 (by decide))
+  have hrev7' : reverseBits (bitsTot % 2 ^ 7) 7 = code >>> 1 := by
+    simpa [hbits7_eq] using hrev7
+  have h24 : 24 ≤ code >>> 1 := by
+    have hdiv : 24 ≤ code / 2 := by
+      have h48 : 48 ≤ code := by omega
+      exact (Nat.le_div_iff_mul_le (by decide : 0 < (2 : Nat))).2
+        (by simpa [Nat.mul_comm] using h48)
+    simpa [Nat.shiftRight_eq_div_pow] using hdiv
+  have hrow7 : fixedLitLenRow7[bitsTot % 2 ^ 7]'hbits7_lt = none := by
+    have h24' : 24 ≤ reverseBits (bitsTot % 2 ^ 7) 7 := by
+      simpa [hrev7'] using h24
+    exact fixedLitLenRow7_get_none_of_ge (bits := bitsTot % 2 ^ 7) hbits7_lt h24'
+  have hrow7? : fixedLitLenRow7[bitsTot % 2 ^ 7]? = some none := by
+    simp [hbits7_lt, hrow7]
+  have hbits8_eq' : bitsTot % 2 ^ 8 = bits := by
+    have hlt : bits < 2 ^ 8 := by simpa [bits] using (reverseBits_lt code 8)
+    have hmod' : bits % 2 ^ 8 = bits := Nat.mod_eq_of_lt hlt
+    have hmod := mod_two_pow_or_shift bits restBits 8 8 (by decide)
+    simpa [bitsTot, hmod'] using hmod
+  have hbits8_lt : bitsTot % 2 ^ 8 < fixedLitLenRow8.size := by
+    have hlt : bits < 2 ^ 8 := by simpa [bits] using (reverseBits_lt code 8)
+    have hlt' : bitsTot % 2 ^ 8 < 2 ^ 8 := by
+      simpa [hbits8_eq', bitsTot] using hlt
+    simpa [fixedLitLenRow8_size, Nat.shiftLeft_eq] using hlt'
+  have hrow8 : fixedLitLenRow8[bitsTot % 2 ^ 8]'hbits8_lt = some sym := by
+    have hrow := fixedLitLenCode_row_lo (sym := sym) h143
+    simpa [code, bits, hbits8_eq'] using hrow
+  have hrow8? : fixedLitLenRow8[bitsTot % 2 ^ 8]? = some (some sym) := by
+    simp [hbits8_lt, hrow8]
+  have h := fixedLitLenHuffman_decode_readerAt_writeBits_len8_core
+    (bw := bw) (sym := sym) (bitsTot := bitsTot) (restLen := restLen)
+    hrow7? hrow8? hbit hcur
+  simpa [hcode, code, bits, bitsTot] using h
+
+set_option maxRecDepth 200000 in
+/-- Decodes a middle fixed literal through the generic Huffman decoder used by dynamic blocks. -/
+lemma fixedLitLenHuffman_decode_readerAt_writeBits_mid
+    (bw : BitWriter) (sym : Nat) (restBits restLen : Nat)
+    (h144 : 144 ≤ sym) (h255 : sym ≤ 255) (hbit : bw.bitPos < 8)
+    (hcur : bw.curClearAbove) :
+    let codeLen := fixedLitLenCode sym
+    let code := codeLen.1
+    let len := codeLen.2
+    let bits := reverseBits code len
+    let bitsTot := bits ||| (restBits <<< len)
+    let lenTot := len + restLen
+    let bw' := BitWriter.writeBits bw bitsTot lenTot
+    let br := BitWriter.readerAt bw bw'.flush (flush_size_writeBits_le bw bitsTot lenTot) hbit
+    fixedLitLenHuffman.decode br =
+      some (sym,
+        BitWriter.readerAt (BitWriter.writeBits bw bitsTot len) bw'.flush
+          (by
+            have hk : len ≤ lenTot := by omega
+            simpa [lenTot] using (flush_size_writeBits_prefix bw bitsTot len lenTot hk))
+          (bitPos_lt_8_writeBits bw bitsTot len hbit)) := by
+  have hcode : fixedLitLenCode sym = (sym - 144 + 400, 9) :=
+    fixedLitLenCode_mid sym h144 h255
+  let code := sym - 144 + 400
+  let bits := reverseBits code 9
+  let bitsTot := bits ||| (restBits <<< 9)
+  have hbits7_eq : bitsTot % 2 ^ 7 = bits % 2 ^ 7 := by
+    simpa [bitsTot] using (mod_two_pow_or_shift bits restBits 7 9 (by decide))
+  have hbits7_lt : bitsTot % 2 ^ 7 < fixedLitLenRow7.size := by
+    have hlt : bits % 2 ^ 7 < 2 ^ 7 := Nat.mod_lt _ (by decide)
+    simpa [hbits7_eq, fixedLitLenRow7_size, Nat.shiftLeft_eq] using hlt
+  have hcode9 : code < 2 ^ 9 := by
+    have hlt : code < 512 := by omega
+    have hle : 512 ≤ 2 ^ 9 := by decide
+    exact lt_of_lt_of_le hlt hle
+  have hrev7 : reverseBits (bits % 2 ^ 7) 7 = code >>> 2 := by
+    simpa [bits] using
+      (reverseBits_prefix_shift (code := code) (len := 9) (k := 7) hcode9 (by decide))
+  have hrev7' : reverseBits (bitsTot % 2 ^ 7) 7 = code >>> 2 := by
+    simpa [hbits7_eq] using hrev7
+  have h24 : 24 ≤ code >>> 2 := by
+    have hdiv : 24 ≤ code / 4 := by
+      have h96 : 96 ≤ code := by omega
+      exact (Nat.le_div_iff_mul_le (by decide : 0 < (4 : Nat))).2
+        (by simpa [Nat.mul_comm] using h96)
+    simpa [Nat.shiftRight_eq_div_pow] using hdiv
+  have hrow7 : fixedLitLenRow7[bitsTot % 2 ^ 7]'hbits7_lt = none := by
+    have h24' : 24 ≤ reverseBits (bitsTot % 2 ^ 7) 7 := by
+      simpa [hrev7'] using h24
+    exact fixedLitLenRow7_get_none_of_ge (bits := bitsTot % 2 ^ 7) hbits7_lt h24'
+  have hrow7? : fixedLitLenRow7[bitsTot % 2 ^ 7]? = some none := by
+    simp [hbits7_lt, hrow7]
+  have hbits8_eq' : bitsTot % 2 ^ 8 = bits % 2 ^ 8 := by
+    simpa [bitsTot] using (mod_two_pow_or_shift bits restBits 8 9 (by decide))
+  have hbits8_lt : bitsTot % 2 ^ 8 < fixedLitLenRow8.size := by
+    have hlt : bits % 2 ^ 8 < 2 ^ 8 := Nat.mod_lt _ (by decide)
+    simpa [hbits8_eq', fixedLitLenRow8_size, Nat.shiftLeft_eq] using hlt
+  have hrev8 : reverseBits (bits % 2 ^ 8) 8 = code >>> 1 := by
+    simpa [bits] using
+      (reverseBits_prefix_shift (code := code) (len := 9) (k := 8) hcode9 (by decide))
+  have hrev8' : reverseBits (bitsTot % 2 ^ 8) 8 = code >>> 1 := by
+    simpa [hbits8_eq'] using hrev8
+  have h200 : 200 ≤ code >>> 1 := by
+    have hdiv : 200 ≤ code / 2 := by
+      have h400 : 400 ≤ code := by omega
+      exact (Nat.le_div_iff_mul_le (by decide : 0 < (2 : Nat))).2
+        (by simpa [Nat.mul_comm] using h400)
+    simpa [Nat.shiftRight_eq_div_pow] using hdiv
+  have hrow8 : fixedLitLenRow8[bitsTot % 2 ^ 8]'hbits8_lt = none := by
+    have h200' : 200 ≤ reverseBits (bitsTot % 2 ^ 8) 8 := by
+      simpa [hrev8'] using h200
+    exact fixedLitLenRow8_get_none_of_ge (bits := bitsTot % 2 ^ 8) hbits8_lt h200'
+  have hrow8? : fixedLitLenRow8[bitsTot % 2 ^ 8]? = some none := by
+    simp [hbits8_lt, hrow8]
+  have hbits9_eq' : bitsTot % 2 ^ 9 = bits := by
+    have hmod := mod_two_pow_or_shift bits restBits 9 9 (by decide)
+    have hlt : bits < 2 ^ 9 := by simpa [bits] using (reverseBits_lt code 9)
+    have hmod' : bits % 2 ^ 9 = bits := Nat.mod_eq_of_lt hlt
+    simpa [bitsTot, hmod'] using hmod
+  have hbits9_lt : bitsTot % 2 ^ 9 < fixedLitLenRow9.size := by
+    have hlt : bits < 2 ^ 9 := by simpa [bits] using (reverseBits_lt code 9)
+    simpa [hbits9_eq', fixedLitLenRow9_size, Nat.shiftLeft_eq] using hlt
+  have hrow9 : fixedLitLenRow9[bitsTot % 2 ^ 9]'hbits9_lt = some sym := by
+    have hrow := fixedLitLenCode_row_mid (sym := sym) h144 h255
+    simpa [code, bits, hbits9_eq'] using hrow
+  have hrow9? : fixedLitLenRow9[bitsTot % 2 ^ 9]? = some (some sym) := by
+    simp [hbits9_lt, hrow9]
+  have h := fixedLitLenHuffman_decode_readerAt_writeBits_len9_core
+    (bw := bw) (sym := sym) (bitsTot := bitsTot) (restLen := restLen)
+    hrow7? hrow8? hrow9? hbit hcur
+  simpa [hcode, code, bits, bitsTot] using h
+
+/-- Decodes any byte literal through the generic fixed Huffman table used by dynamic payloads. -/
+lemma fixedLitLenHuffman_decode_readerAt_writeBits
+    (bw : BitWriter) (sym : Nat) (restBits restLen : Nat)
+    (hsym : sym < 256) (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let codeLen := fixedLitLenCode sym
+    let code := codeLen.1
+    let len := codeLen.2
+    let bits := reverseBits code len
+    let bitsTot := bits ||| (restBits <<< len)
+    let lenTot := len + restLen
+    let bw' := BitWriter.writeBits bw bitsTot lenTot
+    let br := BitWriter.readerAt bw bw'.flush (flush_size_writeBits_le bw bitsTot lenTot) hbit
+    fixedLitLenHuffman.decode br =
+      some (sym,
+        BitWriter.readerAt (BitWriter.writeBits bw bitsTot len) bw'.flush
+          (by
+            have hk : len ≤ lenTot := by omega
+            simpa [lenTot] using (flush_size_writeBits_prefix bw bitsTot len lenTot hk))
+          (bitPos_lt_8_writeBits bw bitsTot len hbit)) := by
+  by_cases h143 : sym ≤ 143
+  · exact fixedLitLenHuffman_decode_readerAt_writeBits_lo
+      (bw := bw) (sym := sym) (restBits := restBits) (restLen := restLen)
+      h143 hbit hcur
+  · have h144 : 144 ≤ sym := by omega
+    have h255 : sym ≤ 255 := by omega
+    exact fixedLitLenHuffman_decode_readerAt_writeBits_mid
+      (bw := bw) (sym := sym) (restBits := restBits) (restLen := restLen)
+      h144 h255 hbit hcur
+
 /-- Converts a known literal decode into one step of `decodeCompressedBlockFuel`. -/
 lemma decodeCompressedBlockFuel_step_literal_of_decodes_aux
     (fuel : Nat) (litLen dist : Huffman) (br br' : BitReader)
@@ -89,6 +280,7 @@ lemma decodeCompressedBlockFuel_step_literal_readerAt_writeBits_lo
     fixedLitLenHuffman_decode_readerAt_writeBits_lo
       (bw := bw) (sym := sym) (restBits := restBits) (restLen := restLen)
       h143 hbit hcur
+  have hcode : fixedLitLenCode sym = (sym + 48, 8) := fixedLitLenCode_lo sym h143
   have hlit : sym < 256 := by omega
   simpa using
     (decodeCompressedBlockFuel_step_literal_of_decodes_aux
@@ -113,7 +305,8 @@ lemma decodeCompressedBlockFuel_step_literal_readerAt_writeBits_lo
               ((reverseBits (sym + 48) 8) ||| (restBits <<< 8)) 8 (8 + restLen) hk))
         (bitPos_lt_8_writeBits bw
           ((reverseBits (sym + 48) 8) ||| (restBits <<< 8)) 8 hbit))
-      (out := out) (sym := sym) (hdecodeSym := by simpa using hdecodeSym) (hlit := hlit))
+      (out := out) (sym := sym) (hdecodeSym := by simpa [hcode] using hdecodeSym)
+      (hlit := hlit))
 
 /-- Replays one literal step for any byte emitted with the fixed literal table. -/
 lemma decodeCompressedBlockFuel_step_literal_readerAt_writeBits
@@ -589,7 +782,7 @@ set_option maxRecDepth 200000 in
 lemma decodeCompressedBlockFuel_step_of_transition
     (fuel : Nat) (spec : DynamicTableSpec) (br br' : BitReader)
     (out out' : ByteArray)
-    (hstep : DynamicPayloadTransition spec br out br' out') :
+  (hstep : DynamicPayloadTransition spec br out br' out') :
     decodeCompressedBlockFuel (fuel + 1) spec.litLenTable spec.distTable br out =
       decodeCompressedBlockFuel fuel spec.litLenTable spec.distTable br' out' := by
   cases hstep with
@@ -597,16 +790,16 @@ lemma decodeCompressedBlockFuel_step_of_transition
       simpa using
         (decodeCompressedBlockFuel_step_literal_of_decodes
           (fuel := fuel) (litLen := spec.litLenTable) (dist := spec.distTable)
-          (br := br) (br' := brStep) (out := out) (sym := sym)
+          (br := br) (br' := _) (out := out) (sym := sym)
           (hdecodeSym := hdecode) (hlit := hlit))
-  | match sym extra len distSym extraD distance brStep brLen brDist brNext outNext
+  | copy sym extra len distSym extraD distance brStep brLen brDist brNext outNext
       hdecodeSym hnotLit hnotEob hsym hextra hbits hdecodeLen hdecodeDistSym hdist
       hextraD hbitsD hdecodeDist hcopy =>
       simpa using
         (decodeCompressedBlockFuel_step_match_of_decodes
           (fuel := fuel) (litLen := spec.litLenTable) (dist := spec.distTable)
-          (br := br) (br' := brStep) (br'' := brLen) (br''' := brDist) (br'''' := brNext)
-          (out := out) (out' := outNext) (sym := sym) (extra := extra) (len := len)
+          (br := br) (br' := _) (br'' := brLen) (br''' := brDist) (br'''' := _)
+          (out := out) (out' := _) (sym := sym) (extra := extra) (len := len)
           (distSym := distSym) (extraD := extraD) (distance := distance)
           (hdecodeSym := hdecodeSym) (hnotLit := hnotLit) (hnotEob := hnotEob)
           (hsym := hsym) (hextra := hextra) (hbits := hbits) (hdecodeLen := hdecodeLen)
@@ -617,7 +810,7 @@ set_option maxRecDepth 200000 in
 /-- Replays the terminating end-of-block payload step packaged by `DynamicPayloadFinish`. -/
 lemma decodeCompressedBlockFuel_step_of_finish
     (fuel : Nat) (spec : DynamicTableSpec) (br br' : BitReader) (out : ByteArray)
-    (hstep : DynamicPayloadFinish spec br out br') :
+  (hstep : DynamicPayloadFinish spec br out br') :
     decodeCompressedBlockFuel (fuel + 1) spec.litLenTable spec.distTable br out =
       some (br', out) := by
   cases hstep with
@@ -625,7 +818,7 @@ lemma decodeCompressedBlockFuel_step_of_finish
       simpa using
         (decodeCompressedBlockFuel_step_eob_of_decodes
           (fuel := fuel) (litLen := spec.litLenTable) (dist := spec.distTable)
-          (br := br) (br' := brStep) (out := out) (sym := sym)
+          (br := br) (br' := _) (out := out) (sym := sym)
           (hdecodeSym := hdecode) (hnotLit := hnotLit) (heob := heob))
 
 set_option maxRecDepth 200000 in
@@ -646,23 +839,17 @@ lemma decodeCompressedBlockFuel_of_trace
       | succ fuel =>
           simpa using
             (decodeCompressedBlockFuel_step_of_finish
-              (fuel := fuel) (spec := spec) (br := br) (br' := br') (out := out)
+              (fuel := fuel) (spec := spec) (br := _) (br' := _) (out := _)
               (hstep := hfinish))
   | step hstep hrest ih =>
       cases fuel with
       | zero =>
           cases hfuel
       | succ fuel =>
-          have hfuel' : _ := by
-            omega
-          calc
-            decodeCompressedBlockFuel (fuel + 1) spec.litLenTable spec.distTable br out
-                = decodeCompressedBlockFuel fuel spec.litLenTable spec.distTable _ _ := by
-                    simpa using
-                      (decodeCompressedBlockFuel_step_of_transition
-                        (fuel := fuel) (spec := spec) (br := br) (br' := _)
-                        (out := out) (out' := _) (hstep := hstep))
-            _ = some (br', out') := ih hfuel'
+          exact
+            (decodeCompressedBlockFuel_step_of_transition
+              (fuel := fuel) (spec := spec) (hstep := hstep)).trans
+              (ih (by omega))
 
 set_option maxRecDepth 200000 in
 /-- Upgrades a validated payload trace to the top-level block decoder once the standard fuel bound
@@ -675,6 +862,16 @@ lemma decodeCompressedBlock_of_trace
     decodeCompressedBlock spec.litLenTable spec.distTable br out = some (br', out') := by
   unfold decodeCompressedBlock
   exact decodeCompressedBlockFuel_of_trace htrace hfuel
+
+/-- Public dynamic-payload correctness theorem: any validated dynamic payload trace is accepted
+by the runtime compressed-block decoder and produces the trace's final bytes. -/
+lemma dynamicPayloadTrace_decode_correct
+    {steps : Nat} {spec : DynamicTableSpec} {br br' : BitReader}
+    {out out' : ByteArray}
+    (htrace : DynamicPayloadTrace spec steps br out br' out')
+    (hfuel : steps ≤ br.data.size * 8 + 1) :
+    decodeCompressedBlock spec.litLenTable spec.distTable br out = some (br', out') := by
+  exact decodeCompressedBlock_of_trace htrace hfuel
 
 set_option maxRecDepth 200000 in
 set_option maxHeartbeats 4000000 in
@@ -1084,6 +1281,13 @@ lemma fixedLitBitsEob_trace_spec
             (out := out.push (u8 b.toNat))
             (hbit := bitPos_lt_8_writeBits bw bits len hbit)
             (hcur := curClearAbove_writeBits bw bits len hbit hcur) hk'
+        have hbr1 :
+            br1 =
+              BitWriter.readerAt (BitWriter.writeBits bw bits len)
+                (BitWriter.writeBits (BitWriter.writeBits bw bits len) restBits restLen).flush
+                (flush_size_writeBits_le (BitWriter.writeBits bw bits len) restBits restLen)
+                (bitPos_lt_8_writeBits bw bits len hbit) := by
+          simp [br1, bw', hconcat, hwriteBits]
         have hrest' :
             DynamicPayloadTrace spec (k + 1) br1 (out.push (u8 b.toNat))
               (BitWriter.readerAt (BitWriter.writeBits bw bitsTot lenTot) bw'.flush
@@ -1093,7 +1297,7 @@ lemma fixedLitBitsEob_trace_spec
                       (BitWriter.writeBits bw bitsTot lenTot).flush.size))
                 (bitPos_lt_8_writeBits bw bitsTot lenTot hbit))
               (byteArrayFromArray data (i + 1) (out.push (u8 b.toNat))) := by
-          simpa [bitsTot, lenTot, bw', hconcat, hwriteBits] using hrest
+          simpa [bitsTot, lenTot, bw', rest, restBits, restLen, hconcat, hwriteBits, hbr1] using hrest
         have hstepOut :
             byteArrayFromArray data i out =
               byteArrayFromArray data (i + 1) (out.push (u8 b.toNat)) := by
@@ -1337,11 +1541,38 @@ lemma decodeCompressedBlock_fixedLitBitsEob_spec
                 (BitWriter.writeBits bw bits len).flush.size))
           (bitPos_lt_8_writeBits bw bits len hbit),
         byteArrayFromArray data i out) := by
-  subst hlit
-  simpa using
-    (decodeCompressedBlock_fixedLitBitsEob
-      (data := data) (i := i) (bw := bw) (dist := spec.distTable)
-      (out := out) hbit hcur)
+  let bitsLen := fixedLitBitsEob data i
+  let bits := bitsLen.1
+  let len := bitsLen.2
+  let bw' := BitWriter.writeBits bw bits len
+  let br := BitWriter.readerAt bw bw'.flush (flush_size_writeBits_le bw bits len) hbit
+  have htrace :
+      DynamicPayloadTrace spec (data.size - i + 1) br out
+        (BitWriter.readerAt (BitWriter.writeBits bw bits len) bw'.flush
+          (by
+            simpa [bw'] using
+              (le_rfl : (BitWriter.writeBits bw bits len).flush.size ≤
+                (BitWriter.writeBits bw bits len).flush.size))
+          (bitPos_lt_8_writeBits bw bits len hbit))
+        (byteArrayFromArray data i out) := by
+    simpa [bitsLen, bits, len, bw', br] using
+      (fixedLitBitsEob_trace_spec
+        (data := data) (i := i) (bw := bw) (spec := spec)
+        (out := out) hbit hcur hlit)
+  have hlen_ge : data.size - i + 1 ≤ len := by
+    simpa [bitsLen, len] using (fixedLitBitsEob_len_ge (data := data) (i := i))
+  have hlen_le : len ≤ br.data.size * 8 := by
+    have hlen_le_bitcount : len ≤ bw'.bitCount := by
+      have h := Nat.le_add_left len bw.bitCount
+      simpa [bw', bitCount_writeBits, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm] using h
+    have hbitcount_le : bw'.bitCount ≤ bw'.flush.size * 8 := by
+      exact flush_size_mul_ge_bitCount (bw := bw') (hbit := bw'.hbit)
+    have hlen_le' : len ≤ bw'.flush.size * 8 := le_trans hlen_le_bitcount hbitcount_le
+    simpa [br] using hlen_le'
+  have hfuel : data.size - i + 1 ≤ br.data.size * 8 + 1 := by
+    omega
+  simpa [bitsLen, bits, len, bw', br] using
+    (decodeCompressedBlock_of_trace htrace hfuel)
 
 end Png
 

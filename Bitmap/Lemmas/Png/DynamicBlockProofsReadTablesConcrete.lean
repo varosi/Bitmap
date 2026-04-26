@@ -232,7 +232,7 @@ lemma readDynamicTables_readerAt_writeBits_concrete
           fun __discr =>
             if __discr.fst.size = 320 then
               (mkHuffman (__discr.fst.extract 0 288)).bind fun litLenTable =>
-                (mkHuffman (__discr.fst.extract 288 320)).bind fun distTable =>
+                (buildDynamicDistTable (__discr.fst.extract 288 320)).bind fun distTable =>
                   some (litLenTable, distTable, __discr.snd)
             else
               none

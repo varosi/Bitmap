@@ -11,9 +11,7 @@ def dynamicFastTableSpec : DynamicTableSpec :=
   { litLenLengths := dynamicLitLenLengths
     distLengths := dynamicDistLengths
     litLenTable := fixedLitLenHuffman
-    distTable := fixedDistHuffman
-    litLenOk := mkHuffman_dynamicLitLenLengths
-    distOk := buildDynamicDistTable_of_mkHuffman mkHuffman_dynamicDistLengths }
+    distTable := fixedDistHuffman }
 
 /-- Shows that the concrete dynamic-fast tables are accepted by the generic dynamic-table
 packaging helper without any special casing in the proof layer. -/

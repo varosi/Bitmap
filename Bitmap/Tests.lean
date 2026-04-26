@@ -333,6 +333,50 @@ private def validateCopyDistanceFast : IO Unit := do
   if Png.copyDistanceFast base 5 3 != none then
     throw (IO.userError "copyDistanceFast accepted distance beyond the output size")
 
+private def oneBitCodeLenHuffman (sym : Nat) : Png.Huffman :=
+  { maxLen := 1
+    table := #[#[], #[some sym, none]] }
+
+private def bitReaderOfByte (bits : Nat) : Png.BitReader :=
+  { data := byteArrayOfNats [bits]
+    bytePos := 0
+    bitPos := 0
+    hpos := by exact Nat.zero_le _
+    hend := by intro _; rfl
+    hbit := by decide }
+
+private def readSingleRepeatLengths? (sym bits total : Nat) (init : Array Nat) :
+    Option (Array Nat × Png.BitReader) :=
+  Png.readDynamicTablesLengthsFuel 4 total (oneBitCodeLenHuffman sym) (bitReaderOfByte bits) init
+
+private def assertRepeatLengths
+    (name : String) (sym bits total fill : Nat) (init : Array Nat) : IO Unit := do
+  match readSingleRepeatLengths? sym bits total init with
+  | some (lengths, _) =>
+      if lengths.size == total && lengths.toList.all (fun len => len == fill) then
+        pure ()
+      else
+        throw (IO.userError s!"dynamic repeat {name} produced unexpected lengths")
+  | none =>
+      throw (IO.userError s!"dynamic repeat {name} failed to decode")
+
+private def validateDynamicRepeatEncodings : IO Unit := do
+  assertRepeatLengths "16" 16 6 7 7 #[7]
+  assertRepeatLengths "17" 17 14 10 0 #[]
+  assertRepeatLengths "18" 18 254 138 0 #[]
+  match readSingleRepeatLengths? 16 0 1 #[] with
+  | none => pure ()
+  | some _ =>
+      throw (IO.userError "dynamic repeat 16 accepted without a previous length")
+  match readSingleRepeatLengths? 18 254 137 #[] with
+  | some (lengths, _) =>
+      if lengths.size > 137 then
+        pure ()
+      else
+        throw (IO.userError "dynamic repeat 18 overflow did not exceed the requested length total")
+  | none =>
+      throw (IO.userError "dynamic repeat 18 overflow failed before exact-size validation")
+
 private def validateDynamicTableValidationBoundary : IO Unit := do
   if Png.mkHuffman #[1, 1, 1] != none then
     throw (IO.userError "mkHuffman accepted an oversubscribed 1-bit code set")
@@ -344,6 +388,7 @@ private def validateDynamicTableValidationBoundary : IO Unit := do
   | some _ => pure ()
   | none =>
       throw (IO.userError "buildDynamicDistTable rejected a valid non-empty distance alphabet")
+  validateDynamicRepeatEncodings
 
 -- Decode PNG fixtures that use fixed-Huffman deflate blocks.
 private def pngDecodeFixedHuffmanFixtures : IO Unit := do

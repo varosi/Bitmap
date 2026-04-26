@@ -959,7 +959,7 @@ def readDynamicTablesAfterHeader (br : BitReader) :
   let litLenLengths := lengths.extract 0 (31 + 257)
   let distLengths := lengths.extract (31 + 257) ((31 + 257) + (31 + 1))
   let litLenTable ← mkHuffman litLenLengths
-  let distTable ← mkHuffman distLengths
+  let distTable ← buildDynamicDistTable distLengths
   return (litLenTable, distTable, brCur)
 
 private def finishDynamicTablesAfterCodeLenLengths (br : BitReader) :
@@ -974,7 +974,7 @@ private def finishDynamicTablesAfterCodeLenLengths (br : BitReader) :
   let litLenLengths := lengths.extract 0 (31 + 257)
   let distLengths := lengths.extract (31 + 257) ((31 + 257) + (31 + 1))
   let litLenTable ← mkHuffman litLenLengths
-  let distTable ← mkHuffman distLengths
+  let distTable ← buildDynamicDistTable distLengths
   return (litLenTable, distTable, brCur)
 
 private lemma readDynamicTablesAfterHeader_eq_finish
@@ -1234,7 +1234,8 @@ private lemma finishDynamicTablesAfterCodeLenLengths_readerAt_writeBits
   simp [Option.bind, hsize320, dynamicCodeLenSymsReaderAt]
   rw [dynamicLitLenDistLengths_extract_lit_expanded,
     dynamicLitLenDistLengths_extract_dist_expanded]
-  rw [mkHuffman_dynamicLitLenLengths, mkHuffman_dynamicDistLengths]
+  rw [mkHuffman_dynamicLitLenLengths]
+  simp [buildDynamicDistTable, mkHuffman_dynamicDistLengths]
 
 set_option maxRecDepth 200000 in
 set_option maxHeartbeats 5000000 in
