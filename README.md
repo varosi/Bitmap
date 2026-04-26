@@ -5,6 +5,18 @@ Lean 4 bitmap image utilities with PNG encode/decode support, plus a small widge
 This library has proofs about:
 - putPixel and getPixel correspondence (Bitmap.Lemmas.putPixel_getPixel);
 - PNG format encode and decode correspondence (Bitmap.Lemmas.decodeBitmap_encodeBitmap);
+- PNG chunk validation properties for CRC checks and chunk-order state transitions
+  (`readChunk_rejects_crc_mismatch`, `readChunk_success_crc_matches`,
+  `parsePngLoopFuel_rejects_non_ihdr_before_header`,
+  `parsePngLoopFuel_rejects_duplicate_ihdr`,
+  `parsePngLoopFuel_rejects_plte_after_plte_or_idat`,
+  `parsePngLoopFuel_rejects_idat_after_closed_idat`,
+  `parsePngLoopFuel_rejects_nonempty_iend`,
+  `parsePngLoopFuel_rejects_iend_before_idat`,
+  `parsePngLoopFuel_rejects_trailing_after_iend`,
+  `parsePngLoopFuel_rejects_unknown_critical`,
+  `parsePngLoopFuel_ignores_ancillary_before_idat`,
+  `parsePngLoopFuel_idat_appends_when_open`);
 - dynamic DEFLATE decoder correctness for proof-specified dynamic table reads,
   payload traces, dynamic-only multi-block streams, and zlib envelopes
   (`dynamicTableReaderSpec_readDynamicTables`, `dynamicPayloadTrace_decode_correct`,

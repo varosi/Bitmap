@@ -16,6 +16,25 @@ attribute [local simp] Png.byteArray_get_proof_irrel
 def zlibDynamicFastBytes (raw : ByteArray) : ByteArray :=
   ByteArray.mk #[u8 0x78, u8 0x01] ++ deflateDynamicFast raw ++ u32be (adler32 raw).toNat
 
+/-- Dynamic zlib output uses the same fixed CMF/FLG envelope as the other encoders.
+This wrapper keeps older dynamic proofs phrased in terms of `zlibCompressDynamic`. -/
+lemma zlibCompressDynamic_cmf_flg (raw : ByteArray) :
+    let bytes := zlibCompressDynamic raw
+    let h0 : 0 < bytes.size := by
+      exact lt_of_lt_of_le (by decide : 0 < 6) (zlibCompressOf_size_ge (deflateDynamic raw) raw)
+    let h1 : 1 < bytes.size := by
+      exact lt_of_lt_of_le (by decide : 1 < 6) (zlibCompressOf_size_ge (deflateDynamic raw) raw)
+    bytes[0]'h0 = u8 0x78 ∧ bytes[1]'h1 = u8 0x01 := by
+  simpa [zlibCompressDynamic_eq] using zlibCompressOf_cmf_flg (deflateDynamic raw) raw
+
+/-- Extracting the zlib payload window from dynamic output returns the deflate stream.
+This is the dynamic specialization of the generic zlib envelope lemma. -/
+lemma zlibCompressDynamic_extract_deflated (raw : ByteArray) :
+    (zlibCompressDynamic raw).extract 2 ((zlibCompressDynamic raw).size - 4) =
+      deflateDynamic raw := by
+  simpa [zlibCompressDynamic_eq] using
+    zlibCompressOf_extract_deflated (deflateDynamic raw) raw
+
 set_option maxRecDepth 400000 in
 set_option maxHeartbeats 20000000 in
 /-- Proves the real dynamic fast stream round-trips through the zlib decoder without fallback. -/
@@ -256,7 +275,7 @@ lemma inflateStored_deflateDynamicFast_none (raw : ByteArray) :
         simpa [payloadBits, hdr0, hdrHeader, streamBits, streamLen] using
           deflateDynamicFast_eq_streamWriter raw
       _ = collapsedWriter.flush := by
-        simpa [hstream] using congrArg BitWriter.flush hstream.symm
+        exact congrArg BitWriter.flush hstream.symm
   have hread0 : streamReader0.bitIndex + 3 ≤ streamReader0.data.size * 8 := by
     simpa [streamReader0, BitWriter.readerAt, hdr0, BitWriter.empty] using
       (readerAt_writeBits_bound (bw := hdr0) (bits := streamBitsFull) (len := streamLenFull)
@@ -278,6 +297,8 @@ lemma inflateStored_deflateDynamicFast_none (raw : ByteArray) :
   have hpos : 0 < collapsedWriter.flush.size := by
     have : 3 ≤ collapsedWriter.flush.size * 8 := by
       simpa [streamReader0] using hread0
+    by_contra hzero
+    have hsize0 : collapsedWriter.flush.size = 0 := Nat.eq_zero_of_not_pos hzero
     omega
   have haux :
       streamReader0.readBitsAux 3 =
@@ -289,29 +310,41 @@ lemma inflateStored_deflateDynamicFast_none (raw : ByteArray) :
             hend := by
               intro hEq
               have : False := by
-                simpa [hEq] using hpos
+                simp [hEq] at hpos
               exact False.elim this
             hbit := by decide }) := by
     simpa [streamReader0] using
       (readBitsAux_within_byte_lt (br := streamReader0) (n := 3)
-        (hspan := by decide) (hlt := hpos))
+        (hspan := by simp [streamReader0]) (hlt := hpos))
   have hmod :
       ((collapsedWriter.flush.get 0 hpos).toNat % 2 ^ 3) = 5 := by
-    have hfst :
-        (streamReader0.readBitsAux 3).1 = 5 := by
-      simpa [hreadAux] using congrArg Prod.fst hread
-    simpa using hfst.trans (by simpa using congrArg Prod.fst haux.symm)
+    have hreadFst : (streamReader0.readBits 3 hread0).1 = 5 := by
+      simpa using congrArg Prod.fst hread
+    have hauxFst :
+        (streamReader0.readBitsAux 3).1 =
+          ((collapsedWriter.flush.get 0 hpos).toNat % 2 ^ 3) := by
+      simpa using congrArg Prod.fst haux
+    calc
+      (collapsedWriter.flush.get 0 hpos).toNat % 2 ^ 3 =
+          (streamReader0.readBitsAux 3).1 := hauxFst.symm
+      _ = (streamReader0.readBits 3 hread0).1 := by
+        simp [hreadAux]
+      _ = 5 := hreadFst
   have hbit2mod : (((collapsedWriter.flush.get 0 hpos).toNat % 2 ^ 3).testBit 2) = true := by
-    simpa [hmod]
+    rw [hmod]
+    decide
   have hbit2 : ((collapsedWriter.flush.get 0 hpos).toNat).testBit 2 = true := by
-    simpa [Nat.testBit_mod_two_pow, (by decide : 2 < 3)] using hbit2mod
+    have hbit2mod' := hbit2mod
+    rw [Nat.testBit_mod_two_pow] at hbit2mod'
+    simpa using hbit2mod'
   let header := collapsedWriter.flush.get 0 hpos
   have hmaskedBit : (((header.toNat >>> 1) &&& 3).testBit 1) = true := by
     simp [header, hbit2, Nat.testBit_shiftRight]
+    decide
   have hbtypeNat : ((header.toNat >>> 1) &&& 3) ≠ 0 := by
     intro hzero
     have : (((header.toNat >>> 1) &&& 3).testBit 1) = false := by
-      simpa [hzero]
+      simp [hzero]
     rw [hmaskedBit] at this
     cases this
   have hbtype : ((header >>> 1) &&& (0x03 : UInt8)) ≠ 0 := by

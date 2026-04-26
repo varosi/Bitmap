@@ -146,98 +146,6 @@ private def zlibDecompressFixture (bytes : ByteArray) : Option ByteArray :=
   else
     none
 
-private def tinyRgbIHDR : ByteArray :=
-  Png.u32be 1 ++ Png.u32be 1 ++ byteArrayOfNats [8, 2, 0, 0, 0]
-
-private def tinyRgbRaw : ByteArray :=
-  byteArrayOfNats [0, 0x12, 0x34, 0x56]
-
-private def pngFromChunks (chunks : List ByteArray) : ByteArray :=
-  chunks.foldl (fun acc chunk => acc ++ chunk) Png.pngSignature
-
-private def tinyRgbPngWithIDAT (idat : ByteArray) : ByteArray :=
-  pngFromChunks
-    [Png.mkChunkBytes Png.ihdrTypeBytes tinyRgbIHDR,
-      Png.mkChunkBytes Png.idatTypeBytes idat,
-      Png.mkChunkBytes Png.iendTypeBytes ByteArray.empty]
-
-private def tinyRgbPng : ByteArray :=
-  tinyRgbPngWithIDAT (Png.zlibCompressStored tinyRgbRaw)
-
-private def corruptByte (bytes : ByteArray) (idx : Nat) : ByteArray :=
-  if idx < bytes.size then
-    bytes.set! idx (Png.u8 ((bytes.get! idx).toNat + 1))
-  else
-    bytes
-
-private def expectRgbPngDecoded (name : String) (bytes : ByteArray) : IO Unit := do
-  match Png.decodeBitmap (px := PixelRGB8) bytes with
-  | some bmp =>
-      if bmp.size.width == 1 && bmp.size.height == 1 then
-        pure ()
-      else
-        throw (IO.userError s!"png fixture {name} decoded to the wrong size")
-  | none =>
-      throw (IO.userError s!"png fixture {name} failed to decode")
-
-private def expectRgbPngRejected (name : String) (bytes : ByteArray) : IO Unit := do
-  match Png.decodeBitmap (px := PixelRGB8) bytes with
-  | none => pure ()
-  | some _ =>
-      throw (IO.userError s!"malformed png fixture {name} unexpectedly decoded")
-
-private def validatePngChunkValidation : IO Unit := do
-  expectRgbPngDecoded "tiny-rgb" tinyRgbPng
-  expectRgbPngRejected "bad-ihdr-crc" (corruptByte tinyRgbPng 32)
-  let idat := Png.zlibCompressStored tinyRgbRaw
-  let ihdrEnd := Png.pngSignature.size + (Png.mkChunkBytes Png.ihdrTypeBytes tinyRgbIHDR).size
-  expectRgbPngRejected "bad-idat-crc" (corruptByte tinyRgbPng (ihdrEnd + 8 + idat.size + 3))
-  let iendStart := ihdrEnd + (Png.mkChunkBytes Png.idatTypeBytes idat).size
-  expectRgbPngRejected "bad-iend-crc" (corruptByte tinyRgbPng (iendStart + 8 + 3))
-  expectRgbPngRejected "trailing-after-iend" (tinyRgbPng ++ byteArrayOfNats [0])
-  expectRgbPngRejected "idat-before-ihdr"
-    (pngFromChunks
-      [Png.mkChunkBytes Png.idatTypeBytes (Png.zlibCompressStored tinyRgbRaw),
-        Png.mkChunkBytes Png.ihdrTypeBytes tinyRgbIHDR,
-        Png.mkChunkBytes Png.iendTypeBytes ByteArray.empty])
-  expectRgbPngRejected "duplicate-ihdr"
-    (pngFromChunks
-      [Png.mkChunkBytes Png.ihdrTypeBytes tinyRgbIHDR,
-        Png.mkChunkBytes Png.ihdrTypeBytes tinyRgbIHDR,
-        Png.mkChunkBytes Png.idatTypeBytes (Png.zlibCompressStored tinyRgbRaw),
-        Png.mkChunkBytes Png.iendTypeBytes ByteArray.empty])
-  expectRgbPngRejected "plte-after-idat"
-    (pngFromChunks
-      [Png.mkChunkBytes Png.ihdrTypeBytes tinyRgbIHDR,
-        Png.mkChunkBytes Png.idatTypeBytes (Png.zlibCompressStored tinyRgbRaw),
-        Png.mkChunkBytes Png.plteTypeBytes (byteArrayOfNats [0, 0, 0]),
-        Png.mkChunkBytes Png.iendTypeBytes ByteArray.empty])
-  expectRgbPngRejected "nonconsecutive-idat"
-    (pngFromChunks
-      [Png.mkChunkBytes Png.ihdrTypeBytes tinyRgbIHDR,
-        Png.mkChunkBytes Png.idatTypeBytes (Png.zlibCompressStored tinyRgbRaw),
-        Png.mkChunk "tEXt" (byteArrayOfNats [65]),
-        Png.mkChunkBytes Png.idatTypeBytes ByteArray.empty,
-        Png.mkChunkBytes Png.iendTypeBytes ByteArray.empty])
-  expectRgbPngRejected "unknown-critical"
-    (pngFromChunks
-      [Png.mkChunkBytes Png.ihdrTypeBytes tinyRgbIHDR,
-        Png.mkChunk "ABCD" ByteArray.empty,
-        Png.mkChunkBytes Png.idatTypeBytes (Png.zlibCompressStored tinyRgbRaw),
-        Png.mkChunkBytes Png.iendTypeBytes ByteArray.empty])
-  expectRgbPngDecoded "ancillary-before-idat"
-    (pngFromChunks
-      [Png.mkChunkBytes Png.ihdrTypeBytes tinyRgbIHDR,
-        Png.mkChunk "tEXt" (byteArrayOfNats [65]),
-        Png.mkChunkBytes Png.idatTypeBytes idat,
-        Png.mkChunkBytes Png.iendTypeBytes ByteArray.empty])
-  expectRgbPngDecoded "consecutive-idat"
-    (pngFromChunks
-      [Png.mkChunkBytes Png.ihdrTypeBytes tinyRgbIHDR,
-        Png.mkChunkBytes Png.idatTypeBytes (idat.extract 0 2),
-        Png.mkChunkBytes Png.idatTypeBytes (idat.extract 2 idat.size),
-        Png.mkChunkBytes Png.iendTypeBytes ByteArray.empty])
-
 private def dynamicRepeatZlibFixture : ByteArray :=
   byteArrayOfNats
     [120, 218, 237, 195, 49, 13, 0, 0, 8, 3, 48, 109, 131, 249, 215, 132, 12, 158,
@@ -691,7 +599,6 @@ def run : IO Unit := do
     IO.println "png round-trip Gray property: ok"
   else
     throw (IO.userError "png round-trip Gray property failed")
-  validatePngChunkValidation
   pngDecodeFixedHuffmanFixtures
   validateDynamicTableValidationBoundary
   validateDynamicZlibFixtures
