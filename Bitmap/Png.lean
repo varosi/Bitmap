@@ -96,6 +96,8 @@ def ihdrTypeBytes : ByteArray := "IHDR".toUTF8
 def idatTypeBytes : ByteArray := "IDAT".toUTF8
 def iendTypeBytes : ByteArray := "IEND".toUTF8
 def plteTypeBytes : ByteArray := "PLTE".toUTF8
+def trnsTypeBytes : ByteArray := "tRNS".toUTF8
+def sbitTypeBytes : ByteArray := "sBIT".toUTF8
 
 def mkChunkBytes (typBytes : ByteArray) (data : ByteArray) : ByteArray :=
   let lenBytes := u32be data.size
@@ -1814,6 +1816,14 @@ def parsePngLoopFuel (fuel : Nat) (bytes : ByteArray) (pos : Nat)
                     if posNext != bytes.size then
                       none
                     some (hdr, state.idat)
+                  else if typBytes == trnsTypeBytes then
+                    -- tRNS attaches transparency to color types 0/2/3; the decoder does not
+                    -- honor it, and silently ignoring it would change pixel semantics.
+                    none
+                  else if typBytes == sbitTypeBytes then
+                    -- sBIT records the significant bit count per channel; ignoring it would
+                    -- silently misrepresent pixel precision.
+                    none
                   else if isCriticalChunkType typBytes then
                     none
                   else if state.seenIDAT then

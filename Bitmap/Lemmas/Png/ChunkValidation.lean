@@ -142,6 +142,41 @@ lemma parsePngLoopFuel_rejects_trailing_after_iend (fuel : Nat)
   simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hIEND,
     hdata, hseen, htrail]
 
+/-- A `tRNS` chunk is rejected. tRNS attaches transparency to color types 0/2/3 that
+the decoder does not honor; silently skipping it would change pixel semantics. -/
+lemma parsePngLoopFuel_rejects_tRNS (fuel : Nat)
+    (bytes : ByteArray) (pos : Nat) (state : PngParseState)
+    (hdr : PngHeader) (typBytes chunkData : ByteArray) (posNext : Nat)
+    (hpos : pos + 8 ≤ bytes.size) (hLen : pos + 3 < bytes.size)
+    (hread : readChunk bytes pos hLen = some (typBytes, chunkData, posNext))
+    (hheader : state.header = some hdr)
+    (hnotIHDR : (typBytes == ihdrTypeBytes) = false)
+    (hnotPLTE : (typBytes == plteTypeBytes) = false)
+    (hnotIDAT : (typBytes == idatTypeBytes) = false)
+    (hnotIEND : (typBytes == iendTypeBytes) = false)
+    (hTRNS : (typBytes == trnsTypeBytes) = true) :
+    parsePngLoopFuel (fuel + 1) bytes pos state = none := by
+  unfold parsePngLoopFuel
+  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND, hTRNS]
+
+/-- An `sBIT` chunk is rejected. sBIT records the original significant bit count per
+channel; silently skipping it would misrepresent pixel precision. -/
+lemma parsePngLoopFuel_rejects_sBIT (fuel : Nat)
+    (bytes : ByteArray) (pos : Nat) (state : PngParseState)
+    (hdr : PngHeader) (typBytes chunkData : ByteArray) (posNext : Nat)
+    (hpos : pos + 8 ≤ bytes.size) (hLen : pos + 3 < bytes.size)
+    (hread : readChunk bytes pos hLen = some (typBytes, chunkData, posNext))
+    (hheader : state.header = some hdr)
+    (hnotIHDR : (typBytes == ihdrTypeBytes) = false)
+    (hnotPLTE : (typBytes == plteTypeBytes) = false)
+    (hnotIDAT : (typBytes == idatTypeBytes) = false)
+    (hnotIEND : (typBytes == iendTypeBytes) = false)
+    (hnotTRNS : (typBytes == trnsTypeBytes) = false)
+    (hSBIT : (typBytes == sbitTypeBytes) = true) :
+    parsePngLoopFuel (fuel + 1) bytes pos state = none := by
+  unfold parsePngLoopFuel
+  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND, hnotTRNS, hSBIT]
+
 /-- Unknown critical chunk types are rejected after the header. -/
 lemma parsePngLoopFuel_rejects_unknown_critical (fuel : Nat)
     (bytes : ByteArray) (pos : Nat) (state : PngParseState)
@@ -153,12 +188,16 @@ lemma parsePngLoopFuel_rejects_unknown_critical (fuel : Nat)
     (hnotPLTE : (typBytes == plteTypeBytes) = false)
     (hnotIDAT : (typBytes == idatTypeBytes) = false)
     (hnotIEND : (typBytes == iendTypeBytes) = false)
+    (hnotTRNS : (typBytes == trnsTypeBytes) = false)
+    (hnotSBIT : (typBytes == sbitTypeBytes) = false)
     (hcritical : isCriticalChunkType typBytes = true) :
     parsePngLoopFuel (fuel + 1) bytes pos state = none := by
   unfold parsePngLoopFuel
-  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND, hcritical]
+  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
+    hnotTRNS, hnotSBIT, hcritical]
 
-/-- Ancillary chunks before the `IDAT` run do not change parser state. -/
+/-- Ancillary chunks (other than the explicitly rejected `tRNS`/`sBIT`) before the
+`IDAT` run do not change parser state. -/
 lemma parsePngLoopFuel_ignores_ancillary_before_idat (fuel : Nat)
     (bytes : ByteArray) (pos : Nat) (state : PngParseState)
     (hdr : PngHeader) (typBytes chunkData : ByteArray) (posNext : Nat)
@@ -169,6 +208,8 @@ lemma parsePngLoopFuel_ignores_ancillary_before_idat (fuel : Nat)
     (hnotPLTE : (typBytes == plteTypeBytes) = false)
     (hnotIDAT : (typBytes == idatTypeBytes) = false)
     (hnotIEND : (typBytes == iendTypeBytes) = false)
+    (hnotTRNS : (typBytes == trnsTypeBytes) = false)
+    (hnotSBIT : (typBytes == sbitTypeBytes) = false)
     (hcritical : isCriticalChunkType typBytes = false)
     (hseen : state.seenIDAT = false) :
     parsePngLoopFuel (fuel + 1) bytes pos state =
@@ -177,7 +218,7 @@ lemma parsePngLoopFuel_ignores_ancillary_before_idat (fuel : Nat)
     lhs
     unfold parsePngLoopFuel
   simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
-    hcritical, hseen]
+    hnotTRNS, hnotSBIT, hcritical, hseen]
 
 /-- An `IDAT` chunk in an open `IDAT` run appends its payload and continues. -/
 lemma parsePngLoopFuel_idat_appends_when_open (fuel : Nat)
