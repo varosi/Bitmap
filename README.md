@@ -15,6 +15,8 @@ This library has proofs about:
   `parsePngLoopFuel_rejects_iend_before_idat`,
   `parsePngLoopFuel_rejects_trailing_after_iend`,
   `parsePngLoopFuel_rejects_unknown_critical`,
+  `parsePngLoopFuel_rejects_tRNS`,
+  `parsePngLoopFuel_rejects_sBIT`,
   `parsePngLoopFuel_ignores_ancillary_before_idat`,
   `parsePngLoopFuel_idat_appends_when_open`);
 - dynamic DEFLATE decoder correctness for proof-specified dynamic table reads,
@@ -73,15 +75,18 @@ which the library carries full round-trip correctness proofs.
 | Compression | `inflateStored` tried first, then fixed- and dynamic-Huffman zlib streams (full `HLIT`/`HDIST`/`HCLEN` + code-length-code + literal/length and distance tables) |
 | LZ77 | Length codes 257–285 and distance codes 0–29 with extra bits; `copyDistance` supports overlap (distance < length) |
 | Color conversion | RGB PNGs can be decoded into `BitmapRGBA8` (fills α = 255) and RGBA PNGs into `BitmapRGB8` (drops alpha) |
-| PNG structure | 8-byte signature, `IHDR` first, consecutive `IDAT`, `IEND` last, required `PLTE` ordering checks, rejects unknown critical chunks, compression/filter method ≠ 0, and interlace ≠ 0 |
-| Integrity | CRC-32 verified for every parsed chunk, Adler-32 verified at end of stream; chunk layout enforced by length bounds |
+| PNG structure | 8-byte signature, `IHDR` first, multiple consecutive `IDAT` chunks accepted and concatenated, `IEND` last, required `PLTE` ordering checks, rejects unknown critical chunks, compression/filter method ≠ 0, and interlace ≠ 0 |
+| Tolerated ancillary chunks | `gAMA`, `cHRM`, `sRGB`, `iCCP`, `pHYs`, `tEXt`, `zTXt`, `iTXt`, `tIME`, `bKGD`, `hIST`, `sPLT`, plus any unknown chunk type whose first byte is lowercase — CRC-validated and skipped without affecting decoded pixels |
+| Integrity | CRC-32 verified for every parsed chunk; mismatch rejects the entire input. Adler-32 verified at end of zlib stream |
 
 ### Not supported
 
 - Bit depths other than 8 (1, 2, 4, 16)
 - Color type 3 (palette / `PLTE`) and color type 4 (gray + alpha)
 - Adam7 interlacing
-- Ancillary chunk semantics (`tRNS`, `gAMA`, `sRGB`, `cHRM`, `pHYs`, `tEXt`, `zTXt`, `iTXt`, `sBIT`, `bKGD`, `hIST`, `sPLT`, `tIME`) — structurally valid ancillary chunks are ignored
+- `tRNS` and `sBIT` chunks — explicitly **rejected** (decoder returns `none`) rather than silently ignored, to avoid the silent-corruption hazard of dropping transparency or precision metadata that affects pixel semantics
+- Unknown critical chunks (any chunk type whose first byte is uppercase and not `IHDR`/`PLTE`/`IDAT`/`IEND`) — rejected per the PNG spec
+- Reading-back of ancillary chunk **content** (`gAMA`, `tEXt`, etc.) — the chunks are validated and skipped; the decoder produces only the pixel matrix, not metadata
 - Encoder-side filter selection (always emits filter 0)
 - Genuinely-distinct dynamic-Huffman encoding — `.dynamic` emits a dynamic-block header but delegates the deflate payload to fixed-Huffman
 
