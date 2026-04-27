@@ -81,6 +81,14 @@ lemma encodeIHDRData_eq_via_ihdrTailColor (h : PngHeader) (hBitDepth : h.bitDept
   unfold encodeIHDRData ihdrTailColor
   simp [hBitDepth]
 
+/-- The on-the-wire size of a chunk built by `mkChunkBytes`: 12-byte
+overhead (4 length + 4 type + 4 CRC) plus the payload size. -/
+lemma mkChunkBytes_size (typBytes data : ByteArray) (hType : typBytes.size = 4) :
+    (mkChunkBytes typBytes data).size = data.size + 12 := by
+  rw [mkChunkBytes_def]
+  simp [ByteArray.size_append, u32be_size, hType]
+  omega
+
 /-- IHDR data round-trip: the runtime parser recovers the original header
 from the bytes produced by `encodeIHDRData`. Requires the supported-subset
 constraints (width/height fit in BE u32, bit depth = 8, color type < 256)
@@ -109,6 +117,48 @@ lemma parseIHDRData_encodeIHDRData (h : PngHeader)
   simp at hBitDepth
   cases hBitDepth
   rfl
+
+/-- The total byte size of a simple-container's on-the-wire bytes: 8 (signature)
++ 25 (IHDR chunk: 13-byte payload + 12 bytes overhead) + (12 + idatData.size)
+(IDAT chunk) + 12 (IEND chunk) = idatData.size + 57. -/
+lemma SimpleContainerSpec.bytes_size (s : SimpleContainerSpec) :
+    s.bytes.size = s.idatData.size + 57 := by
+  -- The auto-simp `mkChunkBytes_{ihdr,idat,iend}` lemmas rewrite to the `mkChunk`
+  -- form; restate the per-chunk sizes against that form so simp can apply them.
+  have hIhdrSize : (mkChunk "IHDR" (encodeIHDRData s.header)).size = 25 := by
+    rw [mkChunk_size]; simp [encodeIHDRData_size, ihdr_utf8ByteSize]
+  have hIdatSize : (mkChunk "IDAT" s.idatData).size = s.idatData.size + 12 := by
+    rw [mkChunk_size]; simp [idat_utf8ByteSize]
+  have hIendSize : (mkChunk "IEND" ByteArray.empty).size = 12 := by
+    rw [mkChunk_size]; simp [iend_utf8ByteSize]
+  unfold SimpleContainerSpec.bytes
+  simp [pngSignature_size, ByteArray.size_append, hIhdrSize, hIdatSize, hIendSize]
+  omega
+
+/-- The first 8 bytes of any simple-container spec are the PNG signature.
+Proved by re-associating the chained appends so the leftmost prefix is
+isolated, then applying `byteArray_extract_append_prefix`. -/
+lemma SimpleContainerSpec.bytes_extract_signature (s : SimpleContainerSpec) :
+    s.bytes.extract 0 8 = pngSignature := by
+  unfold SimpleContainerSpec.bytes
+  have hSigSize : pngSignature.size = 8 := pngSignature_size
+  -- Re-associate the chained `++` so we have `pngSignature ++ rest`.
+  rw [show
+    pngSignature ++ mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header)
+      ++ mkChunkBytes idatTypeBytes s.idatData
+      ++ mkChunkBytes iendTypeBytes ByteArray.empty
+    = pngSignature ++ (mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header)
+      ++ mkChunkBytes idatTypeBytes s.idatData
+      ++ mkChunkBytes iendTypeBytes ByteArray.empty) from by
+      simp [ByteArray.append_assoc]]
+  rw [byteArray_extract_append_prefix
+    (a := pngSignature)
+    (b := mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header)
+      ++ mkChunkBytes idatTypeBytes s.idatData
+      ++ mkChunkBytes iendTypeBytes ByteArray.empty)
+    (n := 8) (by simp [hSigSize])]
+  rw [← hSigSize]
+  exact ByteArray.extract_zero_size
 
 end Lemmas
 
