@@ -72,6 +72,44 @@ lemma encodeIHDRData_size (h : PngHeader) : (encodeIHDRData h).size = 13 := by
   have hTail : (ByteArray.mk #[u8 h.bitDepth, u8 h.colorType, u8 0, u8 0, u8 0]).size = 5 := rfl
   simp [u32be_size, ByteArray.size_append, hTail]
 
+/-- When `bitDepth = 8`, the spec-side `encodeIHDRData` aligns with the
+runtime-side `u32be ... ++ ihdrTailColor (u8 colorType)` form used by
+the encoder. This lemma is the bridge to the existing IHDR machinery
+in `EncodeDecodeBase.lean`. -/
+lemma encodeIHDRData_eq_via_ihdrTailColor (h : PngHeader) (hBitDepth : h.bitDepth = 8) :
+    encodeIHDRData h = u32be h.width ++ u32be h.height ++ ihdrTailColor (u8 h.colorType) := by
+  unfold encodeIHDRData ihdrTailColor
+  simp [hBitDepth]
+
+/-- IHDR data round-trip: the runtime parser recovers the original header
+from the bytes produced by `encodeIHDRData`. Requires the supported-subset
+constraints (width/height fit in BE u32, bit depth = 8, color type < 256)
+to ensure each field is preserved through the `UInt8.ofNat`/`UInt8.toNat`
+truncations. -/
+lemma parseIHDRData_encodeIHDRData (h : PngHeader)
+    (hWidth : h.width < 2 ^ 32) (hHeight : h.height < 2 ^ 32)
+    (hBitDepth : h.bitDepth = 8) (hColorType : h.colorType < 256) :
+    parseIHDRData (encodeIHDRData h) = some h := by
+  rw [encodeIHDRData_eq_via_ihdrTailColor h hBitDepth]
+  unfold parseIHDRData
+  have hSize : (u32be h.width ++ u32be h.height ++ ihdrTailColor (u8 h.colorType)).size = 13 :=
+    ihdr_payload_size h.width h.height (u8 h.colorType)
+  have hWidthRead := readU32BE_ihdr_width h.width h.height (u8 h.colorType) hWidth
+  have hHeightRead := readU32BE_ihdr_height h.width h.height (u8 h.colorType) hHeight
+  have hTailExtract := ihdr_payload_extract_tail h.width h.height (u8 h.colorType)
+  have hCT_ofNat : (u8 h.colorType).toNat = h.colorType := by
+    simp [u8, Nat.mod_eq_of_lt hColorType]
+  have hBD_ofNat : (u8 8).toNat = 8 := by decide
+  have hZero_ofNat : (u8 0).toNat = 0 := by decide
+  -- Discharge the 13-byte size guard, reduce each parsed field, and close the
+  -- final structure equality by destructuring the original header and using
+  -- `hBitDepth : h.bitDepth = 8`.
+  simp [hSize, hWidthRead, hHeightRead, hTailExtract, hCT_ofNat, hBD_ofNat, hZero_ofNat]
+  obtain ⟨w, ht, ct, bd⟩ := h
+  simp at hBitDepth
+  cases hBitDepth
+  rfl
+
 end Lemmas
 
 end Bitmaps
