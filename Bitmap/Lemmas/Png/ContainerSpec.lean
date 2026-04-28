@@ -205,6 +205,35 @@ lemma SimpleContainerSpec.bytes_extract_skip_signature
     (i := start) (j := finish)
   simpa [hSig] using h'
 
+/-! ### Reduction to `parsePngSimple`
+
+`parsePng` tries `parsePngSimple` first and returns its result whenever
+that fast path succeeds. This reduction lemma lets downstream proofs
+work against `parsePngSimple` and then lift to `parsePng` for free. -/
+
+/-- If the simple-shape parser accepts a byte stream, the general parser
+returns the same result. Reduces the full forward-correctness theorem
+for any `SimpleContainerSpec` to a proof about `parsePngSimple` alone. -/
+lemma parsePng_of_parsePngSimple {bytes : ByteArray} (hsize : 8 ≤ bytes.size)
+    {hdr : PngHeader} {idat : ByteArray}
+    (h : parsePngSimple bytes hsize = some (hdr, idat)) :
+    parsePng bytes hsize = some (hdr, idat) := by
+  unfold parsePng
+  simp [h]
+
+/-- The full forward-correctness theorem for the simple container shape
+reduces to `parsePngSimple_simpleContainerSpec_correct` via the
+`parsePng_of_parsePngSimple` wiring. The remaining proof obligation —
+that `parsePngSimple` actually accepts `s.bytes` and produces
+`(s.header, s.idatData)` — needs three per-chunk byte-arithmetic lemmas
+(one each for IHDR/IDAT/IEND) plus a chain through the
+`parsePngSimple` branches; deferred to a follow-up commit. -/
+theorem parsePng_simpleContainerSpec_correct_of_simple (s : SimpleContainerSpec)
+    (hSimple :
+      parsePngSimple s.bytes s.bytes_size_ge_8 = some (s.header, s.idatData)) :
+    parsePng s.bytes s.bytes_size_ge_8 = some (s.header, s.idatData) :=
+  parsePng_of_parsePngSimple s.bytes_size_ge_8 hSimple
+
 end Lemmas
 
 end Bitmaps
