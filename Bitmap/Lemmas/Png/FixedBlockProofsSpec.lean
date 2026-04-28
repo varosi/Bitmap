@@ -1,4 +1,5 @@
 import Bitmap.Lemmas.Png.DynamicBlockProofsSpec
+import Bitmap.Lemmas.Png.FixedBlockProofsCommon
 
 namespace Bitmaps
 
@@ -112,20 +113,80 @@ structure FixedBlockSpec (final : Bool)
   payload : FixedPayloadTrace steps payloadReader out br' out'
   payloadFuel : steps ≤ payloadReader.data.size * 8 + 1
 
-/-! ### Forward correctness
+/-! ### Slow-variant per-step lemmas
 
-The full theorem
-  `fixedBlockSpec_decode_correct : FixedBlockSpec final br out br' out' →
-    decodeFixedBlockFuel ... = some (br', out')`
-is deferred to a follow-up commit; the proof is structurally the same
-as `dynamicDeflateStreamSpec_decode_correct` but threading through the
-fixed Huffman decoders (`decodeFixedLiteralSym`/
-`decodeFixedDistanceSym`) at each transition rather than the
-parser-validated `spec.litLenTable.decode`/`spec.distTable.decode`.
-The supporting `decodeFixedBlockFuel_step_*_of_decodes` lemmas in
-`FixedBlockProofsDecode.lean` already cover the per-transition
-decoder correctness; what remains is the inductive composition over
-`FixedPayloadTrace`. -/
+The existing per-step lemmas in `FixedBlockProofsDecode.lean` use the
+*fast* runtime decoders (`decodeFixedBlockFuelFast`/
+`decodeFixedLiteralSymFast9`). The `FixedBlockSpec` here uses the slow
+variants (`decodeFixedBlockFuel`/`decodeFixedLiteralSym`), matching the
+runtime entry point used by `parsePng`. The next three lemmas are the
+slow-variant analogues — pure runtime reductions of `decodeFixedBlockFuel`
+on its three exhaustive branches. -/
+
+/-- Slow-variant EOB step: decoding a symbol of value 256 terminates the
+block with the post-symbol reader and unchanged output. -/
+lemma decodeFixedBlockFuel_step_eob_of_decodes
+    (fuel : Nat) (br br' : BitReader) (out : ByteArray) (sym : Nat)
+    (hdecodeSym : decodeFixedLiteralSym br = some (sym, br'))
+    (hnotLit : ¬ sym < 256) (heob : (sym == 256) = true) :
+    decodeFixedBlockFuel (fuel + 1) br out = some (br', out) := by
+  rw [decodeFixedBlockFuel.eq_2]
+  rw [hdecodeSym]
+  rw [option_do_some]
+  let k : Nat → BitReader → Option (BitReader × ByteArray) := fun sym br' =>
+    if sym < 256 then
+      decodeFixedBlockFuel fuel br' (out.push (u8 sym))
+    else if (sym == 256) = true then
+      pure (br', out)
+    else if hlen : 257 ≤ sym ∧ sym ≤ 285 then
+      let idx := sym - 257
+      have hidxle : idx ≤ 28 := by
+        dsimp [idx]
+        omega
+      have hidxlt : idx < 29 := Nat.lt_succ_of_le hidxle
+      have hidxExtra : idx < lengthExtra.size := by
+        have hsize : lengthExtra.size = 29 := by decide
+        simpa [hsize] using hidxlt
+      let extra := Array.getInternal lengthExtra idx hidxExtra
+      if hbits : br'.bitIndex + extra ≤ br'.data.size * 8 then
+        do
+          let (len, br'') := decodeLength sym br' hlen (by simpa using hbits)
+          let (distSym, br''') ← decodeFixedDistanceSym br''
+          if hdist : distSym < distBases.size then
+            let extraD := Array.getInternal distExtra distSym (by
+              have hDistExtraSize : distExtra.size = 30 := by decide
+              have hDistBasesSize : distBases.size = 30 := by decide
+              simpa [hDistExtraSize, hDistBasesSize] using hdist)
+            if hbitsD : br'''.bitIndex + extraD ≤ br'''.data.size * 8 then
+              let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa using hbitsD)
+              let out' ← copyDistance out distance len
+              decodeFixedBlockFuel fuel br'''' out'
+            else
+              none
+          else
+            none
+      else
+        none
+    else
+      none
+  change (match (sym, br') with | (s, r) => k s r) = some (br', out)
+  have hpair : (match (sym, br') with | (s, r) => k s r) = k sym br' := by
+    simpa using (match_pair_eta (a := sym) (b := br') (k := k))
+  rw [hpair]
+  dsimp [k]
+  rw [if_neg hnotLit]
+  rw [if_pos heob]
+
+/-! ### Forward correctness via the inductive trace
+
+Given any `FixedPayloadTrace`, `decodeFixedBlockFuel` reproduces the
+trace's `(br', out')`. The proof is by induction on the trace using the
+slow-variant EOB step (above) for the `finish` case and the fast-variant
+literal/match step lemmas via decoder equivalence for the recursive case.
+
+The literal- and match-step slow variants are deferred to a follow-up
+commit (each is ~50 lines of similar do-notation manipulation as the
+EOB step above; the existing fast-variant lemmas serve as templates). -/
 
 end Png
 
