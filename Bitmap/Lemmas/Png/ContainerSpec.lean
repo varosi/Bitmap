@@ -135,6 +135,24 @@ lemma SimpleContainerSpec.bytes_size (s : SimpleContainerSpec) :
   simp [pngSignature_size, ByteArray.size_append, hIhdrSize, hIdatSize, hIendSize]
   omega
 
+/-! ### Spec-level re-association
+
+The runtime represents `s.bytes` as a left-associated chain of `++`. For
+proofs that drill into specific positions, it is more convenient to view
+the same bytes as `pngSignature ++ (chunks...)`, where the rest is itself
+a right-associated chain. The next lemma pivots between the two forms. -/
+
+/-- Re-associate the chained appends in `s.bytes` so the signature is
+isolated as the leftmost prefix. Used by the chunk-reading proofs. -/
+lemma SimpleContainerSpec.bytes_eq_signature_then_chunks (s : SimpleContainerSpec) :
+    s.bytes =
+      pngSignature ++
+        (mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header) ++
+          (mkChunkBytes idatTypeBytes s.idatData ++
+            mkChunkBytes iendTypeBytes ByteArray.empty)) := by
+  unfold SimpleContainerSpec.bytes
+  simp [ByteArray.append_assoc]
+
 /-- The first 8 bytes of any simple-container spec are the PNG signature.
 Proved by re-associating the chained appends so the leftmost prefix is
 isolated, then applying `byteArray_extract_append_prefix`. -/
@@ -159,6 +177,33 @@ lemma SimpleContainerSpec.bytes_extract_signature (s : SimpleContainerSpec) :
     (n := 8) (by simp [hSigSize])]
   rw [← hSigSize]
   exact ByteArray.extract_zero_size
+
+/-! ### Spec-side helpers for chunk-reading proofs
+
+The two lemmas below let downstream proofs treat `s.bytes` as
+`pngSignature ++ chunks` and slice into the chunks region directly,
+skipping past the signature. Phase 3d will use them to derive the three
+`readChunk` results for IHDR, IDAT, and IEND chunks. -/
+
+/-- Slicing into `s.bytes` past the 8-byte signature: extracting the range
+`[8 + start, 8 + finish)` of `s.bytes` equals extracting `[start, finish)`
+of the chunks-only suffix. The `8 + finish ≤ s.bytes.size` precondition
+keeps the slice within bounds. -/
+lemma SimpleContainerSpec.bytes_extract_skip_signature
+    (s : SimpleContainerSpec) (start finish : Nat) (_h : 8 + finish ≤ s.bytes.size) :
+    s.bytes.extract (8 + start) (8 + finish) =
+      (mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header) ++
+        (mkChunkBytes idatTypeBytes s.idatData ++
+          mkChunkBytes iendTypeBytes ByteArray.empty)).extract start finish := by
+  rw [s.bytes_eq_signature_then_chunks]
+  have hSig : pngSignature.size = 8 := pngSignature_size
+  have h' := ByteArray.extract_append_size_add
+    (a := pngSignature)
+    (b := mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header) ++
+      (mkChunkBytes idatTypeBytes s.idatData ++
+        mkChunkBytes iendTypeBytes ByteArray.empty))
+    (i := start) (j := finish)
+  simpa [hSig] using h'
 
 end Lemmas
 
