@@ -23,6 +23,19 @@ This library has proofs about:
   payload traces, dynamic-only multi-block streams, and zlib envelopes
   (`dynamicTableReaderSpec_readDynamicTables`, `dynamicPayloadTrace_decode_correct`,
   `dynamicDeflateStreamSpec_decode_correct`, `zlibDecompress_dynamicStreamSpec_correct`);
+- row-filter reconstruction spec (RFC 2083 §6.2) with `unfilterRow_eq_spec`
+  forward correctness against `reconstructRowSpec`, plus the multi-row chain
+  `reconstructRowsSpec` (Phase 4 of the external-PNG plan);
+- stored DEFLATE block forward correctness against an inductive
+  `StoredDeflateStreamSpec` independent of the encoder
+  (`storedBlockSpec_decode_correct`, `storedDeflateStreamSpec_decode_correct`,
+  Phase 1a of the external-PNG plan);
+- IHDR header round trip (`parseIHDRData_encodeIHDRData`) and container
+  scaffolding (`SimpleContainerSpec`, `bytes_size`, `bytes_extract_signature`,
+  `bytes_extract_skip_signature`, Phase 3a-3c-3d-partial);
+- fixed-block forward-correctness scaffold: `FixedPayloadTransition`,
+  `FixedPayloadFinish`, `FixedPayloadTrace`, and `FixedBlockSpec` inductive
+  structures parallel to the dynamic spec (Phase 1b scaffold);
 - there are no buffer overflows;
 - PNG encode and decode are total functions.
 
@@ -45,6 +58,24 @@ The proof-level dynamic table boundary delegates bit-level header parsing to
 `readDynamicTables`; runtime tests cover code-length repeats `16`, `17`, and `18`,
 repeat overflow shape, literal-only zero-distance blocks, LZ77 matches, and dynamic
 multi-block fixtures.
+
+### External-PNG spec status
+
+A multi-phase plan is in progress to extend the proof coverage to byte streams
+*not* produced by this library's encoder. The phases that have landed:
+
+- **Phase 4 (row filter)**: `Bitmap/Lemmas/Png/RowFilterSpec.lean` — complete.
+- **Phase 1a (stored block)**: `Bitmap/Lemmas/Png/StoredBlockProofsSpec.lean` —
+  complete, including the multi-block stream theorem.
+- **Phase 3a-3d (PNG container)**: `Bitmap/Lemmas/Png/ContainerSpec.lean` — IHDR
+  round trip + size/signature lemmas + signature-skip helper landed; the full
+  `parsePng_simpleContainerSpec_correct` theorem (chunk-by-chunk byte arithmetic
+  for IHDR/IDAT/IEND) is deferred.
+- **Phase 1b (fixed block)**: `Bitmap/Lemmas/Png/FixedBlockProofsSpec.lean` —
+  scaffold (inductive structures defined). The forward-correctness theorem is
+  deferred and would mirror the dynamic spec's induction over the trace.
+- **Phase 2 (mixed `BlockSpec` ADT) and Phase 5 (end-to-end composition)**: not
+  yet started; depend on Phase 1b's final theorem.
 
 ## Supported PNG features
 
