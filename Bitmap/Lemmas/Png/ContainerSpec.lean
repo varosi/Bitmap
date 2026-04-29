@@ -223,16 +223,117 @@ lemma parsePng_of_parsePngSimple {bytes : ByteArray} (hsize : 8 ≤ bytes.size)
 
 /-- The full forward-correctness theorem for the simple container shape
 reduces to `parsePngSimple_simpleContainerSpec_correct` via the
-`parsePng_of_parsePngSimple` wiring. The remaining proof obligation —
-that `parsePngSimple` actually accepts `s.bytes` and produces
-`(s.header, s.idatData)` — needs three per-chunk byte-arithmetic lemmas
-(one each for IHDR/IDAT/IEND) plus a chain through the
-`parsePngSimple` branches; deferred to a follow-up commit. -/
+`parsePng_of_parsePngSimple` wiring. -/
 theorem parsePng_simpleContainerSpec_correct_of_simple (s : SimpleContainerSpec)
     (hSimple :
       parsePngSimple s.bytes s.bytes_size_ge_8 = some (s.header, s.idatData)) :
     parsePng s.bytes s.bytes_size_ge_8 = some (s.header, s.idatData) :=
   parsePng_of_parsePngSimple s.bytes_size_ge_8 hSimple
+
+/-! ### Per-chunk readChunk lemmas
+
+Three lemmas, one per chunk in `SimpleContainerSpec.bytes`, mirroring
+the encoder-specific `readChunk_encodeBitmap_{ihdr,idat,iend}` lemmas
+in `EncodeDecodeBase.lean`. Each builds on `bytes_extract_skip_signature`
+to slice into the chunks region and then on the existing `mkChunk_extract_*`
+lemmas to identify each chunk's segments. -/
+
+/-- The IHDR chunk in a simple container has exactly 25 bytes (12 overhead
++ 13 IHDR data). -/
+private lemma mkChunkBytes_ihdr_size (s : SimpleContainerSpec) :
+    (mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header)).size = 25 := by
+  rw [mkChunkBytes_size _ _ (by rfl : ihdrTypeBytes.size = 4)]
+  rw [encodeIHDRData_size]
+
+/-- The IHDR chunk in `s.bytes` lives at byte 8, has 13 bytes of payload, and
+ends at byte 33. After applying `mkChunkBytes` to the encoded IHDR data,
+the on-the-wire length-prefix-CRC layout is `u32be 13 ++ ihdrTypeBytes ++
+encodeIHDRData s.header ++ u32be (crc32 ...).toNat`. -/
+lemma readChunk_simpleContainer_ihdr (s : SimpleContainerSpec)
+    (hLen : 8 + 3 < s.bytes.size) :
+    readChunk s.bytes 8 hLen =
+      some (ihdrTypeBytes, encodeIHDRData s.header, 33) := by
+  have hSize : s.bytes.size = s.idatData.size + 57 := s.bytes_size
+  -- IHDR length read at position 8 returns 13 (the IHDR data size).
+  have hExtractLen : s.bytes.extract 8 12 = u32be 13 := by
+    have h := s.bytes_extract_skip_signature 0 4 (by rw [hSize]; omega)
+    simp only [Nat.add_zero] at h
+    rw [h]
+    -- chunks region [0..4] = first 4 bytes of ihdrChunk
+    have hLeft := byteArray_extract_append_prefix
+      (a := mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header))
+      (b := mkChunkBytes idatTypeBytes s.idatData ++
+        mkChunkBytes iendTypeBytes ByteArray.empty)
+      (n := 4)
+      (by rw [mkChunkBytes_size _ _ (by rfl : ihdrTypeBytes.size = 4),
+              encodeIHDRData_size]; omega)
+    rw [hLeft]
+    -- mkChunkBytes ihdrTypeBytes ... = mkChunk "IHDR" ... by simp
+    have hChunkLen : (mkChunk "IHDR" (encodeIHDRData s.header)).extract 0 4
+        = u32be (encodeIHDRData s.header).size :=
+      mkChunk_extract_len "IHDR" (encodeIHDRData s.header)
+    simp [hChunkLen, encodeIHDRData_size]
+  have hLenRead : readU32BE s.bytes 8 hLen = 13 :=
+    readU32BE_of_extract_eq s.bytes 8 13 hLen hExtractLen (by decide)
+  -- CRC end position bound.
+  have hCrcEnd : 8 + 8 + 13 + 4 ≤ s.bytes.size := by rw [hSize]; omega
+  -- IHDR type bytes at positions 12..16.
+  have hExtractType : s.bytes.extract 12 16 = ihdrTypeBytes := by
+    have h := s.bytes_extract_skip_signature 4 8 (by rw [hSize]; omega)
+    rw [show (8 + 4 : Nat) = 12 by rfl, show (8 + 8 : Nat) = 16 by rfl] at h
+    rw [h]
+    -- chunks region [4..8] = bytes 4..8 of ihdrChunk
+    have hLeft := byteArray_extract_append_left
+      (a := mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header))
+      (b := mkChunkBytes idatTypeBytes s.idatData ++
+        mkChunkBytes iendTypeBytes ByteArray.empty)
+      (i := 4) (j := 8)
+      (by rw [mkChunkBytes_ihdr_size]; omega)
+      (by rw [mkChunkBytes_ihdr_size]; omega)
+    rw [hLeft]
+    show (mkChunk "IHDR" (encodeIHDRData s.header)).extract 4 8 = ihdrTypeBytes
+    rw [mkChunk_extract_type "IHDR" (encodeIHDRData s.header) ihdr_utf8ByteSize]
+    rfl
+  -- IHDR data bytes at positions 16..29.
+  have hExtractData : s.bytes.extract 16 (16 + 13) = encodeIHDRData s.header := by
+    have h := s.bytes_extract_skip_signature 8 (8 + 13) (by rw [hSize]; omega)
+    rw [show (8 + 8 : Nat) = 16 by rfl, show (8 + (8 + 13) : Nat) = 16 + 13 by rfl] at h
+    rw [h]
+    have hLeft := byteArray_extract_append_left
+      (a := mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header))
+      (b := mkChunkBytes idatTypeBytes s.idatData ++
+        mkChunkBytes iendTypeBytes ByteArray.empty)
+      (i := 8) (j := 8 + 13)
+      (by rw [mkChunkBytes_ihdr_size]; omega)
+      (by rw [mkChunkBytes_ihdr_size]; omega)
+    rw [hLeft]
+    have hData := mkChunk_extract_data "IHDR" (encodeIHDRData s.header) ihdr_utf8ByteSize
+    simp [encodeIHDRData_size] at hData
+    simpa [encodeIHDRData_size] using hData
+  -- IHDR CRC at positions 29..33.
+  have hExtractCrc :
+      s.bytes.extract 29 33 = u32be (crc32Chunk ihdrTypeBytes (encodeIHDRData s.header)).toNat := by
+    have h := s.bytes_extract_skip_signature 21 25 (by rw [hSize]; omega)
+    rw [show (8 + 21 : Nat) = 29 by rfl, show (8 + 25 : Nat) = 33 by rfl] at h
+    rw [h]
+    have hLeft := byteArray_extract_append_left
+      (a := mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header))
+      (b := mkChunkBytes idatTypeBytes s.idatData ++
+        mkChunkBytes iendTypeBytes ByteArray.empty)
+      (i := 21) (j := 25)
+      (by rw [mkChunkBytes_ihdr_size]; omega)
+      (by rw [mkChunkBytes_ihdr_size])
+    rw [hLeft]
+    have hCrc := mkChunk_extract_crc "IHDR" (encodeIHDRData s.header) ihdr_utf8ByteSize
+    simpa [encodeIHDRData_size, ihdrTypeBytes] using hCrc
+  -- CRC value: readU32BE s.bytes 29 _ = computed CRC.
+  have hCrcRead :
+      readU32BE s.bytes (8 + 8 + 13) (by omega) =
+        (crc32Chunk ihdrTypeBytes (encodeIHDRData s.header)).toNat :=
+    readU32BE_of_extract_eq s.bytes 29 _ (by omega) hExtractCrc (UInt32.toNat_lt _)
+  -- Combine via readChunk's definition.
+  unfold readChunk
+  simp [hLenRead, hCrcEnd, hExtractType, hExtractData, hCrcRead]
 
 end Lemmas
 
