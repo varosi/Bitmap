@@ -419,6 +419,25 @@ private def ancFixtureReferenceData : ByteArray :=
   ]
   ByteArray.mk (nats.map UInt8.ofNat)
 
+private def ancFixtureReferenceDataTransparentBlack : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (4 * 4 * 4)
+    for i in [0:16] do
+      let base := i * 3
+      let r := ancFixtureReferenceData.get! base
+      let g := ancFixtureReferenceData.get! (base + 1)
+      let b := ancFixtureReferenceData.get! (base + 2)
+      let a :=
+        if r == Png.u8 0 && g == Png.u8 0 && b == Png.u8 0 then
+          Png.u8 0
+        else
+          Png.u8 255
+      out := out.push r
+      out := out.push g
+      out := out.push b
+      out := out.push a
+    return out
+
 private def expectAncDecodeOk (path : System.FilePath) : IO Unit := do
   let bytes <- IO.FS.readBinFile path
   match Png.decodeBitmap (px := PixelRGB8) bytes with
@@ -430,11 +449,74 @@ private def expectAncDecodeOk (path : System.FilePath) : IO Unit := do
   | none =>
       throw (IO.userError s!"{path}: tolerated-chunk fixture failed to decode")
 
+private def expectAncTrnsRgbaOk (path : System.FilePath) : IO Unit := do
+  let bytes <- IO.FS.readBinFile path
+  match Png.decodeBitmapWithMetadata (px := PixelRGBA8) bytes with
+  | some decoded =>
+      if decoded.bitmap.size.width != 4 || decoded.bitmap.size.height != 4 then
+        throw (IO.userError s!"{path}: unexpected dimensions {decoded.bitmap.size.width}x{decoded.bitmap.size.height}")
+      if decoded.bitmap.data != ancFixtureReferenceDataTransparentBlack then
+        throw (IO.userError s!"{path}: tRNS alpha did not match the transparent-black reference")
+      match decoded.metadata.transparency with
+      | some (Png.PngTransparency.rgb8 r g b) =>
+          if r == Png.u8 0 && g == Png.u8 0 && b == Png.u8 0 then
+            pure ()
+          else
+            throw (IO.userError s!"{path}: unexpected tRNS RGB value")
+      | _ =>
+          throw (IO.userError s!"{path}: missing tRNS metadata")
+  | none =>
+      throw (IO.userError s!"{path}: metadata-aware RGBA tRNS decode failed")
+
+private def expectAncBkgdRgbOk (path : System.FilePath) : IO Unit := do
+  let bytes <- IO.FS.readBinFile path
+  match Png.decodeBitmapWithMetadata (px := PixelRGB8) bytes with
+  | some decoded =>
+      if decoded.bitmap.size.width != 4 || decoded.bitmap.size.height != 4 then
+        throw (IO.userError s!"{path}: unexpected dimensions {decoded.bitmap.size.width}x{decoded.bitmap.size.height}")
+      if decoded.bitmap.data != ancFixtureReferenceData then
+        throw (IO.userError s!"{path}: bKGD changed decoded RGB pixels")
+      match decoded.metadata.background with
+      | some (Png.PngBackground.rgb8 r g b) =>
+          if r == Png.u8 100 && g == Png.u8 100 && b == Png.u8 100 then
+            pure ()
+          else
+            throw (IO.userError s!"{path}: unexpected bKGD RGB value")
+      | _ =>
+          throw (IO.userError s!"{path}: missing bKGD RGB metadata")
+  | none =>
+      throw (IO.userError s!"{path}: metadata-aware bKGD RGB decode failed")
+
+private def expectAncBkgdGrayOk (path : System.FilePath) : IO Unit := do
+  let bytes <- IO.FS.readBinFile path
+  match Png.decodeBitmapWithMetadata (px := PixelGray8) bytes with
+  | some decoded =>
+      if decoded.bitmap.size.width != 4 || decoded.bitmap.size.height != 4 then
+        throw (IO.userError s!"{path}: unexpected dimensions {decoded.bitmap.size.width}x{decoded.bitmap.size.height}")
+      match decoded.metadata.background with
+      | some (Png.PngBackground.gray8 gray) =>
+          if gray == Png.u8 64 then
+            pure ()
+          else
+            throw (IO.userError s!"{path}: unexpected bKGD gray value")
+      | _ =>
+          throw (IO.userError s!"{path}: missing bKGD gray metadata")
+  | none =>
+      throw (IO.userError s!"{path}: metadata-aware bKGD gray decode failed")
+
 private def expectAncDecodeNone (path : System.FilePath) (label : String) : IO Unit := do
   let bytes <- IO.FS.readBinFile path
   match Png.decodeBitmap (px := PixelRGB8) bytes with
   | some _ =>
       throw (IO.userError s!"{path}: decoder accepted a {label} fixture that should be rejected")
+  | none =>
+      pure ()
+
+private def expectAncMetadataDecodeNone (path : System.FilePath) (label : String) : IO Unit := do
+  let bytes <- IO.FS.readBinFile path
+  match Png.decodeBitmapWithMetadata (px := PixelRGBA8) bytes with
+  | some _ =>
+      throw (IO.userError s!"{path}: metadata-aware decoder accepted a {label} fixture that should be rejected")
   | none =>
       pure ()
 
@@ -448,10 +530,22 @@ private def pngAncillaryChunkFixtures : IO Unit := do
   expectAncDecodeOk "test_anc_text.png"
   expectAncDecodeOk "test_anc_multi_idat.png"
   expectAncDecodeOk "test_anc_unknown_anc.png"
-  -- Rejected: pixel-affecting chunks the decoder doesn't honor, an unknown
-  -- critical chunk type ("MyCh"), and a chunk with a corrupted CRC.
+  expectAncTrnsRgbaOk "test_anc_trns.png"
+  expectAncDecodeNone "test_anc_trns.png" "tRNS dropped into RGB"
+  expectAncBkgdRgbOk "test_anc_bkgd_rgb.png"
+  expectAncBkgdGrayOk "test_anc_bkgd_gray.png"
+  -- Rejected: malformed or out-of-order metadata chunks, pixel-affecting chunks
+  -- the decoder doesn't honor, an unknown critical chunk type ("MyCh"), and bad CRCs.
   expectAncDecodeNone "test_anc_unknown_critical.png" "unknown-critical"
-  expectAncDecodeNone "test_anc_trns.png" "tRNS"
+  expectAncMetadataDecodeNone "test_anc_trns_bad_len.png" "bad tRNS length"
+  expectAncMetadataDecodeNone "test_anc_trns_after_idat.png" "tRNS after IDAT"
+  expectAncMetadataDecodeNone "test_anc_trns_duplicate.png" "duplicate tRNS"
+  expectAncMetadataDecodeNone "test_anc_plte_after_trns.png" "PLTE after tRNS"
+  expectAncMetadataDecodeNone "test_anc_trns_rgba.png" "tRNS in RGBA"
+  expectAncMetadataDecodeNone "test_anc_bkgd_bad_len.png" "bad bKGD length"
+  expectAncMetadataDecodeNone "test_anc_bkgd_after_idat.png" "bKGD after IDAT"
+  expectAncMetadataDecodeNone "test_anc_bkgd_duplicate.png" "duplicate bKGD"
+  expectAncMetadataDecodeNone "test_anc_plte_after_bkgd.png" "PLTE after bKGD"
   expectAncDecodeNone "test_anc_sbit.png" "sBIT"
   expectAncDecodeNone "test_anc_bad_crc.png" "bad-CRC"
 

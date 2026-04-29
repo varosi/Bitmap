@@ -55,9 +55,14 @@ def make_chunk_bad_crc(chunk_type: bytes, data: bytes) -> bytes:
 
 def make_ihdr() -> bytes:
     # 8-bit RGB, no compression/filter/interlace variation
+    return make_ihdr_for(WIDTH, HEIGHT, 2)
+
+
+def make_ihdr_for(width: int, height: int, color_type: int) -> bytes:
+    # 8-bit samples, no compression/filter/interlace variation
     return make_chunk(
         b"IHDR",
-        struct.pack(">IIBBBBB", WIDTH, HEIGHT, 8, 2, 0, 0, 0),
+        struct.pack(">IIBBBBB", width, height, 8, color_type, 0, 0, 0),
     )
 
 
@@ -67,15 +72,33 @@ def make_iend() -> bytes:
 
 def deflate_with_filter_zero() -> bytes:
     """Build the IDAT payload: each row prefixed by filter type 0 (None)."""
+    return deflate_pixels_with_filter_zero(WIDTH, HEIGHT, 3, PIXELS)
+
+
+def deflate_pixels_with_filter_zero(width: int, height: int, channels: int, pixels: bytes) -> bytes:
+    """Build an IDAT payload from interleaved pixels using filter type 0."""
     raw = b""
-    for y in range(HEIGHT):
-        row_start = y * WIDTH * 3
-        raw += b"\x00" + PIXELS[row_start : row_start + WIDTH * 3]
+    row_bytes = width * channels
+    for y in range(height):
+        row_start = y * row_bytes
+        raw += b"\x00" + pixels[row_start : row_start + row_bytes]
     return zlib.compress(raw)
 
 
 def make_idat() -> bytes:
     return make_chunk(b"IDAT", deflate_with_filter_zero())
+
+
+def make_gray_idat() -> bytes:
+    gray_pixels = bytes(
+        [
+            0, 64, 128, 255,
+            32, 96, 160, 224,
+            16, 80, 144, 208,
+            48, 112, 176, 240,
+        ]
+    )
+    return make_chunk(b"IDAT", deflate_pixels_with_filter_zero(WIDTH, HEIGHT, 1, gray_pixels))
 
 
 def make_idats_split(n: int) -> bytes:
@@ -129,15 +152,43 @@ def main() -> int:
         make_ihdr() + unknown_crit + make_idat() + make_iend(),
     )
 
-    # 6. RGB PNG with a tRNS chunk — pixel-affecting, decoder rejects.
+    # 6. RGB PNG with a tRNS chunk — metadata-aware RGBA decode applies alpha.
     trns = make_chunk(b"tRNS", struct.pack(">HHH", 0, 0, 0))  # transparent black
     write("test_anc_trns.png", make_ihdr() + trns + make_idat() + make_iend())
 
-    # 7. RGB PNG with an sBIT chunk — pixel-affecting, decoder rejects.
+    # 7. RGB PNG with bKGD — metadata preserved by the metadata-aware decoder.
+    bkgd_rgb = make_chunk(b"bKGD", struct.pack(">HHH", 100, 100, 100))
+    write("test_anc_bkgd_rgb.png", make_ihdr() + bkgd_rgb + make_idat() + make_iend())
+
+    # 8. Grayscale PNG with bKGD — metadata preserved by the metadata-aware decoder.
+    bkgd_gray = make_chunk(b"bKGD", struct.pack(">H", 64))
+    write(
+        "test_anc_bkgd_gray.png",
+        make_ihdr_for(WIDTH, HEIGHT, 0) + bkgd_gray + make_gray_idat() + make_iend(),
+    )
+
+    # 9. Invalid tRNS/bKGD ordering and payload-shape cases.
+    trns_bad_len = make_chunk(b"tRNS", b"\x00")
+    write("test_anc_trns_bad_len.png", make_ihdr() + trns_bad_len + make_idat() + make_iend())
+    write("test_anc_trns_after_idat.png", make_ihdr() + make_idat() + trns + make_iend())
+    write("test_anc_trns_duplicate.png", make_ihdr() + trns + trns + make_idat() + make_iend())
+    plte = make_chunk(b"PLTE", b"\x00\x00\x00")
+    write("test_anc_plte_after_trns.png", make_ihdr() + trns + plte + make_idat() + make_iend())
+    bkgd_bad_len = make_chunk(b"bKGD", b"\x00")
+    write("test_anc_bkgd_bad_len.png", make_ihdr() + bkgd_bad_len + make_idat() + make_iend())
+    write("test_anc_bkgd_after_idat.png", make_ihdr() + make_idat() + bkgd_rgb + make_iend())
+    write("test_anc_bkgd_duplicate.png", make_ihdr() + bkgd_rgb + bkgd_rgb + make_idat() + make_iend())
+    write("test_anc_plte_after_bkgd.png", make_ihdr() + bkgd_rgb + plte + make_idat() + make_iend())
+    trns_rgba = make_chunk(b"tRNS", struct.pack(">HHH", 0, 0, 0))
+    rgba_pixels = bytes([255, 0, 0, 255] * (WIDTH * HEIGHT))
+    rgba_idat = make_chunk(b"IDAT", deflate_pixels_with_filter_zero(WIDTH, HEIGHT, 4, rgba_pixels))
+    write("test_anc_trns_rgba.png", make_ihdr_for(WIDTH, HEIGHT, 6) + trns_rgba + rgba_idat + make_iend())
+
+    # 10. RGB PNG with an sBIT chunk — pixel-affecting, decoder rejects.
     sbit = make_chunk(b"sBIT", b"\x08\x08\x08")
     write("test_anc_sbit.png", make_ihdr() + sbit + make_idat() + make_iend())
 
-    # 8. RGB PNG whose IDAT chunk has a bad CRC32 — decoder rejects.
+    # 11. RGB PNG whose IDAT chunk has a bad CRC32 — decoder rejects.
     bad_idat = make_chunk_bad_crc(b"IDAT", deflate_with_filter_zero())
     write("test_anc_bad_crc.png", make_ihdr() + bad_idat + make_iend())
 
