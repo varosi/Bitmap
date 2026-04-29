@@ -159,6 +159,151 @@ lemma parsePngLoopFuel_rejects_tRNS (fuel : Nat)
   unfold parsePngLoopFuel
   simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND, hTRNS]
 
+/-- The metadata-aware parser records a valid `tRNS` chunk and continues.
+This is the branch-level correctness fact for supported transparency metadata. -/
+lemma parsePngLoopFuelWithMetadata_accepts_tRNS (fuel : Nat)
+    (bytes : ByteArray) (pos : Nat) (state : PngMetadataParseState)
+    (hdr : PngHeader) (typBytes chunkData : ByteArray) (posNext : Nat)
+    (trns : PngTransparency)
+    (hpos : pos + 8 ≤ bytes.size) (hLen : pos + 3 < bytes.size)
+    (hread : readChunk bytes pos hLen = some (typBytes, chunkData, posNext))
+    (hheader : state.header = some hdr)
+    (hnotIHDR : (typBytes == ihdrTypeBytes) = false)
+    (hnotPLTE : (typBytes == plteTypeBytes) = false)
+    (hnotIDAT : (typBytes == idatTypeBytes) = false)
+    (hnotIEND : (typBytes == iendTypeBytes) = false)
+    (hTRNS : (typBytes == trnsTypeBytes) = true)
+    (hseen : state.seenIDAT = false)
+    (hdup : state.metadata.transparency.isSome = false)
+    (hparse : parseTrnsData hdr chunkData = some trns) :
+    parsePngLoopFuelWithMetadata (fuel + 1) bytes pos state =
+      parsePngLoopFuelWithMetadata fuel bytes posNext
+        { state with metadata := { state.metadata with transparency := some trns } } := by
+  conv =>
+    lhs
+    unfold parsePngLoopFuelWithMetadata
+  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
+    hTRNS, hseen, hdup, hparse]
+
+/-- `tRNS` must appear before the first `IDAT` chunk in the metadata-aware parser. -/
+lemma parsePngLoopFuelWithMetadata_rejects_tRNS_after_idat (fuel : Nat)
+    (bytes : ByteArray) (pos : Nat) (state : PngMetadataParseState)
+    (hdr : PngHeader) (typBytes chunkData : ByteArray) (posNext : Nat)
+    (hpos : pos + 8 ≤ bytes.size) (hLen : pos + 3 < bytes.size)
+    (hread : readChunk bytes pos hLen = some (typBytes, chunkData, posNext))
+    (hheader : state.header = some hdr)
+    (hnotIHDR : (typBytes == ihdrTypeBytes) = false)
+    (hnotPLTE : (typBytes == plteTypeBytes) = false)
+    (hnotIDAT : (typBytes == idatTypeBytes) = false)
+    (hnotIEND : (typBytes == iendTypeBytes) = false)
+    (hTRNS : (typBytes == trnsTypeBytes) = true)
+    (hseen : state.seenIDAT = true) :
+    parsePngLoopFuelWithMetadata (fuel + 1) bytes pos state = none := by
+  unfold parsePngLoopFuelWithMetadata
+  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
+    hTRNS, hseen]
+
+/-- A second `tRNS` chunk is rejected rather than replacing earlier metadata. -/
+lemma parsePngLoopFuelWithMetadata_rejects_duplicate_tRNS (fuel : Nat)
+    (bytes : ByteArray) (pos : Nat) (state : PngMetadataParseState)
+    (hdr : PngHeader) (typBytes chunkData : ByteArray) (posNext : Nat)
+    (hpos : pos + 8 ≤ bytes.size) (hLen : pos + 3 < bytes.size)
+    (hread : readChunk bytes pos hLen = some (typBytes, chunkData, posNext))
+    (hheader : state.header = some hdr)
+    (hnotIHDR : (typBytes == ihdrTypeBytes) = false)
+    (hnotPLTE : (typBytes == plteTypeBytes) = false)
+    (hnotIDAT : (typBytes == idatTypeBytes) = false)
+    (hnotIEND : (typBytes == iendTypeBytes) = false)
+    (hTRNS : (typBytes == trnsTypeBytes) = true)
+    (hseen : state.seenIDAT = false)
+    (hdup : state.metadata.transparency.isSome = true) :
+    parsePngLoopFuelWithMetadata (fuel + 1) bytes pos state = none := by
+  unfold parsePngLoopFuelWithMetadata
+  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
+    hTRNS, hseen, hdup]
+
+/-- The metadata-aware parser records a valid `bKGD` chunk and continues.
+This proves background metadata is preserved at the container layer. -/
+lemma parsePngLoopFuelWithMetadata_accepts_bKGD (fuel : Nat)
+    (bytes : ByteArray) (pos : Nat) (state : PngMetadataParseState)
+    (hdr : PngHeader) (typBytes chunkData : ByteArray) (posNext : Nat)
+    (bkgd : PngBackground)
+    (hpos : pos + 8 ≤ bytes.size) (hLen : pos + 3 < bytes.size)
+    (hread : readChunk bytes pos hLen = some (typBytes, chunkData, posNext))
+    (hheader : state.header = some hdr)
+    (hnotIHDR : (typBytes == ihdrTypeBytes) = false)
+    (hnotPLTE : (typBytes == plteTypeBytes) = false)
+    (hnotIDAT : (typBytes == idatTypeBytes) = false)
+    (hnotIEND : (typBytes == iendTypeBytes) = false)
+    (hnotTRNS : (typBytes == trnsTypeBytes) = false)
+    (hBKGD : (typBytes == bkgdTypeBytes) = true)
+    (hseen : state.seenIDAT = false)
+    (hdup : state.metadata.background.isSome = false)
+    (hparse : parseBkgdData hdr chunkData = some bkgd) :
+    parsePngLoopFuelWithMetadata (fuel + 1) bytes pos state =
+      parsePngLoopFuelWithMetadata fuel bytes posNext
+        { state with metadata := { state.metadata with background := some bkgd } } := by
+  conv =>
+    lhs
+    unfold parsePngLoopFuelWithMetadata
+  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
+    hnotTRNS, hBKGD, hseen, hdup, hparse]
+
+/-- `bKGD` must appear before the first `IDAT` chunk in the metadata-aware parser. -/
+lemma parsePngLoopFuelWithMetadata_rejects_bKGD_after_idat (fuel : Nat)
+    (bytes : ByteArray) (pos : Nat) (state : PngMetadataParseState)
+    (hdr : PngHeader) (typBytes chunkData : ByteArray) (posNext : Nat)
+    (hpos : pos + 8 ≤ bytes.size) (hLen : pos + 3 < bytes.size)
+    (hread : readChunk bytes pos hLen = some (typBytes, chunkData, posNext))
+    (hheader : state.header = some hdr)
+    (hnotIHDR : (typBytes == ihdrTypeBytes) = false)
+    (hnotPLTE : (typBytes == plteTypeBytes) = false)
+    (hnotIDAT : (typBytes == idatTypeBytes) = false)
+    (hnotIEND : (typBytes == iendTypeBytes) = false)
+    (hnotTRNS : (typBytes == trnsTypeBytes) = false)
+    (hBKGD : (typBytes == bkgdTypeBytes) = true)
+    (hseen : state.seenIDAT = true) :
+    parsePngLoopFuelWithMetadata (fuel + 1) bytes pos state = none := by
+  unfold parsePngLoopFuelWithMetadata
+  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
+    hnotTRNS, hBKGD, hseen]
+
+/-- A second `bKGD` chunk is rejected rather than replacing earlier metadata. -/
+lemma parsePngLoopFuelWithMetadata_rejects_duplicate_bKGD (fuel : Nat)
+    (bytes : ByteArray) (pos : Nat) (state : PngMetadataParseState)
+    (hdr : PngHeader) (typBytes chunkData : ByteArray) (posNext : Nat)
+    (hpos : pos + 8 ≤ bytes.size) (hLen : pos + 3 < bytes.size)
+    (hread : readChunk bytes pos hLen = some (typBytes, chunkData, posNext))
+    (hheader : state.header = some hdr)
+    (hnotIHDR : (typBytes == ihdrTypeBytes) = false)
+    (hnotPLTE : (typBytes == plteTypeBytes) = false)
+    (hnotIDAT : (typBytes == idatTypeBytes) = false)
+    (hnotIEND : (typBytes == iendTypeBytes) = false)
+    (hnotTRNS : (typBytes == trnsTypeBytes) = false)
+    (hBKGD : (typBytes == bkgdTypeBytes) = true)
+    (hseen : state.seenIDAT = false)
+    (hdup : state.metadata.background.isSome = true) :
+    parsePngLoopFuelWithMetadata (fuel + 1) bytes pos state = none := by
+  unfold parsePngLoopFuelWithMetadata
+  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
+    hnotTRNS, hBKGD, hseen, hdup]
+
+/-- Once transparency or background metadata has appeared, a later `PLTE` is
+rejected so the parser enforces the required relative chunk order. -/
+lemma parsePngLoopFuelWithMetadata_rejects_plte_after_metadata (fuel : Nat)
+    (bytes : ByteArray) (pos : Nat) (state : PngMetadataParseState)
+    (hdr : PngHeader) (typBytes chunkData : ByteArray) (posNext : Nat)
+    (hpos : pos + 8 ≤ bytes.size) (hLen : pos + 3 < bytes.size)
+    (hread : readChunk bytes pos hLen = some (typBytes, chunkData, posNext))
+    (hheader : state.header = some hdr)
+    (hnotIHDR : (typBytes == ihdrTypeBytes) = false)
+    (hPLTE : (typBytes == plteTypeBytes) = true)
+    (hseen : (state.seenPLTE || state.seenIDAT) = false)
+    (hmetadata : (state.metadata.transparency.isSome || state.metadata.background.isSome) = true) :
+    parsePngLoopFuelWithMetadata (fuel + 1) bytes pos state = none := by
+  unfold parsePngLoopFuelWithMetadata
+  simp [hpos, hLen, hread, hheader, hnotIHDR, hPLTE, hseen, hmetadata]
+
 /-- An `sBIT` chunk is rejected. sBIT records the original significant bit count per
 channel; silently skipping it would misrepresent pixel precision. -/
 lemma parsePngLoopFuel_rejects_sBIT (fuel : Nat)

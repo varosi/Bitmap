@@ -17,6 +17,13 @@ This library has proofs about:
   `parsePngLoopFuel_rejects_unknown_critical`,
   `parsePngLoopFuel_rejects_tRNS`,
   `parsePngLoopFuel_rejects_sBIT`,
+  `parsePngLoopFuelWithMetadata_accepts_tRNS`,
+  `parsePngLoopFuelWithMetadata_accepts_bKGD`,
+  `parsePngLoopFuelWithMetadata_rejects_tRNS_after_idat`,
+  `parsePngLoopFuelWithMetadata_rejects_bKGD_after_idat`,
+  `parsePngLoopFuelWithMetadata_rejects_duplicate_tRNS`,
+  `parsePngLoopFuelWithMetadata_rejects_duplicate_bKGD`,
+  `parsePngLoopFuelWithMetadata_rejects_plte_after_metadata`,
   `parsePngLoopFuel_ignores_ancillary_before_idat`,
   `parsePngLoopFuel_idat_appends_when_open`);
 - dynamic DEFLATE decoder correctness for proof-specified dynamic table reads,
@@ -108,6 +115,7 @@ which the library carries full round-trip correctness proofs.
 | Color conversion | RGB PNGs can be decoded into `BitmapRGBA8` (fills α = 255) and RGBA PNGs into `BitmapRGB8` (drops alpha) |
 | PNG structure | 8-byte signature, `IHDR` first, multiple consecutive `IDAT` chunks accepted and concatenated, `IEND` last, required `PLTE` ordering checks, rejects unknown critical chunks, compression/filter method ≠ 0, and interlace ≠ 0 |
 | Tolerated ancillary chunks | `gAMA`, `cHRM`, `sRGB`, `iCCP`, `pHYs`, `tEXt`, `zTXt`, `iTXt`, `tIME`, `bKGD`, `hIST`, `sPLT`, plus any unknown chunk type whose first byte is lowercase — CRC-validated and skipped without affecting decoded pixels |
+| Metadata-aware decode | `decodeBitmapWithMetadata` validates and returns supported `bKGD` metadata; it applies 8-bit grayscale/RGB `tRNS` transparency when decoding to `BitmapRGBA8`, and composites `tRNS` or RGBA alpha over `bKGD` when decoding to `BitmapRGB8` |
 | Integrity | CRC-32 verified for every parsed chunk; mismatch rejects the entire input. Adler-32 verified at end of zlib stream |
 
 ### Not supported
@@ -115,9 +123,11 @@ which the library carries full round-trip correctness proofs.
 - Bit depths other than 8 (1, 2, 4, 16)
 - Color type 3 (palette / `PLTE`) and color type 4 (gray + alpha)
 - Adam7 interlacing
-- `tRNS` and `sBIT` chunks — explicitly **rejected** (decoder returns `none`) rather than silently ignored, to avoid the silent-corruption hazard of dropping transparency or precision metadata that affects pixel semantics
+- Palette `tRNS` and `bKGD` (requires color type 3 / `PLTE` decoding)
+- `tRNS` through the pixel-only `decodeBitmap` API — use `decodeBitmapWithMetadata` for transparent-color decoding into `BitmapRGBA8`, or into `BitmapRGB8` when a valid `bKGD` background is present
+- `sBIT` chunks — explicitly **rejected** (decoder returns `none`) rather than silently ignored, to avoid the silent-corruption hazard of dropping precision metadata that affects pixel semantics
 - Unknown critical chunks (any chunk type whose first byte is uppercase and not `IHDR`/`PLTE`/`IDAT`/`IEND`) — rejected per the PNG spec
-- Reading-back of ancillary chunk **content** (`gAMA`, `tEXt`, etc.) — the chunks are validated and skipped; the decoder produces only the pixel matrix, not metadata
+- Reading-back of most ancillary chunk **content** (`gAMA`, `tEXt`, etc.) — the chunks are validated and skipped; `decodeBitmapWithMetadata` preserves supported `bKGD` and `tRNS`
 - Encoder-side filter selection (always emits filter 0)
 - Genuinely-distinct dynamic-Huffman encoding — `.dynamic` emits a dynamic-block header but delegates the deflate payload to fixed-Huffman
 
