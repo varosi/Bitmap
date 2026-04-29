@@ -134,6 +134,44 @@ subject of Phase 5 and is not part of this spec. -/
 def reconstructRowsSpec (raw : ByteArray) (h rowBytes bpp : Nat) : ByteArray × Nat :=
   (List.range h).foldl (reconstructRowsStep raw rowBytes bpp) (ByteArray.empty, 0)
 
+/-! ### Accumulating-pixel-data variant
+
+`reconstructRowsSpec` only tracks the previous row and the byte offset;
+that is enough for the row-filter chain to be well-defined but does not
+expose the full reconstructed pixel buffer. For Phase 5's
+`ExternalPngSpec.hRowFilter`, the spec also needs the cumulative
+pixel data so the spec can equate it with the bitmap's `.data`.
+`reconstructRowsAccSpec` adds a third state component carrying that
+buffer. -/
+
+/-- One step of the accumulating row-reconstruction fold. Identical to
+`reconstructRowsStep` but also appends the freshly reconstructed row
+to a running pixel-data accumulator. -/
+def reconstructRowsAccStep (raw : ByteArray) (rowBytes bpp : Nat)
+    (state : ByteArray × Nat × ByteArray) (_y : Nat) : ByteArray × Nat × ByteArray :=
+  let (prev, offset, pixels) := state
+  let filter := raw.get! offset
+  let offset := offset + 1
+  let rowData := raw.extract offset (offset + rowBytes)
+  let row := reconstructRowSpec filter rowData prev bpp
+  (row, offset + rowBytes, pixels ++ row)
+
+/-- Multi-row reconstruction with full pixel-data accumulation. Returns
+`(lastRow, finalOffset, fullPixels)` where `fullPixels` is the
+concatenation of all reconstructed rows in row-major order. -/
+def reconstructRowsAccSpec (raw : ByteArray) (h rowBytes bpp : Nat) :
+    ByteArray × Nat × ByteArray :=
+  (List.range h).foldl (reconstructRowsAccStep raw rowBytes bpp)
+    (ByteArray.empty, 0, ByteArray.empty)
+
+/-! The accumulated pixel buffer has size `h * rowBytes` *when* the input
+`raw` has the well-formed PNG layout `h * (rowBytes + 1)` bytes (one
+filter byte plus one row payload per row). The conditional size lemma
+that pushes this invariant through the fold is part of the deferred
+Phase 5 finalisation; downstream proofs can establish the size via the
+specific `inflatedRaw.size = h * (rowBytes + 1)` invariant in
+`ExternalPngSpec`. -/
+
 end Lemmas
 
 end Bitmaps
