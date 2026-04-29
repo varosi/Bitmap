@@ -166,11 +166,68 @@ def reconstructRowsAccSpec (raw : ByteArray) (h rowBytes bpp : Nat) :
 
 /-! The accumulated pixel buffer has size `h * rowBytes` *when* the input
 `raw` has the well-formed PNG layout `h * (rowBytes + 1)` bytes (one
-filter byte plus one row payload per row). The conditional size lemma
-that pushes this invariant through the fold is part of the deferred
-Phase 5 finalisation; downstream proofs can establish the size via the
-specific `inflatedRaw.size = h * (rowBytes + 1)` invariant in
-`ExternalPngSpec`. -/
+filter byte plus one row payload per row). The lemma below pushes this
+invariant through the fold using a generalised offset bound. -/
+
+/-- Generalised size lemma: starting the fold at offset `initOffset` with
+`xs.length` rows still to consume, if there are enough bytes for those
+rows, the final pixel buffer grows by `xs.length * rowBytes`. -/
+private lemma foldl_pixelsStep_size_of_bound
+    (xs : List Nat) (raw : ByteArray) (rowBytes bpp : Nat)
+    (initPrev : ByteArray) (initOffset : Nat) (initPixels : ByteArray)
+    (hBound : initOffset + xs.length * (rowBytes + 1) ≤ raw.size) :
+    (xs.foldl (reconstructRowsAccStep raw rowBytes bpp)
+        (initPrev, initOffset, initPixels)).2.2.size
+      = initPixels.size + xs.length * rowBytes := by
+  induction xs generalizing initPrev initOffset initPixels with
+  | nil => simp
+  | cons y xs ih =>
+      have hExtract :
+          (raw.extract (initOffset + 1) (initOffset + 1 + rowBytes)).size = rowBytes := by
+        have hLe : initOffset + 1 + rowBytes ≤ raw.size := by
+          have := hBound
+          simp [List.length_cons, Nat.succ_mul] at this
+          omega
+        simp [ByteArray.size_extract, Nat.min_eq_left hLe]
+      have hStep :
+        ((reconstructRowsAccStep raw rowBytes bpp
+            (initPrev, initOffset, initPixels) y).2.2).size
+          = initPixels.size + rowBytes := by
+        unfold reconstructRowsAccStep
+        simp [ByteArray.size_append, reconstructRowSpec_size, hExtract]
+      have hBound' :
+          (initOffset + 1 + rowBytes) + xs.length * (rowBytes + 1) ≤ raw.size := by
+        have := hBound
+        simp [List.length_cons, Nat.succ_mul] at this
+        omega
+      have ih' := ih
+        (initPrev := (reconstructRowsAccStep raw rowBytes bpp
+                        (initPrev, initOffset, initPixels) y).1)
+        (initOffset := (reconstructRowsAccStep raw rowBytes bpp
+                          (initPrev, initOffset, initPixels) y).2.1)
+        (initPixels := (reconstructRowsAccStep raw rowBytes bpp
+                          (initPrev, initOffset, initPixels) y).2.2)
+        (by
+          unfold reconstructRowsAccStep
+          simpa using hBound')
+      simp only [hStep] at ih'
+      simp only [List.foldl_cons, List.length_cons]
+      rw [ih']
+      simp [Nat.succ_mul]
+      omega
+
+/-- The accumulated pixel buffer has size `h * rowBytes` for any
+well-formed PNG row stream of `h` rows. The precondition matches the
+size invariant Phase 5's `ExternalPngSpec` carries via `hInflatedSize`. -/
+lemma reconstructRowsAccSpec_size_of_layout
+    (raw : ByteArray) (h rowBytes bpp : Nat)
+    (hLayout : raw.size = h * (rowBytes + 1)) :
+    (reconstructRowsAccSpec raw h rowBytes bpp).2.2.size = h * rowBytes := by
+  unfold reconstructRowsAccSpec
+  have hBound : 0 + (List.range h).length * (rowBytes + 1) ≤ raw.size := by
+    simp [hLayout]
+  simpa using foldl_pixelsStep_size_of_bound (List.range h) raw rowBytes bpp
+    ByteArray.empty 0 ByteArray.empty hBound
 
 end Lemmas
 
