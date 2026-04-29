@@ -63,7 +63,7 @@ structure ExternalPngSpec (px : Type u) [Pixel px] [PngPixel px] where
   hColorType : container.header.colorType = (PngPixel.colorType (α := px)).toNat
   /-- The deflate output (i.e., the result of inflating the container's
       IDAT data through the zlib envelope) — a contiguous byte buffer of
-      `bitmap.size.height * (bitmap.size.width * Pixel.bytesPerPixel + 1)`
+      `bitmap.size.height * (bitmap.size.width * Pixel.bytesPerPixel (α := px) + 1)`
       bytes carrying one filter byte plus one row of pixel data per row. -/
   inflatedRaw : ByteArray
   /-- The container's IDAT bytes are exactly the zlib envelope of
@@ -71,14 +71,20 @@ structure ExternalPngSpec (px : Type u) [Pixel px] [PngPixel px] where
       attached as a separate constraint via `deflateStream`. -/
   hIdatIsZlib :
     container.idatData = zlibCompressOf inflatedRaw bitmap.data
-  /-- The inflated raw bytes, viewed as a sequence of filtered rows,
-      reconstruct to the bitmap's pixel data via the row-filter spec.
-      `reconstructRowsSpec` returns the final `(prevRow, offset)`; the
-      `prevRow` here is the *last reconstructed row*, and the bitmap
-      data follows from the per-row chain. The full encoding is
-      defined in `Phase 5b`. -/
-  hRowFilter : True  -- placeholder; the row-filter constraint is captured
-                     -- separately in the deferred completion of Phase 5.
+  /-- Per-row layout invariant: the inflated raw bytes are organised as
+      `bitmap.size.height` rows, each prefixed by a 1-byte filter selector
+      followed by `rowBytes := bitmap.size.width * Pixel.bytesPerPixel (α := px)` payload
+      bytes. -/
+  hInflatedSize :
+    inflatedRaw.size = bitmap.size.height * (bitmap.size.width * Pixel.bytesPerPixel (α := px) + 1)
+  /-- The full reconstruction via `reconstructRowsSpec` consumes every byte of
+      `inflatedRaw`. This is a structural invariant required for the row-filter
+      chain to terminate at the right offset; it falls out of `hInflatedSize`
+      and `reconstructRowsSpec_size` once the multi-row chain proof lands. -/
+  hRowsConsumed :
+    (reconstructRowsSpec inflatedRaw bitmap.size.height
+        (bitmap.size.width * Pixel.bytesPerPixel (α := px)) (Pixel.bytesPerPixel (α := px))).2
+      = inflatedRaw.size
 
 /-! ### Forward correctness (deferred)
 
