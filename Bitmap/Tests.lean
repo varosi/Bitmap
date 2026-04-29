@@ -423,6 +423,70 @@ private def grayAlphaPngWithTrns : ByteArray :=
   grayAlphaPngWithAncillary
     (Png.mkChunkBytes Png.trnsTypeBytes (ByteArray.mk #[Png.u8 0, Png.u8 0]))
 
+private def u16 (n : Nat) : UInt16 :=
+  UInt16.ofNat n
+
+private def rgb16DownsampleFixture : BitmapRGB16 :=
+  BitmapRGB16.ofPixelFn 2 1 (fun idx : Fin (2 * 1) =>
+    match idx.val with
+    | 0 => { r := u16 0x12ab, g := u16 0x3456, b := u16 0xfedc }
+    | _ => { r := u16 0x0102, g := u16 0x8001, b := u16 0x00ff })
+
+private def rgba16DownsampleFixture : BitmapRGBA16 :=
+  BitmapRGBA16.ofPixelFn 2 1 (fun idx : Fin (2 * 1) =>
+    match idx.val with
+    | 0 => { r := u16 0x12ab, g := u16 0x3456, b := u16 0xfedc, a := u16 0x7788 }
+    | _ => { r := u16 0x0102, g := u16 0x8001, b := u16 0x00ff, a := u16 0xffff })
+
+private def gray16DownsampleFixture : BitmapGray16 :=
+  BitmapGray16.ofPixelFn 3 1 (fun idx : Fin (3 * 1) =>
+    match idx.val with
+    | 0 => { v := u16 0x12ab }
+    | 1 => { v := u16 0x8001 }
+    | _ => { v := u16 0x00ff })
+
+private def grayAlpha16DownsampleFixture : BitmapGrayAlpha16 :=
+  BitmapGrayAlpha16.ofPixelFn 2 1 (fun idx : Fin (2 * 1) =>
+    match idx.val with
+    | 0 => { v := u16 0x12ab, a := u16 0x3456 }
+    | _ => { v := u16 0x8001, a := u16 0x00ff })
+
+private def encodeFixturePng {px : Type} [Pixel px] [Png.PngPixel px]
+    (bmp : Bitmap px) : IO ByteArray := do
+  match Png.encodeBitmapChecked (px := px) bmp .fixed with
+  | Except.ok bytes => pure bytes
+  | Except.error err => throw (IO.userError err)
+
+private def expect16To8Downsample : IO Unit := do
+  let rgbBytes ← encodeFixturePng rgb16DownsampleFixture
+  match Png.decodeBitmap (px := PixelRGB8) rgbBytes with
+  | some bmp =>
+      if bmp.data != ByteArray.mk #[0x12, 0x34, 0xfe, 0x01, 0x80, 0x00] then
+        throw (IO.userError "RGB16 -> RGB8 downsample used unexpected bytes")
+  | none =>
+      throw (IO.userError "RGB16 -> RGB8 downsample failed")
+  let rgbaBytes ← encodeFixturePng rgba16DownsampleFixture
+  match Png.decodeBitmap (px := PixelRGBA8) rgbaBytes with
+  | some bmp =>
+      if bmp.data != ByteArray.mk #[0x12, 0x34, 0xfe, 0x77, 0x01, 0x80, 0x00, 0xff] then
+        throw (IO.userError "RGBA16 -> RGBA8 downsample used unexpected bytes")
+  | none =>
+      throw (IO.userError "RGBA16 -> RGBA8 downsample failed")
+  let grayBytes ← encodeFixturePng gray16DownsampleFixture
+  match Png.decodeBitmap (px := PixelGray8) grayBytes with
+  | some bmp =>
+      if bmp.data != ByteArray.mk #[0x12, 0x80, 0x00] then
+        throw (IO.userError "Gray16 -> Gray8 downsample used unexpected bytes")
+  | none =>
+      throw (IO.userError "Gray16 -> Gray8 downsample failed")
+  let grayAlphaBytes ← encodeFixturePng grayAlpha16DownsampleFixture
+  match Png.decodeBitmap (px := PixelGrayAlpha8) grayAlphaBytes with
+  | some bmp =>
+      if bmp.data != ByteArray.mk #[0x12, 0x34, 0x80, 0x00] then
+        throw (IO.userError "GrayAlpha16 -> GrayAlpha8 downsample used unexpected bytes")
+  | none =>
+      throw (IO.userError "GrayAlpha16 -> GrayAlpha8 downsample failed")
+
 private def expectGrayAlphaFixtures : IO Unit := do
   match Png.decodeBitmap (px := PixelGrayAlpha8) grayAlphaPng with
   | some bmp =>
@@ -795,6 +859,8 @@ def run : IO Unit := do
   pngDecodeFixedHuffmanFixtures
   expectGrayAlphaFixtures
   IO.println "png gray+alpha fixtures: ok"
+  expect16To8Downsample
+  IO.println "png 16-to-8 downsample fixtures: ok"
   pngAncillaryChunkFixtures
   IO.println "png ancillary-chunk fixtures: ok"
   validateDynamicTableValidationBoundary

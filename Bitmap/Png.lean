@@ -1806,6 +1806,34 @@ def pngBytesPerPixelForColorType? (colorType : Nat) : Option Nat :=
   else
     none
 
+def pngChannelCountForColorType? (colorType : Nat) : Option Nat :=
+  if colorType == 0 then
+    some 1
+  else if colorType == 2 then
+    some 3
+  else if colorType == 4 then
+    some 2
+  else if colorType == 6 then
+    some 4
+  else
+    none
+
+def pngSampleBytesForBitDepth? (bitDepth : Nat) : Option Nat :=
+  if bitDepth == 8 then
+    some 1
+  else if bitDepth == 16 then
+    some 2
+  else
+    none
+
+def pngBytesPerPixelForColorTypeAndBitDepth? (colorType bitDepth : Nat) : Option Nat := do
+  let channels ← pngChannelCountForColorType? colorType
+  let sampleBytes ← pngSampleBytesForBitDepth? bitDepth
+  some (channels * sampleBytes)
+
+def pngBitDepthSupported (bitDepth : Nat) : Bool :=
+  bitDepth == 8 || bitDepth == 16
+
 structure PngParseState where
   header : Option PngHeader
   idat : ByteArray
@@ -1825,7 +1853,7 @@ def parsePngSimple (bytes : ByteArray) (_hsize : 8 <= bytes.size) :
         if typ1 != ihdrTypeBytes then
           none
         let hdr ← parseIHDRData data1
-        if hdr.bitDepth != 8 then
+        if !pngBitDepthSupported hdr.bitDepth then
           none
         if hdr.colorType != 0 && hdr.colorType != 2 && hdr.colorType != 4 &&
             hdr.colorType != 6 then
@@ -2316,9 +2344,219 @@ def decodeRowsLoopGrayAlpha (raw : ByteArray) (w h bpp rowBytes : Nat)
   decodeRowsLoopCore raw w h bpp rowBytes bytesPerPixelGrayAlpha decodeRowGrayAlpha
     y offset prevRow pixels
 
+@[inline] def rowU16High (row : ByteArray) (base : Nat) : UInt8 :=
+  row.get! base
+
+@[inline] def rowU16Low (row : ByteArray) (base : Nat) : UInt8 :=
+  row.get! (base + 1)
+
+@[inline] def rowU16Nat (row : ByteArray) (base : Nat) : Nat :=
+  (rowU16High row base).toNat * 256 + (rowU16Low row base).toNat
+
+@[inline] def setU16Bytes! (pixels : ByteArray) (base : Nat) (hi lo : UInt8) : ByteArray :=
+  (pixels.set! base hi).set! (base + 1) lo
+
+@[inline] def setU16Nat! (pixels : ByteArray) (base n : Nat) : ByteArray :=
+  setU16Bytes! pixels base (u8 (n / 256)) (u8 n)
+
+def decodeRowDropAlpha16 (row : ByteArray) (w y bpp : Nat) (pixels : ByteArray) :
+    ByteArray :=
+  Id.run do
+    let mut pixels := pixels
+    for x in [0:w] do
+      let base := x * bpp
+      let rBase := base
+      let gBase := if bpp == 2 || bpp == 4 then base else base + 2
+      let bBase := if bpp == 2 || bpp == 4 then base else base + 4
+      let pixBase := (y * w + x) * bytesPerPixelRGB16
+      pixels := setU16Bytes! pixels pixBase (rowU16High row rBase) (rowU16Low row rBase)
+      pixels := setU16Bytes! pixels (pixBase + 2) (rowU16High row gBase) (rowU16Low row gBase)
+      pixels := setU16Bytes! pixels (pixBase + 4) (rowU16High row bBase) (rowU16Low row bBase)
+    return pixels
+
+def decodeRowAddAlpha16 (row : ByteArray) (w y bpp : Nat) (pixels : ByteArray) :
+    ByteArray :=
+  Id.run do
+    let mut pixels := pixels
+    for x in [0:w] do
+      let base := x * bpp
+      let rBase := base
+      let gBase := if bpp == 2 || bpp == 4 then base else base + 2
+      let bBase := if bpp == 2 || bpp == 4 then base else base + 4
+      let aBase? :=
+        if bpp == 4 then some (base + 2) else if bpp == 8 then some (base + 6) else none
+      let pixBase := (y * w + x) * bytesPerPixelRGBA16
+      pixels := setU16Bytes! pixels pixBase (rowU16High row rBase) (rowU16Low row rBase)
+      pixels := setU16Bytes! pixels (pixBase + 2) (rowU16High row gBase) (rowU16Low row gBase)
+      pixels := setU16Bytes! pixels (pixBase + 4) (rowU16High row bBase) (rowU16Low row bBase)
+      match aBase? with
+      | some aBase =>
+          pixels := setU16Bytes! pixels (pixBase + 6) (rowU16High row aBase) (rowU16Low row aBase)
+      | none =>
+          pixels := setU16Bytes! pixels (pixBase + 6) 0xff 0xff
+    return pixels
+
+def decodeRowGray16 (row : ByteArray) (w y bpp : Nat) (pixels : ByteArray) : ByteArray :=
+  Id.run do
+    let mut pixels := pixels
+    for x in [0:w] do
+      let base := x * bpp
+      let gray :=
+        if bpp == 2 || bpp == 4 then
+          rowU16Nat row base
+        else
+          (rowU16Nat row base + rowU16Nat row (base + 2) + rowU16Nat row (base + 4)) / 3
+      let pixBase := (y * w + x) * bytesPerPixelGray16
+      pixels := setU16Nat! pixels pixBase gray
+    return pixels
+
+def decodeRowGrayAlpha16 (row : ByteArray) (w y bpp : Nat) (pixels : ByteArray) :
+    ByteArray :=
+  Id.run do
+    let mut pixels := pixels
+    for x in [0:w] do
+      let base := x * bpp
+      let gray :=
+        if bpp == 2 || bpp == 4 then
+          rowU16Nat row base
+        else
+          (rowU16Nat row base + rowU16Nat row (base + 2) + rowU16Nat row (base + 4)) / 3
+      let alpha :=
+        if bpp == 4 then
+          rowU16Nat row (base + 2)
+        else if bpp == 8 then
+          rowU16Nat row (base + 6)
+        else
+          65535
+      let pixBase := (y * w + x) * bytesPerPixelGrayAlpha16
+      pixels := setU16Nat! pixels pixBase gray
+      pixels := setU16Nat! pixels (pixBase + 2) alpha
+    return pixels
+
+def decodeRowsLoopRGB16 (raw : ByteArray) (w h bpp rowBytes : Nat)
+    (y offset : Nat) (prevRow pixels : ByteArray) : Option ByteArray :=
+  decodeRowsLoopCore raw w h bpp rowBytes bytesPerPixelRGB16 decodeRowDropAlpha16
+    y offset prevRow pixels
+
+def decodeRowsLoopRGBA16 (raw : ByteArray) (w h bpp rowBytes : Nat)
+    (y offset : Nat) (prevRow pixels : ByteArray) : Option ByteArray :=
+  decodeRowsLoopCore raw w h bpp rowBytes bytesPerPixelRGBA16 decodeRowAddAlpha16
+    y offset prevRow pixels
+
+def decodeRowsLoopGray16 (raw : ByteArray) (w h bpp rowBytes : Nat)
+    (y offset : Nat) (prevRow pixels : ByteArray) : Option ByteArray :=
+  decodeRowsLoopCore raw w h bpp rowBytes bytesPerPixelGray16 decodeRowGray16
+    y offset prevRow pixels
+
+def decodeRowsLoopGrayAlpha16 (raw : ByteArray) (w h bpp rowBytes : Nat)
+    (y offset : Nat) (prevRow pixels : ByteArray) : Option ByteArray :=
+  decodeRowsLoopCore raw w h bpp rowBytes bytesPerPixelGrayAlpha16 decodeRowGrayAlpha16
+    y offset prevRow pixels
+
+def decodeRowDown16ToRGB8 (sourceColorType : Nat)
+    (row : ByteArray) (w y bpp : Nat) (pixels : ByteArray) : ByteArray :=
+  Id.run do
+    let mut pixels := pixels
+    for x in [0:w] do
+      let base := x * bpp
+      let grayLike := sourceColorType == 0 || sourceColorType == 4
+      let r := rowU16High row base
+      let g := if grayLike then r else rowU16High row (base + 2)
+      let b := if grayLike then r else rowU16High row (base + 4)
+      let pixBase := (y * w + x) * bytesPerPixelRGB
+      pixels := pixels.set! pixBase r
+      pixels := pixels.set! (pixBase + 1) g
+      pixels := pixels.set! (pixBase + 2) b
+    return pixels
+
+def decodeRowDown16ToRGBA8 (sourceColorType : Nat)
+    (row : ByteArray) (w y bpp : Nat) (pixels : ByteArray) : ByteArray :=
+  Id.run do
+    let mut pixels := pixels
+    for x in [0:w] do
+      let base := x * bpp
+      let grayLike := sourceColorType == 0 || sourceColorType == 4
+      let r := rowU16High row base
+      let g := if grayLike then r else rowU16High row (base + 2)
+      let b := if grayLike then r else rowU16High row (base + 4)
+      let a :=
+        if sourceColorType == 4 then
+          rowU16High row (base + 2)
+        else if sourceColorType == 6 then
+          rowU16High row (base + 6)
+        else
+          0xff
+      let pixBase := (y * w + x) * bytesPerPixelRGBA
+      pixels := pixels.set! pixBase r
+      pixels := pixels.set! (pixBase + 1) g
+      pixels := pixels.set! (pixBase + 2) b
+      pixels := pixels.set! (pixBase + 3) a
+    return pixels
+
+def decodeRowDown16ToGray8 (sourceColorType : Nat)
+    (row : ByteArray) (w y bpp : Nat) (pixels : ByteArray) : ByteArray :=
+  Id.run do
+    let mut pixels := pixels
+    for x in [0:w] do
+      let base := x * bpp
+      let gray :=
+        if sourceColorType == 0 || sourceColorType == 4 then
+          rowU16High row base
+        else
+          u8 (((rowU16High row base).toNat +
+            (rowU16High row (base + 2)).toNat +
+            (rowU16High row (base + 4)).toNat) / 3)
+      let pixBase := (y * w + x) * bytesPerPixelGray
+      pixels := pixels.set! pixBase gray
+    return pixels
+
+def decodeRowDown16ToGrayAlpha8 (sourceColorType : Nat)
+    (row : ByteArray) (w y bpp : Nat) (pixels : ByteArray) : ByteArray :=
+  Id.run do
+    let mut pixels := pixels
+    for x in [0:w] do
+      let base := x * bpp
+      let gray :=
+        if sourceColorType == 0 || sourceColorType == 4 then
+          rowU16High row base
+        else
+          u8 (((rowU16High row base).toNat +
+            (rowU16High row (base + 2)).toNat +
+            (rowU16High row (base + 4)).toNat) / 3)
+      let alpha :=
+        if sourceColorType == 4 then
+          rowU16High row (base + 2)
+        else if sourceColorType == 6 then
+          rowU16High row (base + 6)
+        else
+          0xff
+      let pixBase := (y * w + x) * bytesPerPixelGrayAlpha
+      pixels := pixels.set! pixBase gray
+      pixels := pixels.set! (pixBase + 1) alpha
+    return pixels
+
+def decodeRowsLoopDown16To8 (targetColorType : UInt8) (sourceColorType : Nat)
+    (raw : ByteArray) (w h bpp rowBytes : Nat)
+    (y offset : Nat) (prevRow pixels : ByteArray) : Option ByteArray :=
+  if targetColorType == u8 0 then
+    decodeRowsLoopCore raw w h bpp rowBytes bytesPerPixelGray
+      (decodeRowDown16ToGray8 sourceColorType) y offset prevRow pixels
+  else if targetColorType == u8 2 then
+    decodeRowsLoopCore raw w h bpp rowBytes bytesPerPixelRGB
+      (decodeRowDown16ToRGB8 sourceColorType) y offset prevRow pixels
+  else if targetColorType == u8 4 then
+    decodeRowsLoopCore raw w h bpp rowBytes bytesPerPixelGrayAlpha
+      (decodeRowDown16ToGrayAlpha8 sourceColorType) y offset prevRow pixels
+  else if targetColorType == u8 6 then
+    decodeRowsLoopCore raw w h bpp rowBytes bytesPerPixelRGBA
+      (decodeRowDown16ToRGBA8 sourceColorType) y offset prevRow pixels
+  else
+    none
+
 class PngPixel (α : Type u) [Pixel α] where
   encodeRaw : Bitmap α -> ByteArray
   colorType : UInt8
+  bitDepth : UInt8
   decodeRowsLoop : (raw : ByteArray) -> (w h bpp rowBytes : Nat) ->
     (y offset : Nat) -> (prevRow pixels : ByteArray) -> Option ByteArray
 
@@ -2326,12 +2564,15 @@ def decodeParsedBitmapWithMetadata {px : Type u} [Pixel px] [PngPixel px]
     (parsed : PngParsed) : Option (PngDecodeResult px) := do
   let hdr := parsed.header
   let idat := parsed.idat
-  if hdr.bitDepth != 8 then
+  if !pngBitDepthSupported hdr.bitDepth then
     none
   if hdr.colorType != 0 && hdr.colorType != 2 && hdr.colorType != 4 &&
       hdr.colorType != 6 then
     none
-  let bpp ← pngBytesPerPixelForColorType? hdr.colorType
+  if hdr.bitDepth != (PngPixel.bitDepth (α := px)).toNat then
+    if !(hdr.bitDepth == 16 && PngPixel.bitDepth (α := px) == u8 8) then
+      none
+  let bpp ← pngBytesPerPixelForColorTypeAndBitDepth? hdr.colorType hdr.bitDepth
   let raw ←
     if hsize : 2 <= idat.size then
       match zlibDecompressStored idat hsize with
@@ -2345,6 +2586,13 @@ def decodeParsedBitmapWithMetadata {px : Type u} [Pixel px] [PngPixel px]
     none
   let totalBytes := hdr.width * hdr.height * Pixel.bytesPerPixel (α := px)
   let pixels0 := ByteArray.mk <| Array.replicate totalBytes 0
+  let decodeDefaultRows : Option ByteArray :=
+    if hdr.bitDepth == 16 && PngPixel.bitDepth (α := px) == u8 8 then
+      decodeRowsLoopDown16To8 (PngPixel.colorType (α := px)) hdr.colorType
+        raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
+    else
+      PngPixel.decodeRowsLoop (α := px)
+        raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
   let pixels ←
     match parsed.metadata.transparency with
     | some trns =>
@@ -2379,11 +2627,9 @@ def decodeParsedBitmapWithMetadata {px : Type u} [Pixel px] [PngPixel px]
               decodeRowsLoopAlphaOverBackground background
                 raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
           | none =>
-              PngPixel.decodeRowsLoop (α := px)
-                raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
+              decodeDefaultRows
         else
-          PngPixel.decodeRowsLoop (α := px)
-            raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
+          decodeDefaultRows
   let size : Size := { width := hdr.width, height := hdr.height }
   if hsize : pixels.size = size.width * size.height * Pixel.bytesPerPixel (α := px) then
     some
@@ -2409,15 +2655,18 @@ def decodeBitmap {px : Type u} [Pixel px] [PngPixel px]
       parsePng bytes hsize
     else
       none
-  if hdr.bitDepth != 8 then
+  if !pngBitDepthSupported hdr.bitDepth then
     none
   if hdr.colorType != 0 && hdr.colorType != 2 && hdr.colorType != 4 &&
       hdr.colorType != 6 then
     none
+  if hdr.bitDepth != (PngPixel.bitDepth (α := px)).toNat then
+    if !(hdr.bitDepth == 16 && PngPixel.bitDepth (α := px) == u8 8) then
+      none
   if hdr.colorType == 4 &&
       PngPixel.colorType (α := px) != u8 4 && PngPixel.colorType (α := px) != u8 6 then
     none
-  let bpp ← pngBytesPerPixelForColorType? hdr.colorType
+  let bpp ← pngBytesPerPixelForColorTypeAndBitDepth? hdr.colorType hdr.bitDepth
   let raw ←
     if hsize : 2 <= idat.size then
       match zlibDecompressStored idat hsize with
@@ -2432,7 +2681,11 @@ def decodeBitmap {px : Type u} [Pixel px] [PngPixel px]
   let totalBytes := hdr.width * hdr.height * Pixel.bytesPerPixel (α := px)
   let pixels0 := ByteArray.mk <| Array.replicate totalBytes 0
   let pixels ←
-    PngPixel.decodeRowsLoop (α := px) raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
+    if hdr.bitDepth == 16 && PngPixel.bitDepth (α := px) == u8 8 then
+      decodeRowsLoopDown16To8 (PngPixel.colorType (α := px)) hdr.colorType
+        raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
+    else
+      PngPixel.decodeRowsLoop (α := px) raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
   let size : Size := { width := hdr.width, height := hdr.height }
   if hsize : pixels.size = size.width * size.height * Pixel.bytesPerPixel (α := px) then
     return { size, data := pixels, valid := hsize }
@@ -2487,7 +2740,7 @@ def encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
     let h := bmp.size.height
     let raw := PngPixel.encodeRaw (α := px) bmp
     let ihdr := u32be w ++ u32be h ++
-      ByteArray.mk #[u8 8, PngPixel.colorType (α := px), u8 0, u8 0, u8 0]
+      ByteArray.mk #[PngPixel.bitDepth (α := px), PngPixel.colorType (α := px), u8 0, u8 0, u8 0]
     let idat :=
       match mode with
       | .stored => zlibCompressStored raw
@@ -2540,6 +2793,17 @@ def BitmapRGB8.writePng [Pixel PixelRGB8] [PngPixel PixelRGB8]
   | Except.error err => pure (Except.error err)
   | Except.ok bytes => ioToExcept (IO.FS.writeBinFile path bytes)
 
+def BitmapRGB16.readPng [Pixel PixelRGB16] [PngPixel PixelRGB16]
+    (path : FilePath) : IO (Except String BitmapRGB16) :=
+  Bitmap.readPng (px := PixelRGB16) path
+
+def BitmapRGB16.writePng [Pixel PixelRGB16] [PngPixel PixelRGB16]
+    (path : FilePath) (bmp : BitmapRGB16) (mode : PngEncodeMode := .fixed) :
+    IO (Except String Unit) :=
+  match encodeBitmapChecked (px := PixelRGB16) bmp mode with
+  | Except.error err => pure (Except.error err)
+  | Except.ok bytes => ioToExcept (IO.FS.writeBinFile path bytes)
+
 def BitmapRGBA8.readPng [Pixel PixelRGBA8] [PngPixel PixelRGBA8]
     (path : FilePath) : IO (Except String BitmapRGBA8) :=
   Bitmap.readPng (px := PixelRGBA8) path
@@ -2548,6 +2812,17 @@ def BitmapRGBA8.writePng [Pixel PixelRGBA8] [PngPixel PixelRGBA8]
     (path : FilePath) (bmp : BitmapRGBA8) (mode : PngEncodeMode := .fixed) :
     IO (Except String Unit) :=
   match encodeBitmapChecked (px := PixelRGBA8) bmp mode with
+  | Except.error err => pure (Except.error err)
+  | Except.ok bytes => ioToExcept (IO.FS.writeBinFile path bytes)
+
+def BitmapRGBA16.readPng [Pixel PixelRGBA16] [PngPixel PixelRGBA16]
+    (path : FilePath) : IO (Except String BitmapRGBA16) :=
+  Bitmap.readPng (px := PixelRGBA16) path
+
+def BitmapRGBA16.writePng [Pixel PixelRGBA16] [PngPixel PixelRGBA16]
+    (path : FilePath) (bmp : BitmapRGBA16) (mode : PngEncodeMode := .fixed) :
+    IO (Except String Unit) :=
+  match encodeBitmapChecked (px := PixelRGBA16) bmp mode with
   | Except.error err => pure (Except.error err)
   | Except.ok bytes => ioToExcept (IO.FS.writeBinFile path bytes)
 
@@ -2562,6 +2837,17 @@ def BitmapGray8.writePng [Pixel PixelGray8] [PngPixel PixelGray8]
   | Except.error err => pure (Except.error err)
   | Except.ok bytes => ioToExcept (IO.FS.writeBinFile path bytes)
 
+def BitmapGray16.readPng [Pixel PixelGray16] [PngPixel PixelGray16]
+    (path : FilePath) : IO (Except String BitmapGray16) :=
+  Bitmap.readPng (px := PixelGray16) path
+
+def BitmapGray16.writePng [Pixel PixelGray16] [PngPixel PixelGray16]
+    (path : FilePath) (bmp : BitmapGray16) (mode : PngEncodeMode := .fixed) :
+    IO (Except String Unit) :=
+  match encodeBitmapChecked (px := PixelGray16) bmp mode with
+  | Except.error err => pure (Except.error err)
+  | Except.ok bytes => ioToExcept (IO.FS.writeBinFile path bytes)
+
 def BitmapGrayAlpha8.readPng [Pixel PixelGrayAlpha8] [PngPixel PixelGrayAlpha8]
     (path : FilePath) : IO (Except String BitmapGrayAlpha8) :=
   Bitmap.readPng (px := PixelGrayAlpha8) path
@@ -2573,25 +2859,64 @@ def BitmapGrayAlpha8.writePng [Pixel PixelGrayAlpha8] [PngPixel PixelGrayAlpha8]
   | Except.error err => pure (Except.error err)
   | Except.ok bytes => ioToExcept (IO.FS.writeBinFile path bytes)
 
+def BitmapGrayAlpha16.readPng [Pixel PixelGrayAlpha16] [PngPixel PixelGrayAlpha16]
+    (path : FilePath) : IO (Except String BitmapGrayAlpha16) :=
+  Bitmap.readPng (px := PixelGrayAlpha16) path
+
+def BitmapGrayAlpha16.writePng [Pixel PixelGrayAlpha16] [PngPixel PixelGrayAlpha16]
+    (path : FilePath) (bmp : BitmapGrayAlpha16) (mode : PngEncodeMode := .fixed) :
+    IO (Except String Unit) :=
+  match encodeBitmapChecked (px := PixelGrayAlpha16) bmp mode with
+  | Except.error err => pure (Except.error err)
+  | Except.ok bytes => ioToExcept (IO.FS.writeBinFile path bytes)
+
 instance : PngPixel PixelRGB8 where
   encodeRaw := encodeRawFast
   colorType := u8 2
+  bitDepth := u8 8
   decodeRowsLoop := decodeRowsLoop
+
+instance : PngPixel PixelRGB16 where
+  encodeRaw := encodeRawFast
+  colorType := u8 2
+  bitDepth := u8 16
+  decodeRowsLoop := decodeRowsLoopRGB16
 
 instance : PngPixel PixelRGBA8 where
   encodeRaw := encodeRawFast
   colorType := u8 6
+  bitDepth := u8 8
   decodeRowsLoop := decodeRowsLoopRGBA
+
+instance : PngPixel PixelRGBA16 where
+  encodeRaw := encodeRawFast
+  colorType := u8 6
+  bitDepth := u8 16
+  decodeRowsLoop := decodeRowsLoopRGBA16
 
 instance : PngPixel PixelGray8 where
   encodeRaw := encodeRawFast
   colorType := u8 0
+  bitDepth := u8 8
   decodeRowsLoop := decodeRowsLoopGray
+
+instance : PngPixel PixelGray16 where
+  encodeRaw := encodeRawFast
+  colorType := u8 0
+  bitDepth := u8 16
+  decodeRowsLoop := decodeRowsLoopGray16
 
 instance : PngPixel PixelGrayAlpha8 where
   encodeRaw := encodeRawFast
   colorType := u8 4
+  bitDepth := u8 8
   decodeRowsLoop := decodeRowsLoopGrayAlpha
+
+instance : PngPixel PixelGrayAlpha16 where
+  encodeRaw := encodeRawFast
+  colorType := u8 4
+  bitDepth := u8 16
+  decodeRowsLoop := decodeRowsLoopGrayAlpha16
 
 end Png
 
@@ -2601,17 +2926,35 @@ instance [Pixel PixelRGB8] [Png.PngPixel PixelRGB8] : FileWritable BitmapRGB8 wh
 instance [Pixel PixelRGB8] [Png.PngPixel PixelRGB8] : FileReadable BitmapRGB8 where
   read := Png.BitmapRGB8.readPng
 
+instance [Pixel PixelRGB16] [Png.PngPixel PixelRGB16] : FileWritable BitmapRGB16 where
+  write := fun path bmp => Png.BitmapRGB16.writePng path bmp .fixed
+
+instance [Pixel PixelRGB16] [Png.PngPixel PixelRGB16] : FileReadable BitmapRGB16 where
+  read := Png.BitmapRGB16.readPng
+
 instance [Pixel PixelRGBA8] [Png.PngPixel PixelRGBA8] : FileWritable BitmapRGBA8 where
   write := fun path bmp => Png.BitmapRGBA8.writePng path bmp .fixed
 
 instance [Pixel PixelRGBA8] [Png.PngPixel PixelRGBA8] : FileReadable BitmapRGBA8 where
   read := Png.BitmapRGBA8.readPng
 
+instance [Pixel PixelRGBA16] [Png.PngPixel PixelRGBA16] : FileWritable BitmapRGBA16 where
+  write := fun path bmp => Png.BitmapRGBA16.writePng path bmp .fixed
+
+instance [Pixel PixelRGBA16] [Png.PngPixel PixelRGBA16] : FileReadable BitmapRGBA16 where
+  read := Png.BitmapRGBA16.readPng
+
 instance [Pixel PixelGray8] [Png.PngPixel PixelGray8] : FileWritable BitmapGray8 where
   write := fun path bmp => Png.BitmapGray8.writePng path bmp .fixed
 
 instance [Pixel PixelGray8] [Png.PngPixel PixelGray8] : FileReadable BitmapGray8 where
   read := Png.BitmapGray8.readPng
+
+instance [Pixel PixelGray16] [Png.PngPixel PixelGray16] : FileWritable BitmapGray16 where
+  write := fun path bmp => Png.BitmapGray16.writePng path bmp .fixed
+
+instance [Pixel PixelGray16] [Png.PngPixel PixelGray16] : FileReadable BitmapGray16 where
+  read := Png.BitmapGray16.readPng
 
 instance [Pixel PixelGrayAlpha8] [Png.PngPixel PixelGrayAlpha8] :
     FileWritable BitmapGrayAlpha8 where
@@ -2620,5 +2963,13 @@ instance [Pixel PixelGrayAlpha8] [Png.PngPixel PixelGrayAlpha8] :
 instance [Pixel PixelGrayAlpha8] [Png.PngPixel PixelGrayAlpha8] :
     FileReadable BitmapGrayAlpha8 where
   read := Png.BitmapGrayAlpha8.readPng
+
+instance [Pixel PixelGrayAlpha16] [Png.PngPixel PixelGrayAlpha16] :
+    FileWritable BitmapGrayAlpha16 where
+  write := fun path bmp => Png.BitmapGrayAlpha16.writePng path bmp .fixed
+
+instance [Pixel PixelGrayAlpha16] [Png.PngPixel PixelGrayAlpha16] :
+    FileReadable BitmapGrayAlpha16 where
+  read := Png.BitmapGrayAlpha16.readPng
 
 end Bitmaps
