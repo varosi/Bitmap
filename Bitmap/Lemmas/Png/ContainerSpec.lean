@@ -571,6 +571,78 @@ lemma readChunk_simpleContainer_iend (s : SimpleContainerSpec)
   show ((45 + s.idatData.size) + 8 + 0 + 4 : Nat) = 57 + s.idatData.size
   omega
 
+/-! ### Forward correctness through `parsePngSimple`
+
+Compose the three per-chunk readChunk lemmas with the IHDR round trip
+and the supported-subset constraints from `SimpleContainerSpec` to
+prove that `parsePngSimple` accepts `s.bytes` and returns
+`(s.header, s.idatData)`. Combined with `parsePng_of_parsePngSimple`,
+this closes the Phase 3 final theorem. -/
+
+/-- Forward correctness for the simple-shape container parser:
+`parsePngSimple` accepts `s.bytes` and returns `(s.header, s.idatData)`,
+given the spec's constraints plus the standard PNG u32 length-field
+fit (`s.idatData.size < 2^32`). -/
+theorem parsePngSimple_simpleContainerSpec_correct (s : SimpleContainerSpec)
+    (hIdatSize : s.idatData.size < 2 ^ 32) :
+    parsePngSimple s.bytes s.bytes_size_ge_8 = some (s.header, s.idatData) := by
+  unfold parsePngSimple
+  have hSize : s.bytes.size = s.idatData.size + 57 := s.bytes_size
+  have hSig : s.bytes.extract 0 8 = pngSignature := s.bytes_extract_signature
+  -- Position bounds for the three chunk reads.
+  have hLen1 : (8 : Nat) + 3 < s.bytes.size := by rw [hSize]; omega
+  have hLen2 : (33 : Nat) + 3 < s.bytes.size := by rw [hSize]; omega
+  have hLen3 : (45 + s.idatData.size : Nat) + 3 < s.bytes.size := by rw [hSize]; omega
+  -- The three chunk reads.
+  have hRead1 := readChunk_simpleContainer_ihdr s hLen1
+  have hRead2 := readChunk_simpleContainer_idat s hIdatSize hLen2
+  have hRead3 := readChunk_simpleContainer_iend s hLen3
+  -- Color type < 256 (from being in {0, 2, 6}).
+  have hCT256 : s.header.colorType < 256 := by
+    rcases s.hColorType with h | h | h <;> rw [h] <;> decide
+  -- IHDR data round-trip parses to the original header.
+  have hParseHdr := parseIHDRData_encodeIHDRData s.header s.hWidth s.hHeight s.hBitDepth hCT256
+  -- Color type IS in {0, 2, 6}, so the bad-color-type check fails.
+  have hCTok :
+      (s.header.colorType != 0 && s.header.colorType != 2 && s.header.colorType != 6)
+        = false := by
+    rcases s.hColorType with h | h | h <;> rw [h] <;> decide
+  -- Bit depth IS 8, so the wrong-bit-depth check fails.
+  have hBitDepthOk : (s.header.bitDepth != 8) = false := by
+    simp [s.hBitDepth]
+  -- IEND data is empty, so the non-empty-IEND check fails.
+  have hEmpty : (ByteArray.empty.size != 0) = false := by decide
+  -- Final position (57 + s.idatData.size) equals s.bytes.size, so the
+  -- trailing-bytes check fails.
+  have hFinal : ((57 + s.idatData.size) != s.bytes.size) = false := by
+    rw [hSize]; simp; omega
+  -- Combine all branches via simp.
+  simp [hSig, hLen1, hRead1, hParseHdr, hBitDepthOk, hCTok,
+    hLen2, hRead2, hLen3, hRead3, hEmpty, hFinal]
+  -- Remaining goal is a conjunction of trivial equalities and the spec
+  -- constraints; discharge each in turn.
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_⟩
+  · exact bne_self_eq_false' (a := pngSignature)
+  · exact bne_self_eq_false' (a := ihdrTypeBytes)
+  · exact s.hBitDepth
+  · intro h0 h2
+    rcases s.hColorType with h | h | h
+    · exact (h0 h).elim
+    · exact (h2 h).elim
+    · exact h
+  · exact bne_self_eq_false' (a := idatTypeBytes)
+  · exact bne_self_eq_false' (a := iendTypeBytes)
+
+/-- The full Phase 3 forward-correctness theorem: `parsePng` accepts any
+byte stream matching `SimpleContainerSpec` and returns the spec's header
+and IDAT data. Composes `parsePngSimple_simpleContainerSpec_correct`
+with the `parsePng → parsePngSimple` reduction. -/
+theorem parsePng_simpleContainerSpec_correct (s : SimpleContainerSpec)
+    (hIdatSize : s.idatData.size < 2 ^ 32) :
+    parsePng s.bytes s.bytes_size_ge_8 = some (s.header, s.idatData) :=
+  parsePng_simpleContainerSpec_correct_of_simple s
+    (parsePngSimple_simpleContainerSpec_correct s hIdatSize)
+
 end Lemmas
 
 end Bitmaps
