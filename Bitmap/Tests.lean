@@ -438,6 +438,33 @@ private def ancFixtureReferenceDataTransparentBlack : ByteArray :=
       out := out.push a
     return out
 
+private def ancFixtureReferenceDataBlackOnBackground : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (4 * 4 * 3)
+    for i in [0:16] do
+      let base := i * 3
+      let r0 := ancFixtureReferenceData.get! base
+      let g0 := ancFixtureReferenceData.get! (base + 1)
+      let b0 := ancFixtureReferenceData.get! (base + 2)
+      let (r, g, b) :=
+        if r0 == Png.u8 0 && g0 == Png.u8 0 && b0 == Png.u8 0 then
+          (Png.u8 100, Png.u8 100, Png.u8 100)
+        else
+          (r0, g0, b0)
+      out := out.push r
+      out := out.push g
+      out := out.push b
+    return out
+
+private def ancFixtureRgbaOverBlueReferenceData : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (4 * 4 * 3)
+    for _ in [0:16] do
+      out := out.push (Png.u8 128)
+      out := out.push (Png.u8 0)
+      out := out.push (Png.u8 127)
+    return out
+
 private def expectAncDecodeOk (path : System.FilePath) : IO Unit := do
   let bytes <- IO.FS.readBinFile path
   match Png.decodeBitmap (px := PixelRGB8) bytes with
@@ -467,6 +494,45 @@ private def expectAncTrnsRgbaOk (path : System.FilePath) : IO Unit := do
           throw (IO.userError s!"{path}: missing tRNS metadata")
   | none =>
       throw (IO.userError s!"{path}: metadata-aware RGBA tRNS decode failed")
+
+private def expectAncTrnsBkgdRgbOk (path : System.FilePath) : IO Unit := do
+  let bytes <- IO.FS.readBinFile path
+  match Png.decodeBitmapWithMetadata (px := PixelRGB8) bytes with
+  | some decoded =>
+      if decoded.bitmap.size.width != 4 || decoded.bitmap.size.height != 4 then
+        throw (IO.userError s!"{path}: unexpected dimensions {decoded.bitmap.size.width}x{decoded.bitmap.size.height}")
+      if decoded.bitmap.data != ancFixtureReferenceDataBlackOnBackground then
+        throw (IO.userError s!"{path}: tRNS+bKGD RGB composition did not match reference")
+      match decoded.metadata.transparency, decoded.metadata.background with
+      | some (Png.PngTransparency.rgb8 tr tg tb), some (Png.PngBackground.rgb8 br bg bb) =>
+          if tr == Png.u8 0 && tg == Png.u8 0 && tb == Png.u8 0 &&
+              br == Png.u8 100 && bg == Png.u8 100 && bb == Png.u8 100 then
+            pure ()
+          else
+            throw (IO.userError s!"{path}: unexpected tRNS+bKGD metadata")
+      | _, _ =>
+          throw (IO.userError s!"{path}: missing tRNS+bKGD metadata")
+  | none =>
+      throw (IO.userError s!"{path}: metadata-aware tRNS+bKGD RGB decode failed")
+
+private def expectAncRgbaBkgdRgbOk (path : System.FilePath) : IO Unit := do
+  let bytes <- IO.FS.readBinFile path
+  match Png.decodeBitmapWithMetadata (px := PixelRGB8) bytes with
+  | some decoded =>
+      if decoded.bitmap.size.width != 4 || decoded.bitmap.size.height != 4 then
+        throw (IO.userError s!"{path}: unexpected dimensions {decoded.bitmap.size.width}x{decoded.bitmap.size.height}")
+      if decoded.bitmap.data != ancFixtureRgbaOverBlueReferenceData then
+        throw (IO.userError s!"{path}: RGBA+bKGD RGB composition did not match reference")
+      match decoded.metadata.background with
+      | some (Png.PngBackground.rgb8 r g b) =>
+          if r == Png.u8 0 && g == Png.u8 0 && b == Png.u8 255 then
+            pure ()
+          else
+            throw (IO.userError s!"{path}: unexpected RGBA bKGD metadata")
+      | _ =>
+          throw (IO.userError s!"{path}: missing RGBA bKGD metadata")
+  | none =>
+      throw (IO.userError s!"{path}: metadata-aware RGBA+bKGD RGB decode failed")
 
 private def expectAncBkgdRgbOk (path : System.FilePath) : IO Unit := do
   let bytes <- IO.FS.readBinFile path
@@ -533,6 +599,8 @@ private def pngAncillaryChunkFixtures : IO Unit := do
   expectAncTrnsRgbaOk "test_anc_trns.png"
   expectAncDecodeNone "test_anc_trns.png" "tRNS dropped into RGB"
   expectAncBkgdRgbOk "test_anc_bkgd_rgb.png"
+  expectAncTrnsBkgdRgbOk "test_anc_trns_bkgd.png"
+  expectAncRgbaBkgdRgbOk "test_anc_rgba_bkgd.png"
   expectAncBkgdGrayOk "test_anc_bkgd_gray.png"
   -- Rejected: malformed or out-of-order metadata chunks, pixel-affecting chunks
   -- the decoder doesn't honor, an unknown critical chunk type ("MyCh"), and bad CRCs.

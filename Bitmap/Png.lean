@@ -2085,6 +2085,63 @@ def decodeRowDropAlpha (row : ByteArray) (w y bpp : Nat) (pixels : ByteArray) : 
       pixels := pixels.set! (pixBase + 2) b
     return pixels
 
+def backgroundToRGB (background : PngBackground) : UInt8 × UInt8 × UInt8 :=
+  match background with
+  | .gray8 gray => (gray, gray, gray)
+  | .rgb8 r g b => (r, g, b)
+
+def alphaCompositeByte (src bg alpha : UInt8) : UInt8 :=
+  u8 ((src.toNat * alpha.toNat + bg.toNat * (255 - alpha.toNat)) / 255)
+
+def transparencyAlpha (trns : Option PngTransparency) (r g b : UInt8) : UInt8 :=
+  match trns with
+  | some (.gray8 gray) =>
+      if r == gray && g == gray && b == gray then u8 0 else u8 255
+  | some (.rgb8 tr tg tb) =>
+      if r == tr && g == tg && b == tb then u8 0 else u8 255
+  | none =>
+      u8 255
+
+def decodeRowTrnsOverBackground
+    (trns : PngTransparency) (background : PngBackground)
+    (row : ByteArray) (w y bpp : Nat) (pixels : ByteArray) : ByteArray :=
+  Id.run do
+    let (br, bg, bb) := backgroundToRGB background
+    let mut pixels := pixels
+    for x in [0:w] do
+      let base := x * bpp
+      let r := row.get! base
+      let g := if bpp == 1 then r else row.get! (base + 1)
+      let b := if bpp == 1 then r else row.get! (base + 2)
+      let (r, g, b) :=
+        if transparencyAlpha (some trns) r g b == u8 0 then
+          (br, bg, bb)
+        else
+          (r, g, b)
+      let pixBase := (y * w + x) * bytesPerPixelRGB
+      pixels := pixels.set! pixBase r
+      pixels := pixels.set! (pixBase + 1) g
+      pixels := pixels.set! (pixBase + 2) b
+    return pixels
+
+def decodeRowAlphaOverBackground
+    (background : PngBackground) (row : ByteArray) (w y bpp : Nat)
+    (pixels : ByteArray) : ByteArray :=
+  Id.run do
+    let (br, bg, bb) := backgroundToRGB background
+    let mut pixels := pixels
+    for x in [0:w] do
+      let base := x * bpp
+      let r := row.get! base
+      let g := row.get! (base + 1)
+      let b := row.get! (base + 2)
+      let a := if bpp == 4 then row.get! (base + 3) else u8 255
+      let pixBase := (y * w + x) * bytesPerPixelRGB
+      pixels := pixels.set! pixBase (alphaCompositeByte r br a)
+      pixels := pixels.set! (pixBase + 1) (alphaCompositeByte g bg a)
+      pixels := pixels.set! (pixBase + 2) (alphaCompositeByte b bb a)
+    return pixels
+
 def decodeRowAddAlpha (row : ByteArray) (w y bpp : Nat) (pixels : ByteArray) : ByteArray :=
   Id.run do
     let mut pixels := pixels
@@ -2099,15 +2156,6 @@ def decodeRowAddAlpha (row : ByteArray) (w y bpp : Nat) (pixels : ByteArray) : B
       pixels := pixels.set! (pixBase + 2) b
       pixels := pixels.set! (pixBase + 3) (u8 255)
     return pixels
-
-def transparencyAlpha (trns : Option PngTransparency) (r g b : UInt8) : UInt8 :=
-  match trns with
-  | some (.gray8 gray) =>
-      if r == gray && g == gray && b == gray then u8 0 else u8 255
-  | some (.rgb8 tr tg tb) =>
-      if r == tr && g == tg && b == tb then u8 0 else u8 255
-  | none =>
-      u8 255
 
 def decodeRowAddAlphaWithTransparency
     (trns : Option PngTransparency) (row : ByteArray) (w y bpp : Nat)
@@ -2175,6 +2223,19 @@ def decodeRowsLoop (raw : ByteArray) (w h bpp rowBytes : Nat)
   decodeRowsLoopCore raw w h bpp rowBytes bytesPerPixelRGB decodeRowDropAlpha
     y offset prevRow pixels
 
+def decodeRowsLoopTrnsOverBackground
+    (trns : PngTransparency) (background : PngBackground)
+    (raw : ByteArray) (w h bpp rowBytes : Nat)
+    (y offset : Nat) (prevRow pixels : ByteArray) : Option ByteArray :=
+  decodeRowsLoopCore raw w h bpp rowBytes 0
+    (decodeRowTrnsOverBackground trns background) y offset prevRow pixels
+
+def decodeRowsLoopAlphaOverBackground
+    (background : PngBackground) (raw : ByteArray) (w h bpp rowBytes : Nat)
+    (y offset : Nat) (prevRow pixels : ByteArray) : Option ByteArray :=
+  decodeRowsLoopCore raw w h bpp rowBytes 0
+    (decodeRowAlphaOverBackground background) y offset prevRow pixels
+
 def decodeRowsLoopRGBA (raw : ByteArray) (w h bpp rowBytes : Nat)
     (y offset : Nat) (prevRow pixels : ByteArray) : Option ByteArray :=
   decodeRowsLoopCore raw w h bpp rowBytes bytesPerPixelRGBA decodeRowAddAlpha
@@ -2225,11 +2286,27 @@ def decodeParsedBitmapWithMetadata {px : Type u} [Pixel px] [PngPixel px]
         if PngPixel.colorType (α := px) == u8 6 then
           decodeRowsLoopRGBAWithTransparency (some trns)
             raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
+        else if PngPixel.colorType (α := px) == u8 2 then
+          match parsed.metadata.background with
+          | some background =>
+              decodeRowsLoopTrnsOverBackground trns background
+                raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
+          | none =>
+              none
         else
           none
     | none =>
-        PngPixel.decodeRowsLoop (α := px)
-          raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
+        if hdr.colorType == 6 && PngPixel.colorType (α := px) == u8 2 then
+          match parsed.metadata.background with
+          | some background =>
+              decodeRowsLoopAlphaOverBackground background
+                raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
+          | none =>
+              PngPixel.decodeRowsLoop (α := px)
+                raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
+        else
+          PngPixel.decodeRowsLoop (α := px)
+            raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
   let size : Size := { width := hdr.width, height := hdr.height }
   if hsize : pixels.size = size.width * size.height * Pixel.bytesPerPixel (α := px) then
     some

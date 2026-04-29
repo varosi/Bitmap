@@ -115,7 +115,7 @@ which the library carries full round-trip correctness proofs.
 | Color conversion | RGB PNGs can be decoded into `BitmapRGBA8` (fills α = 255) and RGBA PNGs into `BitmapRGB8` (drops alpha) |
 | PNG structure | 8-byte signature, `IHDR` first, multiple consecutive `IDAT` chunks accepted and concatenated, `IEND` last, required `PLTE` ordering checks, rejects unknown critical chunks, compression/filter method ≠ 0, and interlace ≠ 0 |
 | Tolerated ancillary chunks | `gAMA`, `cHRM`, `sRGB`, `iCCP`, `pHYs`, `tEXt`, `zTXt`, `iTXt`, `tIME`, `bKGD`, `hIST`, `sPLT`, plus any unknown chunk type whose first byte is lowercase — CRC-validated and skipped without affecting decoded pixels |
-| Metadata-aware decode | `decodeBitmapWithMetadata` validates and returns supported `bKGD` metadata; it also applies 8-bit grayscale/RGB `tRNS` transparency when decoding to `BitmapRGBA8` |
+| Metadata-aware decode | `decodeBitmapWithMetadata` validates and returns supported `bKGD` metadata; it applies 8-bit grayscale/RGB `tRNS` transparency when decoding to `BitmapRGBA8`, and composites `tRNS` or RGBA alpha over `bKGD` when decoding to `BitmapRGB8` |
 | Integrity | CRC-32 verified for every parsed chunk; mismatch rejects the entire input. Adler-32 verified at end of zlib stream |
 
 ### Not supported
@@ -124,7 +124,7 @@ which the library carries full round-trip correctness proofs.
 - Color type 3 (palette / `PLTE`) and color type 4 (gray + alpha)
 - Adam7 interlacing
 - Palette `tRNS` and `bKGD` (requires color type 3 / `PLTE` decoding)
-- `tRNS` through the pixel-only `decodeBitmap` API — use `decodeBitmapWithMetadata` for transparent-color decoding into `BitmapRGBA8`
+- `tRNS` through the pixel-only `decodeBitmap` API — use `decodeBitmapWithMetadata` for transparent-color decoding into `BitmapRGBA8`, or into `BitmapRGB8` when a valid `bKGD` background is present
 - `sBIT` chunks — explicitly **rejected** (decoder returns `none`) rather than silently ignored, to avoid the silent-corruption hazard of dropping precision metadata that affects pixel semantics
 - Unknown critical chunks (any chunk type whose first byte is uppercase and not `IHDR`/`PLTE`/`IDAT`/`IEND`) — rejected per the PNG spec
 - Reading-back of most ancillary chunk **content** (`gAMA`, `tEXt`, etc.) — the chunks are validated and skipped; `decodeBitmapWithMetadata` preserves supported `bKGD` and `tRNS`
