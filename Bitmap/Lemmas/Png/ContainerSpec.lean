@@ -471,6 +471,106 @@ lemma readChunk_simpleContainer_idat (s : SimpleContainerSpec)
   show (33 + 8 + s.idatData.size + 4 : Nat) = 45 + s.idatData.size
   omega
 
+/-- Slicing into `s.bytes` past the 8-byte signature + 25-byte IHDR chunk +
+`(12 + s.idatData.size)`-byte IDAT chunk gives access to the IEND
+chunk's bytes at offset `45 + s.idatData.size`. -/
+lemma SimpleContainerSpec.bytes_extract_skip_through_idat
+    (s : SimpleContainerSpec) (start finish : Nat)
+    (_h : 45 + s.idatData.size + finish ≤ s.bytes.size) :
+    s.bytes.extract (45 + s.idatData.size + start) (45 + s.idatData.size + finish) =
+      (mkChunkBytes iendTypeBytes ByteArray.empty).extract start finish := by
+  have hSig : pngSignature.size = 8 := pngSignature_size
+  have hIhdr := mkChunkBytes_ihdr_size s
+  have hIdat := mkChunkBytes_idat_size s
+  rw [s.bytes_eq_signature_then_chunks]
+  have hRe :
+      pngSignature ++
+        (mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header) ++
+          (mkChunkBytes idatTypeBytes s.idatData ++
+            mkChunkBytes iendTypeBytes ByteArray.empty))
+      = (pngSignature ++ mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header) ++
+          mkChunkBytes idatTypeBytes s.idatData) ++
+          mkChunkBytes iendTypeBytes ByteArray.empty := by
+    simp [ByteArray.append_assoc]
+  rw [hRe]
+  have hPrefSize :
+      pngSignature.size + (mkChunk "IHDR" (encodeIHDRData s.header)).size +
+        (mkChunk "IDAT" s.idatData).size = 45 + s.idatData.size := by
+    simp [pngSignature_size, mkChunk_size, encodeIHDRData_size,
+      ihdr_utf8ByteSize, idat_utf8ByteSize]
+    omega
+  have h := ByteArray.extract_append_size_add
+    (a := pngSignature ++ mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header) ++
+      mkChunkBytes idatTypeBytes s.idatData)
+    (b := mkChunkBytes iendTypeBytes ByteArray.empty)
+    (i := start) (j := finish)
+  simp [ByteArray.size_append] at h
+  rw [hPrefSize] at h
+  exact h
+
+/-- The IEND chunk in `s.bytes` lives at byte `45 + s.idatData.size`, has 0
+bytes of payload, and ends at byte `57 + s.idatData.size` (the end of
+the file). -/
+lemma readChunk_simpleContainer_iend (s : SimpleContainerSpec)
+    (hLen : (45 + s.idatData.size) + 3 < s.bytes.size) :
+    readChunk s.bytes (45 + s.idatData.size) hLen =
+      some (iendTypeBytes, ByteArray.empty, 57 + s.idatData.size) := by
+  have hSize : s.bytes.size = s.idatData.size + 57 := s.bytes_size
+  -- IEND length read returns 0.
+  have hExtractLen :
+      s.bytes.extract (45 + s.idatData.size) (45 + s.idatData.size + 4) = u32be 0 := by
+    have h := s.bytes_extract_skip_through_idat 0 4 (by rw [hSize]; omega)
+    simp only [Nat.add_zero] at h
+    rw [h]
+    show (mkChunk "IEND" ByteArray.empty).extract 0 4 = u32be 0
+    rw [mkChunk_extract_len "IEND" ByteArray.empty]
+    simp
+  have hLenRead :
+      readU32BE s.bytes (45 + s.idatData.size)
+        (by rw [hSize]; omega) = 0 :=
+    readU32BE_of_extract_eq s.bytes (45 + s.idatData.size) 0
+      (by rw [hSize]; omega) hExtractLen (by decide)
+  -- CRC end position bound.
+  have hCrcEnd :
+      (45 + s.idatData.size) + 8 + 0 + 4 ≤ s.bytes.size := by rw [hSize]; omega
+  -- IEND type bytes at positions (49 + s.idatData.size)..(53 + s.idatData.size).
+  have hExtractType :
+      s.bytes.extract ((45 + s.idatData.size) + 4) ((45 + s.idatData.size) + 8) =
+        iendTypeBytes := by
+    have h := s.bytes_extract_skip_through_idat 4 8 (by rw [hSize]; omega)
+    rw [h]
+    show (mkChunk "IEND" ByteArray.empty).extract 4 8 = iendTypeBytes
+    rw [mkChunk_extract_type "IEND" ByteArray.empty iend_utf8ByteSize]
+    rfl
+  -- IEND data bytes at position (53 + s.idatData.size)..(53 + s.idatData.size) (empty).
+  have hExtractData :
+      s.bytes.extract ((45 + s.idatData.size) + 8) ((45 + s.idatData.size) + 8 + 0) =
+        ByteArray.empty := by
+    have h := s.bytes_extract_skip_through_idat 8 (8 + 0) (by rw [hSize]; omega)
+    rw [show (45 + s.idatData.size + (8 + 0) : Nat) = (45 + s.idatData.size) + 8 + 0 by omega] at h
+    rw [h]
+    have hData := mkChunk_extract_data "IEND" ByteArray.empty iend_utf8ByteSize
+    simpa using hData
+  -- IEND CRC.
+  have hExtractCrc :
+      s.bytes.extract ((45 + s.idatData.size) + 8) ((45 + s.idatData.size) + 8 + 4) =
+        u32be (crc32Chunk iendTypeBytes ByteArray.empty).toNat := by
+    have h := s.bytes_extract_skip_through_idat 8 12 (by rw [hSize]; omega)
+    rw [show (45 + s.idatData.size + 12 : Nat) = (45 + s.idatData.size) + 8 + 4 by omega] at h
+    rw [h]
+    have hCrc := mkChunk_extract_crc "IEND" ByteArray.empty iend_utf8ByteSize
+    simpa [iendTypeBytes] using hCrc
+  have hCrcRead :
+      readU32BE s.bytes ((45 + s.idatData.size) + 8 + 0) (by omega) =
+        (crc32Chunk iendTypeBytes ByteArray.empty).toNat :=
+    readU32BE_of_extract_eq s.bytes ((45 + s.idatData.size) + 8) _
+      (by omega) (by simpa using hExtractCrc) (UInt32.toNat_lt _)
+  -- Combine via readChunk's definition.
+  unfold readChunk
+  simp [hLenRead, hCrcEnd, hExtractType, hExtractData, hCrcRead]
+  show ((45 + s.idatData.size) + 8 + 0 + 4 : Nat) = 57 + s.idatData.size
+  omega
+
 end Lemmas
 
 end Bitmaps
