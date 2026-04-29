@@ -65,6 +65,21 @@ def BitmapGray8.widgetProps (bmp : BitmapGray8)
     background
     caption }
 
+def BitmapGrayAlpha8.widgetProps (bmp : BitmapGrayAlpha8)
+    (pixelSize : Nat := 12)
+    (showGrid : Bool := true)
+    (background : String := "#050914")
+    (caption : Option String := none) :
+    BitmapWidgetProps :=
+  { width := bmp.size.width
+    height := bmp.size.height
+    bytes := bmp.data
+    bytesPerPixel := bytesPerPixelGrayAlpha
+    pixelSize := max pixelSize 1
+    showGrid
+    background
+    caption }
+
 -------------------------------------------------------------------------------
 -- Sample bitmap and widget integration
 

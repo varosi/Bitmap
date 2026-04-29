@@ -159,6 +159,14 @@ lemma parsePngLoopFuel_rejects_tRNS (fuel : Nat)
   unfold parsePngLoopFuel
   simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND, hTRNS]
 
+/-- Color type 4 carries alpha in the image samples, so `tRNS` is invalid.
+This guards the gray+alpha metadata path from duplicate transparency sources. -/
+lemma parseTrnsData_rejects_grayAlpha8 (data : ByteArray) :
+    parseTrnsData
+      { width := 1, height := 1, colorType := 4, bitDepth := 8 } data = none := by
+  unfold parseTrnsData
+  simp
+
 /-- The metadata-aware parser records a valid `tRNS` chunk and continues.
 This is the branch-level correctness fact for supported transparency metadata. -/
 lemma parsePngLoopFuelWithMetadata_accepts_tRNS (fuel : Nat)
@@ -248,6 +256,14 @@ lemma parsePngLoopFuelWithMetadata_accepts_bKGD (fuel : Nat)
     unfold parsePngLoopFuelWithMetadata
   simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
     hnotTRNS, hBKGD, hseen, hdup, hparse]
+
+/-- A grayscale `bKGD` payload is valid for color type 4.
+This is the payload-level fact used by gray+alpha background composition. -/
+lemma parseBkgdData_accepts_grayAlpha8 :
+    parseBkgdData
+      { width := 1, height := 1, colorType := 4, bitDepth := 8 }
+      (ByteArray.mk #[u8 0, u8 100]) = some (.gray8 (u8 100)) := by
+  native_decide
 
 /-- `bKGD` must appear before the first `IDAT` chunk in the metadata-aware parser. -/
 lemma parsePngLoopFuelWithMetadata_rejects_bKGD_after_idat (fuel : Nat)
