@@ -21,11 +21,19 @@ private def pixelGrayOfSeed (seed idx : Nat) : PixelGray8 :=
   let s1 := prngStep (seed + idx)
   { v := randByte s1 }
 
+private def pixelGrayAlphaOfSeed (seed idx : Nat) : PixelGrayAlpha8 :=
+  let s1 := prngStep (seed + idx)
+  let s2 := prngStep (s1 + 1)
+  { v := randByte s1, a := randByte s2 }
+
 def bitmapOfSeed (seed w h : Nat) : BitmapRGB8 :=
   Bitmap.ofPixelFn w h (fun i : Fin (w * h) => pixelOfSeed seed i.val)
 
 def bitmapGrayOfSeed (seed w h : Nat) : BitmapGray8 :=
   BitmapGray8.ofPixelFn w h (fun i : Fin (w * h) => pixelGrayOfSeed seed i.val)
+
+def bitmapGrayAlphaOfSeed (seed w h : Nat) : BitmapGrayAlpha8 :=
+  BitmapGrayAlpha8.ofPixelFn w h (fun i : Fin (w * h) => pixelGrayAlphaOfSeed seed i.val)
 
 def pngRoundTripOk (bmp : BitmapRGB8) : Bool :=
   match Png.encodeBitmapChecked (px := PixelRGB8) bmp .dynamic with
@@ -56,6 +64,14 @@ def pngRoundTripOkGray (bmp : BitmapGray8) : Bool :=
   | Except.error _ => false
   | Except.ok bytes =>
       match Png.decodeBitmap (px := PixelGray8) bytes with
+      | some bmp' => decide (bmp' = bmp)
+      | none => false
+
+def pngRoundTripOkGrayAlpha (bmp : BitmapGrayAlpha8) : Bool :=
+  match Png.encodeBitmapChecked (px := PixelGrayAlpha8) bmp .fixed with
+  | Except.error _ => false
+  | Except.ok bytes =>
+      match Png.decodeBitmap (px := PixelGrayAlpha8) bytes with
       | some bmp' => decide (bmp' = bmp)
       | none => false
 
@@ -113,6 +129,20 @@ def pngRoundTripPropertyGray (trials : Nat) : IO Bool := do
     let seed <- IO.rand 0 1000000
     let bmp := bitmapGrayOfSeed seed w h
     if pngRoundTripOkGray bmp then
+      i := i + 1
+    else
+      ok := false
+  return ok
+
+def pngRoundTripPropertyGrayAlpha (trials : Nat) : IO Bool := do
+  let mut ok := true
+  let mut i := 0
+  while i < trials && ok do
+    let w <- IO.rand 1 16
+    let h <- IO.rand 1 16
+    let seed <- IO.rand 0 1000000
+    let bmp := bitmapGrayAlphaOfSeed seed w h
+    if pngRoundTripOkGrayAlpha bmp then
       i := i + 1
     else
       ok := false
@@ -465,6 +495,119 @@ private def ancFixtureRgbaOverBlueReferenceData : ByteArray :=
       out := out.push (Png.u8 127)
     return out
 
+private def grayAlphaFixture : BitmapGrayAlpha8 :=
+  BitmapGrayAlpha8.ofPixelFn 2 2 (fun idx : Fin (2 * 2) =>
+    match idx.val with
+    | 0 => { v := Png.u8 0, a := Png.u8 0 }
+    | 1 => { v := Png.u8 64, a := Png.u8 128 }
+    | 2 => { v := Png.u8 128, a := Png.u8 255 }
+    | _ => { v := Png.u8 255, a := Png.u8 64 })
+
+private def grayAlphaFixtureExpectedRGBAData : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (2 * 2 * 4)
+    for i in [0:4] do
+      let base := i * 2
+      let gray := grayAlphaFixture.data.get! base
+      let alpha := grayAlphaFixture.data.get! (base + 1)
+      out := out.push gray
+      out := out.push gray
+      out := out.push gray
+      out := out.push alpha
+    return out
+
+private def grayAlphaOverBackgroundRGBData (background : UInt8) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (2 * 2 * 3)
+    for i in [0:4] do
+      let base := i * 2
+      let gray := grayAlphaFixture.data.get! base
+      let alpha := grayAlphaFixture.data.get! (base + 1)
+      let composite := Png.alphaCompositeByte gray background alpha
+      out := out.push composite
+      out := out.push composite
+      out := out.push composite
+    return out
+
+private def grayAlphaOverBackgroundGrayData (background : UInt8) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (2 * 2)
+    for i in [0:4] do
+      let base := i * 2
+      let gray := grayAlphaFixture.data.get! base
+      let alpha := grayAlphaFixture.data.get! (base + 1)
+      out := out.push (Png.alphaCompositeByte gray background alpha)
+    return out
+
+private def grayAlphaPngWithAncillary (ancillary : ByteArray) : ByteArray :=
+  let raw := Png.encodeRawFast grayAlphaFixture
+  let idat := Png.zlibCompressFixed raw
+  let ihdr :=
+    Png.u32be grayAlphaFixture.size.width ++
+    Png.u32be grayAlphaFixture.size.height ++
+    ByteArray.mk #[Png.u8 8, Png.u8 4, Png.u8 0, Png.u8 0, Png.u8 0]
+  Png.pngSignature ++
+    Png.mkChunkBytes Png.ihdrTypeBytes ihdr ++
+    ancillary ++
+    Png.mkChunkBytes Png.idatTypeBytes idat ++
+    Png.mkChunkBytes Png.iendTypeBytes ByteArray.empty
+
+private def grayAlphaPng : ByteArray :=
+  grayAlphaPngWithAncillary ByteArray.empty
+
+private def grayAlphaPngWithBkgd : ByteArray :=
+  grayAlphaPngWithAncillary
+    (Png.mkChunkBytes Png.bkgdTypeBytes (ByteArray.mk #[Png.u8 0, Png.u8 100]))
+
+private def grayAlphaPngWithTrns : ByteArray :=
+  grayAlphaPngWithAncillary
+    (Png.mkChunkBytes Png.trnsTypeBytes (ByteArray.mk #[Png.u8 0, Png.u8 0]))
+
+private def expectGrayAlphaFixtures : IO Unit := do
+  match Png.decodeBitmap (px := PixelGrayAlpha8) grayAlphaPng with
+  | some bmp =>
+      if bmp != grayAlphaFixture then
+        throw (IO.userError "gray+alpha PNG did not decode exactly")
+  | none =>
+      throw (IO.userError "gray+alpha PNG failed to decode")
+  match Png.decodeBitmap (px := PixelRGBA8) grayAlphaPng with
+  | some bmp =>
+      if bmp.size.width != 2 || bmp.size.height != 2 ||
+          bmp.data != grayAlphaFixtureExpectedRGBAData then
+        throw (IO.userError "gray+alpha PNG did not expand to RGBA")
+  | none =>
+      throw (IO.userError "gray+alpha PNG failed to decode as RGBA")
+  if (Png.decodeBitmap (px := PixelRGB8) grayAlphaPng).isSome then
+    throw (IO.userError "pixel-only RGB decode accepted gray+alpha without bKGD")
+  if (Png.decodeBitmap (px := PixelGray8) grayAlphaPng).isSome then
+    throw (IO.userError "pixel-only Gray decode accepted gray+alpha without bKGD")
+  match Png.decodeBitmapWithMetadata (px := PixelGrayAlpha8) grayAlphaPngWithBkgd with
+  | some decoded =>
+      if decoded.bitmap != grayAlphaFixture then
+        throw (IO.userError "bKGD changed exact gray+alpha decode")
+      match decoded.metadata.background with
+      | some (Png.PngBackground.gray8 gray) =>
+          if gray != Png.u8 100 then
+            throw (IO.userError "gray+alpha bKGD metadata had wrong value")
+      | _ =>
+          throw (IO.userError "gray+alpha bKGD metadata was missing")
+  | none =>
+      throw (IO.userError "metadata-aware gray+alpha bKGD decode failed")
+  match Png.decodeBitmapWithMetadata (px := PixelRGB8) grayAlphaPngWithBkgd with
+  | some decoded =>
+      if decoded.bitmap.data != grayAlphaOverBackgroundRGBData (Png.u8 100) then
+        throw (IO.userError "gray+alpha bKGD RGB composition mismatch")
+  | none =>
+      throw (IO.userError "gray+alpha bKGD RGB decode failed")
+  match Png.decodeBitmapWithMetadata (px := PixelGray8) grayAlphaPngWithBkgd with
+  | some decoded =>
+      if decoded.bitmap.data != grayAlphaOverBackgroundGrayData (Png.u8 100) then
+        throw (IO.userError "gray+alpha bKGD Gray composition mismatch")
+  | none =>
+      throw (IO.userError "gray+alpha bKGD Gray decode failed")
+  if (Png.decodeBitmapWithMetadata (px := PixelRGBA8) grayAlphaPngWithTrns).isSome then
+    throw (IO.userError "metadata-aware decoder accepted tRNS for gray+alpha")
+
 private def expectAncDecodeOk (path : System.FilePath) : IO Unit := do
   let bytes <- IO.FS.readBinFile path
   match Png.decodeBitmap (px := PixelRGB8) bytes with
@@ -809,7 +952,14 @@ def run : IO Unit := do
     IO.println "png round-trip Gray property: ok"
   else
     throw (IO.userError "png round-trip Gray property failed")
+  let okGrayAlpha <- pngRoundTripPropertyGrayAlpha 20
+  if okGrayAlpha then
+    IO.println "png round-trip GrayAlpha property: ok"
+  else
+    throw (IO.userError "png round-trip GrayAlpha property failed")
   pngDecodeFixedHuffmanFixtures
+  expectGrayAlphaFixtures
+  IO.println "png gray+alpha fixtures: ok"
   pngAncillaryChunkFixtures
   IO.println "png ancillary-chunk fixtures: ok"
   validateDynamicTableValidationBoundary

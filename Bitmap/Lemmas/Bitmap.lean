@@ -5,6 +5,7 @@ import Init.Data.Nat.Lemmas
 import Init.Data.ByteArray.Lemmas
 import Init.Data.Range.Lemmas
 import Init.Data.UInt.Lemmas
+import Batteries.Data.UInt
 import Batteries.Data.ByteArray
 import Bitmap.Lemmas.Png.EncodeDecodeBase
 import Bitmap.Lemmas.Png.EncodeDecode
@@ -41,6 +42,15 @@ lemma pixelWriteGray8_size
   | mk arr =>
       simp [pixelWriteGray8, ByteArray.set, ByteArray.size, Array.size_set]
 
+/-- Writing a grayscale+alpha pixel preserves the byte buffer size.
+This is the byte-layout fact used by the `PixelGrayAlpha8` round-trip proof. -/
+lemma pixelWriteGrayAlpha8_size
+    (data : ByteArray) (base : Nat) (h : base + 1 < data.size) (px : PixelGrayAlpha8) :
+    (pixelWriteGrayAlpha8 data base h px).size = data.size := by
+  cases data with
+  | mk arr =>
+      simp [pixelWriteGrayAlpha8, ByteArray.set, ByteArray.size, Array.size_set]
+
 -------------------------------------------------------------------------------
 -- Verification. Converting tests into proofs.
 -- https://lean-lang.org/theorem_proving_in_lean4/tactics.html
@@ -73,21 +83,25 @@ lemma decodeBitmap_encodeBitmap_common {px : Type u} [Pixel px] [PngPixel px]
     (hct :
       (PngPixel.colorType (α := px)).toNat = 0 ∨
         (PngPixel.colorType (α := px)).toNat = 2 ∨
+        (PngPixel.colorType (α := px)).toNat = 4 ∨
         (PngPixel.colorType (α := px)).toNat = 6)
     (hrawEq :
       (PngPixel.encodeRaw (α := px) bmp).size =
         bmp.size.height *
           ((bmp.size.width *
             (if (PngPixel.colorType (α := px)).toNat = 0 then 1 else
-              if (PngPixel.colorType (α := px)).toNat = 2 then 3 else 4)) + 1))
+              if (PngPixel.colorType (α := px)).toNat = 2 then 3 else
+                if (PngPixel.colorType (α := px)).toNat = 4 then 2 else 4)) + 1))
     (hrows :
       PngPixel.decodeRowsLoop (α := px)
         (PngPixel.encodeRaw (α := px) bmp) bmp.size.width bmp.size.height
         (if (PngPixel.colorType (α := px)).toNat = 0 then 1 else
-          if (PngPixel.colorType (α := px)).toNat = 2 then 3 else 4)
+          if (PngPixel.colorType (α := px)).toNat = 2 then 3 else
+            if (PngPixel.colorType (α := px)).toNat = 4 then 2 else 4)
         (bmp.size.width *
           (if (PngPixel.colorType (α := px)).toNat = 0 then 1 else
-            if (PngPixel.colorType (α := px)).toNat = 2 then 3 else 4))
+            if (PngPixel.colorType (α := px)).toNat = 2 then 3 else
+              if (PngPixel.colorType (α := px)).toNat = 4 then 2 else 4))
         0 0 ByteArray.empty
         { data := Array.replicate
             (bmp.size.width * bmp.size.height * Pixel.bytesPerPixel (α := px)) 0 } =
@@ -107,21 +121,24 @@ lemma decodeBitmap_encodeBitmap_common {px : Type u} [Pixel px] [PngPixel px]
     omega
   -- Color type constraints.
   let ct := (PngPixel.colorType (α := px)).toNat
-  have hct' : ct = 0 ∨ ct = 2 ∨ ct = 6 := by
+  have hct' : ct = 0 ∨ ct = 2 ∨ ct = 4 ∨ ct = 6 := by
     simpa [ct] using hct
-  have hctProp : ¬ ct = 0 → ¬ ct = 2 → ct = 6 := by
-    intro h0 h2
+  have hctProp : ¬ ct = 0 → ¬ ct = 2 → ¬ ct = 4 → ct = 6 := by
+    intro h0 h2 h4
     cases hct' with
     | inl h0' => exact (False.elim (h0 h0'))
     | inr hrest =>
         cases hrest with
         | inl h2' => exact (False.elim (h2 h2'))
-        | inr h6 => exact h6
+        | inr hrest' =>
+            cases hrest' with
+            | inl h4' => exact (False.elim (h4 h4'))
+            | inr h6 => exact h6
   -- Parsed PNG header.
   have hparse := parsePng_encodeBitmap (bmp := bmp) (hw := hw) (hh := hh)
     (mode := mode) hidat hsize hct
   -- Raw size and row decoding results.
-  let bpp := if ct = 0 then 1 else if ct = 2 then 3 else 4
+  let bpp := if ct = 0 then 1 else if ct = 2 then 3 else if ct = 4 then 2 else 4
   have hrawEq' :
       (PngPixel.encodeRaw (α := px) bmp).size =
         bmp.size.height * ((bmp.size.width * bpp) + 1) := by
@@ -136,6 +153,25 @@ lemma decodeBitmap_encodeBitmap_common {px : Type u} [Pixel px] [PngPixel px]
     simpa [ct, bpp] using hrows
   have hvalid : bmp.data.size = bmp.size.width * bmp.size.height * Pixel.bytesPerPixel (α := px) := by
     simpa [Nat.mul_left_comm, Nat.mul_comm, Nat.mul_assoc] using bmp.valid
+  have hpngBpp : pngBytesPerPixelForColorType? ct = some bpp := by
+    unfold pngBytesPerPixelForColorType?
+    dsimp [bpp]
+    rcases hct' with h0 | h2 | h4 | h6
+    · simp [h0]
+    · simp [h2]
+    · simp [h4]
+    · simp [h6]
+  have hctNoReject :
+      ct = 4 → ¬PngPixel.colorType (α := px) = u8 4 →
+        PngPixel.colorType (α := px) = u8 6 := by
+    intro h4 hne
+    have heq4 : PngPixel.colorType (α := px) = u8 4 := by
+      have hnat : (PngPixel.colorType (α := px)).toNat = 4 := by
+        simpa [ct] using h4
+      apply UInt8.ext
+      rw [hnat]
+      decide
+    exact False.elim (hne heq4)
   have hrowsEq :
       ((PngPixel.decodeRowsLoop (α := px)
           (PngPixel.encodeRaw (α := px) bmp) bmp.size.width bmp.size.height bpp
@@ -154,28 +190,33 @@ lemma decodeBitmap_encodeBitmap_common {px : Type u} [Pixel px] [PngPixel px]
   | stored =>
       have hminStored : 2 ≤ (zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)).size := by
         simpa [encodeBitmapIdat] using hmin
-      simpa [hsize, hparse, zlibDecompressStored_zlibCompressStored, encodeBitmapIdat] using
-        (And.intro hctProp (And.intro hminStored (And.intro hrawEq' hrowsEq)))
+      simpa [hsize, hparse, zlibDecompressStored_zlibCompressStored, encodeBitmapIdat,
+        ct, hpngBpp] using
+        (And.intro hctProp
+          (And.intro hctNoReject (And.intro hminStored (And.intro hrawEq' hrowsEq))))
   | fixed =>
       have hminFixed : 2 ≤ (zlibCompressFixed (PngPixel.encodeRaw (α := px) bmp)).size := by
         simpa [encodeBitmapIdat] using hmin
       simpa [hsize, hparse,
         zlibDecompressStored_zlibCompressFixed_none, zlibDecompress_zlibCompressFixed,
-        encodeBitmapIdat] using
-        (And.intro hctProp (And.intro hminFixed (And.intro hrawEq' hrowsEq)))
+        encodeBitmapIdat, ct, hpngBpp] using
+        (And.intro hctProp
+          (And.intro hctNoReject (And.intro hminFixed (And.intro hrawEq' hrowsEq))))
   | dynamic =>
       have hminDyn : 2 ≤ (zlibCompressDynamic (PngPixel.encodeRaw (α := px) bmp)).size := by
         simpa [encodeBitmapIdat] using hmin
       simpa [hsize, hparse,
         zlibDecompressStored_zlibCompressDynamic_none, zlibDecompress_zlibCompressDynamic,
-        encodeBitmapIdat] using
-        (And.intro hctProp (And.intro hminDyn (And.intro hrawEq' hrowsEq)))
+        encodeBitmapIdat, ct, hpngBpp] using
+        (And.intro hctProp
+          (And.intro hctNoReject (And.intro hminDyn (And.intro hrawEq' hrowsEq))))
 
 -- Package the pixel-specific facts needed for PNG round-trips.
 class PngRoundTrip (px : Type u) [Pixel px] [PngPixel px] : Prop where
   colorType_ok :
     (PngPixel.colorType (α := px)).toNat = 0 ∨
       (PngPixel.colorType (α := px)).toNat = 2 ∨
+      (PngPixel.colorType (α := px)).toNat = 4 ∨
       (PngPixel.colorType (α := px)).toNat = 6
   encodeRaw_size :
     ∀ bmp : Bitmap px,
@@ -183,16 +224,19 @@ class PngRoundTrip (px : Type u) [Pixel px] [PngPixel px] : Prop where
         bmp.size.height *
           ((bmp.size.width *
             (if (PngPixel.colorType (α := px)).toNat = 0 then 1 else
-              if (PngPixel.colorType (α := px)).toNat = 2 then 3 else 4)) + 1)
+              if (PngPixel.colorType (α := px)).toNat = 2 then 3 else
+                if (PngPixel.colorType (α := px)).toNat = 4 then 2 else 4)) + 1)
   decodeRowsLoop_encodeRaw :
     ∀ bmp : Bitmap px,
       PngPixel.decodeRowsLoop (α := px)
         (PngPixel.encodeRaw (α := px) bmp) bmp.size.width bmp.size.height
         (if (PngPixel.colorType (α := px)).toNat = 0 then 1 else
-          if (PngPixel.colorType (α := px)).toNat = 2 then 3 else 4)
+          if (PngPixel.colorType (α := px)).toNat = 2 then 3 else
+            if (PngPixel.colorType (α := px)).toNat = 4 then 2 else 4)
         (bmp.size.width *
           (if (PngPixel.colorType (α := px)).toNat = 0 then 1 else
-            if (PngPixel.colorType (α := px)).toNat = 2 then 3 else 4))
+            if (PngPixel.colorType (α := px)).toNat = 2 then 3 else
+              if (PngPixel.colorType (α := px)).toNat = 4 then 2 else 4))
         0 0 ByteArray.empty
         { data := Array.replicate
             (bmp.size.width * bmp.size.height * Pixel.bytesPerPixel (α := px)) 0 } =
@@ -200,7 +244,8 @@ class PngRoundTrip (px : Type u) [Pixel px] [PngPixel px] : Prop where
 
 instance : PngRoundTrip PixelRGB8 where
   colorType_ok := by
-    have : (u8 2).toNat = 0 ∨ (u8 2).toNat = 2 ∨ (u8 2).toNat = 6 := by decide
+    have : (u8 2).toNat = 0 ∨ (u8 2).toNat = 2 ∨
+        (u8 2).toNat = 4 ∨ (u8 2).toNat = 6 := by decide
     simpa [pngPixel_colorType_rgb] using this
   encodeRaw_size := by
     intro bmp
@@ -209,7 +254,8 @@ instance : PngRoundTrip PixelRGB8 where
       rw [encodeRawFast_eq]
       simpa using encodeRaw_size (bmp := bmp)
     have hbpp :
-        (if (u8 2).toNat = 0 then 1 else if (u8 2).toNat = 2 then 3 else 4) = 3 := by
+        (if (u8 2).toNat = 0 then 1 else if (u8 2).toNat = 2 then 3 else
+          if (u8 2).toNat = 4 then 2 else 4) = 3 := by
       decide
     simpa [pngPixel_encodeRaw_rgb, pngPixel_colorType_rgb, hbpp, bytesPerPixelRGB] using hraw
   decodeRowsLoop_encodeRaw := by
@@ -223,14 +269,16 @@ instance : PngRoundTrip PixelRGB8 where
       rw [encodeRawFast_eq]
       simpa using (decodeRowsLoop_encodeRaw (bmp := bmp))
     have hbpp :
-        (if (u8 2).toNat = 0 then 1 else if (u8 2).toNat = 2 then 3 else 4) = 3 := by
+        (if (u8 2).toNat = 0 then 1 else if (u8 2).toNat = 2 then 3 else
+          if (u8 2).toNat = 4 then 2 else 4) = 3 := by
       decide
     simpa [pngPixel_decodeRowsLoop_rgb, pngPixel_encodeRaw_rgb, pngPixel_colorType_rgb, hbpp,
       bytesPerPixel_rgb, bytesPerPixelRGB, Nat.mul_left_comm, Nat.mul_comm, Nat.mul_assoc] using hrows
 
 instance : PngRoundTrip PixelRGBA8 where
   colorType_ok := by
-    have : (u8 6).toNat = 0 ∨ (u8 6).toNat = 2 ∨ (u8 6).toNat = 6 := by decide
+    have : (u8 6).toNat = 0 ∨ (u8 6).toNat = 2 ∨
+        (u8 6).toNat = 4 ∨ (u8 6).toNat = 6 := by decide
     simpa [pngPixel_colorType_rgba] using this
   encodeRaw_size := by
     intro bmp
@@ -239,7 +287,8 @@ instance : PngRoundTrip PixelRGBA8 where
       rw [encodeRawFast_eq]
       simpa [bytesPerPixel_rgba] using encodeRaw_size (bmp := bmp)
     have hbpp :
-        (if (u8 6).toNat = 0 then 1 else if (u8 6).toNat = 2 then 3 else 4) = 4 := by
+        (if (u8 6).toNat = 0 then 1 else if (u8 6).toNat = 2 then 3 else
+          if (u8 6).toNat = 4 then 2 else 4) = 4 := by
       decide
     simpa [pngPixel_encodeRaw_rgba, pngPixel_colorType_rgba, hbpp, bytesPerPixelRGBA] using hraw
   decodeRowsLoop_encodeRaw := by
@@ -253,14 +302,16 @@ instance : PngRoundTrip PixelRGBA8 where
       rw [encodeRawFast_eq]
       simpa using (decodeRowsLoopRGBA_encodeRaw (bmp := bmp))
     have hbpp :
-        (if (u8 6).toNat = 0 then 1 else if (u8 6).toNat = 2 then 3 else 4) = 4 := by
+        (if (u8 6).toNat = 0 then 1 else if (u8 6).toNat = 2 then 3 else
+          if (u8 6).toNat = 4 then 2 else 4) = 4 := by
       decide
     simpa [pngPixel_decodeRowsLoop_rgba, pngPixel_encodeRaw_rgba, pngPixel_colorType_rgba, hbpp,
       bytesPerPixel_rgba, bytesPerPixelRGBA, Nat.mul_left_comm, Nat.mul_comm, Nat.mul_assoc] using hrows
 
 instance : PngRoundTrip PixelGray8 where
   colorType_ok := by
-    have : (u8 0).toNat = 0 ∨ (u8 0).toNat = 2 ∨ (u8 0).toNat = 6 := by decide
+    have : (u8 0).toNat = 0 ∨ (u8 0).toNat = 2 ∨
+        (u8 0).toNat = 4 ∨ (u8 0).toNat = 6 := by decide
     simpa [pngPixel_colorType_gray] using this
   encodeRaw_size := by
     intro bmp
@@ -269,7 +320,8 @@ instance : PngRoundTrip PixelGray8 where
       rw [encodeRawFast_eq]
       simpa [bytesPerPixel_gray] using encodeRaw_size (bmp := bmp)
     have hbpp :
-        (if (u8 0).toNat = 0 then 1 else if (u8 0).toNat = 2 then 3 else 4) = 1 := by
+        (if (u8 0).toNat = 0 then 1 else if (u8 0).toNat = 2 then 3 else
+          if (u8 0).toNat = 4 then 2 else 4) = 1 := by
       decide
     simpa [pngPixel_encodeRaw_gray, pngPixel_colorType_gray, hbpp, bytesPerPixelGray] using hraw
   decodeRowsLoop_encodeRaw := by
@@ -283,10 +335,49 @@ instance : PngRoundTrip PixelGray8 where
       rw [encodeRawFast_eq]
       simpa using (decodeRowsLoopGray_encodeRaw (bmp := bmp))
     have hbpp :
-        (if (u8 0).toNat = 0 then 1 else if (u8 0).toNat = 2 then 3 else 4) = 1 := by
+        (if (u8 0).toNat = 0 then 1 else if (u8 0).toNat = 2 then 3 else
+          if (u8 0).toNat = 4 then 2 else 4) = 1 := by
       decide
     simpa [pngPixel_decodeRowsLoop_gray, pngPixel_encodeRaw_gray, pngPixel_colorType_gray, hbpp,
       bytesPerPixel_gray, bytesPerPixelGray, Nat.mul_left_comm, Nat.mul_comm, Nat.mul_assoc] using hrows
+
+/-- `PixelGrayAlpha8` satisfies the generic PNG round-trip contract.
+It provides the color type 4 facts consumed by `decodeBitmap_encodeBitmap`. -/
+instance : PngRoundTrip PixelGrayAlpha8 where
+  colorType_ok := by
+    have : (u8 4).toNat = 0 ∨ (u8 4).toNat = 2 ∨
+        (u8 4).toNat = 4 ∨ (u8 4).toNat = 6 := by decide
+    simpa [pngPixel_colorType_grayAlpha] using this
+  encodeRaw_size := by
+    intro bmp
+    have hraw : (encodeRawFast bmp).size =
+        bmp.size.height * (bmp.size.width * bytesPerPixelGrayAlpha + 1) := by
+      rw [encodeRawFast_eq]
+      simpa [bytesPerPixel_grayAlpha] using encodeRaw_size (bmp := bmp)
+    have hbpp :
+        (if (u8 4).toNat = 0 then 1 else if (u8 4).toNat = 2 then 3 else
+          if (u8 4).toNat = 4 then 2 else 4) = 2 := by
+      decide
+    simpa [pngPixel_encodeRaw_grayAlpha, pngPixel_colorType_grayAlpha, hbpp,
+      bytesPerPixelGrayAlpha] using hraw
+  decodeRowsLoop_encodeRaw := by
+    intro bmp
+    have hrows :
+        decodeRowsLoopGrayAlpha (encodeRawFast bmp) bmp.size.width bmp.size.height
+            bytesPerPixelGrayAlpha (bmp.size.width * bytesPerPixelGrayAlpha) 0 0
+            ByteArray.empty
+            (ByteArray.mk <| Array.replicate
+              (bmp.size.height * (bmp.size.width * bytesPerPixelGrayAlpha)) 0) =
+          some bmp.data := by
+      rw [encodeRawFast_eq]
+      simpa using (decodeRowsLoopGrayAlpha_encodeRaw (bmp := bmp))
+    have hbpp :
+        (if (u8 4).toNat = 0 then 1 else if (u8 4).toNat = 2 then 3 else
+          if (u8 4).toNat = 4 then 2 else 4) = 2 := by
+      decide
+    simpa [pngPixel_decodeRowsLoop_grayAlpha, pngPixel_encodeRaw_grayAlpha,
+      pngPixel_colorType_grayAlpha, hbpp, bytesPerPixel_grayAlpha, bytesPerPixelGrayAlpha,
+      Nat.mul_left_comm, Nat.mul_comm, Nat.mul_assoc] using hrows
 
 -- Round-trip PNG encode/decode for bitmap payloads.
 lemma decodeBitmap_encodeBitmap {px : Type u} [Pixel px] [PngPixel px] [PngRoundTrip px]

@@ -61,6 +61,12 @@ lemma bytesPerPixel_rgba : Pixel.bytesPerPixel (α := PixelRGBA8) = bytesPerPixe
 lemma bytesPerPixel_gray : Pixel.bytesPerPixel (α := PixelGray8) = bytesPerPixelGray := by
   rfl
 
+/-- Bytes per pixel for `PixelGrayAlpha8`.
+This exposes the two-byte PNG color type 4 layout to later proofs. -/
+lemma bytesPerPixel_grayAlpha :
+    Pixel.bytesPerPixel (α := PixelGrayAlpha8) = bytesPerPixelGrayAlpha := by
+  rfl
+
 -- PNG color type for RGB8.
 @[simp] lemma pngPixel_colorType_rgb : PngPixel.colorType (α := PixelRGB8) = u8 2 := by
   rfl
@@ -73,6 +79,12 @@ lemma bytesPerPixel_gray : Pixel.bytesPerPixel (α := PixelGray8) = bytesPerPixe
 @[simp] lemma pngPixel_colorType_gray : PngPixel.colorType (α := PixelGray8) = u8 0 := by
   rfl
 
+/-- PNG color type for `PixelGrayAlpha8`.
+The encoder emits PNG color type 4 for grayscale+alpha pixels. -/
+@[simp] lemma pngPixel_colorType_grayAlpha :
+    PngPixel.colorType (α := PixelGrayAlpha8) = u8 4 := by
+  rfl
+
 -- PNG raw encoding for RGB8.
 @[simp] lemma pngPixel_encodeRaw_rgb : PngPixel.encodeRaw (α := PixelRGB8) = encodeRawFast := by
   rfl
@@ -83,6 +95,12 @@ lemma bytesPerPixel_gray : Pixel.bytesPerPixel (α := PixelGray8) = bytesPerPixe
 
 -- PNG raw encoding for Gray8.
 @[simp] lemma pngPixel_encodeRaw_gray : PngPixel.encodeRaw (α := PixelGray8) = encodeRawFast := by
+  rfl
+
+/-- Raw PNG row encoding for `PixelGrayAlpha8`.
+This keeps grayscale+alpha on the same filter-0 raw encoder path. -/
+@[simp] lemma pngPixel_encodeRaw_grayAlpha :
+    PngPixel.encodeRaw (α := PixelGrayAlpha8) = encodeRawFast := by
   rfl
 
 -- PNG row decoder for RGB8.
@@ -98,6 +116,12 @@ lemma bytesPerPixel_gray : Pixel.bytesPerPixel (α := PixelGray8) = bytesPerPixe
 -- PNG row decoder for Gray8.
 @[simp] lemma pngPixel_decodeRowsLoop_gray :
     PngPixel.decodeRowsLoop (α := PixelGray8) = decodeRowsLoopGray := by
+  rfl
+
+/-- Row decoder selected by the `PixelGrayAlpha8` PNG instance.
+It lets the generic round-trip proof specialize to color type 4. -/
+@[simp] lemma pngPixel_decodeRowsLoop_grayAlpha :
+    PngPixel.decodeRowsLoop (α := PixelGrayAlpha8) = decodeRowsLoopGrayAlpha := by
   rfl
 
 -- Little-endian 16-bit encoding has length 2.
@@ -2249,6 +2273,7 @@ lemma parsePngSimple_encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : 
     (hsize : 8 <= (encodeBitmap bmp hw hh mode).size)
     (hct : (PngPixel.colorType (α := px)).toNat = 0 ∨
       (PngPixel.colorType (α := px)).toNat = 2 ∨
+      (PngPixel.colorType (α := px)).toNat = 4 ∨
       (PngPixel.colorType (α := px)).toNat = 6) :
     parsePngSimple (encodeBitmap bmp hw hh mode) hsize =
       some ({ width := bmp.size.width, height := bmp.size.height
@@ -2310,16 +2335,19 @@ lemma parsePngSimple_encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : 
     simpa [htailEq] using (by decide : (u8 0).toNat = 0)
   have hinterlace : ((ihdr.extract 8 13).get! 4).toNat = 0 := by
     simpa [htailEq] using (by decide : (u8 0).toNat = 0)
-  have hcolorOk : (ct.toNat != 0 && ct.toNat != 2 && ct.toNat != 6) = false := by
-    rcases hct with h0 | h2 | h6
+  have hcolorOk : (ct.toNat != 0 && ct.toNat != 2 && ct.toNat != 4 &&
+      ct.toNat != 6) = false := by
+    rcases hct with h0 | h2 | h4 | h6
     · rw [h0]; decide
     · rw [h2]; decide
+    · rw [h4]; decide
     · rw [h6]; decide
-  have hctProp : ¬ct.toNat = 0 → ¬ct.toNat = 2 → ct.toNat = 6 := by
-    intro h0' h2'
-    rcases hct with h0 | h2 | h6
+  have hctProp : ¬ct.toNat = 0 → ¬ct.toNat = 2 → ¬ct.toNat = 4 → ct.toNat = 6 := by
+    intro h0' h2' h4'
+    rcases hct with h0 | h2 | h4 | h6
     · exact (False.elim (h0' h0))
     · exact (False.elim (h2' h2))
+    · exact (False.elim (h4' h4))
     · exact h6
   have hpos0 : 0 + 3 < ihdr.size := by
     have : ihdr.size = 13 := hlen'
@@ -2351,9 +2379,9 @@ lemma parsePngSimple_encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : 
     unfold parseIHDRData
     simp [hlen', hwidth, hheight, hbitDepth, hctEq, hcomp, hfilter, hinterlace]
   have hnotColorBad :
-      ¬ ((¬ct.toNat = 0 ∧ ¬ct.toNat = 2) ∧ ¬ct.toNat = 6) := by
-    rintro ⟨⟨h0, h2⟩, h6⟩
-    exact h6 (hctProp h0 h2)
+      ¬ (((¬ct.toNat = 0 ∧ ¬ct.toNat = 2) ∧ ¬ct.toNat = 4) ∧ ¬ct.toNat = 6) := by
+    rintro ⟨⟨⟨h0, h2⟩, h4⟩, h6⟩
+    exact h6 (hctProp h0 h2 h4)
   have hend : 57 + idat.size = (encodeBitmap bmp hw hh mode).size := by
     omega
   unfold parsePngSimple
@@ -2371,6 +2399,7 @@ lemma parsePng_encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap
     (hsize : 8 <= (encodeBitmap bmp hw hh mode).size)
     (hct : (PngPixel.colorType (α := px)).toNat = 0 ∨
       (PngPixel.colorType (α := px)).toNat = 2 ∨
+      (PngPixel.colorType (α := px)).toNat = 4 ∨
       (PngPixel.colorType (α := px)).toNat = 6) :
     parsePng (encodeBitmap bmp hw hh mode) hsize =
       some ({ width := bmp.size.width, height := bmp.size.height
@@ -3404,6 +3433,19 @@ lemma decodeRowsLoopGray_encodeRaw (bmp : BitmapGray8) :
     decodeRowsLoopGray raw w h bytesPerPixelGray rowBytes 0 0 ByteArray.empty pixels0 = some bmp.data := by
   simpa [decodeRowsLoopGray, bytesPerPixel_gray, bytesPerPixelGray] using
     (decodeRowsLoopCore_encodeRaw (bmp := bmp) (convert := decodeRowGray))
+
+/-- Decoding the raw encoding reconstructs the original grayscale+alpha pixels.
+It instantiates the generic row-loop theorem for PNG color type 4. -/
+lemma decodeRowsLoopGrayAlpha_encodeRaw (bmp : BitmapGrayAlpha8) :
+    let w := bmp.size.width
+    let h := bmp.size.height
+    let rowBytes := w * bytesPerPixelGrayAlpha
+    let raw := encodeRaw bmp
+    let pixels0 := ByteArray.mk <| Array.replicate (h * rowBytes) 0
+    decodeRowsLoopGrayAlpha raw w h bytesPerPixelGrayAlpha rowBytes 0 0 ByteArray.empty pixels0 =
+      some bmp.data := by
+  simpa [decodeRowsLoopGrayAlpha, bytesPerPixel_grayAlpha, bytesPerPixelGrayAlpha] using
+    (decodeRowsLoopCore_encodeRaw (bmp := bmp) (convert := decodeRowGrayAlpha))
 
 
 end Lemmas

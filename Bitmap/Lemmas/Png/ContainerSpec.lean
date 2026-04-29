@@ -38,12 +38,14 @@ def encodeIHDRData (h : PngHeader) : ByteArray :=
 /-- The simple-shape container spec: 8-byte signature, one IHDR, one
 IDAT carrying `idatData` payload bytes, and one empty IEND. The header
 is constrained to the supported subset (`bitDepth = 8` and
-`colorType ∈ {0,2,6}`) so the runtime accepts it. -/
+`colorType ∈ {0,2,4,6}`) so the runtime accepts it. -/
 structure SimpleContainerSpec where
   header : PngHeader
   idatData : ByteArray
   hBitDepth : header.bitDepth = 8
-  hColorType : header.colorType = 0 ∨ header.colorType = 2 ∨ header.colorType = 6
+  hColorType :
+    header.colorType = 0 ∨ header.colorType = 2 ∨
+      header.colorType = 4 ∨ header.colorType = 6
   hWidth : header.width < 2 ^ 32
   hHeight : header.height < 2 ^ 32
 

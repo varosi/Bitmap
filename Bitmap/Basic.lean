@@ -217,6 +217,42 @@ instance {α : Type} [Mul α] : Mul (PixelGray α) where
 
 def PixelGray8 := PixelGray UInt8
 
+-------------------------------------------------------------------------------
+-- A single grayscale pixel with alpha of any type
+structure PixelGrayAlpha (RangeT : Type u) where
+  mk ::
+  v : RangeT
+  a : RangeT
+deriving Repr, BEq, DecidableEq, ReflBEq, LawfulBEq
+
+instance instInhabitedPixelGrayAlpha (RangeT) [Inhabited RangeT] :
+    Inhabited (PixelGrayAlpha RangeT) where
+  default := { v := default, a := default }
+
+instance instToJsonPixelGrayAlpha (RangeT) [ToJson RangeT] :
+    ToJson (PixelGrayAlpha RangeT) where
+  toJson
+    | ⟨v, a⟩ =>
+      Json.mkObj [
+        ("v", toJson v),
+        ("a", toJson a)
+      ]
+
+instance instFromJsonPixelGrayAlpha (RangeT) [FromJson RangeT] :
+    FromJson (PixelGrayAlpha RangeT) where
+  fromJson? j := do
+    let v ← j.getObjValAs? RangeT "v"
+    let a ← j.getObjValAs? RangeT "a"
+    return { v, a }
+
+instance {α : Type} [Add α] : Add (PixelGrayAlpha α) where
+  add p1 p2 := { v := p1.v + p2.v, a := p1.a + p2.a }
+
+instance {α : Type} [Mul α] : Mul (PixelGrayAlpha α) where
+  mul p1 p2 := { v := p1.v * p2.v, a := p1.a * p2.a }
+
+def PixelGrayAlpha8 := PixelGrayAlpha UInt8
+
 instance : Inhabited PixelRGB8 := instInhabitedPixelRGB _
 instance : DecidableEq PixelRGB8 := by
   unfold PixelRGB8
@@ -230,6 +266,11 @@ instance : DecidableEq PixelRGBA8 := by
 instance : Inhabited PixelGray8 := instInhabitedPixelGray _
 instance : DecidableEq PixelGray8 := by
   unfold PixelGray8
+  infer_instance
+
+instance : Inhabited PixelGrayAlpha8 := instInhabitedPixelGrayAlpha _
+instance : DecidableEq PixelGrayAlpha8 := by
+  unfold PixelGrayAlpha8
   infer_instance
 
 -------------------------------------------------------------------------------
@@ -253,6 +294,7 @@ class Pixel (α : Type u) where
 def bytesPerPixelRGB : Nat := 3
 def bytesPerPixelRGBA : Nat := 4
 def bytesPerPixelGray : Nat := 1
+def bytesPerPixelGrayAlpha : Nat := 2
 
 def pixelReadRGB8 (data : ByteArray) (base : Nat) (h : base + 2 < data.size) : PixelRGB8 := by
   have h1 : base + 1 < data.size := by omega
@@ -334,6 +376,24 @@ def pixelWriteGray8 (data : ByteArray) (base : Nat) (h : base < data.size)
     (px : PixelGray8) : ByteArray :=
   data.set base px.v h
 
+def pixelReadGrayAlpha8 (data : ByteArray) (base : Nat)
+    (h : base + 1 < data.size) : PixelGrayAlpha8 := by
+  have h0 : base < data.size := by omega
+  exact { v := data.get base h0
+          a := data.get (base + 1) h }
+
+def pixelWriteGrayAlpha8 (data : ByteArray) (base : Nat)
+    (h : base + 1 < data.size) (px : PixelGrayAlpha8) : ByteArray := by
+  have h0 : base < data.size := by omega
+  let data1 := data.set base px.v h0
+  have hsize1 : data1.size = data.size := by
+    cases data with
+    | mk arr =>
+        simp [data1, ByteArray.set, ByteArray.size, Array.size_set]
+  have h1' : base + 1 < data1.size := by
+    simpa [hsize1] using h
+  exact data1.set (base + 1) px.a h1'
+
 
 structure Bitmap (px : Type u) [Pixel px] where
   mk ::
@@ -348,6 +408,7 @@ deriving Repr, DecidableEq
 abbrev BitmapRGB8 [Pixel PixelRGB8] := Bitmap PixelRGB8
 abbrev BitmapRGBA8 [Pixel PixelRGBA8] := Bitmap PixelRGBA8
 abbrev BitmapGray8 [Pixel PixelGray8] := Bitmap PixelGray8
+abbrev BitmapGrayAlpha8 [Pixel PixelGrayAlpha8] := Bitmap PixelGrayAlpha8
 
 instance [Pixel PixelRGB8] : DecidableEq BitmapRGB8 := by
   infer_instance
@@ -356,6 +417,9 @@ instance [Pixel PixelRGBA8] : DecidableEq BitmapRGBA8 := by
   infer_instance
 
 instance [Pixel PixelGray8] : DecidableEq BitmapGray8 := by
+  infer_instance
+
+instance [Pixel PixelGrayAlpha8] : DecidableEq BitmapGrayAlpha8 := by
   infer_instance
 
 def putPixel {px : Type u} [Pixel px] (img : Bitmap px) (x y : Nat) (pixel : px)
@@ -510,6 +574,15 @@ def BitmapGray8.ofPixelFn (w h : Nat) (f : Fin (w * h) → PixelGray8) [Pixel Pi
 
 def mkBlankBitmapGray (w h : ℕ) (color : PixelGray8) [Pixel PixelGray8] : BitmapGray8 :=
   BitmapGray8.ofPixelFn w h (fun _ => color)
+
+def BitmapGrayAlpha8.ofPixelFn (w h : Nat)
+    (f : Fin (w * h) → PixelGrayAlpha8) [Pixel PixelGrayAlpha8] :
+    BitmapGrayAlpha8 :=
+  Bitmap.ofPixelFn w h f
+
+def mkBlankBitmapGrayAlpha (w h : ℕ) (color : PixelGrayAlpha8)
+    [Pixel PixelGrayAlpha8] : BitmapGrayAlpha8 :=
+  BitmapGrayAlpha8.ofPixelFn w h (fun _ => color)
 
 instance instPixelRGB8 : Pixel PixelRGB8 where
   bytesPerPixel := bytesPerPixelRGB
@@ -737,6 +810,67 @@ instance instPixelGray8 : Pixel PixelGray8 where
     cases data with
     | mk arr =>
         simp [pixelWriteGray8, ByteArray.set, ByteArray.size, Array.size_set]
+
+instance instPixelGrayAlpha8 : Pixel PixelGrayAlpha8 where
+  bytesPerPixel := bytesPerPixelGrayAlpha
+  bytesPerPixel_pos := by decide
+  read_write := by
+    intro data base h px
+    cases px with
+    | mk v a =>
+        have h1 : base + 1 < data.size := by
+          simpa [bytesPerPixelGrayAlpha] using h
+        have h0 : base < data.size := by omega
+        have size_set {bs : ByteArray} {i : Nat} (hi : i < bs.size) {v : UInt8} :
+            (bs.set i v hi).size = bs.size := by
+          cases bs with
+          | mk arr =>
+              simp [ByteArray.set, ByteArray.size, Array.size_set]
+        let data1 := data.set base v h0
+        have hsize1 : data1.size = data.size := by
+          simp [data1, size_set]
+        have h1d1 : base + 1 < data1.size := by
+          simpa [hsize1] using h1
+        let data2 := data1.set (base + 1) a h1d1
+        have hsize2 : data2.size = data.size := by
+          have hsize2' : data2.size = data1.size := by
+            simp [data2, size_set]
+          simpa [hsize1] using hsize2'
+        have h0d1 : base < data1.size := by
+          simpa [hsize1] using h0
+        have h0d2 : base < data2.size := by
+          simpa [hsize2] using h0
+        have h1d2 : base + 1 < data2.size := by
+          simpa [hsize2] using h1
+        have get_set_ne {bs : ByteArray} {i j : Nat}
+            (hi : i < bs.size) (hj : j < bs.size) (hij : i ≠ j) {v : UInt8}
+            (h' : j < (bs.set i v hi).size) :
+            (bs.set i v hi).get j h' = bs.get j hj := by
+          cases bs with
+          | mk arr =>
+              simpa [ByteArray.set, ByteArray.get] using
+                (Array.getElem_set_ne (xs := arr) (i := i) (j := j) (h' := hi) (pj := hj)
+                  (h := hij))
+        have hv : data2.get base h0d2 = v := by
+          have hv1 : data2.get base h0d2 = data1.get base h0d1 := by
+            simpa [data2] using
+              (get_set_ne (bs := data1) (i := base + 1) (j := base)
+                (hi := h1d1) (hj := h0d1) (hij := by omega) (v := a) (h' := h0d2))
+          have hv2 : data1.get base h0d1 = v := by
+            simp [data1, ByteArray.set, ByteArray.get]
+          simp [hv1, hv2]
+        have ha : data2.get (base + 1) h1d2 = a := by
+          simp [data2, ByteArray.set, ByteArray.get]
+        simp [pixelReadGrayAlpha8, pixelWriteGrayAlpha8, data1, data2, hv, ha]
+  read := fun data base h =>
+    pixelReadGrayAlpha8 data base (by simpa [bytesPerPixelGrayAlpha] using h)
+  write := fun data base h px =>
+    pixelWriteGrayAlpha8 data base (by simpa [bytesPerPixelGrayAlpha] using h) px
+  write_size := by
+    intro data base h px
+    cases data with
+    | mk arr =>
+        simp [pixelWriteGrayAlpha8, ByteArray.set, ByteArray.size, Array.size_set]
 
 class FileWritable (α : Type) where
   write : FilePath -> α -> IO (Except String Unit)
