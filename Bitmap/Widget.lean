@@ -217,14 +217,17 @@ def auroraBitmap16 : BitmapRGB16 :=
     let b := clampToUInt16 ((width - x) * 1400 + (height - y) * 900)
     PixelRGB.mk r g b)
 
+private def testFixturePath (name : String) : FilePath :=
+  FilePath.mk s!"Bitmap/Tests/{name}"
+
 def testPngPath : FilePath :=
-  FilePath.mk "test.png"
+  testFixturePath "test.png"
 
 def testPngRgbaPath : FilePath :=
-  FilePath.mk "test_rgba.png"
+  testFixturePath "test_rgba.png"
 
 def testPngGrayPath : FilePath :=
-  FilePath.mk "test_gray.png"
+  testFixturePath "test_gray.png"
 
 def testPngBitmapResult : Except String BitmapRGB8 :=
   match unsafe unsafeIO (IO.FS.readBinFile testPngPath) with

@@ -7,7 +7,7 @@ are present between IHDR and IEND. Re-running the script is idempotent.
 
 Run from the repo root:
 
-    python3 scripts/generate-anc-fixtures.py
+    python3 Bitmap/Tests/generate-anc-fixtures.py
 """
 
 import binascii
@@ -35,7 +35,7 @@ assert len(PIXELS) == WIDTH * HEIGHT * 3
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+FIXTURE_DIR = os.path.abspath(os.path.dirname(__file__))
 
 
 def make_chunk(chunk_type: bytes, data: bytes) -> bytes:
@@ -117,7 +117,7 @@ def make_idats_split(n: int) -> bytes:
 
 
 def write(name: str, body: bytes) -> None:
-    path = os.path.join(REPO_ROOT, name)
+    path = os.path.join(FIXTURE_DIR, name)
     with open(path, "wb") as f:
         f.write(PNG_SIGNATURE + body)
     print(f"wrote {name} ({os.path.getsize(path)} bytes)")
