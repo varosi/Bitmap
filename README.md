@@ -1,6 +1,8 @@
 # bitmap
 
 Lean 4 bitmap image utilities with PNG encode/decode support, plus a small widget for visualization.
+The widget accepts the supported 8-bit bitmap formats and displays 16-bit bitmap
+formats by downsampling each channel to its high byte for browser canvas output.
 
 This library has proofs about:
 - putPixel and getPixel correspondence (Bitmap.Lemmas.putPixel_getPixel);

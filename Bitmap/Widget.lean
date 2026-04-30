@@ -80,11 +80,116 @@ def BitmapGrayAlpha8.widgetProps (bmp : BitmapGrayAlpha8)
     background
     caption }
 
+private def downsampleRGB16ToRGB8Data (data : ByteArray) : ByteArray :=
+  Id.run do
+    let pixels := data.size / bytesPerPixelRGB16
+    let mut out := ByteArray.emptyWithCapacity (pixels * bytesPerPixelRGB)
+    for i in [0:pixels] do
+      let base := i * bytesPerPixelRGB16
+      out := out.push (data.get! base)
+      out := out.push (data.get! (base + 2))
+      out := out.push (data.get! (base + 4))
+    return out
+
+private def downsampleRGBA16ToRGBA8Data (data : ByteArray) : ByteArray :=
+  Id.run do
+    let pixels := data.size / bytesPerPixelRGBA16
+    let mut out := ByteArray.emptyWithCapacity (pixels * bytesPerPixelRGBA)
+    for i in [0:pixels] do
+      let base := i * bytesPerPixelRGBA16
+      out := out.push (data.get! base)
+      out := out.push (data.get! (base + 2))
+      out := out.push (data.get! (base + 4))
+      out := out.push (data.get! (base + 6))
+    return out
+
+private def downsampleGray16ToGray8Data (data : ByteArray) : ByteArray :=
+  Id.run do
+    let pixels := data.size / bytesPerPixelGray16
+    let mut out := ByteArray.emptyWithCapacity (pixels * bytesPerPixelGray)
+    for i in [0:pixels] do
+      let base := i * bytesPerPixelGray16
+      out := out.push (data.get! base)
+    return out
+
+private def downsampleGrayAlpha16ToGrayAlpha8Data (data : ByteArray) : ByteArray :=
+  Id.run do
+    let pixels := data.size / bytesPerPixelGrayAlpha16
+    let mut out := ByteArray.emptyWithCapacity (pixels * bytesPerPixelGrayAlpha)
+    for i in [0:pixels] do
+      let base := i * bytesPerPixelGrayAlpha16
+      out := out.push (data.get! base)
+      out := out.push (data.get! (base + 2))
+    return out
+
+def BitmapRGB16.widgetProps (bmp : BitmapRGB16)
+    (pixelSize : Nat := 12)
+    (showGrid : Bool := true)
+    (background : String := "#050914")
+    (caption : Option String := none) :
+    BitmapWidgetProps :=
+  { width := bmp.size.width
+    height := bmp.size.height
+    bytes := downsampleRGB16ToRGB8Data bmp.data
+    bytesPerPixel := bytesPerPixelRGB
+    pixelSize := max pixelSize 1
+    showGrid
+    background
+    caption }
+
+def BitmapRGBA16.widgetProps (bmp : BitmapRGBA16)
+    (pixelSize : Nat := 12)
+    (showGrid : Bool := true)
+    (background : String := "#050914")
+    (caption : Option String := none) :
+    BitmapWidgetProps :=
+  { width := bmp.size.width
+    height := bmp.size.height
+    bytes := downsampleRGBA16ToRGBA8Data bmp.data
+    bytesPerPixel := bytesPerPixelRGBA
+    pixelSize := max pixelSize 1
+    showGrid
+    background
+    caption }
+
+def BitmapGray16.widgetProps (bmp : BitmapGray16)
+    (pixelSize : Nat := 12)
+    (showGrid : Bool := true)
+    (background : String := "#050914")
+    (caption : Option String := none) :
+    BitmapWidgetProps :=
+  { width := bmp.size.width
+    height := bmp.size.height
+    bytes := downsampleGray16ToGray8Data bmp.data
+    bytesPerPixel := bytesPerPixelGray
+    pixelSize := max pixelSize 1
+    showGrid
+    background
+    caption }
+
+def BitmapGrayAlpha16.widgetProps (bmp : BitmapGrayAlpha16)
+    (pixelSize : Nat := 12)
+    (showGrid : Bool := true)
+    (background : String := "#050914")
+    (caption : Option String := none) :
+    BitmapWidgetProps :=
+  { width := bmp.size.width
+    height := bmp.size.height
+    bytes := downsampleGrayAlpha16ToGrayAlpha8Data bmp.data
+    bytesPerPixel := bytesPerPixelGrayAlpha
+    pixelSize := max pixelSize 1
+    showGrid
+    background
+    caption }
+
 -------------------------------------------------------------------------------
 -- Sample bitmap and widget integration
 
 private def clampToByte (n : Nat) : UInt8 :=
   UInt8.ofNat (n % 256)
+
+private def clampToUInt16 (n : Nat) : UInt16 :=
+  UInt16.ofNat (n % 65536)
 
 def auroraBitmap : BitmapRGB8 :=
   let width := 56
@@ -97,6 +202,19 @@ def auroraBitmap : BitmapRGB8 :=
     let r := clampToByte (diag * 4 + y * 2)
     let g := clampToByte (swirl + 40)
     let b := clampToByte ((width - x) * 5 + (height - y) * 3)
+    PixelRGB.mk r g b)
+
+def auroraBitmap16 : BitmapRGB16 :=
+  let width := 56
+  let height := 32
+  BitmapRGB16.ofPixelFn width height (fun idx : Fin (width * height) =>
+    let x := idx.val % width
+    let y := idx.val / width
+    let diag := x + y
+    let wave := (x * 2800 + (height - y) * 1700) % 65536
+    let r := clampToUInt16 (diag * 1024 + y * 320)
+    let g := clampToUInt16 (wave + 8192)
+    let b := clampToUInt16 ((width - x) * 1400 + (height - y) * 900)
     PixelRGB.mk r g b)
 
 def testPngPath : FilePath :=
@@ -215,10 +333,29 @@ def bitmapWidget : Lean.Widget.Module where
         for (let i = 0; i < width * height; i++) {
           const offset = i * 4
           const base = i * stride
-        const r = bytes[base] ?? 0
-        const g = stride === 1 ? r : (bytes[base + 1] ?? 0)
-        const b = stride === 1 ? r : (bytes[base + 2] ?? 0)
-        const a = stride >= 4 ? (bytes[base + 3] ?? 255) : 255
+          let r = 0
+          let g = 0
+          let b = 0
+          let a = 255
+          if (stride === 1) {
+            r = bytes[base] ?? 0
+            g = r
+            b = r
+          } else if (stride === 2) {
+            r = bytes[base] ?? 0
+            g = r
+            b = r
+            a = bytes[base + 1] ?? 255
+          } else if (stride === 3) {
+            r = bytes[base] ?? 0
+            g = bytes[base + 1] ?? 0
+            b = bytes[base + 2] ?? 0
+          } else {
+            r = bytes[base] ?? 0
+            g = bytes[base + 1] ?? 0
+            b = bytes[base + 2] ?? 0
+            a = bytes[base + 3] ?? 255
+          }
           image.data[offset + 0] = r
           image.data[offset + 1] = g
           image.data[offset + 2] = b
@@ -290,6 +427,12 @@ open Bitmaps.Widget
     (pixelSize := 18)
     (background := "#040b18")
     (caption := some "Aurora bitmap rendered via Lean"))
+
+#widget bitmapWidget with
+  (BitmapRGB16.widgetProps auroraBitmap16
+    (pixelSize := 18)
+    (background := "#040b18")
+    (caption := some "16-bit aurora bitmap downsampled for canvas display"))
 
 #widget bitmapWidget with
   (testPngWidgetProps)

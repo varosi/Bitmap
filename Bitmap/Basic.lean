@@ -342,7 +342,7 @@ def bytesPerPixelGrayAlpha16 : Nat := 4
 
 /-- Splitting a `UInt16` into big-endian bytes and reading it back is identity.
 This is the arithmetic core reused by every 16-bit pixel layout proof. -/
-lemma u16_from_be_bytes (x : UInt16) :
+private theorem u16_from_be_bytes (x : UInt16) :
     UInt16.ofNat ((u16HighByte x).toNat * 256 + (u16LowByte x).toNat) = x := by
   unfold u16HighByte u16LowByte
   rw [UInt8.toNat_ofNat', UInt8.toNat_ofNat']
@@ -357,13 +357,13 @@ lemma u16_from_be_bytes (x : UInt16) :
 
 /-- Converting an 8-bit byte to `UInt16` preserves its numeric value.
 This lets the 16-bit byte reconstruction proof survive UInt normalization. -/
-lemma u8_toUInt16_toNat (x : UInt8) : x.toUInt16.toNat = x.toNat := by
+private theorem u8_toUInt16_toNat (x : UInt8) : x.toUInt16.toNat = x.toNat := by
   cases x
   simp [UInt8.toUInt16, UInt8.toNat, UInt16.toNat]
 
 /-- The same reconstruction fact after Lean normalizes `UInt16.ofNat`.
 It closes goals produced by simplifying big-endian byte reads. -/
-lemma u16_from_be_bytes_uint16 (x : UInt16) :
+private theorem u16_from_be_bytes_uint16 (x : UInt16) :
     (u16HighByte x).toUInt16 * 256 + (u16LowByte x).toUInt16 = x := by
   apply UInt16.toNat_inj.mp
   simp [UInt16.toNat_add, UInt16.toNat_mul, UInt16.toNat_ofNat]
@@ -380,7 +380,7 @@ lemma u16_from_be_bytes_uint16 (x : UInt16) :
 
 /-- Setting one byte keeps the byte array size.
 The 16-bit pixel writers use it after each big-endian byte write. -/
-lemma byteArray_set_size {bs : ByteArray} {i : Nat} (hi : i < bs.size) {v : UInt8} :
+private theorem byteArray_set_size {bs : ByteArray} {i : Nat} (hi : i < bs.size) {v : UInt8} :
     (bs.set i v hi).size = bs.size := by
   cases bs with
   | mk arr =>
@@ -388,7 +388,7 @@ lemma byteArray_set_size {bs : ByteArray} {i : Nat} (hi : i < bs.size) {v : UInt
 
 /-- A byte write at another index does not affect a read.
 This packages the array-level `set_ne` fact for multi-byte pixel proofs. -/
-lemma byteArray_get_set_ne {bs : ByteArray} {i j : Nat}
+private theorem byteArray_get_set_ne {bs : ByteArray} {i j : Nat}
     (hi : i < bs.size) (hj : j < bs.size) (hij : i ≠ j) {v : UInt8}
     (h' : j < (bs.set i v hi).size) :
     (bs.set i v hi).get j h' = bs.get j hj := by
@@ -416,7 +416,7 @@ def writeU16BEAt (data : ByteArray) (base : Nat)
 
 /-- Writing a big-endian `UInt16` sample preserves the byte buffer size.
 It is the size side condition used by 16-bit pixel instances. -/
-lemma writeU16BEAt_size
+private theorem writeU16BEAt_size
     (data : ByteArray) (base : Nat) (h : base + 1 < data.size) (x : UInt16) :
     (writeU16BEAt data base h x).size = data.size := by
   unfold writeU16BEAt
@@ -424,7 +424,7 @@ lemma writeU16BEAt_size
 
 /-- Reading the same two-byte slot just written returns the written `UInt16`.
 This is the sample-level read/write law lifted to 16-bit pixels. -/
-lemma readU16BEAt_write_same
+private theorem readU16BEAt_write_same
     (data : ByteArray) (base : Nat) (h : base + 1 < data.size) (x : UInt16) :
     readU16BEAt (writeU16BEAt data base h x) base
       (by simpa [writeU16BEAt_size (data := data) (base := base) (h := h) (x := x)] using h) = x := by
@@ -463,7 +463,7 @@ lemma readU16BEAt_write_same
 
 /-- A later non-overlapping two-byte write preserves an earlier `UInt16` read.
 This keeps RGB/RGBA component proofs small when writing several samples. -/
-lemma readU16BEAt_write_after
+private theorem readU16BEAt_write_after
     (data : ByteArray) (readBase writeBase : Nat)
     (hread : readBase + 1 < data.size) (hwrite : writeBase + 1 < data.size)
     (x : UInt16) (hbefore : readBase + 1 < writeBase) :
@@ -517,7 +517,7 @@ lemma readU16BEAt_write_after
 
 /-- An earlier non-overlapping two-byte write preserves a later `UInt16` read.
 This is the symmetric preservation fact for multi-component 16-bit pixels. -/
-lemma readU16BEAt_write_before
+private theorem readU16BEAt_write_before
     (data : ByteArray) (readBase writeBase : Nat)
     (hread : readBase + 1 < data.size) (hwrite : writeBase + 1 < data.size)
     (x : UInt16) (hbefore : writeBase + 1 < readBase) :
