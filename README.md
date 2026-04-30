@@ -20,10 +20,17 @@ This library has proofs about:
   `parsePngLoopFuel_rejects_unknown_critical`,
   `parsePngLoopFuel_rejects_tRNS`,
   `parseTrnsData_rejects_grayAlpha8`,
+  `parseTrnsData_rejects_grayAlpha16`,
+  `parseTrnsData_accepts_gray16`,
+  `parseTrnsData_accepts_rgb16`,
   `parsePngLoopFuel_rejects_sBIT`,
   `parsePngLoopFuelWithMetadata_accepts_tRNS`,
   `parsePngLoopFuelWithMetadata_accepts_bKGD`,
   `parseBkgdData_accepts_grayAlpha8`,
+  `parseBkgdData_accepts_grayAlpha16`,
+  `parseBkgdData_accepts_gray16`,
+  `parseBkgdData_accepts_rgb16`,
+  `parseBkgdData_accepts_rgba16`,
   `parsePngLoopFuelWithMetadata_rejects_tRNS_after_idat`,
   `parsePngLoopFuelWithMetadata_rejects_bKGD_after_idat`,
   `parsePngLoopFuelWithMetadata_rejects_duplicate_tRNS`,
@@ -121,8 +128,8 @@ which the library carries full round-trip correctness proofs.
 | LZ77 | Length codes 257–285 and distance codes 0–29 with extra bits; `copyDistance` supports overlap (distance < length) |
 | Color conversion | RGB PNGs can be decoded into `BitmapRGBA8` (fills α = 255), gray+alpha PNGs into `BitmapRGBA8` (preserves alpha as expanded gray), and RGBA PNGs into `BitmapRGB8` (drops alpha). 16-bit PNGs may be decoded into matching 8-bit bitmap formats by taking the high byte of each sample |
 | PNG structure | 8-byte signature, `IHDR` first, multiple consecutive `IDAT` chunks accepted and concatenated, `IEND` last, required `PLTE` ordering checks, rejects unknown critical chunks, compression/filter method ≠ 0, and interlace ≠ 0 |
-| Tolerated ancillary chunks | `gAMA`, `cHRM`, `sRGB`, `iCCP`, `pHYs`, `tEXt`, `zTXt`, `iTXt`, `tIME`, `bKGD`, `hIST`, `sPLT`, plus any unknown chunk type whose first byte is lowercase — CRC-validated and skipped without affecting decoded pixels |
-| Metadata-aware decode | `decodeBitmapWithMetadata` validates and returns supported 8-bit `bKGD` metadata; it applies 8-bit grayscale/RGB `tRNS` transparency when decoding to `BitmapRGBA8`, composites `tRNS` or RGBA alpha over `bKGD` when decoding to `BitmapRGB8`, and composites grayscale+alpha over grayscale `bKGD` when decoding to `BitmapRGB8` or `BitmapGray8` |
+| Tolerated ancillary chunks | `gAMA`, `cHRM`, `sRGB`, `iCCP`, `pHYs`, `tEXt`, `zTXt`, `iTXt`, `tIME`, `bKGD`, `hIST`, `sPLT`, plus any unknown chunk type whose first byte is lowercase — CRC-validated and skipped by the pixel-only decoder; supported `bKGD` is preserved and applied by metadata-aware decode |
+| Metadata-aware decode | `decodeBitmapWithMetadata` validates and returns supported 8- and 16-bit `bKGD` metadata; it applies 8- and 16-bit grayscale/RGB `tRNS` transparency when decoding to RGBA, composites `tRNS` or RGBA alpha over `bKGD` when decoding to RGB, and composites grayscale+alpha over grayscale `bKGD` when decoding to RGB or grayscale. 16-bit sources can target exact 16-bit bitmaps or matching 8-bit bitmaps by high-byte downsampling after metadata handling |
 | Integrity | CRC-32 verified for every parsed chunk; mismatch rejects the entire input. Adler-32 verified at end of zlib stream |
 
 ### Not supported
@@ -130,7 +137,7 @@ which the library carries full round-trip correctness proofs.
 - Bit depths other than 8 and 16 (1, 2, 4)
 - Color type 3 (palette / `PLTE`)
 - Adam7 interlacing
-- Palette `tRNS` and `bKGD` (requires color type 3 / `PLTE` decoding), and 16-bit `tRNS`/`bKGD` metadata payloads
+- Palette `tRNS` and `bKGD` (requires color type 3 / `PLTE` decoding)
 - `tRNS` through the pixel-only `decodeBitmap` API — use `decodeBitmapWithMetadata` for transparent-color decoding into `BitmapRGBA8`, or into `BitmapRGB8` when a valid `bKGD` background is present
 - Gray+alpha through the pixel-only `decodeBitmap` API into non-alpha targets — use `decodeBitmapWithMetadata` for `BitmapRGB8` or `BitmapGray8` when a valid grayscale `bKGD` background is present
 - `sBIT` chunks — explicitly **rejected** (decoder returns `none`) rather than silently ignored, to avoid the silent-corruption hazard of dropping precision metadata that affects pixel semantics

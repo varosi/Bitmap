@@ -167,6 +167,33 @@ lemma parseTrnsData_rejects_grayAlpha8 (data : ByteArray) :
   unfold parseTrnsData
   simp
 
+/-- Color type 4 still rejects `tRNS` at 16-bit depth.
+This keeps alpha-in-sample images from also carrying transparent-color metadata. -/
+lemma parseTrnsData_rejects_grayAlpha16 (data : ByteArray) :
+    parseTrnsData
+      { width := 1, height := 1, colorType := 4, bitDepth := 16 } data = none := by
+  unfold parseTrnsData
+  simp
+
+/-- A 16-bit grayscale `tRNS` payload is preserved as a `UInt16` sample.
+This pins transparent-color parsing for high-precision grayscale PNGs. -/
+lemma parseTrnsData_accepts_gray16 :
+    parseTrnsData
+      { width := 1, height := 1, colorType := 0, bitDepth := 16 }
+      (ByteArray.mk #[u8 0x12, u8 0x34]) =
+        some (.gray16 (UInt16.ofNat 0x1234)) := by
+  native_decide
+
+/-- A 16-bit truecolor `tRNS` payload is preserved as three `UInt16` samples.
+This prevents the metadata parser from accidentally truncating RGB transparency. -/
+lemma parseTrnsData_accepts_rgb16 :
+    parseTrnsData
+      { width := 1, height := 1, colorType := 2, bitDepth := 16 }
+      (ByteArray.mk #[u8 0x12, u8 0x34, u8 0x56, u8 0x78, u8 0x9a, u8 0xbc]) =
+        some (.rgb16 (UInt16.ofNat 0x1234) (UInt16.ofNat 0x5678)
+          (UInt16.ofNat 0x9abc)) := by
+  native_decide
+
 /-- The metadata-aware parser records a valid `tRNS` chunk and continues.
 This is the branch-level correctness fact for supported transparency metadata. -/
 lemma parsePngLoopFuelWithMetadata_accepts_tRNS (fuel : Nat)
@@ -263,6 +290,44 @@ lemma parseBkgdData_accepts_grayAlpha8 :
     parseBkgdData
       { width := 1, height := 1, colorType := 4, bitDepth := 8 }
       (ByteArray.mk #[u8 0, u8 100]) = some (.gray8 (u8 100)) := by
+  native_decide
+
+/-- A grayscale `bKGD` payload is valid for 16-bit color type 4.
+This is the payload fact used by high-precision gray+alpha compositing. -/
+lemma parseBkgdData_accepts_grayAlpha16 :
+    parseBkgdData
+      { width := 1, height := 1, colorType := 4, bitDepth := 16 }
+      (ByteArray.mk #[u8 0x12, u8 0x34]) =
+        some (.gray16 (UInt16.ofNat 0x1234)) := by
+  native_decide
+
+/-- A 16-bit grayscale `bKGD` payload is preserved as a `UInt16` sample.
+This covers background metadata for high-precision grayscale PNGs. -/
+lemma parseBkgdData_accepts_gray16 :
+    parseBkgdData
+      { width := 1, height := 1, colorType := 0, bitDepth := 16 }
+      (ByteArray.mk #[u8 0x12, u8 0x34]) =
+        some (.gray16 (UInt16.ofNat 0x1234)) := by
+  native_decide
+
+/-- A 16-bit truecolor `bKGD` payload is preserved as three `UInt16` samples.
+This keeps background metadata exact before any requested downsampling. -/
+lemma parseBkgdData_accepts_rgb16 :
+    parseBkgdData
+      { width := 1, height := 1, colorType := 2, bitDepth := 16 }
+      (ByteArray.mk #[u8 0x20, u8 0x01, u8 0x40, u8 0x02, u8 0x60, u8 0x03]) =
+        some (.rgb16 (UInt16.ofNat 0x2001) (UInt16.ofNat 0x4002)
+          (UInt16.ofNat 0x6003)) := by
+  native_decide
+
+/-- A 16-bit RGBA `bKGD` payload is parsed as a truecolor background.
+This is the payload fact used when compositing high-precision RGBA over bKGD. -/
+lemma parseBkgdData_accepts_rgba16 :
+    parseBkgdData
+      { width := 1, height := 1, colorType := 6, bitDepth := 16 }
+      (ByteArray.mk #[u8 0x20, u8 0x01, u8 0x40, u8 0x02, u8 0x60, u8 0x03]) =
+        some (.rgb16 (UInt16.ofNat 0x2001) (UInt16.ofNat 0x4002)
+          (UInt16.ofNat 0x6003)) := by
   native_decide
 
 /-- `bKGD` must appear before the first `IDAT` chunk in the metadata-aware parser. -/

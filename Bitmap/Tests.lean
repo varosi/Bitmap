@@ -426,6 +426,9 @@ private def grayAlphaPngWithTrns : ByteArray :=
 private def u16 (n : Nat) : UInt16 :=
   UInt16.ofNat n
 
+private def u16be (n : Nat) : ByteArray :=
+  ByteArray.mk #[Png.u8 (n / 256), Png.u8 n]
+
 private def rgb16DownsampleFixture : BitmapRGB16 :=
   BitmapRGB16.ofPixelFn 2 1 (fun idx : Fin (2 * 1) =>
     match idx.val with
@@ -450,6 +453,56 @@ private def grayAlpha16DownsampleFixture : BitmapGrayAlpha16 :=
     match idx.val with
     | 0 => { v := u16 0x12ab, a := u16 0x3456 }
     | _ => { v := u16 0x8001, a := u16 0x00ff })
+
+private def pngWithAncillary {px : Type} [Pixel px] [Png.PngPixel px]
+    (bmp : Bitmap px) (ancillary : ByteArray) : ByteArray :=
+  let raw := Png.encodeRawFast bmp
+  let idat := Png.zlibCompressFixed raw
+  let ihdr :=
+    Png.u32be bmp.size.width ++
+    Png.u32be bmp.size.height ++
+    ByteArray.mk
+      #[Png.PngPixel.bitDepth (α := px), Png.PngPixel.colorType (α := px),
+        Png.u8 0, Png.u8 0, Png.u8 0]
+  Png.pngSignature ++
+    Png.mkChunkBytes Png.ihdrTypeBytes ihdr ++
+    ancillary ++
+    Png.mkChunkBytes Png.idatTypeBytes idat ++
+    Png.mkChunkBytes Png.iendTypeBytes ByteArray.empty
+
+private def rgb16MetadataFixture : BitmapRGB16 :=
+  BitmapRGB16.ofPixelFn 2 1 (fun idx : Fin (2 * 1) =>
+    match idx.val with
+    | 0 => { r := u16 0x1234, g := u16 0x5678, b := u16 0x9abc }
+    | _ => { r := u16 0x2001, g := u16 0x4002, b := u16 0x6003 })
+
+private def rgb16MetadataPng : ByteArray :=
+  pngWithAncillary rgb16MetadataFixture
+    (Png.mkChunkBytes Png.trnsTypeBytes
+        (u16be 0x1234 ++ u16be 0x5678 ++ u16be 0x9abc) ++
+      Png.mkChunkBytes Png.bkgdTypeBytes
+        (u16be 0x2100 ++ u16be 0x4300 ++ u16be 0x6500))
+
+private def grayAlpha16MetadataFixture : BitmapGrayAlpha16 :=
+  BitmapGrayAlpha16.ofPixelFn 2 1 (fun idx : Fin (2 * 1) =>
+    match idx.val with
+    | 0 => { v := u16 0x1234, a := u16 0x0000 }
+    | _ => { v := u16 0x8001, a := u16 0xffff })
+
+private def grayAlpha16MetadataPng : ByteArray :=
+  pngWithAncillary grayAlpha16MetadataFixture
+    (Png.mkChunkBytes Png.bkgdTypeBytes (u16be 0x3000))
+
+private def rgba16MetadataFixture : BitmapRGBA16 :=
+  BitmapRGBA16.ofPixelFn 2 1 (fun idx : Fin (2 * 1) =>
+    match idx.val with
+    | 0 => { r := u16 0x1234, g := u16 0x5678, b := u16 0x9abc, a := u16 0x0000 }
+    | _ => { r := u16 0x2001, g := u16 0x4002, b := u16 0x6003, a := u16 0xffff })
+
+private def rgba16MetadataPng : ByteArray :=
+  pngWithAncillary rgba16MetadataFixture
+    (Png.mkChunkBytes Png.bkgdTypeBytes
+      (u16be 0x2100 ++ u16be 0x4300 ++ u16be 0x6500))
 
 private def encodeFixturePng {px : Type} [Pixel px] [Png.PngPixel px]
     (bmp : Bitmap px) : IO ByteArray := do
@@ -486,6 +539,72 @@ private def expect16To8Downsample : IO Unit := do
         throw (IO.userError "GrayAlpha16 -> GrayAlpha8 downsample used unexpected bytes")
   | none =>
       throw (IO.userError "GrayAlpha16 -> GrayAlpha8 downsample failed")
+
+private def expect16BitMetadata : IO Unit := do
+  match Png.decodeBitmapWithMetadata (px := PixelRGBA8) rgb16MetadataPng with
+  | some decoded =>
+      if decoded.bitmap.data != ByteArray.mk
+          #[0x12, 0x56, 0x9a, 0x00, 0x20, 0x40, 0x60, 0xff] then
+        throw (IO.userError "RGB16+tRNS -> RGBA8 metadata decode mismatch")
+      match decoded.metadata.transparency with
+      | some (Png.PngTransparency.rgb16 r g b) =>
+          if r != u16 0x1234 || g != u16 0x5678 || b != u16 0x9abc then
+            throw (IO.userError "RGB16 tRNS metadata had wrong value")
+      | _ =>
+          throw (IO.userError "RGB16 tRNS metadata was missing")
+  | none =>
+      throw (IO.userError "RGB16+tRNS -> RGBA8 metadata decode failed")
+  match Png.decodeBitmapWithMetadata (px := PixelRGB8) rgb16MetadataPng with
+  | some decoded =>
+      if decoded.bitmap.data != ByteArray.mk #[0x21, 0x43, 0x65, 0x20, 0x40, 0x60] then
+        throw (IO.userError "RGB16+tRNS+bKGD -> RGB8 composition mismatch")
+      match decoded.metadata.background with
+      | some (Png.PngBackground.rgb16 r g b) =>
+          if r != u16 0x2100 || g != u16 0x4300 || b != u16 0x6500 then
+            throw (IO.userError "RGB16 bKGD metadata had wrong value")
+      | _ =>
+          throw (IO.userError "RGB16 bKGD metadata was missing")
+  | none =>
+      throw (IO.userError "RGB16+tRNS+bKGD -> RGB8 metadata decode failed")
+  match Png.decodeBitmapWithMetadata (px := PixelRGB16) rgb16MetadataPng with
+  | some decoded =>
+      if decoded.bitmap.data != ByteArray.mk
+          #[0x21, 0x00, 0x43, 0x00, 0x65, 0x00, 0x20, 0x01, 0x40, 0x02, 0x60, 0x03] then
+        throw (IO.userError "RGB16+tRNS+bKGD -> RGB16 composition mismatch")
+  | none =>
+      throw (IO.userError "RGB16+tRNS+bKGD -> RGB16 metadata decode failed")
+  match Png.decodeBitmapWithMetadata (px := PixelRGBA16) rgb16MetadataPng with
+  | some decoded =>
+      if decoded.bitmap.data != ByteArray.mk
+          #[0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0x00, 0x00,
+            0x20, 0x01, 0x40, 0x02, 0x60, 0x03, 0xff, 0xff] then
+        throw (IO.userError "RGB16+tRNS -> RGBA16 alpha mismatch")
+  | none =>
+      throw (IO.userError "RGB16+tRNS -> RGBA16 metadata decode failed")
+  match Png.decodeBitmapWithMetadata (px := PixelGray8) grayAlpha16MetadataPng with
+  | some decoded =>
+      if decoded.bitmap.data != ByteArray.mk #[0x30, 0x80] then
+        throw (IO.userError "GrayAlpha16+bKGD -> Gray8 composition mismatch")
+      match decoded.metadata.background with
+      | some (Png.PngBackground.gray16 gray) =>
+          if gray != u16 0x3000 then
+            throw (IO.userError "GrayAlpha16 bKGD metadata had wrong value")
+      | _ =>
+          throw (IO.userError "GrayAlpha16 bKGD metadata was missing")
+  | none =>
+      throw (IO.userError "GrayAlpha16+bKGD -> Gray8 metadata decode failed")
+  match Png.decodeBitmapWithMetadata (px := PixelGray16) grayAlpha16MetadataPng with
+  | some decoded =>
+      if decoded.bitmap.data != ByteArray.mk #[0x30, 0x00, 0x80, 0x01] then
+        throw (IO.userError "GrayAlpha16+bKGD -> Gray16 composition mismatch")
+  | none =>
+      throw (IO.userError "GrayAlpha16+bKGD -> Gray16 metadata decode failed")
+  match Png.decodeBitmapWithMetadata (px := PixelRGB8) rgba16MetadataPng with
+  | some decoded =>
+      if decoded.bitmap.data != ByteArray.mk #[0x21, 0x43, 0x65, 0x20, 0x40, 0x60] then
+        throw (IO.userError "RGBA16+bKGD -> RGB8 composition mismatch")
+  | none =>
+      throw (IO.userError "RGBA16+bKGD -> RGB8 metadata decode failed")
 
 private def expectGrayAlphaFixtures : IO Unit := do
   match Png.decodeBitmap (px := PixelGrayAlpha8) grayAlphaPng with
@@ -861,6 +980,8 @@ def run : IO Unit := do
   IO.println "png gray+alpha fixtures: ok"
   expect16To8Downsample
   IO.println "png 16-to-8 downsample fixtures: ok"
+  expect16BitMetadata
+  IO.println "png 16-bit metadata fixtures: ok"
   pngAncillaryChunkFixtures
   IO.println "png ancillary-chunk fixtures: ok"
   validateDynamicTableValidationBoundary

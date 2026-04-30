@@ -1679,11 +1679,15 @@ deriving Repr
 inductive PngTransparency where
   | gray8 (gray : UInt8)
   | rgb8 (r g b : UInt8)
+  | gray16 (gray : UInt16)
+  | rgb16 (r g b : UInt16)
 deriving Repr, DecidableEq
 
 inductive PngBackground where
   | gray8 (gray : UInt8)
   | rgb8 (r g b : UInt8)
+  | gray16 (gray : UInt16)
+  | rgb16 (r g b : UInt16)
 deriving Repr, DecidableEq
 
 structure PngMetadata where
@@ -1704,49 +1708,70 @@ deriving Repr
 def readU16BE! (bytes : ByteArray) (pos : Nat) : Nat :=
   ((bytes.get! pos).toNat <<< 8) + (bytes.get! (pos + 1)).toNat
 
+def readU16BEUInt16! (bytes : ByteArray) (pos : Nat) : UInt16 :=
+  UInt16.ofNat (readU16BE! bytes pos)
+
 def parseTrnsData (hdr : PngHeader) (data : ByteArray) : Option PngTransparency := do
-  if hdr.bitDepth != 8 then
-    none
-  else if hdr.colorType == 0 then
+  if hdr.colorType == 0 then
     if data.size != 2 then
       none
-    let gray := readU16BE! data 0
-    if gray ≤ 255 then
-      some (.gray8 (u8 gray))
+    else if hdr.bitDepth == 8 then
+      let gray := readU16BE! data 0
+      if gray ≤ 255 then
+        some (.gray8 (u8 gray))
+      else
+        none
+    else if hdr.bitDepth == 16 then
+      some (.gray16 (readU16BEUInt16! data 0))
     else
       none
   else if hdr.colorType == 2 then
     if data.size != 6 then
       none
-    let r := readU16BE! data 0
-    let g := readU16BE! data 2
-    let b := readU16BE! data 4
-    if r ≤ 255 && g ≤ 255 && b ≤ 255 then
-      some (.rgb8 (u8 r) (u8 g) (u8 b))
+    else if hdr.bitDepth == 8 then
+      let r := readU16BE! data 0
+      let g := readU16BE! data 2
+      let b := readU16BE! data 4
+      if r ≤ 255 && g ≤ 255 && b ≤ 255 then
+        some (.rgb8 (u8 r) (u8 g) (u8 b))
+      else
+        none
+    else if hdr.bitDepth == 16 then
+      some (.rgb16 (readU16BEUInt16! data 0) (readU16BEUInt16! data 2)
+        (readU16BEUInt16! data 4))
     else
       none
   else
     none
 
 def parseBkgdData (hdr : PngHeader) (data : ByteArray) : Option PngBackground := do
-  if hdr.bitDepth != 8 then
-    none
-  else if hdr.colorType == 0 || hdr.colorType == 4 then
+  if hdr.colorType == 0 || hdr.colorType == 4 then
     if data.size != 2 then
       none
-    let gray := readU16BE! data 0
-    if gray ≤ 255 then
-      some (.gray8 (u8 gray))
+    else if hdr.bitDepth == 8 then
+      let gray := readU16BE! data 0
+      if gray ≤ 255 then
+        some (.gray8 (u8 gray))
+      else
+        none
+    else if hdr.bitDepth == 16 then
+      some (.gray16 (readU16BEUInt16! data 0))
     else
       none
   else if hdr.colorType == 2 || hdr.colorType == 6 then
     if data.size != 6 then
       none
-    let r := readU16BE! data 0
-    let g := readU16BE! data 2
-    let b := readU16BE! data 4
-    if r ≤ 255 && g ≤ 255 && b ≤ 255 then
-      some (.rgb8 (u8 r) (u8 g) (u8 b))
+    else if hdr.bitDepth == 8 then
+      let r := readU16BE! data 0
+      let g := readU16BE! data 2
+      let b := readU16BE! data 4
+      if r ≤ 255 && g ≤ 255 && b ≤ 255 then
+        some (.rgb8 (u8 r) (u8 g) (u8 b))
+      else
+        none
+    else if hdr.bitDepth == 16 then
+      some (.rgb16 (readU16BEUInt16! data 0) (readU16BEUInt16! data 2)
+        (readU16BEUInt16! data 4))
     else
       none
   else
@@ -2130,14 +2155,45 @@ def backgroundToRGB (background : PngBackground) : UInt8 × UInt8 × UInt8 :=
   match background with
   | .gray8 gray => (gray, gray, gray)
   | .rgb8 r g b => (r, g, b)
+  | .gray16 gray =>
+      let gray8 := u8 (gray.toNat / 256)
+      (gray8, gray8, gray8)
+  | .rgb16 r g b => (u8 (r.toNat / 256), u8 (g.toNat / 256), u8 (b.toNat / 256))
 
 def backgroundToGray (background : PngBackground) : UInt8 :=
   match background with
   | .gray8 gray => gray
   | .rgb8 r g b => u8 ((r.toNat + g.toNat + b.toNat) / 3)
+  | .gray16 gray => u8 (gray.toNat / 256)
+  | .rgb16 r g b => u8 (((r.toNat / 256) + (g.toNat / 256) + (b.toNat / 256)) / 3)
+
+def u8ToUInt16Full (x : UInt8) : UInt16 :=
+  UInt16.ofNat (x.toNat * 257)
+
+def backgroundToRGB16 (background : PngBackground) : UInt16 × UInt16 × UInt16 :=
+  match background with
+  | .gray8 gray =>
+      let gray16 := u8ToUInt16Full gray
+      (gray16, gray16, gray16)
+  | .rgb8 r g b => (u8ToUInt16Full r, u8ToUInt16Full g, u8ToUInt16Full b)
+  | .gray16 gray => (gray, gray, gray)
+  | .rgb16 r g b => (r, g, b)
+
+def backgroundToGray16 (background : PngBackground) : UInt16 :=
+  match background with
+  | .gray8 gray => u8ToUInt16Full gray
+  | .rgb8 r g b => UInt16.ofNat ((r.toNat * 257 + g.toNat * 257 + b.toNat * 257) / 3)
+  | .gray16 gray => gray
+  | .rgb16 r g b => UInt16.ofNat ((r.toNat + g.toNat + b.toNat) / 3)
 
 def alphaCompositeByte (src bg alpha : UInt8) : UInt8 :=
   u8 ((src.toNat * alpha.toNat + bg.toNat * (255 - alpha.toNat)) / 255)
+
+def alphaComposite16 (src bg alpha : UInt16) : UInt16 :=
+  UInt16.ofNat ((src.toNat * alpha.toNat + bg.toNat * (65535 - alpha.toNat)) / 65535)
+
+def alphaComposite16ToByte (src bg alpha : UInt16) : UInt8 :=
+  u8 ((alphaComposite16 src bg alpha).toNat / 256)
 
 def transparencyAlpha (trns : Option PngTransparency) (r g b : UInt8) : UInt8 :=
   match trns with
@@ -2145,8 +2201,31 @@ def transparencyAlpha (trns : Option PngTransparency) (r g b : UInt8) : UInt8 :=
       if r == gray && g == gray && b == gray then u8 0 else u8 255
   | some (.rgb8 tr tg tb) =>
       if r == tr && g == tg && b == tb then u8 0 else u8 255
+  | some (.gray16 gray) =>
+      let gray8 := u8 (gray.toNat / 256)
+      if r == gray8 && g == gray8 && b == gray8 then u8 0 else u8 255
+  | some (.rgb16 tr tg tb) =>
+      if r == u8 (tr.toNat / 256) && g == u8 (tg.toNat / 256) &&
+          b == u8 (tb.toNat / 256) then u8 0 else u8 255
   | none =>
       u8 255
+
+def transparencyAlpha16 (trns : Option PngTransparency) (r g b : UInt16) : UInt16 :=
+  match trns with
+  | some (.gray8 gray) =>
+      let gray16 := u8ToUInt16Full gray
+      if r == gray16 && g == gray16 && b == gray16 then UInt16.ofNat 0 else UInt16.ofNat 65535
+  | some (.rgb8 tr tg tb) =>
+      if r == u8ToUInt16Full tr && g == u8ToUInt16Full tg && b == u8ToUInt16Full tb then
+        UInt16.ofNat 0
+      else
+        UInt16.ofNat 65535
+  | some (.gray16 gray) =>
+      if r == gray && g == gray && b == gray then UInt16.ofNat 0 else UInt16.ofNat 65535
+  | some (.rgb16 tr tg tb) =>
+      if r == tr && g == tg && b == tb then UInt16.ofNat 0 else UInt16.ofNat 65535
+  | none =>
+      UInt16.ofNat 65535
 
 def decodeRowTrnsOverBackground
     (trns : PngTransparency) (background : PngBackground)
@@ -2453,6 +2532,258 @@ def decodeRowsLoopGrayAlpha16 (raw : ByteArray) (w h bpp rowBytes : Nat)
   decodeRowsLoopCore raw w h bpp rowBytes bytesPerPixelGrayAlpha16 decodeRowGrayAlpha16
     y offset prevRow pixels
 
+def decodeRowAddAlpha16WithTransparency
+    (trns : Option PngTransparency) (sourceColorType : Nat)
+    (row : ByteArray) (w y bpp : Nat) (pixels : ByteArray) : ByteArray :=
+  Id.run do
+    let mut pixels := pixels
+    for x in [0:w] do
+      let base := x * bpp
+      let grayLike := sourceColorType == 0 || sourceColorType == 4
+      let r := UInt16.ofNat (rowU16Nat row base)
+      let g := if grayLike then r else UInt16.ofNat (rowU16Nat row (base + 2))
+      let b := if grayLike then r else UInt16.ofNat (rowU16Nat row (base + 4))
+      let a :=
+        if sourceColorType == 4 then
+          UInt16.ofNat (rowU16Nat row (base + 2))
+        else if sourceColorType == 6 then
+          UInt16.ofNat (rowU16Nat row (base + 6))
+        else
+          transparencyAlpha16 trns r g b
+      let pixBase := (y * w + x) * bytesPerPixelRGBA16
+      pixels := setU16Nat! pixels pixBase r.toNat
+      pixels := setU16Nat! pixels (pixBase + 2) g.toNat
+      pixels := setU16Nat! pixels (pixBase + 4) b.toNat
+      pixels := setU16Nat! pixels (pixBase + 6) a.toNat
+    return pixels
+
+def decodeRowsLoopRGBA16WithTransparency (trns : Option PngTransparency)
+    (sourceColorType : Nat) (raw : ByteArray) (w h bpp rowBytes : Nat)
+    (y offset : Nat) (prevRow pixels : ByteArray) : Option ByteArray :=
+  decodeRowsLoopCore raw w h bpp rowBytes bytesPerPixelRGBA16
+    (decodeRowAddAlpha16WithTransparency trns sourceColorType) y offset prevRow pixels
+
+def decodeRowTrnsOverBackground16
+    (trns : PngTransparency) (background : PngBackground) (sourceColorType : Nat)
+    (row : ByteArray) (w y bpp : Nat) (pixels : ByteArray) : ByteArray :=
+  Id.run do
+    let (br, bg, bb) := backgroundToRGB16 background
+    let mut pixels := pixels
+    for x in [0:w] do
+      let base := x * bpp
+      let grayLike := sourceColorType == 0 || sourceColorType == 4
+      let r0 := UInt16.ofNat (rowU16Nat row base)
+      let g0 := if grayLike then r0 else UInt16.ofNat (rowU16Nat row (base + 2))
+      let b0 := if grayLike then r0 else UInt16.ofNat (rowU16Nat row (base + 4))
+      let (r, g, b) :=
+        if transparencyAlpha16 (some trns) r0 g0 b0 == UInt16.ofNat 0 then
+          (br, bg, bb)
+        else
+          (r0, g0, b0)
+      let pixBase := (y * w + x) * bytesPerPixelRGB16
+      pixels := setU16Nat! pixels pixBase r.toNat
+      pixels := setU16Nat! pixels (pixBase + 2) g.toNat
+      pixels := setU16Nat! pixels (pixBase + 4) b.toNat
+    return pixels
+
+def decodeRowsLoopTrnsOverBackground16
+    (trns : PngTransparency) (background : PngBackground) (sourceColorType : Nat)
+    (raw : ByteArray) (w h bpp rowBytes : Nat)
+    (y offset : Nat) (prevRow pixels : ByteArray) : Option ByteArray :=
+  decodeRowsLoopCore raw w h bpp rowBytes 0
+    (decodeRowTrnsOverBackground16 trns background sourceColorType) y offset prevRow pixels
+
+def decodeRowAlphaOverBackground16
+    (background : PngBackground) (sourceColorType : Nat)
+    (row : ByteArray) (w y bpp : Nat) (pixels : ByteArray) : ByteArray :=
+  Id.run do
+    let (br, bg, bb) := backgroundToRGB16 background
+    let mut pixels := pixels
+    for x in [0:w] do
+      let base := x * bpp
+      let grayLike := sourceColorType == 0 || sourceColorType == 4
+      let r := UInt16.ofNat (rowU16Nat row base)
+      let g := if grayLike then r else UInt16.ofNat (rowU16Nat row (base + 2))
+      let b := if grayLike then r else UInt16.ofNat (rowU16Nat row (base + 4))
+      let a :=
+        if sourceColorType == 4 then
+          UInt16.ofNat (rowU16Nat row (base + 2))
+        else if sourceColorType == 6 then
+          UInt16.ofNat (rowU16Nat row (base + 6))
+        else
+          UInt16.ofNat 65535
+      let pixBase := (y * w + x) * bytesPerPixelRGB16
+      pixels := setU16Nat! pixels pixBase (alphaComposite16 r br a).toNat
+      pixels := setU16Nat! pixels (pixBase + 2) (alphaComposite16 g bg a).toNat
+      pixels := setU16Nat! pixels (pixBase + 4) (alphaComposite16 b bb a).toNat
+    return pixels
+
+def decodeRowsLoopAlphaOverBackground16
+    (background : PngBackground) (sourceColorType : Nat)
+    (raw : ByteArray) (w h bpp rowBytes : Nat)
+    (y offset : Nat) (prevRow pixels : ByteArray) : Option ByteArray :=
+  decodeRowsLoopCore raw w h bpp rowBytes bytesPerPixelRGB16
+    (decodeRowAlphaOverBackground16 background sourceColorType) y offset prevRow pixels
+
+def decodeRowGrayAlphaOverBackground16
+    (background : PngBackground) (sourceColorType : Nat)
+    (row : ByteArray) (w y bpp : Nat) (pixels : ByteArray) : ByteArray :=
+  Id.run do
+    let bg := backgroundToGray16 background
+    let mut pixels := pixels
+    for x in [0:w] do
+      let base := x * bpp
+      let gray :=
+        if sourceColorType == 0 || sourceColorType == 4 then
+          UInt16.ofNat (rowU16Nat row base)
+        else
+          UInt16.ofNat
+            ((rowU16Nat row base + rowU16Nat row (base + 2) + rowU16Nat row (base + 4)) / 3)
+      let alpha :=
+        if sourceColorType == 4 then
+          UInt16.ofNat (rowU16Nat row (base + 2))
+        else if sourceColorType == 6 then
+          UInt16.ofNat (rowU16Nat row (base + 6))
+        else
+          UInt16.ofNat 65535
+      let pixBase := (y * w + x) * bytesPerPixelGray16
+      pixels := setU16Nat! pixels pixBase (alphaComposite16 gray bg alpha).toNat
+    return pixels
+
+def decodeRowsLoopGrayAlphaOverBackground16
+    (background : PngBackground) (sourceColorType : Nat)
+    (raw : ByteArray) (w h bpp rowBytes : Nat)
+    (y offset : Nat) (prevRow pixels : ByteArray) : Option ByteArray :=
+  decodeRowsLoopCore raw w h bpp rowBytes bytesPerPixelGray16
+    (decodeRowGrayAlphaOverBackground16 background sourceColorType) y offset prevRow pixels
+
+def decodeRowDown16ToRGBA8WithTransparency
+    (trns : Option PngTransparency) (sourceColorType : Nat)
+    (row : ByteArray) (w y bpp : Nat) (pixels : ByteArray) : ByteArray :=
+  Id.run do
+    let mut pixels := pixels
+    for x in [0:w] do
+      let base := x * bpp
+      let grayLike := sourceColorType == 0 || sourceColorType == 4
+      let r16 := UInt16.ofNat (rowU16Nat row base)
+      let g16 := if grayLike then r16 else UInt16.ofNat (rowU16Nat row (base + 2))
+      let b16 := if grayLike then r16 else UInt16.ofNat (rowU16Nat row (base + 4))
+      let a :=
+        if sourceColorType == 4 then
+          rowU16High row (base + 2)
+        else if sourceColorType == 6 then
+          rowU16High row (base + 6)
+        else if transparencyAlpha16 trns r16 g16 b16 == UInt16.ofNat 0 then
+          u8 0
+        else
+          u8 255
+      let pixBase := (y * w + x) * bytesPerPixelRGBA
+      pixels := pixels.set! pixBase (u8 (r16.toNat / 256))
+      pixels := pixels.set! (pixBase + 1) (u8 (g16.toNat / 256))
+      pixels := pixels.set! (pixBase + 2) (u8 (b16.toNat / 256))
+      pixels := pixels.set! (pixBase + 3) a
+    return pixels
+
+def decodeRowsLoopDown16ToRGBA8WithTransparency (trns : Option PngTransparency)
+    (sourceColorType : Nat) (raw : ByteArray) (w h bpp rowBytes : Nat)
+    (y offset : Nat) (prevRow pixels : ByteArray) : Option ByteArray :=
+  decodeRowsLoopCore raw w h bpp rowBytes bytesPerPixelRGBA
+    (decodeRowDown16ToRGBA8WithTransparency trns sourceColorType) y offset prevRow pixels
+
+def decodeRowDown16TrnsOverBackgroundRGB8
+    (trns : PngTransparency) (background : PngBackground) (sourceColorType : Nat)
+    (row : ByteArray) (w y bpp : Nat) (pixels : ByteArray) : ByteArray :=
+  Id.run do
+    let (br, bg, bb) := backgroundToRGB16 background
+    let mut pixels := pixels
+    for x in [0:w] do
+      let base := x * bpp
+      let grayLike := sourceColorType == 0 || sourceColorType == 4
+      let r0 := UInt16.ofNat (rowU16Nat row base)
+      let g0 := if grayLike then r0 else UInt16.ofNat (rowU16Nat row (base + 2))
+      let b0 := if grayLike then r0 else UInt16.ofNat (rowU16Nat row (base + 4))
+      let (r, g, b) :=
+        if transparencyAlpha16 (some trns) r0 g0 b0 == UInt16.ofNat 0 then
+          (br, bg, bb)
+        else
+          (r0, g0, b0)
+      let pixBase := (y * w + x) * bytesPerPixelRGB
+      pixels := pixels.set! pixBase (u8 (r.toNat / 256))
+      pixels := pixels.set! (pixBase + 1) (u8 (g.toNat / 256))
+      pixels := pixels.set! (pixBase + 2) (u8 (b.toNat / 256))
+    return pixels
+
+def decodeRowsLoopDown16TrnsOverBackgroundRGB8
+    (trns : PngTransparency) (background : PngBackground) (sourceColorType : Nat)
+    (raw : ByteArray) (w h bpp rowBytes : Nat)
+    (y offset : Nat) (prevRow pixels : ByteArray) : Option ByteArray :=
+  decodeRowsLoopCore raw w h bpp rowBytes bytesPerPixelRGB
+    (decodeRowDown16TrnsOverBackgroundRGB8 trns background sourceColorType) y offset prevRow pixels
+
+def decodeRowDown16AlphaOverBackgroundRGB8
+    (background : PngBackground) (sourceColorType : Nat)
+    (row : ByteArray) (w y bpp : Nat) (pixels : ByteArray) : ByteArray :=
+  Id.run do
+    let (br, bg, bb) := backgroundToRGB16 background
+    let mut pixels := pixels
+    for x in [0:w] do
+      let base := x * bpp
+      let grayLike := sourceColorType == 0 || sourceColorType == 4
+      let r := UInt16.ofNat (rowU16Nat row base)
+      let g := if grayLike then r else UInt16.ofNat (rowU16Nat row (base + 2))
+      let b := if grayLike then r else UInt16.ofNat (rowU16Nat row (base + 4))
+      let a :=
+        if sourceColorType == 4 then
+          UInt16.ofNat (rowU16Nat row (base + 2))
+        else if sourceColorType == 6 then
+          UInt16.ofNat (rowU16Nat row (base + 6))
+        else
+          UInt16.ofNat 65535
+      let pixBase := (y * w + x) * bytesPerPixelRGB
+      pixels := pixels.set! pixBase (alphaComposite16ToByte r br a)
+      pixels := pixels.set! (pixBase + 1) (alphaComposite16ToByte g bg a)
+      pixels := pixels.set! (pixBase + 2) (alphaComposite16ToByte b bb a)
+    return pixels
+
+def decodeRowsLoopDown16AlphaOverBackgroundRGB8
+    (background : PngBackground) (sourceColorType : Nat)
+    (raw : ByteArray) (w h bpp rowBytes : Nat)
+    (y offset : Nat) (prevRow pixels : ByteArray) : Option ByteArray :=
+  decodeRowsLoopCore raw w h bpp rowBytes bytesPerPixelRGB
+    (decodeRowDown16AlphaOverBackgroundRGB8 background sourceColorType) y offset prevRow pixels
+
+def decodeRowDown16GrayAlphaOverBackgroundGray8
+    (background : PngBackground) (sourceColorType : Nat)
+    (row : ByteArray) (w y bpp : Nat) (pixels : ByteArray) : ByteArray :=
+  Id.run do
+    let bg := backgroundToGray16 background
+    let mut pixels := pixels
+    for x in [0:w] do
+      let base := x * bpp
+      let gray :=
+        if sourceColorType == 0 || sourceColorType == 4 then
+          UInt16.ofNat (rowU16Nat row base)
+        else
+          UInt16.ofNat
+            ((rowU16Nat row base + rowU16Nat row (base + 2) + rowU16Nat row (base + 4)) / 3)
+      let alpha :=
+        if sourceColorType == 4 then
+          UInt16.ofNat (rowU16Nat row (base + 2))
+        else if sourceColorType == 6 then
+          UInt16.ofNat (rowU16Nat row (base + 6))
+        else
+          UInt16.ofNat 65535
+      let pixBase := (y * w + x) * bytesPerPixelGray
+      pixels := pixels.set! pixBase (alphaComposite16ToByte gray bg alpha)
+    return pixels
+
+def decodeRowsLoopDown16GrayAlphaOverBackgroundGray8
+    (background : PngBackground) (sourceColorType : Nat)
+    (raw : ByteArray) (w h bpp rowBytes : Nat)
+    (y offset : Nat) (prevRow pixels : ByteArray) : Option ByteArray :=
+  decodeRowsLoopCore raw w h bpp rowBytes bytesPerPixelGray
+    (decodeRowDown16GrayAlphaOverBackgroundGray8 background sourceColorType) y offset prevRow pixels
+
 def decodeRowDown16ToRGB8 (sourceColorType : Nat)
     (row : ByteArray) (w y bpp : Nat) (pixels : ByteArray) : ByteArray :=
   Id.run do
@@ -2584,11 +2915,16 @@ def decodeParsedBitmapWithMetadata {px : Type u} [Pixel px] [PngPixel px]
   let expected := hdr.height * (rowBytes + 1)
   if raw.size != expected then
     none
+  let targetColorType := PngPixel.colorType (α := px)
+  let targetBitDepth := PngPixel.bitDepth (α := px)
+  let source16 := hdr.bitDepth == 16
+  let target8 := targetBitDepth == u8 8
+  let target16 := targetBitDepth == u8 16
   let totalBytes := hdr.width * hdr.height * Pixel.bytesPerPixel (α := px)
   let pixels0 := ByteArray.mk <| Array.replicate totalBytes 0
   let decodeDefaultRows : Option ByteArray :=
-    if hdr.bitDepth == 16 && PngPixel.bitDepth (α := px) == u8 8 then
-      decodeRowsLoopDown16To8 (PngPixel.colorType (α := px)) hdr.colorType
+    if source16 && target8 then
+      decodeRowsLoopDown16To8 targetColorType hdr.colorType
         raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
     else
       PngPixel.decodeRowsLoop (α := px)
@@ -2596,36 +2932,71 @@ def decodeParsedBitmapWithMetadata {px : Type u} [Pixel px] [PngPixel px]
   let pixels ←
     match parsed.metadata.transparency with
     | some trns =>
-        if PngPixel.colorType (α := px) == u8 6 then
-          decodeRowsLoopRGBAWithTransparency (some trns)
-            raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
-        else if PngPixel.colorType (α := px) == u8 2 then
+        if targetColorType == u8 6 then
+          if source16 && target8 then
+            decodeRowsLoopDown16ToRGBA8WithTransparency (some trns) hdr.colorType
+              raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
+          else if source16 && target16 then
+            decodeRowsLoopRGBA16WithTransparency (some trns) hdr.colorType
+              raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
+          else
+            decodeRowsLoopRGBAWithTransparency (some trns)
+              raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
+        else if targetColorType == u8 2 then
           match parsed.metadata.background with
           | some background =>
-              decodeRowsLoopTrnsOverBackground trns background
-                raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
+              if source16 && target8 then
+                decodeRowsLoopDown16TrnsOverBackgroundRGB8 trns background hdr.colorType
+                  raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
+              else if source16 && target16 then
+                decodeRowsLoopTrnsOverBackground16 trns background hdr.colorType
+                  raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
+              else
+                decodeRowsLoopTrnsOverBackground trns background
+                  raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
           | none =>
               none
         else
           none
     | none =>
         if hdr.colorType == 4 &&
-            (PngPixel.colorType (α := px) == u8 2 || PngPixel.colorType (α := px) == u8 0) then
+            (targetColorType == u8 2 || targetColorType == u8 0) then
           match parsed.metadata.background with
           | some background =>
-              if PngPixel.colorType (α := px) == u8 2 then
-                decodeRowsLoopAlphaOverBackground background
-                  raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
+              if targetColorType == u8 2 then
+                if source16 && target8 then
+                  decodeRowsLoopDown16AlphaOverBackgroundRGB8 background hdr.colorType
+                    raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
+                else if source16 && target16 then
+                  decodeRowsLoopAlphaOverBackground16 background hdr.colorType
+                    raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
+                else
+                  decodeRowsLoopAlphaOverBackground background
+                    raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
               else
-                decodeRowsLoopGrayAlphaOverBackground background
-                  raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
+                if source16 && target8 then
+                  decodeRowsLoopDown16GrayAlphaOverBackgroundGray8 background hdr.colorType
+                    raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
+                else if source16 && target16 then
+                  decodeRowsLoopGrayAlphaOverBackground16 background hdr.colorType
+                    raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
+                else
+                  decodeRowsLoopGrayAlphaOverBackground background
+                    raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
           | none =>
               none
-        else if hdr.colorType == 6 && PngPixel.colorType (α := px) == u8 2 then
+        else if hdr.colorType == 6 && targetColorType == u8 2 then
           match parsed.metadata.background with
           | some background =>
-              decodeRowsLoopAlphaOverBackground background
-                raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
+              if source16 && target8 then
+                decodeRowsLoopDown16AlphaOverBackgroundRGB8 background hdr.colorType
+                  raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
+              else if source16 && target16 then
+                decodeRowsLoopAlphaOverBackground16 background hdr.colorType
+                  raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
+              else
+                decodeRowsLoopAlphaOverBackground background
+                  raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
           | none =>
               decodeDefaultRows
         else
