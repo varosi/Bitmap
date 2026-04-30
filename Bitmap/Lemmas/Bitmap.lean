@@ -200,7 +200,8 @@ lemma decodeBitmap_encodeBitmap_common {px : Type u} [Pixel px] [PngPixel px]
       have hminStored : 2 ≤ (zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)).size := by
         simpa [encodeBitmapIdat] using hmin
       simpa [hsize, hparse, zlibDecompressStored_zlibCompressStored, encodeBitmapIdat,
-        ct, bd, hbdNoReject, hbitDepthEq, hbitDepthEqHeader, hnoDownsample, hpngBpp'] using
+        ct, bd, hbdNoReject, hbitDepthEq, hbitDepthEqHeader, hnoDownsample, hpngBpp',
+        normalizeRawByInterlace?] using
         (And.intro hctProp
           (And.intro hctNoReject (And.intro hminStored (And.intro hrawEq' hrowsEq))))
   | fixed =>
@@ -209,7 +210,7 @@ lemma decodeBitmap_encodeBitmap_common {px : Type u} [Pixel px] [PngPixel px]
       simpa [hsize, hparse,
         zlibDecompressStored_zlibCompressFixed_none, zlibDecompress_zlibCompressFixed,
         encodeBitmapIdat, ct, bd, hbdNoReject, hbitDepthEq, hbitDepthEqHeader,
-        hnoDownsample, hpngBpp'] using
+        hnoDownsample, hpngBpp', normalizeRawByInterlace?] using
         (And.intro hctProp
           (And.intro hctNoReject (And.intro hminFixed (And.intro hrawEq' hrowsEq))))
   | dynamic =>
@@ -218,7 +219,7 @@ lemma decodeBitmap_encodeBitmap_common {px : Type u} [Pixel px] [PngPixel px]
       simpa [hsize, hparse,
         zlibDecompressStored_zlibCompressDynamic_none, zlibDecompress_zlibCompressDynamic,
         encodeBitmapIdat, ct, bd, hbdNoReject, hbitDepthEq, hbitDepthEqHeader,
-        hnoDownsample, hpngBpp'] using
+        hnoDownsample, hpngBpp', normalizeRawByInterlace?] using
         (And.intro hctProp
           (And.intro hctNoReject (And.intro hminDyn (And.intro hrawEq' hrowsEq))))
 
