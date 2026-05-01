@@ -1674,6 +1674,7 @@ structure PngHeader where
   height : Nat
   colorType : Nat
   bitDepth : Nat
+  interlace : Nat := 0
 deriving Repr
 
 inductive PngTransparency where
@@ -1807,9 +1808,9 @@ def parseIHDRData (data : ByteArray) : Option PngHeader := do
     let comp := (tail.get! 2).toNat
     let filter := (tail.get! 3).toNat
     let interlace := (tail.get! 4).toNat
-    if comp != 0 || filter != 0 || interlace != 0 then
+    if comp != 0 || filter != 0 || (interlace != 0 && interlace != 1) then
       none
-    return { width := w, height := h, colorType, bitDepth }
+    return { width := w, height := h, colorType, bitDepth, interlace }
   else
     none
 
@@ -2136,6 +2137,125 @@ def unfilterRow (filter : UInt8) (row : ByteArray) (prev : ByteArray) (bpp : Nat
         | _ => raw
       out := out.push recon
     return out
+
+structure Adam7Pass where
+  startX : Nat
+  startY : Nat
+  stepX : Nat
+  stepY : Nat
+deriving Repr, DecidableEq
+
+def adam7Passes : List Adam7Pass :=
+  [ { startX := 0, startY := 0, stepX := 8, stepY := 8 }
+  , { startX := 4, startY := 0, stepX := 8, stepY := 8 }
+  , { startX := 0, startY := 4, stepX := 4, stepY := 8 }
+  , { startX := 2, startY := 0, stepX := 4, stepY := 4 }
+  , { startX := 0, startY := 2, stepX := 2, stepY := 4 }
+  , { startX := 1, startY := 0, stepX := 2, stepY := 2 }
+  , { startX := 0, startY := 1, stepX := 1, stepY := 2 } ]
+
+def adam7PassDim (full start step : Nat) : Nat :=
+  if start < full then
+    ((full - 1 - start) / step) + 1
+  else
+    0
+
+def adam7ScatterRow (row : ByteArray) (flat : ByteArray) (w bpp : Nat)
+    (pass : Adam7Pass) (passY passWidth : Nat) : ByteArray :=
+  Id.run do
+    let mut flat := flat
+    let dstY := pass.startY + passY * pass.stepY
+    for passX in [0:passWidth] do
+      let dstX := pass.startX + passX * pass.stepX
+      let srcBase := passX * bpp
+      let dstBase := (dstY * w + dstX) * bpp
+      for k in [0:bpp] do
+        flat := flat.set! (dstBase + k) (row.get! (srcBase + k))
+    return flat
+
+def decodeAdam7PassRows (raw : ByteArray) (w bpp : Nat) (pass : Adam7Pass)
+    (passWidth passHeight passY offset : Nat) (prevRow flat : ByteArray) :
+    Option (Nat × ByteArray) := do
+  if hlt : passY < passHeight then
+    let _ := hlt
+    let rowBytes := passWidth * bpp
+    if _hrow : offset + 1 + rowBytes ≤ raw.size then
+      let filter := raw.get! offset
+      let dataStart := offset + 1
+      let rowData := raw.extract dataStart (dataStart + rowBytes)
+      if hfilter : filter.toNat ≤ 4 then
+        let row :=
+          if filter.toNat = 0 then
+            rowData
+          else
+            unfilterRow filter rowData prevRow bpp hfilter
+        let flat := adam7ScatterRow row flat w bpp pass passY passWidth
+        decodeAdam7PassRows raw w bpp pass passWidth passHeight (passY + 1)
+          (dataStart + rowBytes) row flat
+      else
+        none
+    else
+      none
+  else
+    some (offset, flat)
+termination_by passHeight - passY
+decreasing_by
+  have hpassY : passY < passHeight := hlt
+  have hsucc : passY < passY + 1 := Nat.lt_succ_self passY
+  exact Nat.sub_lt_sub_left hpassY hsucc
+
+def decodeAdam7Passes (raw : ByteArray) (w h bpp offset : Nat) (flat : ByteArray) :
+    List Adam7Pass -> Option (Nat × ByteArray)
+  | [] => some (offset, flat)
+  | pass :: passes => do
+      let passWidth := adam7PassDim w pass.startX pass.stepX
+      let passHeight :=
+        if passWidth == 0 then
+          0
+        else
+          adam7PassDim h pass.startY pass.stepY
+      let (offset, flat) ←
+        decodeAdam7PassRows raw w bpp pass passWidth passHeight 0 offset ByteArray.empty flat
+      decodeAdam7Passes raw w h bpp offset flat passes
+
+def adam7FlatToRawLoop (flat : ByteArray) (rowBytes h y : Nat) (raw : ByteArray) :
+    ByteArray :=
+  if hlt : y < h then
+    let outOff := y * (rowBytes + 1)
+    let start := y * rowBytes
+    let raw := flat.copySlice start raw (outOff + 1) rowBytes
+    adam7FlatToRawLoop flat rowBytes h (y + 1) raw
+  else
+    raw
+termination_by h - y
+decreasing_by
+  have hy : y < h := hlt
+  have hy' : y < y + 1 := Nat.lt_succ_self y
+  exact Nat.sub_lt_sub_left hy hy'
+
+def adam7FlatToFilterZeroRaw (flat : ByteArray) (w h bpp : Nat) : ByteArray :=
+  let rowBytes := w * bpp
+  let rawSize := h * (rowBytes + 1)
+  let raw := ByteArray.mk <| Array.replicate rawSize 0
+  adam7FlatToRawLoop flat rowBytes h 0 raw
+
+def decodeAdam7ToFlatRaw? (raw : ByteArray) (w h bpp : Nat) : Option ByteArray := do
+  let flatSize := w * h * bpp
+  let flat0 := ByteArray.mk <| Array.replicate flatSize 0
+  let (offset, flat) ← decodeAdam7Passes raw w h bpp 0 flat0 adam7Passes
+  if offset != raw.size then
+    none
+  else
+    some (adam7FlatToFilterZeroRaw flat w h bpp)
+
+def normalizeRawByInterlace? (raw : ByteArray) (hdr : PngHeader) (bpp : Nat) :
+    Option ByteArray :=
+  if hdr.interlace == 0 then
+    some raw
+  else if hdr.interlace == 1 then
+    decodeAdam7ToFlatRaw? raw hdr.width hdr.height bpp
+  else
+    none
 
 def decodeRowDropAlpha (row : ByteArray) (w y bpp : Nat) (pixels : ByteArray) : ByteArray :=
   Id.run do
@@ -2904,7 +3024,7 @@ def decodeParsedBitmapWithMetadata {px : Type u} [Pixel px] [PngPixel px]
     if !(hdr.bitDepth == 16 && PngPixel.bitDepth (α := px) == u8 8) then
       none
   let bpp ← pngBytesPerPixelForColorTypeAndBitDepth? hdr.colorType hdr.bitDepth
-  let raw ←
+  let inflated ←
     if hsize : 2 <= idat.size then
       match zlibDecompressStored idat hsize with
       | some raw => some raw
@@ -2912,6 +3032,7 @@ def decodeParsedBitmapWithMetadata {px : Type u} [Pixel px] [PngPixel px]
     else
       none
   let rowBytes := hdr.width * bpp
+  let raw ← normalizeRawByInterlace? inflated hdr bpp
   let expected := hdr.height * (rowBytes + 1)
   if raw.size != expected then
     none
@@ -3038,7 +3159,7 @@ def decodeBitmap {px : Type u} [Pixel px] [PngPixel px]
       PngPixel.colorType (α := px) != u8 4 && PngPixel.colorType (α := px) != u8 6 then
     none
   let bpp ← pngBytesPerPixelForColorTypeAndBitDepth? hdr.colorType hdr.bitDepth
-  let raw ←
+  let inflated ←
     if hsize : 2 <= idat.size then
       match zlibDecompressStored idat hsize with
       | some raw => some raw
@@ -3046,6 +3167,7 @@ def decodeBitmap {px : Type u} [Pixel px] [PngPixel px]
     else
       none
   let rowBytes := hdr.width * bpp
+  let raw ← normalizeRawByInterlace? inflated hdr bpp
   let expected := hdr.height * (rowBytes + 1)
   if raw.size != expected then
     none

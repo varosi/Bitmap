@@ -513,6 +513,196 @@ private def encodeFixturePng {px : Type} [Pixel px] [Png.PngPixel px]
   | Except.ok bytes => pure bytes
   | Except.error err => throw (IO.userError err)
 
+private def adam7Sample8 (x y salt : Nat) : UInt8 :=
+  Png.u8 (x * 17 + y * 31 + salt)
+
+private def adam7Sample16 (x y salt : Nat) : Nat :=
+  (x * 4099 + y * 257 + salt) % 65536
+
+private def pushU16BE (out : ByteArray) (n : Nat) : ByteArray :=
+  (out.push (Png.u8 (n / 256))).push (Png.u8 n)
+
+private def adam7RGB8ExpectedData (w h : Nat) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelRGB)
+    for y in [0:h] do
+      for x in [0:w] do
+        out := out.push (adam7Sample8 x y 5)
+        out := out.push (adam7Sample8 x y 17)
+        out := out.push (adam7Sample8 x y 29)
+    return out
+
+private def adam7RGB8ExpectedRGBAData (w h : Nat) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelRGBA)
+    for y in [0:h] do
+      for x in [0:w] do
+        out := out.push (adam7Sample8 x y 5)
+        out := out.push (adam7Sample8 x y 17)
+        out := out.push (adam7Sample8 x y 29)
+        out := out.push (if x == 0 && y == 0 then Png.u8 0 else Png.u8 255)
+    return out
+
+private def adam7RGB8ExpectedOverBackgroundData (w h : Nat) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelRGB)
+    for y in [0:h] do
+      for x in [0:w] do
+        if x == 0 && y == 0 then
+          out := out.push (Png.u8 10)
+          out := out.push (Png.u8 20)
+          out := out.push (Png.u8 30)
+        else
+          out := out.push (adam7Sample8 x y 5)
+          out := out.push (adam7Sample8 x y 17)
+          out := out.push (adam7Sample8 x y 29)
+    return out
+
+private def adam7Gray8ExpectedData (w h : Nat) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelGray)
+    for y in [0:h] do
+      for x in [0:w] do
+        out := out.push (adam7Sample8 x y 3)
+    return out
+
+private def adam7GrayAlpha8ExpectedData (w h : Nat) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelGrayAlpha)
+    for y in [0:h] do
+      for x in [0:w] do
+        out := out.push (adam7Sample8 x y 7)
+        out := out.push (adam7Sample8 x y 113)
+    return out
+
+private def adam7RGBA8ExpectedData (w h : Nat) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelRGBA)
+    for y in [0:h] do
+      for x in [0:w] do
+        out := out.push (adam7Sample8 x y 11)
+        out := out.push (adam7Sample8 x y 23)
+        out := out.push (adam7Sample8 x y 37)
+        out := out.push (adam7Sample8 x y 151)
+    return out
+
+private def adam7RGB16ExpectedData (w h : Nat) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelRGB16)
+    for y in [0:h] do
+      for x in [0:w] do
+        out := pushU16BE out (adam7Sample16 x y 0x1001)
+        out := pushU16BE out (adam7Sample16 x y 0x3003)
+        out := pushU16BE out (adam7Sample16 x y 0x5005)
+    return out
+
+private def adam7RGB16DownsampleExpectedData (w h : Nat) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelRGB)
+    for y in [0:h] do
+      for x in [0:w] do
+        out := out.push (Png.u8 (adam7Sample16 x y 0x1001 / 256))
+        out := out.push (Png.u8 (adam7Sample16 x y 0x3003 / 256))
+        out := out.push (Png.u8 (adam7Sample16 x y 0x5005 / 256))
+    return out
+
+private def adam7Gray16ExpectedData (w h : Nat) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelGray16)
+    for y in [0:h] do
+      for x in [0:w] do
+        out := pushU16BE out (adam7Sample16 x y 0x1234)
+    return out
+
+private def adam7Gray16DownsampleExpectedData (w h : Nat) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelGray)
+    for y in [0:h] do
+      for x in [0:w] do
+        out := out.push (Png.u8 (adam7Sample16 x y 0x1234 / 256))
+    return out
+
+private def expectAdam7Fixtures : IO Unit := do
+  let rgb8Bytes ← IO.FS.readBinFile (testFixturePath "test_adam7_rgb8_9x9_filters.png")
+  match Png.decodeBitmap (px := PixelRGB8) rgb8Bytes with
+  | some bmp =>
+      if bmp.size.width != 9 || bmp.size.height != 9 ||
+          bmp.data != adam7RGB8ExpectedData 9 9 then
+        throw (IO.userError "Adam7 RGB8 varied-filter fixture mismatch")
+  | none =>
+      throw (IO.userError "Adam7 RGB8 varied-filter fixture failed to decode")
+  let gray8Bytes ← IO.FS.readBinFile (testFixturePath "test_adam7_gray8_2x3.png")
+  match Png.decodeBitmap (px := PixelGray8) gray8Bytes with
+  | some bmp =>
+      if bmp.size.width != 2 || bmp.size.height != 3 ||
+          bmp.data != adam7Gray8ExpectedData 2 3 then
+        throw (IO.userError "Adam7 Gray8 small fixture mismatch")
+  | none =>
+      throw (IO.userError "Adam7 Gray8 small fixture failed to decode")
+  let grayAlpha8Bytes ← IO.FS.readBinFile (testFixturePath "test_adam7_grayalpha8_9x9.png")
+  match Png.decodeBitmap (px := PixelGrayAlpha8) grayAlpha8Bytes with
+  | some bmp =>
+      if bmp.size.width != 9 || bmp.size.height != 9 ||
+          bmp.data != adam7GrayAlpha8ExpectedData 9 9 then
+        throw (IO.userError "Adam7 GrayAlpha8 fixture mismatch")
+  | none =>
+      throw (IO.userError "Adam7 GrayAlpha8 fixture failed to decode")
+  let rgba8Bytes ← IO.FS.readBinFile (testFixturePath "test_adam7_rgba8_1x1.png")
+  match Png.decodeBitmap (px := PixelRGBA8) rgba8Bytes with
+  | some bmp =>
+      if bmp.size.width != 1 || bmp.size.height != 1 ||
+          bmp.data != adam7RGBA8ExpectedData 1 1 then
+        throw (IO.userError "Adam7 RGBA8 1x1 fixture mismatch")
+  | none =>
+      throw (IO.userError "Adam7 RGBA8 1x1 fixture failed to decode")
+  let rgb16Bytes ← IO.FS.readBinFile (testFixturePath "test_adam7_rgb16_9x9.png")
+  match Png.decodeBitmap (px := PixelRGB16) rgb16Bytes with
+  | some bmp =>
+      if bmp.size.width != 9 || bmp.size.height != 9 ||
+          bmp.data != adam7RGB16ExpectedData 9 9 then
+        throw (IO.userError "Adam7 RGB16 fixture mismatch")
+  | none =>
+      throw (IO.userError "Adam7 RGB16 fixture failed to decode")
+  match Png.decodeBitmap (px := PixelRGB8) rgb16Bytes with
+  | some bmp =>
+      if bmp.data != adam7RGB16DownsampleExpectedData 9 9 then
+        throw (IO.userError "Adam7 RGB16 -> RGB8 downsample mismatch")
+  | none =>
+      throw (IO.userError "Adam7 RGB16 -> RGB8 downsample failed")
+  let gray16Bytes ← IO.FS.readBinFile (testFixturePath "test_adam7_gray16_2x3.png")
+  match Png.decodeBitmap (px := PixelGray16) gray16Bytes with
+  | some bmp =>
+      if bmp.size.width != 2 || bmp.size.height != 3 ||
+          bmp.data != adam7Gray16ExpectedData 2 3 then
+        throw (IO.userError "Adam7 Gray16 fixture mismatch")
+  | none =>
+      throw (IO.userError "Adam7 Gray16 fixture failed to decode")
+  match Png.decodeBitmap (px := PixelGray8) gray16Bytes with
+  | some bmp =>
+      if bmp.data != adam7Gray16DownsampleExpectedData 2 3 then
+        throw (IO.userError "Adam7 Gray16 -> Gray8 downsample mismatch")
+  | none =>
+      throw (IO.userError "Adam7 Gray16 -> Gray8 downsample failed")
+  let trnsBkgdBytes ← IO.FS.readBinFile (testFixturePath "test_adam7_trns_bkgd_rgb8.png")
+  match Png.decodeBitmapWithMetadata (px := PixelRGBA8) trnsBkgdBytes with
+  | some decoded =>
+      if decoded.bitmap.data != adam7RGB8ExpectedRGBAData 2 3 then
+        throw (IO.userError "Adam7 tRNS RGBA alpha mismatch")
+  | none =>
+      throw (IO.userError "Adam7 tRNS RGBA metadata decode failed")
+  match Png.decodeBitmapWithMetadata (px := PixelRGB8) trnsBkgdBytes with
+  | some decoded =>
+      if decoded.bitmap.data != adam7RGB8ExpectedOverBackgroundData 2 3 then
+        throw (IO.userError "Adam7 tRNS+bKGD RGB composition mismatch")
+  | none =>
+      throw (IO.userError "Adam7 tRNS+bKGD RGB metadata decode failed")
+  let interlace2Bytes ← IO.FS.readBinFile (testFixturePath "test_adam7_interlace2.png")
+  if (Png.decodeBitmap (px := PixelRGB8) interlace2Bytes).isSome then
+    throw (IO.userError "decoder accepted invalid Adam7 interlace method 2")
+  let truncatedBytes ← IO.FS.readBinFile (testFixturePath "test_adam7_truncated.png")
+  if (Png.decodeBitmap (px := PixelRGB8) truncatedBytes).isSome then
+    throw (IO.userError "decoder accepted truncated Adam7 payload")
+
 private def expect16To8Downsample : IO Unit := do
   let rgbBytes ← encodeFixturePng rgb16DownsampleFixture
   match Png.decodeBitmap (px := PixelRGB8) rgbBytes with
@@ -985,6 +1175,8 @@ def run : IO Unit := do
   IO.println "png 16-to-8 downsample fixtures: ok"
   expect16BitMetadata
   IO.println "png 16-bit metadata fixtures: ok"
+  expectAdam7Fixtures
+  IO.println "png Adam7 fixtures: ok"
   pngAncillaryChunkFixtures
   IO.println "png ancillary-chunk fixtures: ok"
   validateDynamicTableValidationBoundary
