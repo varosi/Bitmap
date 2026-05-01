@@ -80,6 +80,29 @@ def BitmapGrayAlpha8.widgetProps (bmp : BitmapGrayAlpha8)
     background
     caption }
 
+private def expandGray1ToGray8Data (bmp : BitmapGray1) : ByteArray :=
+  Id.run do
+    let count := bmp.size.width * bmp.size.height
+    let mut out := ByteArray.emptyWithCapacity count
+    for i in [0:count] do
+      out := out.push (if bmp.getBitLinear i then 0xff else 0)
+    return out
+
+def BitmapGray1.widgetProps (bmp : BitmapGray1)
+    (pixelSize : Nat := 12)
+    (showGrid : Bool := true)
+    (background : String := "#050914")
+    (caption : Option String := none) :
+    BitmapWidgetProps :=
+  { width := bmp.size.width
+    height := bmp.size.height
+    bytes := expandGray1ToGray8Data bmp
+    bytesPerPixel := bytesPerPixelGray
+    pixelSize := max pixelSize 1
+    showGrid
+    background
+    caption }
+
 private def downsampleRGB16ToRGB8Data (data : ByteArray) : ByteArray :=
   Id.run do
     let pixels := data.size / bytesPerPixelRGB16

@@ -86,6 +86,11 @@ lemma decodeBitmap_encodeBitmap_common {px : Type u} [Pixel px] [PngPixel px]
         (PngPixel.colorType (α := px)).toNat = 4 ∨
         (PngPixel.colorType (α := px)).toNat = 6)
     (hbd : pngBitDepthSupported (PngPixel.bitDepth (α := px)).toNat = true)
+    (hctbd :
+      pngColorTypeBitDepthSupported
+        (PngPixel.colorType (α := px)).toNat
+        (PngPixel.bitDepth (α := px)).toNat = true)
+    (hbdNot1 : ¬ (PngPixel.bitDepth (α := px)).toNat = 1)
     (hpngBpp :
       pngBytesPerPixelForColorTypeAndBitDepth?
         (PngPixel.colorType (α := px)).toNat
@@ -133,7 +138,7 @@ lemma decodeBitmap_encodeBitmap_common {px : Type u} [Pixel px] [PngPixel px]
             | inr h6 => exact h6
   -- Parsed PNG header.
   have hparse := parsePng_encodeBitmap (bmp := bmp) (hw := hw) (hh := hh)
-    (mode := mode) hidat hsize hct hbd
+    (mode := mode) hidat hsize hct hbd hctbd
   -- Raw size and row decoding results.
   let bd := (PngPixel.bitDepth (α := px)).toNat
   let bpp := Pixel.bytesPerPixel (α := px)
@@ -153,6 +158,10 @@ lemma decodeBitmap_encodeBitmap_common {px : Type u} [Pixel px] [PngPixel px]
     simpa [Nat.mul_left_comm, Nat.mul_comm, Nat.mul_assoc] using bmp.valid
   have hpngBpp' : pngBytesPerPixelForColorTypeAndBitDepth? ct bd = some bpp := by
     simpa [ct, bd, bpp] using hpngBpp
+  have hctbd' : pngColorTypeBitDepthSupported ct bd = true := by
+    simpa [ct, bd] using hctbd
+  have hbdNot1' : ¬ bd = 1 := by
+    simpa [bd] using hbdNot1
   have hbdNoReject : (pngBitDepthSupported bd) = true := by
     simpa [bd] using hbd
   have hbitDepthEq :
@@ -201,27 +210,30 @@ lemma decodeBitmap_encodeBitmap_common {px : Type u} [Pixel px] [PngPixel px]
         simpa [encodeBitmapIdat] using hmin
       simpa [hsize, hparse, zlibDecompressStored_zlibCompressStored, encodeBitmapIdat,
         ct, bd, hbdNoReject, hbitDepthEq, hbitDepthEqHeader, hnoDownsample, hpngBpp',
-        normalizeRawByInterlace?] using
-        (And.intro hctProp
-          (And.intro hctNoReject (And.intro hminStored (And.intro hrawEq' hrowsEq))))
+        hctbd', hbdNot1', normalizeRawByInterlace?] using
+        (And.intro hctbd'
+          (And.intro hctProp
+            (And.intro hctNoReject (And.intro hminStored (And.intro hrawEq' hrowsEq)))))
   | fixed =>
       have hminFixed : 2 ≤ (zlibCompressFixed (PngPixel.encodeRaw (α := px) bmp)).size := by
         simpa [encodeBitmapIdat] using hmin
       simpa [hsize, hparse,
         zlibDecompressStored_zlibCompressFixed_none, zlibDecompress_zlibCompressFixed,
         encodeBitmapIdat, ct, bd, hbdNoReject, hbitDepthEq, hbitDepthEqHeader,
-        hnoDownsample, hpngBpp', normalizeRawByInterlace?] using
-        (And.intro hctProp
-          (And.intro hctNoReject (And.intro hminFixed (And.intro hrawEq' hrowsEq))))
+        hnoDownsample, hpngBpp', hctbd', hbdNot1', normalizeRawByInterlace?] using
+        (And.intro hctbd'
+          (And.intro hctProp
+            (And.intro hctNoReject (And.intro hminFixed (And.intro hrawEq' hrowsEq)))))
   | dynamic =>
       have hminDyn : 2 ≤ (zlibCompressDynamic (PngPixel.encodeRaw (α := px) bmp)).size := by
         simpa [encodeBitmapIdat] using hmin
       simpa [hsize, hparse,
         zlibDecompressStored_zlibCompressDynamic_none, zlibDecompress_zlibCompressDynamic,
         encodeBitmapIdat, ct, bd, hbdNoReject, hbitDepthEq, hbitDepthEqHeader,
-        hnoDownsample, hpngBpp', normalizeRawByInterlace?] using
-        (And.intro hctProp
-          (And.intro hctNoReject (And.intro hminDyn (And.intro hrawEq' hrowsEq))))
+        hnoDownsample, hpngBpp', hctbd', hbdNot1', normalizeRawByInterlace?] using
+        (And.intro hctbd'
+          (And.intro hctProp
+            (And.intro hctNoReject (And.intro hminDyn (And.intro hrawEq' hrowsEq)))))
 
 -- Package the pixel-specific facts needed for PNG round-trips.
 class PngRoundTrip (px : Type u) [Pixel px] [PngPixel px] : Prop where
@@ -232,6 +244,12 @@ class PngRoundTrip (px : Type u) [Pixel px] [PngPixel px] : Prop where
       (PngPixel.colorType (α := px)).toNat = 6
   bitDepth_ok :
     pngBitDepthSupported (PngPixel.bitDepth (α := px)).toNat = true
+  colorTypeBitDepth_ok :
+    pngColorTypeBitDepthSupported
+      (PngPixel.colorType (α := px)).toNat
+      (PngPixel.bitDepth (α := px)).toNat = true
+  bitDepth_ne_one :
+    ¬ (PngPixel.bitDepth (α := px)).toNat = 1
   pngBytesPerPixel_ok :
     pngBytesPerPixelForColorTypeAndBitDepth?
       (PngPixel.colorType (α := px)).toNat
@@ -258,6 +276,10 @@ instance : PngRoundTrip PixelRGB8 where
         (u8 2).toNat = 4 ∨ (u8 2).toNat = 6 := by decide
     simpa [pngPixel_colorType_rgb] using this
   bitDepth_ok := by
+    decide
+  colorTypeBitDepth_ok := by
+    decide
+  bitDepth_ne_one := by
     decide
   pngBytesPerPixel_ok := by
     decide
@@ -296,6 +318,10 @@ instance : PngRoundTrip PixelRGBA8 where
     simpa [pngPixel_colorType_rgba] using this
   bitDepth_ok := by
     decide
+  colorTypeBitDepth_ok := by
+    decide
+  bitDepth_ne_one := by
+    decide
   pngBytesPerPixel_ok := by
     decide
   encodeRaw_size := by
@@ -332,6 +358,10 @@ instance : PngRoundTrip PixelGray8 where
         (u8 0).toNat = 4 ∨ (u8 0).toNat = 6 := by decide
     simpa [pngPixel_colorType_gray] using this
   bitDepth_ok := by
+    decide
+  colorTypeBitDepth_ok := by
+    decide
+  bitDepth_ne_one := by
     decide
   pngBytesPerPixel_ok := by
     decide
@@ -372,6 +402,10 @@ instance : PngRoundTrip PixelGrayAlpha8 where
         (u8 4).toNat = 4 ∨ (u8 4).toNat = 6 := by decide
     simpa [pngPixel_colorType_grayAlpha] using this
   bitDepth_ok := by
+    decide
+  colorTypeBitDepth_ok := by
+    decide
+  bitDepth_ne_one := by
     decide
   pngBytesPerPixel_ok := by
     decide
@@ -415,6 +449,10 @@ instance : PngRoundTrip PixelRGB16 where
     simpa [pngPixel_colorType_rgb16] using this
   bitDepth_ok := by
     decide
+  colorTypeBitDepth_ok := by
+    decide
+  bitDepth_ne_one := by
+    decide
   pngBytesPerPixel_ok := by
     decide
   encodeRaw_size := by
@@ -446,6 +484,10 @@ instance : PngRoundTrip PixelRGBA16 where
         (u8 6).toNat = 4 ∨ (u8 6).toNat = 6 := by decide
     simpa [pngPixel_colorType_rgba16] using this
   bitDepth_ok := by
+    decide
+  colorTypeBitDepth_ok := by
+    decide
+  bitDepth_ne_one := by
     decide
   pngBytesPerPixel_ok := by
     decide
@@ -479,6 +521,10 @@ instance : PngRoundTrip PixelGray16 where
     simpa [pngPixel_colorType_gray16] using this
   bitDepth_ok := by
     decide
+  colorTypeBitDepth_ok := by
+    decide
+  bitDepth_ne_one := by
+    decide
   pngBytesPerPixel_ok := by
     decide
   encodeRaw_size := by
@@ -510,6 +556,10 @@ instance : PngRoundTrip PixelGrayAlpha16 where
         (u8 4).toNat = 4 ∨ (u8 4).toNat = 6 := by decide
     simpa [pngPixel_colorType_grayAlpha16] using this
   bitDepth_ok := by
+    decide
+  colorTypeBitDepth_ok := by
+    decide
+  bitDepth_ne_one := by
     decide
   pngBytesPerPixel_ok := by
     decide
@@ -545,12 +595,14 @@ lemma decodeBitmap_encodeBitmap {px : Type u} [Pixel px] [PngPixel px] [PngRound
     Png.decodeBitmap (Png.encodeBitmap bmp hw hh mode) = some bmp := by
   have hct := PngRoundTrip.colorType_ok (px := px)
   have hbd := PngRoundTrip.bitDepth_ok (px := px)
+  have hctbd := PngRoundTrip.colorTypeBitDepth_ok (px := px)
+  have hbdNot1 := PngRoundTrip.bitDepth_ne_one (px := px)
   have hbpp := PngRoundTrip.pngBytesPerPixel_ok (px := px)
   have hrawEq := PngRoundTrip.encodeRaw_size (px := px) bmp
   have hrows := PngRoundTrip.decodeRowsLoop_encodeRaw (px := px) bmp
   exact
     decodeBitmap_encodeBitmap_common (bmp := bmp) (hw := hw) (hh := hh)
-      (mode := mode) hidat hct hbd hbpp hrawEq hrows
+      (mode := mode) hidat hct hbd hctbd hbdNot1 hbpp hrawEq hrows
 
 -- RGB-specialized wrapper for symmetry.
 lemma decodeBitmap_encodeBitmap_rgb (bmp : BitmapRGB8)

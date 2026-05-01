@@ -3,6 +3,7 @@
 Lean 4 bitmap image utilities with PNG encode/decode support, plus a small widget for visualization.
 The widget accepts the supported 8-bit bitmap formats and displays 16-bit bitmap
 formats by downsampling each channel to its high byte for browser canvas output.
+Packed 1-bit grayscale bitmaps are expanded to 8-bit grayscale for display.
 
 This library has proofs about:
 - putPixel and getPixel correspondence (Bitmap.Lemmas.putPixel_getPixel);
@@ -49,6 +50,11 @@ This library has proofs about:
   `reconstructRowsSpec` (Phase 4 of the external-PNG plan);
 - focused Adam7 helper facts for pass geometry and filter-0 normalization size
   (`adam7PassCoord_lt_full`, `adam7FlatToFilterZeroRaw_size`);
+- focused 1-bit grayscale helper facts for packed row geometry, PNG bit-depth
+  validation, filter-0 raw size, and encoder raw size
+  (`pngColorTypeBitDepthSupported_gray1`,
+  `pngColorTypeBitDepthSupported_rgb1_false`, `gray1FlatToFilterZeroRaw_size`,
+  `encodeRawGray1_size`);
 - stored DEFLATE block forward correctness against an inductive
   `StoredDeflateStreamSpec` independent of the encoder
   (`storedBlockSpec_decode_correct`, `storedDeflateStreamSpec_decode_correct`,
@@ -105,15 +111,17 @@ A multi-phase plan is in progress to extend the proof coverage to byte streams
 ## Supported PNG features
 
 The encoder and decoder target a deliberately narrow PNG subset — the one for
-which the library carries full round-trip correctness proofs.
+which the library implements directly. The byte-per-pixel bitmap formats in this
+subset carry full round-trip correctness proofs; packed 1-bit grayscale currently
+has focused layout and validation lemmas plus runtime fixture coverage.
 
 ### Encoder
 
 | Area | Support |
 |---|---|
 | Color types | `0` Grayscale, `2` RGB, `4` Grayscale+Alpha, `6` RGBA |
-| Bit depth | 8 or 16 bits per channel |
-| Pixel formats | `PixelGray8`, `PixelRGB8`, `PixelGrayAlpha8`, `PixelRGBA8`, `PixelGray16`, `PixelRGB16`, `PixelGrayAlpha16`, `PixelRGBA16` |
+| Bit depth | Grayscale: 1, 8, or 16 bits per channel. RGB, Grayscale+Alpha, and RGBA: 8 or 16 bits per channel |
+| Pixel formats | `PixelGray1`/`BitmapGray1`, `PixelGray8`, `PixelRGB8`, `PixelGrayAlpha8`, `PixelRGBA8`, `PixelGray16`, `PixelRGB16`, `PixelGrayAlpha16`, `PixelRGBA16` |
 | Filter type | `0` (None) only — every encoded row is written with filter byte `0x00` |
 | Compression modes | `.stored` (uncompressed DEFLATE), `.fixed` (fixed-Huffman with LZ77 distance-1 run encoding), `.dynamic` (dynamic-block header; payload currently delegates to fixed-Huffman) |
 | Interlace | None (encoder always emits non-interlaced PNGs) |
@@ -126,20 +134,21 @@ which the library carries full round-trip correctness proofs.
 | Area | Support |
 |---|---|
 | Color types | `0`, `2`, `4`, `6` (palette `3` rejected) |
-| Bit depth | 8 or 16 bits per channel |
+| Bit depth | Grayscale: 1, 8, or 16 bits per channel. RGB, Grayscale+Alpha, and RGBA: 8 or 16 bits per channel |
 | Filter types | All five reconstructed: `0` None, `1` Sub, `2` Up, `3` Average, `4` Paeth |
 | Interlace | None and Adam7 |
 | Compression | `inflateStored` tried first, then fixed- and dynamic-Huffman zlib streams (full `HLIT`/`HDIST`/`HCLEN` + code-length-code + literal/length and distance tables) |
 | LZ77 | Length codes 257–285 and distance codes 0–29 with extra bits; `copyDistance` supports overlap (distance < length) |
-| Color conversion | RGB PNGs can be decoded into `BitmapRGBA8` (fills α = 255), gray+alpha PNGs into `BitmapRGBA8` (preserves alpha as expanded gray), and RGBA PNGs into `BitmapRGB8` (drops alpha). 16-bit PNGs may be decoded into matching 8-bit bitmap formats by taking the high byte of each sample |
+| Color conversion | 1-bit grayscale PNGs can be decoded into `BitmapGray1` exactly or expanded into 8-/16-bit grayscale, RGB, or RGBA targets using full-range black/white samples. RGB PNGs can be decoded into `BitmapRGBA8` (fills α = 255), gray+alpha PNGs into `BitmapRGBA8` (preserves alpha as expanded gray), and RGBA PNGs into `BitmapRGB8` (drops alpha). 16-bit PNGs may be decoded into matching 8-bit bitmap formats by taking the high byte of each sample |
 | PNG structure | 8-byte signature, `IHDR` first, multiple consecutive `IDAT` chunks accepted and concatenated, `IEND` last, required `PLTE` ordering checks, rejects unknown critical chunks, compression/filter method ≠ 0, and interlace methods other than `0` or `1` |
 | Tolerated ancillary chunks | `gAMA`, `cHRM`, `sRGB`, `iCCP`, `pHYs`, `tEXt`, `zTXt`, `iTXt`, `tIME`, `bKGD`, `hIST`, `sPLT`, plus any unknown chunk type whose first byte is lowercase — CRC-validated and skipped by the pixel-only decoder; supported `bKGD` is preserved and applied by metadata-aware decode |
-| Metadata-aware decode | `decodeBitmapWithMetadata` validates and returns supported 8- and 16-bit `bKGD` metadata; it applies 8- and 16-bit grayscale/RGB `tRNS` transparency when decoding to RGBA, composites `tRNS` or RGBA alpha over `bKGD` when decoding to RGB, and composites grayscale+alpha over grayscale `bKGD` when decoding to RGB or grayscale. 16-bit sources can target exact 16-bit bitmaps or matching 8-bit bitmaps by high-byte downsampling after metadata handling |
+| Metadata-aware decode | `decodeBitmapWithMetadata` validates and returns supported 1-bit grayscale plus 8- and 16-bit grayscale/RGB `bKGD` metadata; it applies supported grayscale/RGB `tRNS` transparency when decoding to RGBA, composites `tRNS` or RGBA alpha over `bKGD` when decoding to RGB, and composites grayscale+alpha over grayscale `bKGD` when decoding to RGB or grayscale. 16-bit sources can target exact 16-bit bitmaps or matching 8-bit bitmaps by high-byte downsampling after metadata handling |
 | Integrity | CRC-32 verified for every parsed chunk; mismatch rejects the entire input. Adler-32 verified at end of zlib stream |
 
 ### Not supported
 
-- Bit depths other than 8 and 16 (1, 2, 4)
+- Bit depths 2 and 4
+- Truecolor RGB bit depth 1 (PNG forbids color type 2 at bit depth 1)
 - Color type 3 (palette / `PLTE`)
 - Encoder-side Adam7 interlacing
 - Palette `tRNS` and `bKGD` (requires color type 3 / `PLTE` decoding)

@@ -1678,6 +1678,7 @@ structure PngHeader where
 deriving Repr
 
 inductive PngTransparency where
+  | gray1 (gray : Bool)
   | gray8 (gray : UInt8)
   | rgb8 (r g b : UInt8)
   | gray16 (gray : UInt16)
@@ -1685,6 +1686,7 @@ inductive PngTransparency where
 deriving Repr, DecidableEq
 
 inductive PngBackground where
+  | gray1 (gray : Bool)
   | gray8 (gray : UInt8)
   | rgb8 (r g b : UInt8)
   | gray16 (gray : UInt16)
@@ -1698,6 +1700,10 @@ deriving Repr
 
 structure PngDecodeResult (px : Type u) [Pixel px] where
   bitmap : Bitmap px
+  metadata : PngMetadata
+
+structure PngDecodeGray1Result where
+  bitmap : BitmapGray1
   metadata : PngMetadata
 
 structure PngParsed where
@@ -1716,6 +1722,12 @@ def parseTrnsData (hdr : PngHeader) (data : ByteArray) : Option PngTransparency 
   if hdr.colorType == 0 then
     if data.size != 2 then
       none
+    else if hdr.bitDepth == 1 then
+      let gray := readU16BE! data 0
+      if gray ≤ 1 then
+        some (.gray1 (gray != 0))
+      else
+        none
     else if hdr.bitDepth == 8 then
       let gray := readU16BE! data 0
       if gray ≤ 255 then
@@ -1749,6 +1761,12 @@ def parseBkgdData (hdr : PngHeader) (data : ByteArray) : Option PngBackground :=
   if hdr.colorType == 0 || hdr.colorType == 4 then
     if data.size != 2 then
       none
+    else if hdr.bitDepth == 1 then
+      let gray := readU16BE! data 0
+      if gray ≤ 1 then
+        some (.gray1 (gray != 0))
+      else
+        none
     else if hdr.bitDepth == 8 then
       let gray := readU16BE! data 0
       if gray ≤ 255 then
@@ -1857,8 +1875,35 @@ def pngBytesPerPixelForColorTypeAndBitDepth? (colorType bitDepth : Nat) : Option
   let sampleBytes ← pngSampleBytesForBitDepth? bitDepth
   some (channels * sampleBytes)
 
+def pngBitsPerPixelForColorTypeAndBitDepth? (colorType bitDepth : Nat) : Option Nat := do
+  let channels ← pngChannelCountForColorType? colorType
+  if colorType == 0 && bitDepth == 1 then
+    some 1
+  else if bitDepth == 8 || bitDepth == 16 then
+    some (channels * bitDepth)
+  else
+    none
+
+def pngRowBytesForColorTypeAndBitDepth? (width colorType bitDepth : Nat) : Option Nat := do
+  let bitsPerPixel ← pngBitsPerPixelForColorTypeAndBitDepth? colorType bitDepth
+  some ((width * bitsPerPixel + 7) / 8)
+
+def pngFilterBppForColorTypeAndBitDepth? (colorType bitDepth : Nat) : Option Nat := do
+  if colorType == 0 && bitDepth == 1 then
+    some 1
+  else
+    pngBytesPerPixelForColorTypeAndBitDepth? colorType bitDepth
+
+def pngColorTypeBitDepthSupported (colorType bitDepth : Nat) : Bool :=
+  if colorType == 0 then
+    bitDepth == 1 || bitDepth == 8 || bitDepth == 16
+  else if colorType == 2 || colorType == 4 || colorType == 6 then
+    bitDepth == 8 || bitDepth == 16
+  else
+    false
+
 def pngBitDepthSupported (bitDepth : Nat) : Bool :=
-  bitDepth == 8 || bitDepth == 16
+  bitDepth == 1 || bitDepth == 8 || bitDepth == 16
 
 structure PngParseState where
   header : Option PngHeader
@@ -1879,7 +1924,7 @@ def parsePngSimple (bytes : ByteArray) (_hsize : 8 <= bytes.size) :
         if typ1 != ihdrTypeBytes then
           none
         let hdr ← parseIHDRData data1
-        if !pngBitDepthSupported hdr.bitDepth then
+        if !pngColorTypeBitDepthSupported hdr.colorType hdr.bitDepth then
           none
         if hdr.colorType != 0 && hdr.colorType != 2 && hdr.colorType != 4 &&
             hdr.colorType != 6 then
@@ -2248,6 +2293,86 @@ def decodeAdam7ToFlatRaw? (raw : ByteArray) (w h bpp : Nat) : Option ByteArray :
   else
     some (adam7FlatToFilterZeroRaw flat w h bpp)
 
+@[inline] def gray1BitAt (bytes : ByteArray) (w x y : Nat) : Bool :=
+  let byte := bytes.get! (gray1ByteIndex w x y)
+  gray1BitIsSet byte x
+
+@[inline] def gray1SetFlatBit (flat : ByteArray) (w x y : Nat) (bit : Bool) :
+    ByteArray :=
+  let idx := gray1ByteIndex w x y
+  let byte := flat.get! idx
+  flat.set! idx (gray1SetBitInByte byte x bit)
+
+def adam7ScatterRowGray1 (row : ByteArray) (flat : ByteArray) (w : Nat)
+    (pass : Adam7Pass) (passY passWidth : Nat) : ByteArray :=
+  Id.run do
+    let mut flat := flat
+    let dstY := pass.startY + passY * pass.stepY
+    for passX in [0:passWidth] do
+      let dstX := pass.startX + passX * pass.stepX
+      flat := gray1SetFlatBit flat w dstX dstY (gray1BitAt row passWidth passX 0)
+    return flat
+
+def decodeAdam7Gray1PassRows (raw : ByteArray) (w : Nat) (pass : Adam7Pass)
+    (passWidth passHeight passY offset : Nat) (prevRow flat : ByteArray) :
+    Option (Nat × ByteArray) := do
+  if hlt : passY < passHeight then
+    let _ := hlt
+    let rowBytes := gray1RowBytes passWidth
+    if _hrow : offset + 1 + rowBytes ≤ raw.size then
+      let filter := raw.get! offset
+      let dataStart := offset + 1
+      let rowData := raw.extract dataStart (dataStart + rowBytes)
+      if hfilter : filter.toNat ≤ 4 then
+        let row :=
+          if filter.toNat = 0 then
+            rowData
+          else
+            unfilterRow filter rowData prevRow 1 hfilter
+        let flat := adam7ScatterRowGray1 row flat w pass passY passWidth
+        decodeAdam7Gray1PassRows raw w pass passWidth passHeight (passY + 1)
+          (dataStart + rowBytes) row flat
+      else
+        none
+    else
+      none
+  else
+    some (offset, flat)
+termination_by passHeight - passY
+decreasing_by
+  have hpassY : passY < passHeight := hlt
+  have hsucc : passY < passY + 1 := Nat.lt_succ_self passY
+  exact Nat.sub_lt_sub_left hpassY hsucc
+
+def decodeAdam7Gray1Passes (raw : ByteArray) (w h offset : Nat) (flat : ByteArray) :
+    List Adam7Pass -> Option (Nat × ByteArray)
+  | [] => some (offset, flat)
+  | pass :: passes => do
+      let passWidth := adam7PassDim w pass.startX pass.stepX
+      let passHeight :=
+        if passWidth == 0 then
+          0
+        else
+          adam7PassDim h pass.startY pass.stepY
+      let (offset, flat) ←
+        decodeAdam7Gray1PassRows raw w pass passWidth passHeight 0 offset ByteArray.empty flat
+      decodeAdam7Gray1Passes raw w h offset flat passes
+
+def gray1FlatToFilterZeroRaw (flat : ByteArray) (w h : Nat) : ByteArray :=
+  let rowBytes := gray1RowBytes w
+  let rawSize := h * (rowBytes + 1)
+  let raw := ByteArray.mk <| Array.replicate rawSize 0
+  adam7FlatToRawLoop flat rowBytes h 0 raw
+
+def decodeAdam7Gray1ToFlatRaw? (raw : ByteArray) (w h : Nat) : Option ByteArray := do
+  let flatSize := gray1DataSize w h
+  let flat0 := ByteArray.mk <| Array.replicate flatSize 0
+  let (offset, flat) ← decodeAdam7Gray1Passes raw w h 0 flat0 adam7Passes
+  if offset != raw.size then
+    none
+  else
+    some (gray1FlatToFilterZeroRaw flat w h)
+
 def normalizeRawByInterlace? (raw : ByteArray) (hdr : PngHeader) (bpp : Nat) :
     Option ByteArray :=
   if hdr.interlace == 0 then
@@ -2256,6 +2381,34 @@ def normalizeRawByInterlace? (raw : ByteArray) (hdr : PngHeader) (bpp : Nat) :
     decodeAdam7ToFlatRaw? raw hdr.width hdr.height bpp
   else
     none
+
+def normalizeGray1RawByInterlace? (raw : ByteArray) (hdr : PngHeader) :
+    Option ByteArray :=
+  if hdr.interlace == 0 then
+    some raw
+  else if hdr.interlace == 1 then
+    decodeAdam7Gray1ToFlatRaw? raw hdr.width hdr.height
+  else
+    none
+
+def gray1FlatToSampleRaw (flat : ByteArray) (w h targetBitDepth : Nat) : ByteArray :=
+  Id.run do
+    let rowBytes := if targetBitDepth == 16 then w * 2 else w
+    let mut raw := ByteArray.emptyWithCapacity (h * (rowBytes + 1))
+    for y in [0:h] do
+      raw := raw.push 0
+      for x in [0:w] do
+        let on := gray1BitAt flat w x y
+        if targetBitDepth == 16 then
+          if on then
+            raw := raw.push 0xff
+            raw := raw.push 0xff
+          else
+            raw := raw.push 0
+            raw := raw.push 0
+        else
+          raw := raw.push (if on then 0xff else 0)
+    return raw
 
 def decodeRowDropAlpha (row : ByteArray) (w y bpp : Nat) (pixels : ByteArray) : ByteArray :=
   Id.run do
@@ -2273,6 +2426,9 @@ def decodeRowDropAlpha (row : ByteArray) (w y bpp : Nat) (pixels : ByteArray) : 
 
 def backgroundToRGB (background : PngBackground) : UInt8 × UInt8 × UInt8 :=
   match background with
+  | .gray1 gray =>
+      let gray8 := if gray then 0xff else 0
+      (gray8, gray8, gray8)
   | .gray8 gray => (gray, gray, gray)
   | .rgb8 r g b => (r, g, b)
   | .gray16 gray =>
@@ -2282,6 +2438,7 @@ def backgroundToRGB (background : PngBackground) : UInt8 × UInt8 × UInt8 :=
 
 def backgroundToGray (background : PngBackground) : UInt8 :=
   match background with
+  | .gray1 gray => if gray then 0xff else 0
   | .gray8 gray => gray
   | .rgb8 r g b => u8 ((r.toNat + g.toNat + b.toNat) / 3)
   | .gray16 gray => u8 (gray.toNat / 256)
@@ -2292,6 +2449,9 @@ def u8ToUInt16Full (x : UInt8) : UInt16 :=
 
 def backgroundToRGB16 (background : PngBackground) : UInt16 × UInt16 × UInt16 :=
   match background with
+  | .gray1 gray =>
+      let gray16 := if gray then UInt16.ofNat 65535 else UInt16.ofNat 0
+      (gray16, gray16, gray16)
   | .gray8 gray =>
       let gray16 := u8ToUInt16Full gray
       (gray16, gray16, gray16)
@@ -2301,6 +2461,7 @@ def backgroundToRGB16 (background : PngBackground) : UInt16 × UInt16 × UInt16 
 
 def backgroundToGray16 (background : PngBackground) : UInt16 :=
   match background with
+  | .gray1 gray => if gray then UInt16.ofNat 65535 else UInt16.ofNat 0
   | .gray8 gray => u8ToUInt16Full gray
   | .rgb8 r g b => UInt16.ofNat ((r.toNat * 257 + g.toNat * 257 + b.toNat * 257) / 3)
   | .gray16 gray => gray
@@ -2317,6 +2478,9 @@ def alphaComposite16ToByte (src bg alpha : UInt16) : UInt8 :=
 
 def transparencyAlpha (trns : Option PngTransparency) (r g b : UInt8) : UInt8 :=
   match trns with
+  | some (.gray1 gray) =>
+      let gray8 := if gray then 0xff else 0
+      if r == gray8 && g == gray8 && b == gray8 then u8 0 else u8 255
   | some (.gray8 gray) =>
       if r == gray && g == gray && b == gray then u8 0 else u8 255
   | some (.rgb8 tr tg tb) =>
@@ -2332,6 +2496,9 @@ def transparencyAlpha (trns : Option PngTransparency) (r g b : UInt8) : UInt8 :=
 
 def transparencyAlpha16 (trns : Option PngTransparency) (r g b : UInt16) : UInt16 :=
   match trns with
+  | some (.gray1 gray) =>
+      let gray16 := if gray then UInt16.ofNat 65535 else UInt16.ofNat 0
+      if r == gray16 && g == gray16 && b == gray16 then UInt16.ofNat 0 else UInt16.ofNat 65535
   | some (.gray8 gray) =>
       let gray16 := u8ToUInt16Full gray
       if r == gray16 && g == gray16 && b == gray16 then UInt16.ofNat 0 else UInt16.ofNat 65535
@@ -2497,6 +2664,12 @@ decreasing_by
   have hy : y < h := hlt
   have hy' : y < y + 1 := Nat.lt_succ_self y
   exact Nat.sub_lt_sub_left hy hy'
+
+def decodeRowsLoopGray1Packed (raw : ByteArray) (w h : Nat) :
+    Option ByteArray :=
+  let rowBytes := gray1RowBytes w
+  let pixels0 := ByteArray.mk <| Array.replicate (gray1DataSize w h) 0
+  decodeRowsLoopCore raw w h 1 rowBytes 1 decodeRowGray 0 0 ByteArray.empty pixels0
 
 def decodeRowsLoop (raw : ByteArray) (w h bpp rowBytes : Nat)
     (y offset : Nat) (prevRow pixels : ByteArray) : Option ByteArray :=
@@ -3015,15 +3188,23 @@ def decodeParsedBitmapWithMetadata {px : Type u} [Pixel px] [PngPixel px]
     (parsed : PngParsed) : Option (PngDecodeResult px) := do
   let hdr := parsed.header
   let idat := parsed.idat
-  if !pngBitDepthSupported hdr.bitDepth then
+  if !pngColorTypeBitDepthSupported hdr.colorType hdr.bitDepth then
     none
   if hdr.colorType != 0 && hdr.colorType != 2 && hdr.colorType != 4 &&
       hdr.colorType != 6 then
     none
-  if hdr.bitDepth != (PngPixel.bitDepth (α := px)).toNat then
-    if !(hdr.bitDepth == 16 && PngPixel.bitDepth (α := px) == u8 8) then
-      none
-  let bpp ← pngBytesPerPixelForColorTypeAndBitDepth? hdr.colorType hdr.bitDepth
+  let targetColorType := PngPixel.colorType (α := px)
+  let targetBitDepth := PngPixel.bitDepth (α := px)
+  let source1 := hdr.bitDepth == 1
+  let source16 := hdr.bitDepth == 16
+  let target8 := targetBitDepth == u8 8
+  let target16 := targetBitDepth == u8 16
+  let bitDepthCompatible :=
+    hdr.bitDepth == targetBitDepth.toNat ||
+      (source16 && target8) ||
+      (source1 && (target8 || target16))
+  if !bitDepthCompatible then
+    none
   let inflated ←
     if hsize : 2 <= idat.size then
       match zlibDecompressStored idat hsize with
@@ -3031,16 +3212,27 @@ def decodeParsedBitmapWithMetadata {px : Type u} [Pixel px] [PngPixel px]
       | none => zlibDecompress idat hsize
     else
       none
-  let rowBytes := hdr.width * bpp
-  let raw ← normalizeRawByInterlace? inflated hdr bpp
-  let expected := hdr.height * (rowBytes + 1)
-  if raw.size != expected then
-    none
-  let targetColorType := PngPixel.colorType (α := px)
-  let targetBitDepth := PngPixel.bitDepth (α := px)
-  let source16 := hdr.bitDepth == 16
-  let target8 := targetBitDepth == u8 8
-  let target16 := targetBitDepth == u8 16
+  let (raw, bpp, rowBytes) ←
+    if source1 then
+      let packedRowBytes := gray1RowBytes hdr.width
+      let packedRaw ← normalizeGray1RawByInterlace? inflated hdr
+      let expected := hdr.height * (packedRowBytes + 1)
+      if packedRaw.size != expected then
+        none
+      let flat ← decodeRowsLoopGray1Packed packedRaw hdr.width hdr.height
+      let virtualBitDepth := if target16 then 16 else 8
+      let raw := gray1FlatToSampleRaw flat hdr.width hdr.height virtualBitDepth
+      let bpp := if target16 then 2 else 1
+      let rowBytes := hdr.width * bpp
+      some (raw, bpp, rowBytes)
+    else
+      let bpp ← pngBytesPerPixelForColorTypeAndBitDepth? hdr.colorType hdr.bitDepth
+      let rowBytes := hdr.width * bpp
+      let raw ← normalizeRawByInterlace? inflated hdr bpp
+      let expected := hdr.height * (rowBytes + 1)
+      if raw.size != expected then
+        none
+      some (raw, bpp, rowBytes)
   let totalBytes := hdr.width * hdr.height * Pixel.bytesPerPixel (α := px)
   let pixels0 := ByteArray.mk <| Array.replicate totalBytes 0
   let decodeDefaultRows : Option ByteArray :=
@@ -3147,18 +3339,25 @@ def decodeBitmap {px : Type u} [Pixel px] [PngPixel px]
       parsePng bytes hsize
     else
       none
-  if !pngBitDepthSupported hdr.bitDepth then
+  if !pngColorTypeBitDepthSupported hdr.colorType hdr.bitDepth then
     none
   if hdr.colorType != 0 && hdr.colorType != 2 && hdr.colorType != 4 &&
       hdr.colorType != 6 then
     none
-  if hdr.bitDepth != (PngPixel.bitDepth (α := px)).toNat then
-    if !(hdr.bitDepth == 16 && PngPixel.bitDepth (α := px) == u8 8) then
-      none
+  let targetBitDepth := PngPixel.bitDepth (α := px)
+  let source1 := hdr.bitDepth == 1
+  let source16 := hdr.bitDepth == 16
+  let target8 := targetBitDepth == u8 8
+  let target16 := targetBitDepth == u8 16
+  let bitDepthCompatible :=
+    hdr.bitDepth == targetBitDepth.toNat ||
+      (source16 && target8) ||
+      (source1 && (target8 || target16))
+  if !bitDepthCompatible then
+    none
   if hdr.colorType == 4 &&
       PngPixel.colorType (α := px) != u8 4 && PngPixel.colorType (α := px) != u8 6 then
     none
-  let bpp ← pngBytesPerPixelForColorTypeAndBitDepth? hdr.colorType hdr.bitDepth
   let inflated ←
     if hsize : 2 <= idat.size then
       match zlibDecompressStored idat hsize with
@@ -3166,15 +3365,31 @@ def decodeBitmap {px : Type u} [Pixel px] [PngPixel px]
       | none => zlibDecompress idat hsize
     else
       none
-  let rowBytes := hdr.width * bpp
-  let raw ← normalizeRawByInterlace? inflated hdr bpp
-  let expected := hdr.height * (rowBytes + 1)
-  if raw.size != expected then
-    none
+  let (raw, bpp, rowBytes) ←
+    if source1 then
+      let packedRowBytes := gray1RowBytes hdr.width
+      let packedRaw ← normalizeGray1RawByInterlace? inflated hdr
+      let expected := hdr.height * (packedRowBytes + 1)
+      if packedRaw.size != expected then
+        none
+      let flat ← decodeRowsLoopGray1Packed packedRaw hdr.width hdr.height
+      let virtualBitDepth := if target16 then 16 else 8
+      let raw := gray1FlatToSampleRaw flat hdr.width hdr.height virtualBitDepth
+      let bpp := if target16 then 2 else 1
+      let rowBytes := hdr.width * bpp
+      some (raw, bpp, rowBytes)
+    else
+      let bpp ← pngBytesPerPixelForColorTypeAndBitDepth? hdr.colorType hdr.bitDepth
+      let rowBytes := hdr.width * bpp
+      let raw ← normalizeRawByInterlace? inflated hdr bpp
+      let expected := hdr.height * (rowBytes + 1)
+      if raw.size != expected then
+        none
+      some (raw, bpp, rowBytes)
   let totalBytes := hdr.width * hdr.height * Pixel.bytesPerPixel (α := px)
   let pixels0 := ByteArray.mk <| Array.replicate totalBytes 0
   let pixels ←
-    if hdr.bitDepth == 16 && PngPixel.bitDepth (α := px) == u8 8 then
+    if source16 && target8 then
       decodeRowsLoopDown16To8 (PngPixel.colorType (α := px)) hdr.colorType
         raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
     else
@@ -3222,6 +3437,92 @@ def encodeRawFast {px : Type u} [Pixel px] (bmp : Bitmap px) : ByteArray :=
   let rawSize := h * (rowBytes + 1)
   let raw := ByteArray.mk <| Array.replicate rawSize 0
   encodeRawPrefix bmp.data rowBytes h raw
+
+def encodeRawGray1 (bmp : BitmapGray1) : ByteArray :=
+  let rowBytes := gray1RowBytes bmp.size.width
+  let rawSize := bmp.size.height * (rowBytes + 1)
+  let raw := ByteArray.mk <| Array.replicate rawSize 0
+  encodeRawPrefix bmp.data rowBytes bmp.size.height raw
+
+def decodeParsedBitmapGray1WithMetadata (parsed : PngParsed) :
+    Option PngDecodeGray1Result := do
+  let hdr := parsed.header
+  if hdr.colorType != 0 || hdr.bitDepth != 1 then
+    none
+  let packedRowBytes := gray1RowBytes hdr.width
+  let inflated ←
+    if hsize : 2 <= parsed.idat.size then
+      match zlibDecompressStored parsed.idat hsize with
+      | some raw => some raw
+      | none => zlibDecompress parsed.idat hsize
+    else
+      none
+  let packedRaw ← normalizeGray1RawByInterlace? inflated hdr
+  let expected := hdr.height * (packedRowBytes + 1)
+  if packedRaw.size != expected then
+    none
+  let pixels ← decodeRowsLoopGray1Packed packedRaw hdr.width hdr.height
+  let size : Size := { width := hdr.width, height := hdr.height }
+  if hvalid : pixels.size = gray1DataSize size.width size.height then
+    some
+      { bitmap := { size, data := pixels, valid := hvalid }
+        metadata := parsed.metadata }
+  else
+    none
+
+def decodeBitmapGray1WithMetadata (bytes : ByteArray) :
+    Option PngDecodeGray1Result := do
+  let parsed ←
+    if hsize : 8 <= bytes.size then
+      parsePngWithMetadata bytes hsize
+    else
+      none
+  decodeParsedBitmapGray1WithMetadata parsed
+
+def decodeBitmapGray1 (bytes : ByteArray) : Option BitmapGray1 := do
+  let (hdr, idat) ←
+    if hsize : 8 <= bytes.size then
+      parsePng bytes hsize
+    else
+      none
+  decodeParsedBitmapGray1WithMetadata
+    { header := hdr
+      idat := idat
+      metadata := { transparency := none, background := none } }
+    |>.map (fun decoded => decoded.bitmap)
+
+def encodeBitmapGray1 (bmp : BitmapGray1)
+    (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (mode : PngEncodeMode := .fixed) : ByteArray :=
+  have _ := hw
+  have _ := hh
+  Id.run do
+    let w := bmp.size.width
+    let h := bmp.size.height
+    let raw := encodeRawGray1 bmp
+    let ihdr := u32be w ++ u32be h ++
+      ByteArray.mk #[u8 1, u8 0, u8 0, u8 0, u8 0]
+    let idat :=
+      match mode with
+      | .stored => zlibCompressStored raw
+      | .fixed => zlibCompressFixed raw
+      | .dynamic => zlibCompressDynamic raw
+    let ihdrChunk := mkChunkBytes ihdrTypeBytes ihdr
+    let idatChunk := mkChunkBytes idatTypeBytes idat
+    let iendChunk := mkChunkBytes iendTypeBytes ByteArray.empty
+    let outSize := pngSignature.size + ihdrChunk.size + idatChunk.size + iendChunk.size
+    let out := ByteArray.emptyWithCapacity outSize
+    out ++ pngSignature ++ ihdrChunk ++ idatChunk ++ iendChunk
+
+def encodeBitmapGray1Checked (bmp : BitmapGray1)
+    (mode : PngEncodeMode := .fixed) : Except String ByteArray :=
+  if hw : bmp.size.width < 2 ^ 32 then
+    if hh : bmp.size.height < 2 ^ 32 then
+      Except.ok (encodeBitmapGray1 bmp hw hh mode)
+    else
+      Except.error "bitmap height exceeds PNG limit (2^32)"
+  else
+    Except.error "bitmap width exceeds PNG limit (2^32)"
 
 def encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
     (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
@@ -3274,6 +3575,21 @@ def Bitmap.readPng {px : Type u} [Pixel px] [PngPixel px]
       match decodeBitmap (px := px) bytes with
       | some bmp => pure (Except.ok bmp)
       | none => pure (Except.error "invalid PNG bitmap")
+
+def BitmapGray1.readPng (path : FilePath) : IO (Except String BitmapGray1) := do
+  let bytesOrErr <- ioToExcept (IO.FS.readBinFile path)
+  match bytesOrErr with
+  | Except.error err => pure (Except.error err)
+  | Except.ok bytes =>
+      match decodeBitmapGray1 bytes with
+      | some bmp => pure (Except.ok bmp)
+      | none => pure (Except.error "invalid PNG bitmap")
+
+def BitmapGray1.writePng (path : FilePath) (bmp : BitmapGray1)
+    (mode : PngEncodeMode := .fixed) : IO (Except String Unit) :=
+  match encodeBitmapGray1Checked bmp mode with
+  | Except.error err => pure (Except.error err)
+  | Except.ok bytes => ioToExcept (IO.FS.writeBinFile path bytes)
 
 def BitmapRGB8.readPng [Pixel PixelRGB8] [PngPixel PixelRGB8]
     (path : FilePath) : IO (Except String BitmapRGB8) :=
@@ -3412,6 +3728,12 @@ instance : PngPixel PixelGrayAlpha16 where
   decodeRowsLoop := decodeRowsLoopGrayAlpha16
 
 end Png
+
+instance : FileWritable BitmapGray1 where
+  write := fun path bmp => Png.BitmapGray1.writePng path bmp .fixed
+
+instance : FileReadable BitmapGray1 where
+  read := Png.BitmapGray1.readPng
 
 instance [Pixel PixelRGB8] [Png.PngPixel PixelRGB8] : FileWritable BitmapRGB8 where
   write := fun path bmp => Png.BitmapRGB8.writePng path bmp .fixed

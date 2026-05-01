@@ -231,6 +231,28 @@ def PixelGray8 := PixelGray UInt8
 def PixelGray16 := PixelGray UInt16
 
 -------------------------------------------------------------------------------
+-- A packed one-bit grayscale pixel.
+structure PixelGray1 where
+  mk ::
+  v : Bool
+deriving Repr, BEq, DecidableEq, ReflBEq, LawfulBEq
+
+instance : Inhabited PixelGray1 where
+  default := { v := false }
+
+instance : ToJson PixelGray1 where
+  toJson
+    | ⟨v⟩ =>
+      Json.mkObj [
+        ("v", toJson v)
+      ]
+
+instance : FromJson PixelGray1 where
+  fromJson? j := do
+    let v ← j.getObjValAs? Bool "v"
+    return { v }
+
+-------------------------------------------------------------------------------
 -- A single grayscale pixel with alpha of any type
 structure PixelGrayAlpha (RangeT : Type u) where
   mk ::
@@ -333,6 +355,33 @@ def bytesPerPixelRGB16 : Nat := 6
 def bytesPerPixelRGBA16 : Nat := 8
 def bytesPerPixelGray16 : Nat := 2
 def bytesPerPixelGrayAlpha16 : Nat := 4
+
+def gray1RowBytes (w : Nat) : Nat :=
+  (w + 7) / 8
+
+def gray1DataSize (w h : Nat) : Nat :=
+  h * gray1RowBytes w
+
+@[inline] def gray1BitMask (x : Nat) : UInt8 :=
+  UInt8.ofNat (1 <<< (7 - (x % 8)))
+
+@[inline] def gray1BitClearMask (x : Nat) : UInt8 :=
+  UInt8.ofNat (255 - (gray1BitMask x).toNat)
+
+@[inline] def gray1BitIsSet (byte : UInt8) (x : Nat) : Bool :=
+  (byte &&& gray1BitMask x) != 0
+
+@[inline] def gray1SetBitInByte (byte : UInt8) (x : Nat) (bit : Bool) : UInt8 :=
+  if bit then
+    byte ||| gray1BitMask x
+  else
+    byte &&& gray1BitClearMask x
+
+@[inline] def gray1ByteIndex (w x y : Nat) : Nat :=
+  y * gray1RowBytes w + x / 8
+
+@[inline] def gray1FullByte (px : PixelGray1) : UInt8 :=
+  if px.v then 0xff else 0
 
 @[inline] def u16HighByte (x : UInt16) : UInt8 :=
   UInt8.ofNat (x.toNat / 256)
@@ -767,6 +816,16 @@ structure Bitmap (px : Type u) [Pixel px] where
     simp
 deriving Repr, DecidableEq
 
+structure BitmapGray1 where
+  mk ::
+
+  size : Size
+  data : ByteArray
+
+  valid : data.size = gray1DataSize size.width size.height := by
+    simp [gray1DataSize]
+deriving Repr, DecidableEq
+
 abbrev BitmapRGB8 [Pixel PixelRGB8] := Bitmap PixelRGB8
 abbrev BitmapRGB16 [Pixel PixelRGB16] := Bitmap PixelRGB16
 abbrev BitmapRGBA8 [Pixel PixelRGBA8] := Bitmap PixelRGBA8
@@ -994,6 +1053,115 @@ def BitmapGrayAlpha16.ofPixelFn (w h : Nat)
 def mkBlankBitmapGrayAlpha16 (w h : ℕ) (color : PixelGrayAlpha16)
     [Pixel PixelGrayAlpha16] : BitmapGrayAlpha16 :=
   BitmapGrayAlpha16.ofPixelFn w h (fun _ => color)
+
+private def gray1PackedByteOfFn (w h rowBytes : Nat)
+    (i : Fin (h * rowBytes)) (f : Fin (w * h) → PixelGray1) : UInt8 :=
+  Id.run do
+    let y := i.val / rowBytes
+    let byteX := i.val % rowBytes
+    let mut byte : UInt8 := 0
+    if hy : y < h then
+      for bit in [0:8] do
+        let x := byteX * 8 + bit
+        if hx : x < w then
+          let pixIdx := x + y * w
+          have hpix : pixIdx < w * h := by
+            have hx' : x + y * w < w + y * w := Nat.add_lt_add_right hx _
+            have hx'' : x + y * w < w * (y + 1) := by
+              simpa [Nat.mul_succ, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc,
+                Nat.mul_comm] using hx'
+            have hy' : w * (y + 1) ≤ w * h :=
+              Nat.mul_le_mul_left w (Nat.succ_le_of_lt hy)
+            exact lt_of_lt_of_le hx'' hy'
+          if (f ⟨pixIdx, hpix⟩).v then
+            byte := gray1SetBitInByte byte x true
+    return byte
+
+def BitmapGray1.ofPixelFn (w h : Nat) (f : Fin (w * h) → PixelGray1) :
+    BitmapGray1 :=
+  let rowBytes := gray1RowBytes w
+  let data := ByteArray.mk <|
+    Array.ofFn (fun i : Fin (h * rowBytes) => gray1PackedByteOfFn w h rowBytes i f)
+  { size := { width := w, height := h }
+    data := data
+    valid := by
+      change (Array.ofFn
+        (fun i : Fin (h * rowBytes) => gray1PackedByteOfFn w h rowBytes i f)).size =
+          gray1DataSize w h
+      simp [gray1DataSize, rowBytes] }
+
+def mkBlankBitmapGray1 (w h : Nat) (color : PixelGray1) : BitmapGray1 :=
+  BitmapGray1.ofPixelFn w h (fun _ => color)
+
+def BitmapGray1.getBitLinear (bmp : BitmapGray1) (i : Nat) : Bool :=
+  if _hpix : i < bmp.size.width * bmp.size.height then
+    if bmp.size.width == 0 then
+      false
+    else
+      let x := i % bmp.size.width
+      let y := i / bmp.size.width
+      let byte := bmp.data.get! (gray1ByteIndex bmp.size.width x y)
+      gray1BitIsSet byte x
+  else
+    false
+
+def BitmapGray1.getPixel? (bmp : BitmapGray1) (x y : Nat) : Option PixelGray1 :=
+  if _hx : x < bmp.size.width then
+    if _hy : y < bmp.size.height then
+      let byte := bmp.data.get! (gray1ByteIndex bmp.size.width x y)
+      some { v := gray1BitIsSet byte x }
+    else
+      none
+  else
+    none
+
+def BitmapGray1.setPixel? (bmp : BitmapGray1) (x y : Nat) (px : PixelGray1) :
+    Option BitmapGray1 :=
+  if _hx : x < bmp.size.width then
+    if _hy : y < bmp.size.height then
+      let idx := gray1ByteIndex bmp.size.width x y
+      if hidx : idx < bmp.data.size then
+        let byte := bmp.data.get idx hidx
+        let data := bmp.data.set idx (gray1SetBitInByte byte x px.v) hidx
+        have hdataSize : data.size = bmp.data.size := by
+          cases hdata : bmp.data with
+          | mk arr =>
+              simp only [data, hdata, ByteArray.set, ByteArray.size, Array.size_set]
+        some
+          { size := bmp.size
+            data := data
+            valid := by
+              calc
+                data.size = bmp.data.size := hdataSize
+                _ = gray1DataSize bmp.size.width bmp.size.height := bmp.valid }
+      else
+        none
+    else
+      none
+  else
+    none
+
+def BitmapGray1.putPixel? := BitmapGray1.setPixel?
+
+def BitmapGray1.toGray8 (bmp : BitmapGray1) [Pixel PixelGray8] : BitmapGray8 :=
+  BitmapGray8.ofPixelFn bmp.size.width bmp.size.height (fun idx =>
+    { v := if bmp.getBitLinear idx.val then 0xff else 0 })
+
+def BitmapGray1.toRGB8 (bmp : BitmapGray1) [Pixel PixelRGB8] : BitmapRGB8 :=
+  Bitmap.ofPixelFn bmp.size.width bmp.size.height (fun idx =>
+    let v : UInt8 := if bmp.getBitLinear idx.val then 0xff else 0
+    { r := v, g := v, b := v })
+
+def BitmapGray1.toRGBA8 (bmp : BitmapGray1) [Pixel PixelRGBA8] : BitmapRGBA8 :=
+  BitmapRGBA8.ofPixelFn bmp.size.width bmp.size.height (fun idx =>
+    let v : UInt8 := if bmp.getBitLinear idx.val then 0xff else 0
+    { r := v, g := v, b := v, a := 0xff })
+
+def BitmapGray8.toGray1Threshold [Pixel PixelGray8] (bmp : BitmapGray8)
+    (threshold : UInt8 := 128) :
+    BitmapGray1 :=
+  BitmapGray1.ofPixelFn bmp.size.width bmp.size.height (fun idx =>
+    { v := (bmp.data.get! idx.val).toNat >= threshold.toNat })
 
 instance instPixelRGB8 : Pixel PixelRGB8 where
   bytesPerPixel := bytesPerPixelRGB

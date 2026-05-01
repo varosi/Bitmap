@@ -2425,7 +2425,11 @@ lemma parsePngSimple_encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : 
       (PngPixel.colorType (α := px)).toNat = 2 ∨
       (PngPixel.colorType (α := px)).toNat = 4 ∨
       (PngPixel.colorType (α := px)).toNat = 6)
-    (hbd : pngBitDepthSupported (PngPixel.bitDepth (α := px)).toNat = true) :
+    (_hbd : pngBitDepthSupported (PngPixel.bitDepth (α := px)).toNat = true)
+    (hctbd :
+      pngColorTypeBitDepthSupported
+        (PngPixel.colorType (α := px)).toNat
+        (PngPixel.bitDepth (α := px)).toNat = true) :
     parsePngSimple (encodeBitmap bmp hw hh mode) hsize =
       some ({ width := bmp.size.width, height := bmp.size.height
             , colorType := (PngPixel.colorType (α := px)).toNat
@@ -2540,7 +2544,7 @@ lemma parsePngSimple_encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : 
   unfold parsePngSimple
   simp [hsig, hlen1, hlen2, hlen3, hread1, hread2, hread3,
     hsigNe, hihdrNeBA, hidatNeBA, hiendNeBA,
-    hnotColorBad, hparseIHDR, hbd, hend,
+    hnotColorBad, hparseIHDR, hctbd, hend,
     w, h, ct, bd, ihdr, idat,
     ihdrTypeBytes, idatTypeBytes, iendTypeBytes, String.toUTF8_eq_toByteArray]
 
@@ -2554,13 +2558,18 @@ lemma parsePng_encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap
       (PngPixel.colorType (α := px)).toNat = 2 ∨
       (PngPixel.colorType (α := px)).toNat = 4 ∨
       (PngPixel.colorType (α := px)).toNat = 6)
-    (hbd : pngBitDepthSupported (PngPixel.bitDepth (α := px)).toNat = true) :
+    (hbd : pngBitDepthSupported (PngPixel.bitDepth (α := px)).toNat = true)
+    (hctbd :
+      pngColorTypeBitDepthSupported
+        (PngPixel.colorType (α := px)).toNat
+        (PngPixel.bitDepth (α := px)).toNat = true) :
     parsePng (encodeBitmap bmp hw hh mode) hsize =
       some ({ width := bmp.size.width, height := bmp.size.height
             , colorType := (PngPixel.colorType (α := px)).toNat
             , bitDepth := (PngPixel.bitDepth (α := px)).toNat },
             encodeBitmapIdat (bmp := bmp) (mode := mode)) := by
-  have hsimple := parsePngSimple_encodeBitmap (bmp := bmp) hw hh (mode := mode) hidat hsize hct hbd
+  have hsimple :=
+    parsePngSimple_encodeBitmap (bmp := bmp) hw hh (mode := mode) hidat hsize hct hbd hctbd
   unfold parsePng
   simp [hsimple]
 

@@ -703,6 +703,100 @@ private def expectAdam7Fixtures : IO Unit := do
   if (Png.decodeBitmap (px := PixelRGB8) truncatedBytes).isSome then
     throw (IO.userError "decoder accepted truncated Adam7 payload")
 
+private def gray1FixtureOn (x y : Nat) : Bool :=
+  ((x * 3 + y * 5 + x * y) % 7) < 3
+
+private def gray1FixtureBitmap (w h : Nat) : BitmapGray1 :=
+  BitmapGray1.ofPixelFn w h (fun idx =>
+    let x := idx.val % w
+    let y := idx.val / w
+    { v := gray1FixtureOn x y })
+
+private def gray1ExpandedGray8Data (w h : Nat) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (w * h)
+    for i in [0:w * h] do
+      let x := i % w
+      let y := i / w
+      out := out.push (if gray1FixtureOn x y then 0xff else 0)
+    return out
+
+private def expectGray1ExactFixture (name : String) (w h : Nat) : IO Unit := do
+  let bytes ← IO.FS.readBinFile (testFixturePath name)
+  match Png.decodeBitmapGray1 bytes with
+  | some bmp =>
+      if bmp.size.width != w || bmp.size.height != h ||
+          bmp.data != (gray1FixtureBitmap w h).data then
+        throw (IO.userError s!"{name}: Gray1 exact decode mismatch")
+  | none =>
+      throw (IO.userError s!"{name}: Gray1 exact decode failed")
+
+private def expectGray1Fixtures : IO Unit := do
+  for w in [1, 7, 8, 9, 17] do
+    expectGray1ExactFixture s!"test_gray1_w{w}.png" w 3
+  expectGray1ExactFixture "test_gray1_filters.png" 17 5
+  expectGray1ExactFixture "test_gray1_adam7.png" 9 9
+
+  let filterBytes ← IO.FS.readBinFile (testFixturePath "test_gray1_filters.png")
+  match Png.decodeBitmap (px := PixelGray8) filterBytes with
+  | some bmp =>
+      if bmp.size.width != 17 || bmp.size.height != 5 ||
+          bmp.data != gray1ExpandedGray8Data 17 5 then
+        throw (IO.userError "Gray1 -> Gray8 decode mismatch")
+  | none =>
+      throw (IO.userError "Gray1 -> Gray8 decode failed")
+  match Png.decodeBitmap (px := PixelRGB8) filterBytes with
+  | some bmp =>
+      if bmp.size.width != 17 || bmp.size.height != 5 then
+        throw (IO.userError "Gray1 -> RGB8 dimensions mismatch")
+  | none =>
+      throw (IO.userError "Gray1 -> RGB8 decode failed")
+  match Png.decodeBitmap (px := PixelRGBA16) filterBytes with
+  | some bmp =>
+      if bmp.size.width != 17 || bmp.size.height != 5 then
+        throw (IO.userError "Gray1 -> RGBA16 dimensions mismatch")
+  | none =>
+      throw (IO.userError "Gray1 -> RGBA16 decode failed")
+
+  let metaBytes ← IO.FS.readBinFile (testFixturePath "test_gray1_trns_bkgd.png")
+  match Png.decodeBitmapGray1WithMetadata metaBytes with
+  | some decoded =>
+      if decoded.bitmap.data != (gray1FixtureBitmap 9 3).data then
+        throw (IO.userError "Gray1 metadata exact data mismatch")
+      match decoded.metadata.transparency, decoded.metadata.background with
+      | some (.gray1 true), some (.gray1 false) => pure ()
+      | _, _ => throw (IO.userError "Gray1 metadata values mismatch")
+  | none =>
+      throw (IO.userError "Gray1 metadata decode failed")
+  match Png.decodeBitmapWithMetadata (px := PixelRGBA8) metaBytes with
+  | some decoded =>
+      if decoded.bitmap.size.width != 9 || decoded.bitmap.size.height != 3 then
+        throw (IO.userError "Gray1+tRNS -> RGBA8 dimensions mismatch")
+  | none =>
+      throw (IO.userError "Gray1+tRNS -> RGBA8 decode failed")
+
+  let invalidRgb1 ← IO.FS.readBinFile (testFixturePath "test_gray1_invalid_rgb1.png")
+  if (Png.decodeBitmap (px := PixelRGB8) invalidRgb1).isSome then
+    throw (IO.userError "invalid RGB bit-depth 1 fixture decoded as RGB8")
+  if (Png.decodeBitmapGray1 invalidRgb1).isSome then
+    throw (IO.userError "invalid RGB bit-depth 1 fixture decoded as Gray1")
+  let truncated ← IO.FS.readBinFile (testFixturePath "test_gray1_truncated.png")
+  if (Png.decodeBitmapGray1 truncated).isSome then
+    throw (IO.userError "truncated Gray1 fixture unexpectedly decoded")
+
+  let roundTripBmp := gray1FixtureBitmap 17 4
+  for mode in [Png.PngEncodeMode.stored, .fixed, .dynamic] do
+    match Png.encodeBitmapGray1Checked roundTripBmp mode with
+    | Except.error err =>
+        throw (IO.userError s!"Gray1 encode failed: {err}")
+    | Except.ok bytes =>
+        match Png.decodeBitmapGray1 bytes with
+        | some decoded =>
+            if decoded != roundTripBmp then
+              throw (IO.userError "Gray1 encode/decode round-trip mismatch")
+        | none =>
+            throw (IO.userError "Gray1 encode/decode round-trip failed")
+
 private def expect16To8Downsample : IO Unit := do
   let rgbBytes ← encodeFixturePng rgb16DownsampleFixture
   match Png.decodeBitmap (px := PixelRGB8) rgbBytes with
@@ -1177,6 +1271,8 @@ def run : IO Unit := do
   IO.println "png 16-bit metadata fixtures: ok"
   expectAdam7Fixtures
   IO.println "png Adam7 fixtures: ok"
+  expectGray1Fixtures
+  IO.println "png Gray1 fixtures: ok"
   pngAncillaryChunkFixtures
   IO.println "png ancillary-chunk fixtures: ok"
   validateDynamicTableValidationBoundary
