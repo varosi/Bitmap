@@ -473,6 +473,62 @@ private def pngWithAncillary {px : Type} [Pixel px] [Png.PngPixel px]
     Png.mkChunkBytes Png.idatTypeBytes idat ++
     Png.mkChunkBytes Png.iendTypeBytes ByteArray.empty
 
+private def pngWithPostIdatAncillary {px : Type} [Pixel px] [Png.PngPixel px]
+    (bmp : Bitmap px) (postIdat : ByteArray) : ByteArray :=
+  let raw := Png.encodeRawFast bmp
+  let idat := Png.zlibCompressFixed raw
+  let ihdr :=
+    Png.u32be bmp.size.width ++
+    Png.u32be bmp.size.height ++
+    ByteArray.mk
+      #[Png.PngPixel.bitDepth (α := px), Png.PngPixel.colorType (α := px),
+        Png.u8 0, Png.u8 0, Png.u8 0]
+  Png.pngSignature ++
+    Png.mkChunkBytes Png.ihdrTypeBytes ihdr ++
+    Png.mkChunkBytes Png.idatTypeBytes idat ++
+    postIdat ++
+    Png.mkChunkBytes Png.iendTypeBytes ByteArray.empty
+
+private def gamaChunk (gammaScaled : Nat) : ByteArray :=
+  Png.mkChunkBytes Png.gamaTypeBytes (Png.u32be gammaScaled)
+
+private def srgbChunk (intent : Png.PngSrgbIntent) : ByteArray :=
+  Png.mkChunkBytes Png.srgbTypeBytes (ByteArray.mk #[intent.toByte])
+
+private def plteChunk : ByteArray :=
+  Png.mkChunkBytes Png.plteTypeBytes
+    (ByteArray.mk #[Png.u8 0, Png.u8 0, Png.u8 0])
+
+private def gammaTransformRgb8Data (gammaScaled : Nat) (data : ByteArray) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity data.size
+    for i in [0:data.size] do
+      out := out.push (Png.u8 (Png.gammaSampleToSrgbNat gammaScaled (data.get! i).toNat 255))
+    return out
+
+private def gammaTransformRgba8Data (gammaScaled : Nat) (data : ByteArray) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity data.size
+    let count := data.size / 4
+    for i in [0:count] do
+      let base := i * 4
+      out := out.push (Png.u8 (Png.gammaSampleToSrgbNat gammaScaled (data.get! base).toNat 255))
+      out := out.push (Png.u8 (Png.gammaSampleToSrgbNat gammaScaled (data.get! (base + 1)).toNat 255))
+      out := out.push (Png.u8 (Png.gammaSampleToSrgbNat gammaScaled (data.get! (base + 2)).toNat 255))
+      out := out.push (data.get! (base + 3))
+    return out
+
+private def gammaTransformGray16Data (gammaScaled : Nat) (data : ByteArray) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity data.size
+    let count := data.size / 2
+    for i in [0:count] do
+      let base := i * 2
+      let sample := (data.get! base).toNat * 256 + (data.get! (base + 1)).toNat
+      let corrected := Png.gammaSampleToSrgbNat gammaScaled sample 65535
+      out := out ++ u16be corrected
+    return out
+
 private def rgb16MetadataFixture : BitmapRGB16 :=
   BitmapRGB16.ofPixelFn 2 1 (fun idx : Fin (2 * 1) =>
     match idx.val with
@@ -1059,13 +1115,129 @@ private def expectAncMetadataDecodeNone (path : System.FilePath) (label : String
   | none =>
       pure ()
 
+private def expectMetadataDecodeNoneBytes (bytes : ByteArray) (label : String) : IO Unit := do
+  match Png.decodeBitmapWithMetadata (px := PixelRGBA8) bytes with
+  | some _ =>
+      throw (IO.userError s!"metadata-aware decoder accepted invalid color-space chunk: {label}")
+  | none =>
+      pure ()
+
+private def expectColorSpaceChunks : IO Unit := do
+  let rgbFixture : BitmapRGB8 :=
+    Bitmap.ofPixelFn 3 1 (fun idx : Fin (3 * 1) =>
+      match idx.val with
+      | 0 => { r := Png.u8 32, g := Png.u8 96, b := Png.u8 160 }
+      | 1 => { r := Png.u8 64, g := Png.u8 128, b := Png.u8 192 }
+      | _ => { r := Png.u8 16, g := Png.u8 48, b := Png.u8 240 })
+  for intent in
+      #[Png.PngSrgbIntent.perceptual, .relativeColorimetric, .saturation, .absoluteColorimetric] do
+    let bytes := pngWithAncillary rgbFixture (srgbChunk intent)
+    match Png.decodeBitmapWithMetadata (px := PixelRGB8) bytes with
+    | some decoded =>
+        if decoded.bitmap.data != rgbFixture.data then
+          throw (IO.userError "sRGB changed already-sRGB RGB samples")
+        if decoded.metadata.srgb != some intent then
+          throw (IO.userError "sRGB rendering intent was not preserved")
+    | none =>
+        throw (IO.userError "sRGB fixture failed to decode")
+  let gamma := 100000
+  let gammaBytes := pngWithAncillary rgbFixture (gamaChunk gamma)
+  match Png.decodeBitmap (px := PixelRGB8) gammaBytes with
+  | some bmp =>
+      if bmp.data != gammaTransformRgb8Data gamma rgbFixture.data then
+        throw (IO.userError "gAMA RGB8 decode did not convert samples to sRGB")
+  | none =>
+      throw (IO.userError "gAMA RGB8 fixture failed to decode")
+  match Png.decodeBitmapWithMetadata (px := PixelRGB8) gammaBytes with
+  | some decoded =>
+      if decoded.metadata.gamma != some gamma then
+        throw (IO.userError "gAMA metadata was not preserved")
+  | none =>
+      throw (IO.userError "gAMA metadata decode failed")
+  let rgbaFixture : BitmapRGBA8 :=
+    BitmapRGBA8.ofPixelFn 1 1 (fun _ =>
+      { r := Png.u8 64, g := Png.u8 128, b := Png.u8 192, a := Png.u8 77 })
+  match Png.decodeBitmap (px := PixelRGBA8) (pngWithAncillary rgbaFixture (gamaChunk gamma)) with
+  | some bmp =>
+      if bmp.data != gammaTransformRgba8Data gamma rgbaFixture.data then
+        throw (IO.userError "gAMA RGBA8 decode changed alpha or missed color conversion")
+  | none =>
+      throw (IO.userError "gAMA RGBA8 fixture failed to decode")
+  let gray16Fixture : BitmapGray16 :=
+    BitmapGray16.ofPixelFn 2 1 (fun idx : Fin (2 * 1) =>
+      match idx.val with
+      | 0 => { v := u16 0x4000 }
+      | _ => { v := u16 0x9000 })
+  match Png.decodeBitmap (px := PixelGray16) (pngWithAncillary gray16Fixture (gamaChunk gamma)) with
+  | some bmp =>
+      if bmp.data != gammaTransformGray16Data gamma gray16Fixture.data then
+        throw (IO.userError "gAMA Gray16 decode did not convert samples to sRGB")
+  | none =>
+      throw (IO.userError "gAMA Gray16 fixture failed to decode")
+  let compatBytes := pngWithAncillary rgbFixture (gamaChunk 45455 ++ srgbChunk .perceptual)
+  match Png.decodeBitmapWithMetadata (px := PixelRGB8) compatBytes with
+  | some decoded =>
+      if decoded.bitmap.data != rgbFixture.data then
+        throw (IO.userError "sRGB precedence failed for compatible gAMA+sRGB")
+      if decoded.metadata.gamma != some 45455 || decoded.metadata.srgb != some .perceptual then
+        throw (IO.userError "compatible gAMA+sRGB metadata was not preserved")
+  | none =>
+      throw (IO.userError "compatible gAMA+sRGB fixture failed to decode")
+  expectMetadataDecodeNoneBytes
+    (pngWithAncillary rgbFixture (Png.mkChunkBytes Png.gamaTypeBytes (ByteArray.mk #[Png.u8 1])))
+    "bad gAMA length"
+  expectMetadataDecodeNoneBytes
+    (pngWithAncillary rgbFixture (Png.mkChunkBytes Png.gamaTypeBytes (Png.u32be 0)))
+    "zero gAMA"
+  expectMetadataDecodeNoneBytes
+    (pngWithAncillary rgbFixture (gamaChunk gamma ++ gamaChunk gamma))
+    "duplicate gAMA"
+  expectMetadataDecodeNoneBytes
+    (pngWithAncillary rgbFixture (srgbChunk .perceptual ++ srgbChunk .saturation))
+    "duplicate sRGB"
+  expectMetadataDecodeNoneBytes
+    (pngWithAncillary rgbFixture (Png.mkChunkBytes Png.srgbTypeBytes (ByteArray.mk #[Png.u8 4])))
+    "bad sRGB intent"
+  expectMetadataDecodeNoneBytes
+    (pngWithAncillary rgbFixture (gamaChunk gamma ++ srgbChunk .perceptual))
+    "incompatible gAMA+sRGB"
+  expectMetadataDecodeNoneBytes
+    (pngWithAncillary rgbFixture (plteChunk ++ gamaChunk gamma))
+    "gAMA after PLTE"
+  expectMetadataDecodeNoneBytes
+    (pngWithAncillary rgbFixture (plteChunk ++ srgbChunk .perceptual))
+    "sRGB after PLTE"
+  expectMetadataDecodeNoneBytes
+    (pngWithPostIdatAncillary rgbFixture (gamaChunk gamma))
+    "gAMA after IDAT"
+  match Png.encodeBitmapWithOptionsChecked (px := PixelRGB8) rgbFixture
+      { mode := .fixed, colorSpace := some (.srgb .perceptual true) } with
+  | Except.ok bytes =>
+      if bytes.extract 37 41 != Png.gamaTypeBytes then
+        throw (IO.userError "encoder did not emit compatibility gAMA before sRGB")
+      if bytes.extract 53 57 != Png.srgbTypeBytes then
+        throw (IO.userError "encoder did not emit sRGB after compatibility gAMA")
+      match Png.decodeBitmapWithMetadata (px := PixelRGB8) bytes with
+      | some decoded =>
+          if decoded.metadata.gamma != some 45455 || decoded.metadata.srgb != some .perceptual then
+            throw (IO.userError "encoded sRGB metadata failed to parse")
+      | none =>
+          throw (IO.userError "encoded sRGB PNG failed to decode")
+  | Except.error err =>
+      throw (IO.userError err)
+  match Png.encodeBitmapWithOptionsChecked (px := PixelRGB8) rgbFixture
+      { mode := .fixed, colorSpace := some (.gamma 0) } with
+  | Except.ok _ =>
+      throw (IO.userError "encoder accepted zero gAMA option")
+  | Except.error _ =>
+      pure ()
+
 -- Verify the tolerate-and-skip behavior for ancillary chunks plus the
 -- rejection guarantees for pixel-affecting chunks, unknown critical chunks,
 -- and CRC mismatches. All fixtures live under Bitmap/Tests/.
 private def pngAncillaryChunkFixtures : IO Unit := do
-  -- Tolerated: gAMA + pHYs metadata, tEXt comment, multiple consecutive IDATs,
-  -- and an unknown ancillary chunk type ("myCh") all decode to the reference pattern.
-  expectAncDecodeOk (testFixturePath "test_anc_meta.png")
+  -- Tolerated: tEXt comment, multiple consecutive IDATs, and an unknown ancillary
+  -- chunk type ("myCh") all decode to the reference pattern.
   expectAncDecodeOk (testFixturePath "test_anc_text.png")
   expectAncDecodeOk (testFixturePath "test_anc_multi_idat.png")
   expectAncDecodeOk (testFixturePath "test_anc_unknown_anc.png")
@@ -1273,6 +1445,8 @@ def run : IO Unit := do
   IO.println "png Adam7 fixtures: ok"
   expectGray1Fixtures
   IO.println "png Gray1 fixtures: ok"
+  expectColorSpaceChunks
+  IO.println "png sRGB/gAMA fixtures: ok"
   pngAncillaryChunkFixtures
   IO.println "png ancillary-chunk fixtures: ok"
   validateDynamicTableValidationBoundary

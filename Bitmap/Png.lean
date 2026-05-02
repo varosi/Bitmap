@@ -98,6 +98,8 @@ def iendTypeBytes : ByteArray := "IEND".toUTF8
 def plteTypeBytes : ByteArray := "PLTE".toUTF8
 def trnsTypeBytes : ByteArray := "tRNS".toUTF8
 def bkgdTypeBytes : ByteArray := "bKGD".toUTF8
+def gamaTypeBytes : ByteArray := "gAMA".toUTF8
+def srgbTypeBytes : ByteArray := "sRGB".toUTF8
 def sbitTypeBytes : ByteArray := "sBIT".toUTF8
 
 def mkChunkBytes (typBytes : ByteArray) (data : ByteArray) : ByteArray :=
@@ -176,6 +178,41 @@ inductive PngEncodeMode
   | stored
   | fixed
   | dynamic
+deriving Repr, DecidableEq
+
+inductive PngSrgbIntent
+  | perceptual
+  | relativeColorimetric
+  | saturation
+  | absoluteColorimetric
+deriving Repr, DecidableEq
+
+def PngSrgbIntent.toByte : PngSrgbIntent -> UInt8
+  | .perceptual => u8 0
+  | .relativeColorimetric => u8 1
+  | .saturation => u8 2
+  | .absoluteColorimetric => u8 3
+
+def PngSrgbIntent.ofByte (b : UInt8) : Option PngSrgbIntent :=
+  if b == u8 0 then
+    some .perceptual
+  else if b == u8 1 then
+    some .relativeColorimetric
+  else if b == u8 2 then
+    some .saturation
+  else if b == u8 3 then
+    some .absoluteColorimetric
+  else
+    none
+
+inductive PngEncodeColorSpace
+  | gamma (gammaScaled : Nat)
+  | srgb (intent : PngSrgbIntent) (includeCompatGamma : Bool)
+deriving Repr, DecidableEq
+
+structure PngEncodeOptions where
+  mode : PngEncodeMode := .fixed
+  colorSpace : Option PngEncodeColorSpace := none
 deriving Repr, DecidableEq
 
 structure BitWriter where
@@ -1696,7 +1733,12 @@ deriving Repr, DecidableEq
 structure PngMetadata where
   transparency : Option PngTransparency := none
   background : Option PngBackground := none
-deriving Repr
+  gamma : Option Nat := none
+  srgb : Option PngSrgbIntent := none
+deriving Repr, DecidableEq
+
+def PngMetadata.empty : PngMetadata :=
+  { transparency := none, background := none, gamma := none, srgb := none }
 
 structure PngDecodeResult (px : Type u) [Pixel px] where
   bitmap : Bitmap px
@@ -1717,6 +1759,22 @@ def readU16BE! (bytes : ByteArray) (pos : Nat) : Nat :=
 
 def readU16BEUInt16! (bytes : ByteArray) (pos : Nat) : UInt16 :=
   UInt16.ofNat (readU16BE! bytes pos)
+
+def parseGammaData (data : ByteArray) : Option Nat := do
+  if hlen : data.size = 4 then
+    let gammaScaled := readU32BE data 0 (by omega)
+    if gammaScaled == 0 then
+      none
+    else
+      some gammaScaled
+  else
+    none
+
+def parseSrgbData (data : ByteArray) : Option PngSrgbIntent := do
+  if data.size != 1 then
+    none
+  else
+    PngSrgbIntent.ofByte (data.get! 0)
 
 def parseTrnsData (hdr : PngHeader) (data : ByteArray) : Option PngTransparency := do
   if hdr.colorType == 0 then
@@ -1911,6 +1969,7 @@ structure PngParseState where
   seenPLTE : Bool
   seenIDAT : Bool
   closedIDAT : Bool
+  metadata : PngMetadata := PngMetadata.empty
 deriving Repr
 
 def parsePngSimple (bytes : ByteArray) (_hsize : 8 <= bytes.size) :
@@ -2009,6 +2068,35 @@ def parsePngLoopFuel (fuel : Nat) (bytes : ByteArray) (pos : Nat)
                     -- tRNS attaches transparency to color types 0/2/3; the decoder does not
                     -- honor it, and silently ignoring it would change pixel semantics.
                     none
+                  else if typBytes == gamaTypeBytes then
+                    if state.seenPLTE || state.seenIDAT then
+                      none
+                    if state.metadata.gamma.isSome then
+                      none
+                    let gamma ← parseGammaData chunkData
+                    if state.metadata.srgb.isSome && gamma != 45455 then
+                      none
+                    parsePngLoopFuel fuel bytes posNext
+                      { state with
+                          metadata := { state.metadata with gamma := some gamma } }
+                  else if typBytes == srgbTypeBytes then
+                    if state.seenPLTE || state.seenIDAT then
+                      none
+                    if state.metadata.srgb.isSome then
+                      none
+                    let intent ← parseSrgbData chunkData
+                    match state.metadata.gamma with
+                    | some gamma =>
+                        if gamma != 45455 then
+                          none
+                        else
+                          parsePngLoopFuel fuel bytes posNext
+                            { state with
+                                metadata := { state.metadata with srgb := some intent } }
+                    | none =>
+                        parsePngLoopFuel fuel bytes posNext
+                          { state with
+                              metadata := { state.metadata with srgb := some intent } }
                   else if typBytes == sbitTypeBytes then
                     -- sBIT records the significant bit count per channel; ignoring it would
                     -- silently misrepresent pixel precision.
@@ -2037,7 +2125,8 @@ def parsePng (bytes : ByteArray) (_hsize : 8 <= bytes.size) :
       idat := ByteArray.empty
       seenPLTE := false
       seenIDAT := false
-      closedIDAT := false }
+      closedIDAT := false
+      metadata := PngMetadata.empty }
 
 structure PngMetadataParseState where
   header : Option PngHeader
@@ -2054,7 +2143,7 @@ def parsePngSimpleWithMetadata (bytes : ByteArray) (hsize : 8 <= bytes.size) :
   return {
     header := hdr
     idat := idat
-    metadata := { transparency := none, background := none }
+    metadata := PngMetadata.empty
   }
 
 def parsePngLoopFuelWithMetadata (fuel : Nat) (bytes : ByteArray) (pos : Nat)
@@ -2124,6 +2213,35 @@ def parsePngLoopFuelWithMetadata (fuel : Nat) (bytes : ByteArray) (pos : Nat)
                     parsePngLoopFuelWithMetadata fuel bytes posNext
                       { state with
                           metadata := { state.metadata with background := some bkgd } }
+                  else if typBytes == gamaTypeBytes then
+                    if state.seenPLTE || state.seenIDAT then
+                      none
+                    if state.metadata.gamma.isSome then
+                      none
+                    let gamma ← parseGammaData chunkData
+                    if state.metadata.srgb.isSome && gamma != 45455 then
+                      none
+                    parsePngLoopFuelWithMetadata fuel bytes posNext
+                      { state with
+                          metadata := { state.metadata with gamma := some gamma } }
+                  else if typBytes == srgbTypeBytes then
+                    if state.seenPLTE || state.seenIDAT then
+                      none
+                    if state.metadata.srgb.isSome then
+                      none
+                    let intent ← parseSrgbData chunkData
+                    match state.metadata.gamma with
+                    | some gamma =>
+                        if gamma != 45455 then
+                          none
+                        else
+                          parsePngLoopFuelWithMetadata fuel bytes posNext
+                            { state with
+                                metadata := { state.metadata with srgb := some intent } }
+                    | none =>
+                        parsePngLoopFuelWithMetadata fuel bytes posNext
+                          { state with
+                              metadata := { state.metadata with srgb := some intent } }
                   else if typBytes == sbitTypeBytes then
                     -- sBIT records the significant bit count per channel; ignoring it would
                     -- silently misrepresent pixel precision.
@@ -2153,7 +2271,16 @@ def parsePngWithMetadata (bytes : ByteArray) (_hsize : 8 <= bytes.size) :
       seenPLTE := false
       seenIDAT := false
       closedIDAT := false
-      metadata := { transparency := none, background := none } }
+      metadata := PngMetadata.empty }
+
+def parsePngForDecode (bytes : ByteArray) (hsize : 8 <= bytes.size) :
+    Option PngParsed := do
+  match parsePngSimpleWithMetadata bytes hsize with
+  | some parsed => some parsed
+  | none => parsePngWithMetadata bytes hsize
+
+def PngMetadata.pixelOnlyColorSpace (metadata : PngMetadata) : PngMetadata :=
+  { PngMetadata.empty with gamma := metadata.gamma, srgb := metadata.srgb }
 
 def paethPredictor (a b c : Nat) : Nat :=
   let p : Int := (a : Int) + (b : Int) - (c : Int)
@@ -3177,6 +3304,111 @@ def decodeRowsLoopDown16To8 (targetColorType : UInt8) (sourceColorType : Nat)
   else
     none
 
+@[inline] def clamp01 (x : Float) : Float :=
+  if x <= 0.0 then
+    0.0
+  else if x >= 1.0 then
+    1.0
+  else
+    x
+
+@[inline] def linearToSrgb (linear : Float) : Float :=
+  let linear := clamp01 linear
+  if linear <= 0.0031308 then
+    12.92 * linear
+  else
+    1.055 * Float.pow linear (1.0 / 2.4) - 0.055
+
+@[inline] def roundedUnitToNat (x : Float) (maxValue : Nat) : Nat :=
+  let scaled := clamp01 x * Float.ofNat maxValue + 0.5
+  if scaled <= 0.0 then
+    0
+  else if scaled >= Float.ofNat maxValue then
+    maxValue
+  else
+    (Float.floor scaled).toUInt64.toNat
+
+@[inline] def gammaSampleToSrgbNat (gammaScaled sample maxValue : Nat) : Nat :=
+  if gammaScaled == 0 then
+    sample
+  else if maxValue == 0 then
+    0
+  else
+    let gamma := Float.ofNat gammaScaled / 100000.0
+    let encoded := Float.ofNat sample / Float.ofNat maxValue
+    let linear := Float.pow (clamp01 encoded) (1.0 / gamma)
+    roundedUnitToNat (linearToSrgb linear) maxValue
+
+def gammaToSrgb8Lut (gammaScaled : Nat) : Array UInt8 :=
+  Id.run do
+    let mut lut : Array UInt8 := Array.empty
+    for n in [0:256] do
+      lut := lut.push (u8 (gammaSampleToSrgbNat gammaScaled n 255))
+    return lut
+
+def gammaToSrgb16Lut (gammaScaled : Nat) : Array UInt16 :=
+  Id.run do
+    let mut lut : Array UInt16 := Array.empty
+    for n in [0:65536] do
+      lut := lut.push (UInt16.ofNat (gammaSampleToSrgbNat gammaScaled n 65535))
+    return lut
+
+def applyGamma8ToPixels (gammaScaled : Nat) (colorType : UInt8)
+    (pixels : ByteArray) : Option ByteArray := do
+  let stride ← pngBytesPerPixelForColorTypeAndBitDepth? colorType.toNat 8
+  if stride == 0 || pixels.size % stride != 0 then
+    none
+  let lut := gammaToSrgb8Lut gammaScaled
+  let count := pixels.size / stride
+  let out :=
+    Id.run do
+      let mut out := pixels
+      for i in [0:count] do
+        let base := i * stride
+        out := out.set! base lut[(pixels.get! base).toNat]!
+        if colorType == u8 2 || colorType == u8 6 then
+          out := out.set! (base + 1) lut[(pixels.get! (base + 1)).toNat]!
+          out := out.set! (base + 2) lut[(pixels.get! (base + 2)).toNat]!
+      return out
+  some out
+
+def applyGamma16ToPixels (gammaScaled : Nat) (colorType : UInt8)
+    (pixels : ByteArray) : Option ByteArray := do
+  let stride ← pngBytesPerPixelForColorTypeAndBitDepth? colorType.toNat 16
+  if stride == 0 || pixels.size % stride != 0 then
+    none
+  let lut := gammaToSrgb16Lut gammaScaled
+  let count := pixels.size / stride
+  let out :=
+    Id.run do
+      let mut out := pixels
+      for i in [0:count] do
+        let base := i * stride
+        let r := lut[rowU16Nat pixels base]!
+        out := setU16Nat! out base r.toNat
+        if colorType == u8 2 || colorType == u8 6 then
+          let g := lut[rowU16Nat pixels (base + 2)]!
+          let b := lut[rowU16Nat pixels (base + 4)]!
+          out := setU16Nat! out (base + 2) g.toNat
+          out := setU16Nat! out (base + 4) b.toNat
+      return out
+  some out
+
+def applyPngColorSpaceTransform (metadata : PngMetadata) (targetColorType targetBitDepth : UInt8)
+    (pixels : ByteArray) : Option ByteArray :=
+  match metadata.srgb with
+  | some _ => some pixels
+  | none =>
+      match metadata.gamma with
+      | none => some pixels
+      | some gamma =>
+          if targetBitDepth == u8 8 then
+            applyGamma8ToPixels gamma targetColorType pixels
+          else if targetBitDepth == u8 16 then
+            applyGamma16ToPixels gamma targetColorType pixels
+          else
+            some pixels
+
 class PngPixel (α : Type u) [Pixel α] where
   encodeRaw : Bitmap α -> ByteArray
   colorType : UInt8
@@ -3314,6 +3546,7 @@ def decodeParsedBitmapWithMetadata {px : Type u} [Pixel px] [PngPixel px]
               decodeDefaultRows
         else
           decodeDefaultRows
+  let pixels ← applyPngColorSpaceTransform parsed.metadata targetColorType targetBitDepth pixels
   let size : Size := { width := hdr.width, height := hdr.height }
   if hsize : pixels.size = size.width * size.height * Pixel.bytesPerPixel (α := px) then
     some
@@ -3334,11 +3567,17 @@ def decodeBitmapWithMetadata {px : Type u} [Pixel px] [PngPixel px]
 -- PNG decoder for RGB/RGBA; converts as needed (drops or fills alpha).
 def decodeBitmap {px : Type u} [Pixel px] [PngPixel px]
     (bytes : ByteArray) : Option (Bitmap px) := do
-  let (hdr, idat) ←
+  let parsed ←
     if hsize : 8 <= bytes.size then
-      parsePng bytes hsize
+      parsePngForDecode bytes hsize
     else
       none
+  if parsed.metadata.transparency.isSome then
+    none
+  let parsed :=
+    { parsed with metadata := PngMetadata.pixelOnlyColorSpace parsed.metadata }
+  let hdr := parsed.header
+  let idat := parsed.idat
   if !pngColorTypeBitDepthSupported hdr.colorType hdr.bitDepth then
     none
   if hdr.colorType != 0 && hdr.colorType != 2 && hdr.colorType != 4 &&
@@ -3394,6 +3633,8 @@ def decodeBitmap {px : Type u} [Pixel px] [PngPixel px]
         raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
     else
       PngPixel.decodeRowsLoop (α := px) raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
+  let pixels ← applyPngColorSpaceTransform parsed.metadata (PngPixel.colorType (α := px))
+    targetBitDepth pixels
   let size : Size := { width := hdr.width, height := hdr.height }
   if hsize : pixels.size = size.width * size.height * Pixel.bytesPerPixel (α := px) then
     return { size, data := pixels, valid := hsize }
@@ -3444,6 +3685,36 @@ def encodeRawGray1 (bmp : BitmapGray1) : ByteArray :=
   let raw := ByteArray.mk <| Array.replicate rawSize 0
   encodeRawPrefix bmp.data rowBytes bmp.size.height raw
 
+def encodeColorSpaceChunks? (colorSpace : Option PngEncodeColorSpace) : Option ByteArray :=
+  match colorSpace with
+  | none => some ByteArray.empty
+  | some (.gamma gammaScaled) =>
+      if gammaScaled == 0 then
+        none
+      else
+        some (mkChunkBytes gamaTypeBytes (u32be gammaScaled))
+  | some (.srgb intent includeCompatGamma) =>
+      let srgbChunk := mkChunkBytes srgbTypeBytes (ByteArray.mk #[intent.toByte])
+      if includeCompatGamma then
+        some (mkChunkBytes gamaTypeBytes (u32be 45455) ++ srgbChunk)
+      else
+        some srgbChunk
+
+def encodeBitmapCore (raw ihdr : ByteArray) (mode : PngEncodeMode)
+    (colorSpace : Option PngEncodeColorSpace) : Option ByteArray := do
+  let ancillary ← encodeColorSpaceChunks? colorSpace
+  let idat :=
+    match mode with
+    | .stored => zlibCompressStored raw
+    | .fixed => zlibCompressFixed raw
+    | .dynamic => zlibCompressDynamic raw
+  let ihdrChunk := mkChunkBytes ihdrTypeBytes ihdr
+  let idatChunk := mkChunkBytes idatTypeBytes idat
+  let iendChunk := mkChunkBytes iendTypeBytes ByteArray.empty
+  let outSize := pngSignature.size + ihdrChunk.size + ancillary.size + idatChunk.size + iendChunk.size
+  let out := ByteArray.emptyWithCapacity outSize
+  some (out ++ pngSignature ++ ihdrChunk ++ ancillary ++ idatChunk ++ iendChunk)
+
 def decodeParsedBitmapGray1WithMetadata (parsed : PngParsed) :
     Option PngDecodeGray1Result := do
   let hdr := parsed.header
@@ -3480,15 +3751,15 @@ def decodeBitmapGray1WithMetadata (bytes : ByteArray) :
   decodeParsedBitmapGray1WithMetadata parsed
 
 def decodeBitmapGray1 (bytes : ByteArray) : Option BitmapGray1 := do
-  let (hdr, idat) ←
+  let parsed ←
     if hsize : 8 <= bytes.size then
-      parsePng bytes hsize
+      parsePngForDecode bytes hsize
     else
       none
+  if parsed.metadata.transparency.isSome then
+    none
   decodeParsedBitmapGray1WithMetadata
-    { header := hdr
-      idat := idat
-      metadata := { transparency := none, background := none } }
+    { parsed with metadata := PngMetadata.pixelOnlyColorSpace parsed.metadata }
     |>.map (fun decoded => decoded.bitmap)
 
 def encodeBitmapGray1 (bmp : BitmapGray1)
@@ -3514,11 +3785,33 @@ def encodeBitmapGray1 (bmp : BitmapGray1)
     let out := ByteArray.emptyWithCapacity outSize
     out ++ pngSignature ++ ihdrChunk ++ idatChunk ++ iendChunk
 
+def encodeBitmapGray1WithOptions (bmp : BitmapGray1)
+    (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (options : PngEncodeOptions := {}) : Option ByteArray :=
+  have _ := hw
+  have _ := hh
+  let raw := encodeRawGray1 bmp
+  let ihdr := u32be bmp.size.width ++ u32be bmp.size.height ++
+    ByteArray.mk #[u8 1, u8 0, u8 0, u8 0, u8 0]
+  encodeBitmapCore raw ihdr options.mode options.colorSpace
+
 def encodeBitmapGray1Checked (bmp : BitmapGray1)
     (mode : PngEncodeMode := .fixed) : Except String ByteArray :=
   if hw : bmp.size.width < 2 ^ 32 then
     if hh : bmp.size.height < 2 ^ 32 then
       Except.ok (encodeBitmapGray1 bmp hw hh mode)
+    else
+      Except.error "bitmap height exceeds PNG limit (2^32)"
+  else
+    Except.error "bitmap width exceeds PNG limit (2^32)"
+
+def encodeBitmapGray1WithOptionsChecked (bmp : BitmapGray1)
+    (options : PngEncodeOptions := {}) : Except String ByteArray :=
+  if hw : bmp.size.width < 2 ^ 32 then
+    if hh : bmp.size.height < 2 ^ 32 then
+      match encodeBitmapGray1WithOptions bmp hw hh options with
+      | some bytes => Except.ok bytes
+      | none => Except.error "invalid PNG color-space encode options"
     else
       Except.error "bitmap height exceeds PNG limit (2^32)"
   else
@@ -3547,6 +3840,16 @@ def encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
     let out := ByteArray.emptyWithCapacity outSize
     out ++ pngSignature ++ ihdrChunk ++ idatChunk ++ iendChunk
 
+def encodeBitmapWithOptions {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
+    (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (options : PngEncodeOptions := {}) : Option ByteArray :=
+  have _ := hw
+  have _ := hh
+  let raw := PngPixel.encodeRaw (α := px) bmp
+  let ihdr := u32be bmp.size.width ++ u32be bmp.size.height ++
+    ByteArray.mk #[PngPixel.bitDepth (α := px), PngPixel.colorType (α := px), u8 0, u8 0, u8 0]
+  encodeBitmapCore raw ihdr options.mode options.colorSpace
+
 -- Encode a bitmap using the buffered fixed-Huffman deflate blocks (perf testing).
 
 -- Encode a bitmap using fixed-Huffman deflate blocks.
@@ -3560,6 +3863,18 @@ def encodeBitmapChecked {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
   if hw : bmp.size.width < 2 ^ 32 then
     if hh : bmp.size.height < 2 ^ 32 then
       Except.ok (encodeBitmap bmp hw hh mode)
+    else
+      Except.error "bitmap height exceeds PNG limit (2^32)"
+  else
+    Except.error "bitmap width exceeds PNG limit (2^32)"
+
+def encodeBitmapWithOptionsChecked {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
+    (options : PngEncodeOptions := {}) : Except String ByteArray :=
+  if hw : bmp.size.width < 2 ^ 32 then
+    if hh : bmp.size.height < 2 ^ 32 then
+      match encodeBitmapWithOptions bmp hw hh options with
+      | some bytes => Except.ok bytes
+      | none => Except.error "invalid PNG color-space encode options"
     else
       Except.error "bitmap height exceeds PNG limit (2^32)"
   else

@@ -137,8 +137,21 @@ lemma decodeBitmap_encodeBitmap_common {px : Type u} [Pixel px] [PngPixel px]
             | inl h4' => exact (False.elim (h4 h4'))
             | inr h6 => exact h6
   -- Parsed PNG header.
-  have hparse := parsePng_encodeBitmap (bmp := bmp) (hw := hw) (hh := hh)
+  have hparseSimple := parsePngSimple_encodeBitmap (bmp := bmp) (hw := hw) (hh := hh)
     (mode := mode) hidat hsize hct hbd hctbd
+  have hparseForDecode :
+      parsePngForDecode (encodeBitmap bmp hw hh mode) hsize =
+        some
+          { header :=
+              { width := bmp.size.width
+                height := bmp.size.height
+                colorType := (PngPixel.colorType (α := px)).toNat
+                bitDepth := (PngPixel.bitDepth (α := px)).toNat
+                interlace := 0 }
+            idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
+            metadata := PngMetadata.empty } := by
+    unfold parsePngForDecode parsePngSimpleWithMetadata
+    simp [hparseSimple]
   -- Raw size and row decoding results.
   let bd := (PngPixel.bitDepth (α := px)).toNat
   let bpp := Pixel.bytesPerPixel (α := px)
@@ -190,48 +203,55 @@ lemma decodeBitmap_encodeBitmap_common {px : Type u} [Pixel px] [PngPixel px]
       rw [hnat]
       decide
     exact False.elim (hne heq4)
+  have hmetadataNoTransparency : PngMetadata.empty.transparency = none := by
+    rfl
   have hrowsEq :
       ((PngPixel.decodeRowsLoop (α := px)
           (PngPixel.encodeRaw (α := px) bmp) bmp.size.width bmp.size.height bpp
           (bmp.size.width * bpp) 0 0 ByteArray.empty
           { data := Array.replicate
               (bmp.size.width * bmp.size.height * Pixel.bytesPerPixel (α := px)) 0 }).bind
-        fun pixels ↦
-          if h : pixels.size = bmp.size.width * bmp.size.height * Pixel.bytesPerPixel (α := px) then
-            some { size := { width := bmp.size.width, height := bmp.size.height }, data := pixels, valid := h }
-          else none) =
+        fun decodedPixels ↦
+          (applyPngColorSpaceTransform PngMetadata.empty
+            (PngPixel.colorType (α := px)) (PngPixel.bitDepth (α := px)) decodedPixels).bind
+            fun pixels ↦
+              if h : pixels.size = bmp.size.width * bmp.size.height * Pixel.bytesPerPixel (α := px) then
+                some { size := { width := bmp.size.width, height := bmp.size.height }, data := pixels, valid := h }
+              else none) =
       some bmp := by
-    simp [hrows', hvalid]
+    simp [hrows', hvalid, applyPngColorSpaceTransform, PngMetadata.empty]
   -- Finish by unfolding the decoder.
   unfold Png.decodeBitmap
   cases mode with
   | stored =>
       have hminStored : 2 ≤ (zlibCompressStored (PngPixel.encodeRaw (α := px) bmp)).size := by
         simpa [encodeBitmapIdat] using hmin
-      simpa [hsize, hparse, zlibDecompressStored_zlibCompressStored, encodeBitmapIdat,
+      simpa [hsize, hparseForDecode, zlibDecompressStored_zlibCompressStored, encodeBitmapIdat,
         ct, bd, hbdNoReject, hbitDepthEq, hbitDepthEqHeader, hnoDownsample, hpngBpp',
-        hctbd', hbdNot1', normalizeRawByInterlace?] using
-        (And.intro hctbd'
+        hctbd', hbdNot1', normalizeRawByInterlace?, PngMetadata.pixelOnlyColorSpace] using
+        (And.intro hmetadataNoTransparency
           (And.intro hctProp
             (And.intro hctNoReject (And.intro hminStored (And.intro hrawEq' hrowsEq)))))
   | fixed =>
       have hminFixed : 2 ≤ (zlibCompressFixed (PngPixel.encodeRaw (α := px) bmp)).size := by
         simpa [encodeBitmapIdat] using hmin
-      simpa [hsize, hparse,
+      simpa [hsize, hparseForDecode,
         zlibDecompressStored_zlibCompressFixed_none, zlibDecompress_zlibCompressFixed,
         encodeBitmapIdat, ct, bd, hbdNoReject, hbitDepthEq, hbitDepthEqHeader,
-        hnoDownsample, hpngBpp', hctbd', hbdNot1', normalizeRawByInterlace?] using
-        (And.intro hctbd'
+        hnoDownsample, hpngBpp', hctbd', hbdNot1', normalizeRawByInterlace?,
+        PngMetadata.pixelOnlyColorSpace] using
+        (And.intro hmetadataNoTransparency
           (And.intro hctProp
             (And.intro hctNoReject (And.intro hminFixed (And.intro hrawEq' hrowsEq)))))
   | dynamic =>
       have hminDyn : 2 ≤ (zlibCompressDynamic (PngPixel.encodeRaw (α := px) bmp)).size := by
         simpa [encodeBitmapIdat] using hmin
-      simpa [hsize, hparse,
+      simpa [hsize, hparseForDecode,
         zlibDecompressStored_zlibCompressDynamic_none, zlibDecompress_zlibCompressDynamic,
         encodeBitmapIdat, ct, bd, hbdNoReject, hbitDepthEq, hbitDepthEqHeader,
-        hnoDownsample, hpngBpp', hctbd', hbdNot1', normalizeRawByInterlace?] using
-        (And.intro hctbd'
+        hnoDownsample, hpngBpp', hctbd', hbdNot1', normalizeRawByInterlace?,
+        PngMetadata.pixelOnlyColorSpace] using
+        (And.intro hmetadataNoTransparency
           (And.intro hctProp
             (And.intro hctNoReject (And.intro hminDyn (And.intro hrawEq' hrowsEq)))))
 

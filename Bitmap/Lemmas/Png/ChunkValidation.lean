@@ -369,6 +369,249 @@ lemma parsePngLoopFuelWithMetadata_rejects_duplicate_bKGD (fuel : Nat)
   simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
     hnotTRNS, hBKGD, hseen, hdup]
 
+/-- A four-byte nonzero `gAMA` payload is parsed as its scaled gamma integer.
+This pins the payload-level metadata read used by the color-space parser branch. -/
+lemma parseGammaData_accepts_45455 :
+    parseGammaData (ByteArray.mk #[u8 0x00, u8 0x00, u8 0xb1, u8 0x8f]) =
+      some 45455 := by
+  native_decide
+
+/-- A zero `gAMA` value is invalid, so the payload parser rejects it.
+This prevents later color transforms from dividing by an invalid gamma. -/
+lemma parseGammaData_rejects_zero :
+    parseGammaData (ByteArray.mk #[u8 0, u8 0, u8 0, u8 0]) = none := by
+  native_decide
+
+/-- `gAMA` has an exact four-byte payload shape.
+This lemma exposes the length check used before reading the scaled integer. -/
+lemma parseGammaData_rejects_bad_length (data : ByteArray)
+    (hlen : data.size ≠ 4) :
+    parseGammaData data = none := by
+  unfold parseGammaData
+  simp [hlen]
+
+/-- The four valid `sRGB` rendering intents are decoded from bytes `0..3`.
+This pins all accepted payload values for metadata-aware decode. -/
+lemma parseSrgbData_accepts_intents :
+    (parseSrgbData (ByteArray.mk #[u8 0]) = some .perceptual) ∧
+    (parseSrgbData (ByteArray.mk #[u8 1]) = some .relativeColorimetric) ∧
+    (parseSrgbData (ByteArray.mk #[u8 2]) = some .saturation) ∧
+    (parseSrgbData (ByteArray.mk #[u8 3]) = some .absoluteColorimetric) := by
+  native_decide
+
+/-- An out-of-range `sRGB` intent byte is rejected.
+This guards the one-byte rendering-intent parser from accepting reserved values. -/
+lemma parseSrgbData_rejects_bad_intent :
+    parseSrgbData (ByteArray.mk #[u8 4]) = none := by
+  native_decide
+
+/-- The metadata-aware parser records a valid `gAMA` chunk and continues.
+This is the branch-level preservation fact for image gamma metadata. -/
+lemma parsePngLoopFuelWithMetadata_accepts_gAMA (fuel : Nat)
+    (bytes : ByteArray) (pos : Nat) (state : PngMetadataParseState)
+    (hdr : PngHeader) (typBytes chunkData : ByteArray) (posNext : Nat)
+    (gamma : Nat)
+    (hpos : pos + 8 ≤ bytes.size) (hLen : pos + 3 < bytes.size)
+    (hread : readChunk bytes pos hLen = some (typBytes, chunkData, posNext))
+    (hheader : state.header = some hdr)
+    (hnotIHDR : (typBytes == ihdrTypeBytes) = false)
+    (hnotPLTE : (typBytes == plteTypeBytes) = false)
+    (hnotIDAT : (typBytes == idatTypeBytes) = false)
+    (hnotIEND : (typBytes == iendTypeBytes) = false)
+    (hnotTRNS : (typBytes == trnsTypeBytes) = false)
+    (hnotBKGD : (typBytes == bkgdTypeBytes) = false)
+    (hGAMA : (typBytes == gamaTypeBytes) = true)
+    (horder : (state.seenPLTE || state.seenIDAT) = false)
+    (hdup : state.metadata.gamma.isSome = false)
+    (hsrgb : state.metadata.srgb = none)
+    (hparse : parseGammaData chunkData = some gamma) :
+    parsePngLoopFuelWithMetadata (fuel + 1) bytes pos state =
+      parsePngLoopFuelWithMetadata fuel bytes posNext
+        { state with metadata := { state.metadata with gamma := some gamma } } := by
+  conv =>
+    lhs
+    unfold parsePngLoopFuelWithMetadata
+  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
+    hnotTRNS, hnotBKGD, hGAMA, horder, hdup, hparse, hsrgb]
+
+/-- `gAMA` must precede both `PLTE` and `IDAT`.
+This is the ordering-rejection branch for gamma metadata. -/
+lemma parsePngLoopFuelWithMetadata_rejects_gAMA_after_plte_or_idat (fuel : Nat)
+    (bytes : ByteArray) (pos : Nat) (state : PngMetadataParseState)
+    (hdr : PngHeader) (typBytes chunkData : ByteArray) (posNext : Nat)
+    (hpos : pos + 8 ≤ bytes.size) (hLen : pos + 3 < bytes.size)
+    (hread : readChunk bytes pos hLen = some (typBytes, chunkData, posNext))
+    (hheader : state.header = some hdr)
+    (hnotIHDR : (typBytes == ihdrTypeBytes) = false)
+    (hnotPLTE : (typBytes == plteTypeBytes) = false)
+    (hnotIDAT : (typBytes == idatTypeBytes) = false)
+    (hnotIEND : (typBytes == iendTypeBytes) = false)
+    (hnotTRNS : (typBytes == trnsTypeBytes) = false)
+    (hnotBKGD : (typBytes == bkgdTypeBytes) = false)
+    (hGAMA : (typBytes == gamaTypeBytes) = true)
+    (horder : (state.seenPLTE || state.seenIDAT) = true) :
+    parsePngLoopFuelWithMetadata (fuel + 1) bytes pos state = none := by
+  unfold parsePngLoopFuelWithMetadata
+  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
+    hnotTRNS, hnotBKGD, hGAMA, horder]
+
+/-- A second `gAMA` chunk is rejected rather than replacing earlier metadata.
+This makes gamma parsing deterministic. -/
+lemma parsePngLoopFuelWithMetadata_rejects_duplicate_gAMA (fuel : Nat)
+    (bytes : ByteArray) (pos : Nat) (state : PngMetadataParseState)
+    (hdr : PngHeader) (typBytes chunkData : ByteArray) (posNext : Nat)
+    (hpos : pos + 8 ≤ bytes.size) (hLen : pos + 3 < bytes.size)
+    (hread : readChunk bytes pos hLen = some (typBytes, chunkData, posNext))
+    (hheader : state.header = some hdr)
+    (hnotIHDR : (typBytes == ihdrTypeBytes) = false)
+    (hnotPLTE : (typBytes == plteTypeBytes) = false)
+    (hnotIDAT : (typBytes == idatTypeBytes) = false)
+    (hnotIEND : (typBytes == iendTypeBytes) = false)
+    (hnotTRNS : (typBytes == trnsTypeBytes) = false)
+    (hnotBKGD : (typBytes == bkgdTypeBytes) = false)
+    (hGAMA : (typBytes == gamaTypeBytes) = true)
+    (horder : (state.seenPLTE || state.seenIDAT) = false)
+    (hdup : state.metadata.gamma.isSome = true) :
+    parsePngLoopFuelWithMetadata (fuel + 1) bytes pos state = none := by
+  unfold parsePngLoopFuelWithMetadata
+  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
+    hnotTRNS, hnotBKGD, hGAMA, horder, hdup]
+
+/-- The metadata-aware parser records a valid `sRGB` chunk and continues.
+This is the branch-level preservation fact for rendering-intent metadata. -/
+lemma parsePngLoopFuelWithMetadata_accepts_sRGB (fuel : Nat)
+    (bytes : ByteArray) (pos : Nat) (state : PngMetadataParseState)
+    (hdr : PngHeader) (typBytes chunkData : ByteArray) (posNext : Nat)
+    (intent : PngSrgbIntent)
+    (hpos : pos + 8 ≤ bytes.size) (hLen : pos + 3 < bytes.size)
+    (hread : readChunk bytes pos hLen = some (typBytes, chunkData, posNext))
+    (hheader : state.header = some hdr)
+    (hnotIHDR : (typBytes == ihdrTypeBytes) = false)
+    (hnotPLTE : (typBytes == plteTypeBytes) = false)
+    (hnotIDAT : (typBytes == idatTypeBytes) = false)
+    (hnotIEND : (typBytes == iendTypeBytes) = false)
+    (hnotTRNS : (typBytes == trnsTypeBytes) = false)
+    (hnotBKGD : (typBytes == bkgdTypeBytes) = false)
+    (hnotGAMA : (typBytes == gamaTypeBytes) = false)
+    (hSRGB : (typBytes == srgbTypeBytes) = true)
+    (horder : (state.seenPLTE || state.seenIDAT) = false)
+    (hdup : state.metadata.srgb.isSome = false)
+    (hgamma : state.metadata.gamma = none)
+    (hparse : parseSrgbData chunkData = some intent) :
+    parsePngLoopFuelWithMetadata (fuel + 1) bytes pos state =
+      parsePngLoopFuelWithMetadata fuel bytes posNext
+        { state with metadata := { state.metadata with srgb := some intent } } := by
+  conv =>
+    lhs
+    unfold parsePngLoopFuelWithMetadata
+  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
+    hnotTRNS, hnotBKGD, hnotGAMA, hSRGB, horder, hdup, hparse, hgamma]
+
+/-- `sRGB` must precede both `PLTE` and `IDAT`.
+This is the ordering-rejection branch for sRGB metadata. -/
+lemma parsePngLoopFuelWithMetadata_rejects_sRGB_after_plte_or_idat (fuel : Nat)
+    (bytes : ByteArray) (pos : Nat) (state : PngMetadataParseState)
+    (hdr : PngHeader) (typBytes chunkData : ByteArray) (posNext : Nat)
+    (hpos : pos + 8 ≤ bytes.size) (hLen : pos + 3 < bytes.size)
+    (hread : readChunk bytes pos hLen = some (typBytes, chunkData, posNext))
+    (hheader : state.header = some hdr)
+    (hnotIHDR : (typBytes == ihdrTypeBytes) = false)
+    (hnotPLTE : (typBytes == plteTypeBytes) = false)
+    (hnotIDAT : (typBytes == idatTypeBytes) = false)
+    (hnotIEND : (typBytes == iendTypeBytes) = false)
+    (hnotTRNS : (typBytes == trnsTypeBytes) = false)
+    (hnotBKGD : (typBytes == bkgdTypeBytes) = false)
+    (hnotGAMA : (typBytes == gamaTypeBytes) = false)
+    (hSRGB : (typBytes == srgbTypeBytes) = true)
+    (horder : (state.seenPLTE || state.seenIDAT) = true) :
+    parsePngLoopFuelWithMetadata (fuel + 1) bytes pos state = none := by
+  unfold parsePngLoopFuelWithMetadata
+  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
+    hnotTRNS, hnotBKGD, hnotGAMA, hSRGB, horder]
+
+/-- A second `sRGB` chunk is rejected rather than replacing the original intent.
+This makes color-space metadata deterministic. -/
+lemma parsePngLoopFuelWithMetadata_rejects_duplicate_sRGB (fuel : Nat)
+    (bytes : ByteArray) (pos : Nat) (state : PngMetadataParseState)
+    (hdr : PngHeader) (typBytes chunkData : ByteArray) (posNext : Nat)
+    (hpos : pos + 8 ≤ bytes.size) (hLen : pos + 3 < bytes.size)
+    (hread : readChunk bytes pos hLen = some (typBytes, chunkData, posNext))
+    (hheader : state.header = some hdr)
+    (hnotIHDR : (typBytes == ihdrTypeBytes) = false)
+    (hnotPLTE : (typBytes == plteTypeBytes) = false)
+    (hnotIDAT : (typBytes == idatTypeBytes) = false)
+    (hnotIEND : (typBytes == iendTypeBytes) = false)
+    (hnotTRNS : (typBytes == trnsTypeBytes) = false)
+    (hnotBKGD : (typBytes == bkgdTypeBytes) = false)
+    (hnotGAMA : (typBytes == gamaTypeBytes) = false)
+    (hSRGB : (typBytes == srgbTypeBytes) = true)
+    (horder : (state.seenPLTE || state.seenIDAT) = false)
+    (hdup : state.metadata.srgb.isSome = true) :
+    parsePngLoopFuelWithMetadata (fuel + 1) bytes pos state = none := by
+  unfold parsePngLoopFuelWithMetadata
+  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
+    hnotTRNS, hnotBKGD, hnotGAMA, hSRGB, horder, hdup]
+
+/-- An `sRGB` chunk is incompatible with non-sRGB-compatible existing `gAMA`.
+This proves the parser rejects conflicting color-space metadata. -/
+lemma parsePngLoopFuelWithMetadata_rejects_sRGB_after_incompatible_gAMA (fuel : Nat)
+    (bytes : ByteArray) (pos : Nat) (state : PngMetadataParseState)
+    (hdr : PngHeader) (typBytes chunkData : ByteArray) (posNext : Nat)
+    (intent : PngSrgbIntent) (gamma : Nat)
+    (hpos : pos + 8 ≤ bytes.size) (hLen : pos + 3 < bytes.size)
+    (hread : readChunk bytes pos hLen = some (typBytes, chunkData, posNext))
+    (hheader : state.header = some hdr)
+    (hnotIHDR : (typBytes == ihdrTypeBytes) = false)
+    (hnotPLTE : (typBytes == plteTypeBytes) = false)
+    (hnotIDAT : (typBytes == idatTypeBytes) = false)
+    (hnotIEND : (typBytes == iendTypeBytes) = false)
+    (hnotTRNS : (typBytes == trnsTypeBytes) = false)
+    (hnotBKGD : (typBytes == bkgdTypeBytes) = false)
+    (hnotGAMA : (typBytes == gamaTypeBytes) = false)
+    (hSRGB : (typBytes == srgbTypeBytes) = true)
+    (horder : (state.seenPLTE || state.seenIDAT) = false)
+    (hdup : state.metadata.srgb.isSome = false)
+    (hgamma : state.metadata.gamma = some gamma)
+    (hbad : gamma ≠ 45455)
+    (hparse : parseSrgbData chunkData = some intent) :
+    parsePngLoopFuelWithMetadata (fuel + 1) bytes pos state = none := by
+  unfold parsePngLoopFuelWithMetadata
+  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
+    hnotTRNS, hnotBKGD, hnotGAMA, hSRGB, horder, hdup, hparse, hgamma, hbad]
+
+/-- With no color-space metadata, the final color transform is a no-op.
+This keeps existing encoder round-trip clients on the unchanged pixel path. -/
+lemma applyPngColorSpaceTransform_no_metadata (targetColorType targetBitDepth : UInt8)
+    (pixels : ByteArray) :
+    applyPngColorSpaceTransform PngMetadata.empty targetColorType targetBitDepth pixels =
+      some pixels := by
+  rfl
+
+/-- `sRGB` metadata has precedence and does not rewrite already-sRGB samples.
+This exposes the no-op transform branch for all rendering intents. -/
+lemma applyPngColorSpaceTransform_sRGB_noop (metadata : PngMetadata)
+    (intent : PngSrgbIntent) (targetColorType targetBitDepth : UInt8)
+    (pixels : ByteArray) :
+    applyPngColorSpaceTransform { metadata with srgb := some intent }
+      targetColorType targetBitDepth pixels = some pixels := by
+  cases intent <;> rfl
+
+/-- The 8-bit RGBA gamma transform leaves the alpha byte untouched.
+This concrete witness guards the non-alpha-channel traversal used by the LUT pass. -/
+lemma applyGamma8ToPixels_preserves_rgba_alpha_sample :
+    (applyGamma8ToPixels 100000 (u8 6)
+      (ByteArray.mk #[u8 64, u8 128, u8 192, u8 77])).map (fun out => out.get! 3) =
+        some (u8 77) := by
+  native_decide
+
+/-- The 16-bit grayscale+alpha gamma transform leaves the alpha sample untouched.
+This witness covers the two-byte alpha-preservation path. -/
+lemma applyGamma16ToPixels_preserves_grayAlpha_alpha_sample :
+    (applyGamma16ToPixels 100000 (u8 4)
+      (ByteArray.mk #[u8 0x12, u8 0x34, u8 0xab, u8 0xcd])).map
+        (fun out => (out.get! 2, out.get! 3)) = some (u8 0xab, u8 0xcd) := by
+  native_decide
+
 /-- Once transparency or background metadata has appeared, a later `PLTE` is
 rejected so the parser enforces the required relative chunk order. -/
 lemma parsePngLoopFuelWithMetadata_rejects_plte_after_metadata (fuel : Nat)
@@ -398,10 +641,13 @@ lemma parsePngLoopFuel_rejects_sBIT (fuel : Nat)
     (hnotIDAT : (typBytes == idatTypeBytes) = false)
     (hnotIEND : (typBytes == iendTypeBytes) = false)
     (hnotTRNS : (typBytes == trnsTypeBytes) = false)
+    (hnotGAMA : (typBytes == gamaTypeBytes) = false)
+    (hnotSRGB : (typBytes == srgbTypeBytes) = false)
     (hSBIT : (typBytes == sbitTypeBytes) = true) :
     parsePngLoopFuel (fuel + 1) bytes pos state = none := by
   unfold parsePngLoopFuel
-  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND, hnotTRNS, hSBIT]
+  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
+    hnotTRNS, hnotGAMA, hnotSRGB, hSBIT]
 
 /-- Unknown critical chunk types are rejected after the header. -/
 lemma parsePngLoopFuel_rejects_unknown_critical (fuel : Nat)
@@ -415,15 +661,17 @@ lemma parsePngLoopFuel_rejects_unknown_critical (fuel : Nat)
     (hnotIDAT : (typBytes == idatTypeBytes) = false)
     (hnotIEND : (typBytes == iendTypeBytes) = false)
     (hnotTRNS : (typBytes == trnsTypeBytes) = false)
+    (hnotGAMA : (typBytes == gamaTypeBytes) = false)
+    (hnotSRGB : (typBytes == srgbTypeBytes) = false)
     (hnotSBIT : (typBytes == sbitTypeBytes) = false)
     (hcritical : isCriticalChunkType typBytes = true) :
     parsePngLoopFuel (fuel + 1) bytes pos state = none := by
   unfold parsePngLoopFuel
   simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
-    hnotTRNS, hnotSBIT, hcritical]
+    hnotTRNS, hnotGAMA, hnotSRGB, hnotSBIT, hcritical]
 
-/-- Ancillary chunks (other than the explicitly rejected `tRNS`/`sBIT`) before the
-`IDAT` run do not change parser state. -/
+/-- Ancillary chunks (other than the explicitly handled color/precision metadata)
+before the `IDAT` run do not change parser state. -/
 lemma parsePngLoopFuel_ignores_ancillary_before_idat (fuel : Nat)
     (bytes : ByteArray) (pos : Nat) (state : PngParseState)
     (hdr : PngHeader) (typBytes chunkData : ByteArray) (posNext : Nat)
@@ -435,6 +683,8 @@ lemma parsePngLoopFuel_ignores_ancillary_before_idat (fuel : Nat)
     (hnotIDAT : (typBytes == idatTypeBytes) = false)
     (hnotIEND : (typBytes == iendTypeBytes) = false)
     (hnotTRNS : (typBytes == trnsTypeBytes) = false)
+    (hnotGAMA : (typBytes == gamaTypeBytes) = false)
+    (hnotSRGB : (typBytes == srgbTypeBytes) = false)
     (hnotSBIT : (typBytes == sbitTypeBytes) = false)
     (hcritical : isCriticalChunkType typBytes = false)
     (hseen : state.seenIDAT = false) :
@@ -444,7 +694,7 @@ lemma parsePngLoopFuel_ignores_ancillary_before_idat (fuel : Nat)
     lhs
     unfold parsePngLoopFuel
   simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
-    hnotTRNS, hnotSBIT, hcritical, hseen]
+    hnotTRNS, hnotGAMA, hnotSRGB, hnotSBIT, hcritical, hseen]
 
 /-- An `IDAT` chunk in an open `IDAT` run appends its payload and continues. -/
 lemma parsePngLoopFuel_idat_appends_when_open (fuel : Nat)
@@ -464,7 +714,8 @@ lemma parsePngLoopFuel_idat_appends_when_open (fuel : Nat)
           idat := state.idat ++ chunkData
           seenPLTE := state.seenPLTE
           seenIDAT := true
-          closedIDAT := false } := by
+          closedIDAT := false
+          metadata := state.metadata } := by
   conv =>
     lhs
     unfold parsePngLoopFuel
