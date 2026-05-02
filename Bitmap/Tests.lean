@@ -527,6 +527,14 @@ private def gamaChunk (gammaScaled : Nat) : ByteArray :=
 private def srgbChunk (intent : Png.PngSrgbIntent) : ByteArray :=
   Png.mkChunkBytes Png.srgbTypeBytes (ByteArray.mk #[intent.toByte])
 
+private def fixedPngTime : Png.PngTime :=
+  { year := 2026, month := 5, day := 2, hour := 17, minute := 45, second := 12 }
+
+private def timeChunk (time : Png.PngTime) : ByteArray :=
+  match Png.encodeTimeData? time with
+  | some data => Png.mkChunkBytes Png.timeTypeBytes data
+  | none => Png.mkChunkBytes Png.timeTypeBytes ByteArray.empty
+
 private def plteChunk : ByteArray :=
   Png.mkChunkBytes Png.plteTypeBytes
     (ByteArray.mk #[Png.u8 0, Png.u8 0, Png.u8 0])
@@ -1289,7 +1297,7 @@ private def expectAncMetadataDecodeNone (path : System.FilePath) (label : String
 private def expectMetadataDecodeNoneBytes (bytes : ByteArray) (label : String) : IO Unit := do
   match Png.decodeBitmapWithMetadata (px := PixelRGBA8) bytes with
   | some _ =>
-      throw (IO.userError s!"metadata-aware decoder accepted invalid color-space chunk: {label}")
+      throw (IO.userError s!"metadata-aware decoder accepted invalid metadata chunk: {label}")
   | none =>
       pure ()
 
@@ -1402,6 +1410,112 @@ private def expectColorSpaceChunks : IO Unit := do
       throw (IO.userError "encoder accepted zero gAMA option")
   | Except.error _ =>
       pure ()
+
+private def expectTimeChunks : IO Unit := do
+  let rgbFixture : BitmapRGB8 :=
+    Bitmap.ofPixelFn 2 1 (fun idx : Fin (2 * 1) =>
+      match idx.val with
+      | 0 => { r := Png.u8 12, g := Png.u8 34, b := Png.u8 56 }
+      | _ => { r := Png.u8 78, g := Png.u8 90, b := Png.u8 123 })
+  match Png.encodeBitmapWithOptionsChecked (px := PixelRGB8) rgbFixture
+      { mode := .fixed, modificationTime := some fixedPngTime } with
+  | Except.ok bytes =>
+      match Png.decodeBitmapWithMetadata (px := PixelRGB8) bytes with
+      | some decoded =>
+          if decoded.bitmap.data != rgbFixture.data then
+            throw (IO.userError "tIME encode changed RGB samples")
+          if decoded.metadata.modificationTime != some fixedPngTime then
+            throw (IO.userError "encoded tIME metadata failed to parse")
+      | none =>
+          throw (IO.userError "encoded tIME PNG failed to decode")
+  | Except.error err =>
+      throw (IO.userError err)
+  match Png.encodeBitmapWithOptionsChecked (px := PixelRGB8) rgbFixture
+      { mode := .fixed, modificationTime := some { fixedPngTime with month := 13 } } with
+  | Except.ok _ =>
+      throw (IO.userError "encoder accepted invalid tIME option")
+  | Except.error _ =>
+      pure ()
+  for bytes in #[pngWithAncillary rgbFixture (timeChunk fixedPngTime),
+      pngWithPostIdatAncillary rgbFixture (timeChunk fixedPngTime)] do
+    match Png.decodeBitmapWithMetadata (px := PixelRGB8) bytes with
+    | some decoded =>
+        if decoded.metadata.modificationTime != some fixedPngTime then
+          throw (IO.userError "tIME metadata was not preserved")
+    | none =>
+        throw (IO.userError "valid tIME fixture failed to decode")
+  expectMetadataDecodeNoneBytes
+    (pngWithAncillary rgbFixture (Png.mkChunkBytes Png.timeTypeBytes (ByteArray.mk #[Png.u8 1])))
+    "bad tIME length"
+  expectMetadataDecodeNoneBytes
+    (pngWithAncillary rgbFixture
+      (Png.mkChunkBytes Png.timeTypeBytes
+        (ByteArray.mk #[Png.u8 0x07, Png.u8 0xea, Png.u8 13, Png.u8 1,
+          Png.u8 0, Png.u8 0, Png.u8 0])))
+    "bad tIME month"
+  expectMetadataDecodeNoneBytes
+    (pngWithAncillary rgbFixture
+      (Png.mkChunkBytes Png.timeTypeBytes
+        (ByteArray.mk #[Png.u8 0x07, Png.u8 0xea, Png.u8 2, Png.u8 30,
+          Png.u8 0, Png.u8 0, Png.u8 0])))
+    "bad tIME day"
+  expectMetadataDecodeNoneBytes
+    (pngWithAncillary rgbFixture
+      (Png.mkChunkBytes Png.timeTypeBytes
+        (ByteArray.mk #[Png.u8 0x07, Png.u8 0xea, Png.u8 5, Png.u8 2,
+          Png.u8 24, Png.u8 0, Png.u8 0])))
+    "bad tIME hour"
+  expectMetadataDecodeNoneBytes
+    (pngWithAncillary rgbFixture
+      (Png.mkChunkBytes Png.timeTypeBytes
+        (ByteArray.mk #[Png.u8 0x07, Png.u8 0xea, Png.u8 5, Png.u8 2,
+          Png.u8 0, Png.u8 60, Png.u8 0])))
+    "bad tIME minute"
+  expectMetadataDecodeNoneBytes
+    (pngWithAncillary rgbFixture
+      (Png.mkChunkBytes Png.timeTypeBytes
+        (ByteArray.mk #[Png.u8 0x07, Png.u8 0xea, Png.u8 5, Png.u8 2,
+          Png.u8 0, Png.u8 0, Png.u8 61])))
+    "bad tIME second"
+  expectMetadataDecodeNoneBytes
+    (pngWithAncillary rgbFixture (timeChunk fixedPngTime ++ timeChunk fixedPngTime))
+    "duplicate tIME"
+  expectMetadataDecodeNoneBytes
+    (pngWithPostIdatAncillary rgbFixture
+      (timeChunk fixedPngTime ++ Png.mkChunkBytes Png.idatTypeBytes ByteArray.empty))
+    "IDAT after post-IDAT tIME"
+  let defaultPath := System.FilePath.mk "/tmp/bitmap_time_write_default.png"
+  match ← Png.BitmapRGB8.writePng defaultPath rgbFixture .fixed with
+  | Except.error err =>
+      throw (IO.userError err)
+  | Except.ok _ =>
+      let bytes ← IO.FS.readBinFile defaultPath
+      match Png.decodeBitmapWithMetadata (px := PixelRGB8) bytes with
+      | some decoded =>
+          if decoded.metadata.modificationTime.isNone then
+            throw (IO.userError "file write did not emit default tIME metadata")
+      | none =>
+          throw (IO.userError "default tIME file write failed to decode")
+  let noTimePath := System.FilePath.mk "/tmp/bitmap_time_write_without_time.png"
+  match ← Png.Bitmap.writePngWithoutTime (px := PixelRGB8) noTimePath rgbFixture .fixed with
+  | Except.error err =>
+      throw (IO.userError err)
+  | Except.ok _ =>
+      let bytes ← IO.FS.readBinFile noTimePath
+      match Png.decodeBitmapWithMetadata (px := PixelRGB8) bytes with
+      | some decoded =>
+          if decoded.metadata.modificationTime.isSome then
+            throw (IO.userError "deterministic file write unexpectedly emitted tIME metadata")
+      | none =>
+          throw (IO.userError "deterministic no-time file write failed to decode")
+  try
+    IO.FS.removeFile defaultPath
+  catch _ =>
+    pure ()
+  try
+    IO.FS.removeFile noTimePath
+  catch _ =>
+    pure ()
 
 -- Verify the tolerate-and-skip behavior for ancillary chunks plus the
 -- rejection guarantees for pixel-affecting chunks, unknown critical chunks,
@@ -1620,6 +1734,8 @@ def run : IO Unit := do
   IO.println "png encoder filter fixtures: ok"
   expectColorSpaceChunks
   IO.println "png sRGB/gAMA fixtures: ok"
+  expectTimeChunks
+  IO.println "png tIME fixtures: ok"
   pngAncillaryChunkFixtures
   IO.println "png ancillary-chunk fixtures: ok"
   validateDynamicTableValidationBoundary

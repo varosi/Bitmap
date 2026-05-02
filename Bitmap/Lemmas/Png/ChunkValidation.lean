@@ -405,6 +405,97 @@ lemma parseSrgbData_rejects_bad_intent :
     parseSrgbData (ByteArray.mk #[u8 4]) = none := by
   native_decide
 
+/-- A well-formed seven-byte `tIME` payload is decoded exactly.
+This witnesses the metadata parser's calendar-field layout. -/
+lemma parseTimeData_accepts_valid_time :
+    parseTimeData (ByteArray.mk #[u8 0x07, u8 0xea, u8 5, u8 2, u8 17, u8 45, u8 12]) =
+      some { year := 2026, month := 5, day := 2, hour := 17, minute := 45, second := 12 } := by
+  native_decide
+
+/-- `tIME` has an exact seven-byte payload shape.
+This exposes the length check before the calendar fields are read. -/
+lemma parseTimeData_rejects_bad_length (data : ByteArray)
+    (hlen : data.size ≠ 7) :
+    parseTimeData data = none := by
+  unfold parseTimeData
+  simp [hlen]
+
+/-- Invalid calendar fields in `tIME` are rejected.
+This prevents nonsensical modification timestamps from entering metadata. -/
+lemma parseTimeData_rejects_bad_month :
+    parseTimeData (ByteArray.mk #[u8 0x07, u8 0xea, u8 13, u8 1, u8 0, u8 0, u8 0]) =
+      none := by
+  native_decide
+
+/-- Invalid calendar days in `tIME` are rejected.
+This covers the month-specific day limit used by the validator. -/
+lemma parseTimeData_rejects_bad_day :
+    parseTimeData (ByteArray.mk #[u8 0x07, u8 0xea, u8 2, u8 30, u8 0, u8 0, u8 0]) =
+      none := by
+  native_decide
+
+/-- Encoder-side `tIME` payloads use exactly the seven bytes required by PNG.
+This keeps the ancillary writer aligned with the parser shape. -/
+lemma encodeTimeData?_valid_size :
+    (encodeTimeData?
+      { year := 2026, month := 5, day := 2, hour := 17, minute := 45, second := 12 }).map
+        ByteArray.size = some 7 := by
+  native_decide
+
+/-- The metadata-aware parser records a valid `tIME` chunk and continues.
+This is the branch-level preservation fact for modification-time metadata. -/
+lemma parsePngLoopFuelWithMetadata_accepts_tIME (fuel : Nat)
+    (bytes : ByteArray) (pos : Nat) (state : PngMetadataParseState)
+    (hdr : PngHeader) (typBytes chunkData : ByteArray) (posNext : Nat)
+    (time : PngTime)
+    (hpos : pos + 8 ≤ bytes.size) (hLen : pos + 3 < bytes.size)
+    (hread : readChunk bytes pos hLen = some (typBytes, chunkData, posNext))
+    (hheader : state.header = some hdr)
+    (hnotIHDR : (typBytes == ihdrTypeBytes) = false)
+    (hnotPLTE : (typBytes == plteTypeBytes) = false)
+    (hnotIDAT : (typBytes == idatTypeBytes) = false)
+    (hnotIEND : (typBytes == iendTypeBytes) = false)
+    (hnotTRNS : (typBytes == trnsTypeBytes) = false)
+    (hnotBKGD : (typBytes == bkgdTypeBytes) = false)
+    (hnotGAMA : (typBytes == gamaTypeBytes) = false)
+    (hnotSRGB : (typBytes == srgbTypeBytes) = false)
+    (hTIME : (typBytes == timeTypeBytes) = true)
+    (hdup : state.metadata.modificationTime.isSome = false)
+    (hparse : parseTimeData chunkData = some time) :
+    parsePngLoopFuelWithMetadata (fuel + 1) bytes pos state =
+      parsePngLoopFuelWithMetadata fuel bytes posNext
+        { state with
+            closedIDAT := if state.seenIDAT then true else state.closedIDAT
+            metadata := { state.metadata with modificationTime := some time } } := by
+  conv =>
+    lhs
+    unfold parsePngLoopFuelWithMetadata
+  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
+    hnotTRNS, hnotBKGD, hnotGAMA, hnotSRGB, hTIME, hdup, hparse]
+
+/-- A second `tIME` chunk is rejected rather than replacing the original value.
+This makes modification-time metadata deterministic. -/
+lemma parsePngLoopFuelWithMetadata_rejects_duplicate_tIME (fuel : Nat)
+    (bytes : ByteArray) (pos : Nat) (state : PngMetadataParseState)
+    (hdr : PngHeader) (typBytes chunkData : ByteArray) (posNext : Nat)
+    (hpos : pos + 8 ≤ bytes.size) (hLen : pos + 3 < bytes.size)
+    (hread : readChunk bytes pos hLen = some (typBytes, chunkData, posNext))
+    (hheader : state.header = some hdr)
+    (hnotIHDR : (typBytes == ihdrTypeBytes) = false)
+    (hnotPLTE : (typBytes == plteTypeBytes) = false)
+    (hnotIDAT : (typBytes == idatTypeBytes) = false)
+    (hnotIEND : (typBytes == iendTypeBytes) = false)
+    (hnotTRNS : (typBytes == trnsTypeBytes) = false)
+    (hnotBKGD : (typBytes == bkgdTypeBytes) = false)
+    (hnotGAMA : (typBytes == gamaTypeBytes) = false)
+    (hnotSRGB : (typBytes == srgbTypeBytes) = false)
+    (hTIME : (typBytes == timeTypeBytes) = true)
+    (hdup : state.metadata.modificationTime.isSome = true) :
+    parsePngLoopFuelWithMetadata (fuel + 1) bytes pos state = none := by
+  unfold parsePngLoopFuelWithMetadata
+  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
+    hnotTRNS, hnotBKGD, hnotGAMA, hnotSRGB, hTIME, hdup]
+
 /-- The metadata-aware parser records a valid `gAMA` chunk and continues.
 This is the branch-level preservation fact for image gamma metadata. -/
 lemma parsePngLoopFuelWithMetadata_accepts_gAMA (fuel : Nat)
@@ -643,11 +734,12 @@ lemma parsePngLoopFuel_rejects_sBIT (fuel : Nat)
     (hnotTRNS : (typBytes == trnsTypeBytes) = false)
     (hnotGAMA : (typBytes == gamaTypeBytes) = false)
     (hnotSRGB : (typBytes == srgbTypeBytes) = false)
+    (hnotTIME : (typBytes == timeTypeBytes) = false)
     (hSBIT : (typBytes == sbitTypeBytes) = true) :
     parsePngLoopFuel (fuel + 1) bytes pos state = none := by
   unfold parsePngLoopFuel
   simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
-    hnotTRNS, hnotGAMA, hnotSRGB, hSBIT]
+    hnotTRNS, hnotGAMA, hnotSRGB, hnotTIME, hSBIT]
 
 /-- Unknown critical chunk types are rejected after the header. -/
 lemma parsePngLoopFuel_rejects_unknown_critical (fuel : Nat)
@@ -663,12 +755,13 @@ lemma parsePngLoopFuel_rejects_unknown_critical (fuel : Nat)
     (hnotTRNS : (typBytes == trnsTypeBytes) = false)
     (hnotGAMA : (typBytes == gamaTypeBytes) = false)
     (hnotSRGB : (typBytes == srgbTypeBytes) = false)
+    (hnotTIME : (typBytes == timeTypeBytes) = false)
     (hnotSBIT : (typBytes == sbitTypeBytes) = false)
     (hcritical : isCriticalChunkType typBytes = true) :
     parsePngLoopFuel (fuel + 1) bytes pos state = none := by
   unfold parsePngLoopFuel
   simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
-    hnotTRNS, hnotGAMA, hnotSRGB, hnotSBIT, hcritical]
+    hnotTRNS, hnotGAMA, hnotSRGB, hnotTIME, hnotSBIT, hcritical]
 
 /-- Ancillary chunks (other than the explicitly handled color/precision metadata)
 before the `IDAT` run do not change parser state. -/
@@ -685,6 +778,7 @@ lemma parsePngLoopFuel_ignores_ancillary_before_idat (fuel : Nat)
     (hnotTRNS : (typBytes == trnsTypeBytes) = false)
     (hnotGAMA : (typBytes == gamaTypeBytes) = false)
     (hnotSRGB : (typBytes == srgbTypeBytes) = false)
+    (hnotTIME : (typBytes == timeTypeBytes) = false)
     (hnotSBIT : (typBytes == sbitTypeBytes) = false)
     (hcritical : isCriticalChunkType typBytes = false)
     (hseen : state.seenIDAT = false) :
@@ -694,7 +788,7 @@ lemma parsePngLoopFuel_ignores_ancillary_before_idat (fuel : Nat)
     lhs
     unfold parsePngLoopFuel
   simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
-    hnotTRNS, hnotGAMA, hnotSRGB, hnotSBIT, hcritical, hseen]
+    hnotTRNS, hnotGAMA, hnotSRGB, hnotTIME, hnotSBIT, hcritical, hseen]
 
 /-- An `IDAT` chunk in an open `IDAT` run appends its payload and continues. -/
 lemma parsePngLoopFuel_idat_appends_when_open (fuel : Nat)

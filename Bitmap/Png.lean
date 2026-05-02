@@ -1,4 +1,5 @@
 import Bitmap.Basic
+import Std.Time
 
 open System (FilePath)
 
@@ -101,6 +102,64 @@ def bkgdTypeBytes : ByteArray := "bKGD".toUTF8
 def gamaTypeBytes : ByteArray := "gAMA".toUTF8
 def srgbTypeBytes : ByteArray := "sRGB".toUTF8
 def sbitTypeBytes : ByteArray := "sBIT".toUTF8
+def timeTypeBytes : ByteArray := "tIME".toUTF8
+
+structure PngTime where
+  year : Nat
+  month : Nat
+  day : Nat
+  hour : Nat
+  minute : Nat
+  second : Nat
+deriving Repr, DecidableEq
+
+def pngTimeLeapYear (year : Nat) : Bool :=
+  year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+
+def pngTimeDaysInMonth (year month : Nat) : Nat :=
+  if month == 1 then
+    31
+  else if month == 2 then
+    if pngTimeLeapYear year then 29 else 28
+  else if month == 3 then
+    31
+  else if month == 4 then
+    30
+  else if month == 5 then
+    31
+  else if month == 6 then
+    30
+  else if month == 7 then
+    31
+  else if month == 8 then
+    31
+  else if month == 9 then
+    30
+  else if month == 10 then
+    31
+  else if month == 11 then
+    30
+  else if month == 12 then
+    31
+  else
+    0
+
+def PngTime.valid (time : PngTime) : Bool :=
+  decide (time.year ≤ 65535) &&
+  decide (1 ≤ time.month) && decide (time.month ≤ 12) &&
+  decide (1 ≤ time.day) && decide (time.day ≤ pngTimeDaysInMonth time.year time.month) &&
+  decide (time.hour < 24) &&
+  decide (time.minute < 60) &&
+  decide (time.second ≤ 60)
+
+def encodeTimeData? (time : PngTime) : Option ByteArray :=
+  if time.valid then
+    some <| ByteArray.mk #[
+      u8 (time.year / 256), u8 time.year,
+      u8 time.month, u8 time.day, u8 time.hour, u8 time.minute, u8 time.second
+    ]
+  else
+    none
 
 def mkChunkBytes (typBytes : ByteArray) (data : ByteArray) : ByteArray :=
   let lenBytes := u32be data.size
@@ -235,6 +294,7 @@ structure PngEncodeOptions where
   mode : PngEncodeMode := .fixed
   colorSpace : Option PngEncodeColorSpace := none
   filter : PngFilterStrategy := .none
+  modificationTime : Option PngTime := none
 deriving Repr, DecidableEq
 
 structure BitWriter where
@@ -1757,10 +1817,15 @@ structure PngMetadata where
   background : Option PngBackground := none
   gamma : Option Nat := none
   srgb : Option PngSrgbIntent := none
+  modificationTime : Option PngTime := none
 deriving Repr, DecidableEq
 
 def PngMetadata.empty : PngMetadata :=
-  { transparency := none, background := none, gamma := none, srgb := none }
+  { transparency := none
+    background := none
+    gamma := none
+    srgb := none
+    modificationTime := none }
 
 structure PngDecodeResult (px : Type u) [Pixel px] where
   bitmap : Bitmap px
@@ -1797,6 +1862,22 @@ def parseSrgbData (data : ByteArray) : Option PngSrgbIntent := do
     none
   else
     PngSrgbIntent.ofByte (data.get! 0)
+
+def parseTimeData (data : ByteArray) : Option PngTime := do
+  if data.size != 7 then
+    none
+  else
+    let time : PngTime :=
+      { year := readU16BE! data 0
+        month := (data.get! 2).toNat
+        day := (data.get! 3).toNat
+        hour := (data.get! 4).toNat
+        minute := (data.get! 5).toNat
+        second := (data.get! 6).toNat }
+    if time.valid then
+      some time
+    else
+      none
 
 def parseTrnsData (hdr : PngHeader) (data : ByteArray) : Option PngTransparency := do
   if hdr.colorType == 0 then
@@ -2119,6 +2200,14 @@ def parsePngLoopFuel (fuel : Nat) (bytes : ByteArray) (pos : Nat)
                         parsePngLoopFuel fuel bytes posNext
                           { state with
                               metadata := { state.metadata with srgb := some intent } }
+                  else if typBytes == timeTypeBytes then
+                    if state.metadata.modificationTime.isSome then
+                      none
+                    let modificationTime ← parseTimeData chunkData
+                    parsePngLoopFuel fuel bytes posNext
+                      { state with
+                          closedIDAT := if state.seenIDAT then true else state.closedIDAT
+                          metadata := { state.metadata with modificationTime := some modificationTime } }
                   else if typBytes == sbitTypeBytes then
                     -- sBIT records the significant bit count per channel; ignoring it would
                     -- silently misrepresent pixel precision.
@@ -2264,6 +2353,14 @@ def parsePngLoopFuelWithMetadata (fuel : Nat) (bytes : ByteArray) (pos : Nat)
                         parsePngLoopFuelWithMetadata fuel bytes posNext
                           { state with
                               metadata := { state.metadata with srgb := some intent } }
+                  else if typBytes == timeTypeBytes then
+                    if state.metadata.modificationTime.isSome then
+                      none
+                    let modificationTime ← parseTimeData chunkData
+                    parsePngLoopFuelWithMetadata fuel bytes posNext
+                      { state with
+                          closedIDAT := if state.seenIDAT then true else state.closedIDAT
+                          metadata := { state.metadata with modificationTime := some modificationTime } }
                   else if typBytes == sbitTypeBytes then
                     -- sBIT records the significant bit count per channel; ignoring it would
                     -- silently misrepresent pixel precision.
@@ -3823,9 +3920,23 @@ def encodeColorSpaceChunks? (colorSpace : Option PngEncodeColorSpace) : Option B
       else
         some srgbChunk
 
+def encodeTimeChunk? (modificationTime : Option PngTime) : Option ByteArray := do
+  match modificationTime with
+  | none => some ByteArray.empty
+  | some time =>
+      let data ← encodeTimeData? time
+      some (mkChunkBytes timeTypeBytes data)
+
+def encodeAncillaryChunks? (colorSpace : Option PngEncodeColorSpace)
+    (modificationTime : Option PngTime) : Option ByteArray := do
+  let colorSpaceChunks ← encodeColorSpaceChunks? colorSpace
+  let timeChunk ← encodeTimeChunk? modificationTime
+  some (colorSpaceChunks ++ timeChunk)
+
 def encodeBitmapCore (raw ihdr : ByteArray) (mode : PngEncodeMode)
-    (colorSpace : Option PngEncodeColorSpace) : Option ByteArray := do
-  let ancillary ← encodeColorSpaceChunks? colorSpace
+    (colorSpace : Option PngEncodeColorSpace) (modificationTime : Option PngTime) :
+    Option ByteArray := do
+  let ancillary ← encodeAncillaryChunks? colorSpace modificationTime
   let idat :=
     match mode with
     | .stored => zlibCompressStored raw
@@ -3916,7 +4027,7 @@ def encodeBitmapGray1WithOptions (bmp : BitmapGray1)
   let raw := encodeRawGray1WithFilter bmp options.filter
   let ihdr := u32be bmp.size.width ++ u32be bmp.size.height ++
     ByteArray.mk #[u8 1, u8 0, u8 0, u8 0, u8 0]
-  encodeBitmapCore raw ihdr options.mode options.colorSpace
+  encodeBitmapCore raw ihdr options.mode options.colorSpace options.modificationTime
 
 def encodeBitmapGray1Checked (bmp : BitmapGray1)
     (mode : PngEncodeMode := .fixed) : Except String ByteArray :=
@@ -3934,7 +4045,7 @@ def encodeBitmapGray1WithOptionsChecked (bmp : BitmapGray1)
     if hh : bmp.size.height < 2 ^ 32 then
       match encodeBitmapGray1WithOptions bmp hw hh options with
       | some bytes => Except.ok bytes
-      | none => Except.error "invalid PNG color-space encode options"
+      | none => Except.error "invalid PNG ancillary encode options"
     else
       Except.error "bitmap height exceeds PNG limit (2^32)"
   else
@@ -3974,7 +4085,7 @@ def encodeBitmapWithOptions {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap
     | _ => encodeRawWithFilter bmp options.filter
   let ihdr := u32be bmp.size.width ++ u32be bmp.size.height ++
     ByteArray.mk #[PngPixel.bitDepth (α := px), PngPixel.colorType (α := px), u8 0, u8 0, u8 0]
-  encodeBitmapCore raw ihdr options.mode options.colorSpace
+  encodeBitmapCore raw ihdr options.mode options.colorSpace options.modificationTime
 
 -- Encode a bitmap using the buffered fixed-Huffman deflate blocks (perf testing).
 
@@ -4000,12 +4111,40 @@ def encodeBitmapWithOptionsChecked {px : Type u} [Pixel px] [PngPixel px] (bmp :
     if hh : bmp.size.height < 2 ^ 32 then
       match encodeBitmapWithOptions bmp hw hh options with
       | some bytes => Except.ok bytes
-      | none => Except.error "invalid PNG color-space encode options"
+      | none => Except.error "invalid PNG ancillary encode options"
     else
       Except.error "bitmap height exceeds PNG limit (2^32)"
   else
     Except.error "bitmap width exceeds PNG limit (2^32)"
 
+def PngTime.ofDateTimeUTC? (dt : Std.Time.DateTime Std.Time.TimeZone.UTC) : Option PngTime :=
+  let year := (dt.year : Int)
+  if year < 0 then
+    none
+  else
+    let time : PngTime :=
+      { year := year.toNat
+        month := dt.month.val.toNat
+        day := dt.day.val.toNat
+        hour := dt.hour.val.toNat
+        minute := dt.minute.val.toNat
+        second := dt.second.val.toNat }
+    if time.valid then some time else none
+
+def currentPngTimeUTC? : IO (Except String PngTime) := do
+  let dt ← Std.Time.DateTime.now (tz := Std.Time.TimeZone.UTC)
+  match PngTime.ofDateTimeUTC? dt with
+  | some time => pure (Except.ok time)
+  | none => pure (Except.error "current UTC time is outside PNG tIME range")
+
+def PngEncodeOptions.withCurrentModificationTime
+    (options : PngEncodeOptions) : IO (Except String PngEncodeOptions) := do
+  if options.modificationTime.isSome then
+    pure (Except.ok options)
+  else
+    match ← currentPngTimeUTC? with
+    | Except.ok time => pure (Except.ok { options with modificationTime := some time })
+    | Except.error err => pure (Except.error err)
 
 def Bitmap.readPng {px : Type u} [Pixel px] [PngPixel px]
     (path : FilePath) : IO (Except String (Bitmap px)) := do
@@ -4027,21 +4166,43 @@ def BitmapGray1.readPng (path : FilePath) : IO (Except String BitmapGray1) := do
       | none => pure (Except.error "invalid PNG bitmap")
 
 def BitmapGray1.writePng (path : FilePath) (bmp : BitmapGray1)
+    (mode : PngEncodeMode := .fixed) : IO (Except String Unit) := do
+  match ← ({ mode := mode } : PngEncodeOptions).withCurrentModificationTime with
+  | Except.error err => pure (Except.error err)
+  | Except.ok options =>
+      match encodeBitmapGray1WithOptionsChecked bmp options with
+      | Except.error err => pure (Except.error err)
+      | Except.ok bytes => ioToExcept (IO.FS.writeBinFile path bytes)
+
+def BitmapGray1.writePngWithOptions (path : FilePath) (bmp : BitmapGray1)
+    (options : PngEncodeOptions := {}) : IO (Except String Unit) := do
+  match ← options.withCurrentModificationTime with
+  | Except.error err => pure (Except.error err)
+  | Except.ok options =>
+      match encodeBitmapGray1WithOptionsChecked bmp options with
+      | Except.error err => pure (Except.error err)
+      | Except.ok bytes => ioToExcept (IO.FS.writeBinFile path bytes)
+
+def BitmapGray1.writePngWithoutTime (path : FilePath) (bmp : BitmapGray1)
     (mode : PngEncodeMode := .fixed) : IO (Except String Unit) :=
   match encodeBitmapGray1Checked bmp mode with
   | Except.error err => pure (Except.error err)
   | Except.ok bytes => ioToExcept (IO.FS.writeBinFile path bytes)
 
-def BitmapGray1.writePngWithOptions (path : FilePath) (bmp : BitmapGray1)
-    (options : PngEncodeOptions := {}) : IO (Except String Unit) :=
-  match encodeBitmapGray1WithOptionsChecked bmp options with
-  | Except.error err => pure (Except.error err)
-  | Except.ok bytes => ioToExcept (IO.FS.writeBinFile path bytes)
-
 def Bitmap.writePngWithOptions {px : Type u} [Pixel px] [PngPixel px]
     (path : FilePath) (bmp : Bitmap px) (options : PngEncodeOptions := {}) :
+    IO (Except String Unit) := do
+  match ← options.withCurrentModificationTime with
+  | Except.error err => pure (Except.error err)
+  | Except.ok options =>
+      match encodeBitmapWithOptionsChecked (px := px) bmp options with
+      | Except.error err => pure (Except.error err)
+      | Except.ok bytes => ioToExcept (IO.FS.writeBinFile path bytes)
+
+def Bitmap.writePngWithoutTime {px : Type u} [Pixel px] [PngPixel px]
+    (path : FilePath) (bmp : Bitmap px) (mode : PngEncodeMode := .fixed) :
     IO (Except String Unit) :=
-  match encodeBitmapWithOptionsChecked (px := px) bmp options with
+  match encodeBitmapChecked (px := px) bmp mode with
   | Except.error err => pure (Except.error err)
   | Except.ok bytes => ioToExcept (IO.FS.writeBinFile path bytes)
 
@@ -4052,9 +4213,7 @@ def BitmapRGB8.readPng [Pixel PixelRGB8] [PngPixel PixelRGB8]
 def BitmapRGB8.writePng [Pixel PixelRGB8] [PngPixel PixelRGB8]
     (path : FilePath) (bmp : BitmapRGB8) (mode : PngEncodeMode := .fixed) :
     IO (Except String Unit) :=
-  match encodeBitmapChecked (px := PixelRGB8) bmp mode with
-  | Except.error err => pure (Except.error err)
-  | Except.ok bytes => ioToExcept (IO.FS.writeBinFile path bytes)
+  Bitmap.writePngWithOptions (px := PixelRGB8) path bmp { mode := mode }
 
 def BitmapRGB16.readPng [Pixel PixelRGB16] [PngPixel PixelRGB16]
     (path : FilePath) : IO (Except String BitmapRGB16) :=
@@ -4063,9 +4222,7 @@ def BitmapRGB16.readPng [Pixel PixelRGB16] [PngPixel PixelRGB16]
 def BitmapRGB16.writePng [Pixel PixelRGB16] [PngPixel PixelRGB16]
     (path : FilePath) (bmp : BitmapRGB16) (mode : PngEncodeMode := .fixed) :
     IO (Except String Unit) :=
-  match encodeBitmapChecked (px := PixelRGB16) bmp mode with
-  | Except.error err => pure (Except.error err)
-  | Except.ok bytes => ioToExcept (IO.FS.writeBinFile path bytes)
+  Bitmap.writePngWithOptions (px := PixelRGB16) path bmp { mode := mode }
 
 def BitmapRGBA8.readPng [Pixel PixelRGBA8] [PngPixel PixelRGBA8]
     (path : FilePath) : IO (Except String BitmapRGBA8) :=
@@ -4074,9 +4231,7 @@ def BitmapRGBA8.readPng [Pixel PixelRGBA8] [PngPixel PixelRGBA8]
 def BitmapRGBA8.writePng [Pixel PixelRGBA8] [PngPixel PixelRGBA8]
     (path : FilePath) (bmp : BitmapRGBA8) (mode : PngEncodeMode := .fixed) :
     IO (Except String Unit) :=
-  match encodeBitmapChecked (px := PixelRGBA8) bmp mode with
-  | Except.error err => pure (Except.error err)
-  | Except.ok bytes => ioToExcept (IO.FS.writeBinFile path bytes)
+  Bitmap.writePngWithOptions (px := PixelRGBA8) path bmp { mode := mode }
 
 def BitmapRGBA16.readPng [Pixel PixelRGBA16] [PngPixel PixelRGBA16]
     (path : FilePath) : IO (Except String BitmapRGBA16) :=
@@ -4085,9 +4240,7 @@ def BitmapRGBA16.readPng [Pixel PixelRGBA16] [PngPixel PixelRGBA16]
 def BitmapRGBA16.writePng [Pixel PixelRGBA16] [PngPixel PixelRGBA16]
     (path : FilePath) (bmp : BitmapRGBA16) (mode : PngEncodeMode := .fixed) :
     IO (Except String Unit) :=
-  match encodeBitmapChecked (px := PixelRGBA16) bmp mode with
-  | Except.error err => pure (Except.error err)
-  | Except.ok bytes => ioToExcept (IO.FS.writeBinFile path bytes)
+  Bitmap.writePngWithOptions (px := PixelRGBA16) path bmp { mode := mode }
 
 def BitmapGray8.readPng [Pixel PixelGray8] [PngPixel PixelGray8]
     (path : FilePath) : IO (Except String BitmapGray8) :=
@@ -4096,9 +4249,7 @@ def BitmapGray8.readPng [Pixel PixelGray8] [PngPixel PixelGray8]
 def BitmapGray8.writePng [Pixel PixelGray8] [PngPixel PixelGray8]
     (path : FilePath) (bmp : BitmapGray8) (mode : PngEncodeMode := .fixed) :
     IO (Except String Unit) :=
-  match encodeBitmapChecked (px := PixelGray8) bmp mode with
-  | Except.error err => pure (Except.error err)
-  | Except.ok bytes => ioToExcept (IO.FS.writeBinFile path bytes)
+  Bitmap.writePngWithOptions (px := PixelGray8) path bmp { mode := mode }
 
 def BitmapGray16.readPng [Pixel PixelGray16] [PngPixel PixelGray16]
     (path : FilePath) : IO (Except String BitmapGray16) :=
@@ -4107,9 +4258,7 @@ def BitmapGray16.readPng [Pixel PixelGray16] [PngPixel PixelGray16]
 def BitmapGray16.writePng [Pixel PixelGray16] [PngPixel PixelGray16]
     (path : FilePath) (bmp : BitmapGray16) (mode : PngEncodeMode := .fixed) :
     IO (Except String Unit) :=
-  match encodeBitmapChecked (px := PixelGray16) bmp mode with
-  | Except.error err => pure (Except.error err)
-  | Except.ok bytes => ioToExcept (IO.FS.writeBinFile path bytes)
+  Bitmap.writePngWithOptions (px := PixelGray16) path bmp { mode := mode }
 
 def BitmapGrayAlpha8.readPng [Pixel PixelGrayAlpha8] [PngPixel PixelGrayAlpha8]
     (path : FilePath) : IO (Except String BitmapGrayAlpha8) :=
@@ -4118,9 +4267,7 @@ def BitmapGrayAlpha8.readPng [Pixel PixelGrayAlpha8] [PngPixel PixelGrayAlpha8]
 def BitmapGrayAlpha8.writePng [Pixel PixelGrayAlpha8] [PngPixel PixelGrayAlpha8]
     (path : FilePath) (bmp : BitmapGrayAlpha8) (mode : PngEncodeMode := .fixed) :
     IO (Except String Unit) :=
-  match encodeBitmapChecked (px := PixelGrayAlpha8) bmp mode with
-  | Except.error err => pure (Except.error err)
-  | Except.ok bytes => ioToExcept (IO.FS.writeBinFile path bytes)
+  Bitmap.writePngWithOptions (px := PixelGrayAlpha8) path bmp { mode := mode }
 
 def BitmapGrayAlpha16.readPng [Pixel PixelGrayAlpha16] [PngPixel PixelGrayAlpha16]
     (path : FilePath) : IO (Except String BitmapGrayAlpha16) :=
@@ -4129,9 +4276,7 @@ def BitmapGrayAlpha16.readPng [Pixel PixelGrayAlpha16] [PngPixel PixelGrayAlpha1
 def BitmapGrayAlpha16.writePng [Pixel PixelGrayAlpha16] [PngPixel PixelGrayAlpha16]
     (path : FilePath) (bmp : BitmapGrayAlpha16) (mode : PngEncodeMode := .fixed) :
     IO (Except String Unit) :=
-  match encodeBitmapChecked (px := PixelGrayAlpha16) bmp mode with
-  | Except.error err => pure (Except.error err)
-  | Except.ok bytes => ioToExcept (IO.FS.writeBinFile path bytes)
+  Bitmap.writePngWithOptions (px := PixelGrayAlpha16) path bmp { mode := mode }
 
 instance : PngPixel PixelRGB8 where
   encodeRaw := encodeRawFast
