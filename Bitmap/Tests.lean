@@ -39,6 +39,38 @@ private def zlibDecompressFixture (bytes : ByteArray) : Option ByteArray :=
   else
     none
 
+private def inflatedPngRaw? (bytes : ByteArray) : Option ByteArray := do
+  let parsed ←
+    if h : 8 ≤ bytes.size then
+      Png.parsePngForDecode bytes h
+    else
+      none
+  if hsize : 2 ≤ parsed.idat.size then
+    match Png.zlibDecompressStored parsed.idat hsize with
+    | some raw => some raw
+    | none => Png.zlibDecompress parsed.idat hsize
+  else
+    none
+
+private def allRowsHaveFilter (raw : ByteArray) (rowBytes h : Nat) (filter : UInt8) :
+    Bool :=
+  Id.run do
+    let mut ok := true
+    for y in [0:h] do
+      let offset := y * (rowBytes + 1)
+      if raw.get! offset != filter then
+        ok := false
+    return ok
+
+private def rawHasNonzeroFilter (raw : ByteArray) (rowBytes h : Nat) : Bool :=
+  Id.run do
+    let mut found := false
+    for y in [0:h] do
+      let offset := y * (rowBytes + 1)
+      if raw.get! offset != 0 then
+        found := true
+    return found
+
 private def dynamicRepeatZlibFixture : ByteArray :=
   byteArrayOfNats
     [120, 218, 237, 195, 49, 13, 0, 0, 8, 3, 48, 109, 131, 249, 215, 132, 12, 158,
@@ -853,6 +885,145 @@ private def expectGray1Fixtures : IO Unit := do
         | none =>
             throw (IO.userError "Gray1 encode/decode round-trip failed")
 
+private def filterRGB8Fixture : BitmapRGB8 :=
+  Bitmap.ofPixelFn 6 4 (fun idx : Fin (6 * 4) =>
+    let x := idx.val % 6
+    let y := idx.val / 6
+    { r := Png.u8 (30 + x * 17 + y * 9)
+      g := Png.u8 (20 + x * 11 + y * 23)
+      b := Png.u8 (200 - x * 13 + y * 5) })
+
+private def filterRGBA8Fixture : BitmapRGBA8 :=
+  BitmapRGBA8.ofPixelFn 5 3 (fun idx : Fin (5 * 3) =>
+    let x := idx.val % 5
+    let y := idx.val / 5
+    { r := Png.u8 (x * 40 + y * 7)
+      g := Png.u8 (180 - x * 12 + y * 9)
+      b := Png.u8 (50 + x * 21 + y * 15)
+      a := Png.u8 (90 + x * 19 + y * 17) })
+
+private def filterGray8Fixture : BitmapGray8 :=
+  BitmapGray8.ofPixelFn 7 3 (fun idx : Fin (7 * 3) =>
+    let x := idx.val % 7
+    let y := idx.val / 7
+    { v := Png.u8 (x * 31 + y * 37) })
+
+private def filterGray16Fixture : BitmapGray16 :=
+  BitmapGray16.ofPixelFn 4 3 (fun idx : Fin (4 * 3) =>
+    let x := idx.val % 4
+    let y := idx.val / 4
+    { v := u16 (0x1200 + x * 0x101 + y * 0x1111) })
+
+private def adaptiveNonzeroFixture : BitmapRGB8 :=
+  Bitmap.ofPixelFn 8 4 (fun _idx : Fin (8 * 4) =>
+    { r := Png.u8 80, g := Png.u8 80, b := Png.u8 80 })
+
+private def expectFilteredBitmapRoundTrip {px : Type} [Pixel px] [Png.PngPixel px]
+    (name : String) (bmp : Bitmap px) (strategy : Png.PngFilterStrategy) : IO ByteArray := do
+  match Png.encodeBitmapWithOptionsChecked (px := px) bmp
+      { mode := .fixed, filter := strategy } with
+  | Except.error err =>
+      throw (IO.userError s!"{name}: filtered encode failed: {err}")
+  | Except.ok bytes =>
+      match Png.decodeBitmap (px := px) bytes with
+      | some decoded =>
+          if decoded.size.width != bmp.size.width ||
+              decoded.size.height != bmp.size.height ||
+              decoded.data != bmp.data then
+            throw (IO.userError s!"{name}: filtered round-trip mismatch")
+          pure bytes
+      | none =>
+          throw (IO.userError s!"{name}: filtered decode failed")
+
+private def expectFilteredGray1RoundTrip
+    (name : String) (bmp : BitmapGray1) (strategy : Png.PngFilterStrategy) :
+    IO ByteArray := do
+  match Png.encodeBitmapGray1WithOptionsChecked bmp { mode := .fixed, filter := strategy } with
+  | Except.error err =>
+      throw (IO.userError s!"{name}: filtered Gray1 encode failed: {err}")
+  | Except.ok bytes =>
+      match Png.decodeBitmapGray1 bytes with
+      | some decoded =>
+          if decoded != bmp then
+            throw (IO.userError s!"{name}: filtered Gray1 round-trip mismatch")
+          pure bytes
+      | none =>
+          throw (IO.userError s!"{name}: filtered Gray1 decode failed")
+
+private def expectRawFilterByte (name : String) (bytes : ByteArray)
+    (rowBytes h : Nat) (filter : UInt8) : IO Unit := do
+  match inflatedPngRaw? bytes with
+  | some raw =>
+      if raw.size != h * (rowBytes + 1) then
+        throw (IO.userError s!"{name}: filtered raw size mismatch")
+      if !allRowsHaveFilter raw rowBytes h filter then
+        throw (IO.userError s!"{name}: unexpected filter byte")
+  | none =>
+      throw (IO.userError s!"{name}: failed to inflate encoded PNG")
+
+private def expectPngEncodeFilters : IO Unit := do
+  let filters : List Png.PngRowFilter := [.none, .sub, .up, .average, .paeth]
+  for filter in filters do
+    let strategy := Png.PngFilterStrategy.fixed filter
+    let rgbBytes ← expectFilteredBitmapRoundTrip "RGB8 fixed filter" filterRGB8Fixture strategy
+    expectRawFilterByte "RGB8 fixed filter" rgbBytes
+      (filterRGB8Fixture.size.width * bytesPerPixelRGB) filterRGB8Fixture.size.height filter.toByte
+    let rgbaBytes ← expectFilteredBitmapRoundTrip "RGBA8 fixed filter" filterRGBA8Fixture strategy
+    expectRawFilterByte "RGBA8 fixed filter" rgbaBytes
+      (filterRGBA8Fixture.size.width * bytesPerPixelRGBA) filterRGBA8Fixture.size.height filter.toByte
+    let grayBytes ← expectFilteredBitmapRoundTrip "Gray8 fixed filter" filterGray8Fixture strategy
+    expectRawFilterByte "Gray8 fixed filter" grayBytes
+      (filterGray8Fixture.size.width * bytesPerPixelGray) filterGray8Fixture.size.height filter.toByte
+    let grayAlphaBytes ← expectFilteredBitmapRoundTrip "GrayAlpha8 fixed filter" grayAlphaFixture strategy
+    expectRawFilterByte "GrayAlpha8 fixed filter" grayAlphaBytes
+      (grayAlphaFixture.size.width * bytesPerPixelGrayAlpha) grayAlphaFixture.size.height filter.toByte
+    let rgb16Bytes ← expectFilteredBitmapRoundTrip "RGB16 fixed filter" rgb16DownsampleFixture strategy
+    expectRawFilterByte "RGB16 fixed filter" rgb16Bytes
+      (rgb16DownsampleFixture.size.width * bytesPerPixelRGB16) rgb16DownsampleFixture.size.height filter.toByte
+    let gray16Bytes ← expectFilteredBitmapRoundTrip "Gray16 fixed filter" filterGray16Fixture strategy
+    expectRawFilterByte "Gray16 fixed filter" gray16Bytes
+      (filterGray16Fixture.size.width * bytesPerPixelGray16) filterGray16Fixture.size.height filter.toByte
+    for w in [1, 7, 8, 9, 17] do
+      let bmp := gray1FixtureBitmap w 4
+      let bytes ← expectFilteredGray1RoundTrip "Gray1 fixed filter" bmp strategy
+      expectRawFilterByte "Gray1 fixed filter" bytes
+        (gray1RowBytes bmp.size.width) bmp.size.height filter.toByte
+
+  let defaultBytes ←
+    match Png.encodeBitmapChecked (px := PixelRGB8) filterRGB8Fixture .fixed with
+    | Except.ok bytes => pure bytes
+    | Except.error err => throw (IO.userError err)
+  let optionDefaultBytes ←
+    match Png.encodeBitmapWithOptionsChecked (px := PixelRGB8) filterRGB8Fixture
+        { mode := .fixed, filter := .none } with
+    | Except.ok bytes => pure bytes
+    | Except.error err => throw (IO.userError err)
+  if defaultBytes != optionDefaultBytes then
+    throw (IO.userError "default encoder output changed when filter options were omitted")
+
+  let adaptiveBytes ←
+    expectFilteredBitmapRoundTrip "RGB8 adaptive filter" adaptiveNonzeroFixture .adaptive
+  match inflatedPngRaw? adaptiveBytes with
+  | some raw =>
+      if !rawHasNonzeroFilter raw
+          (adaptiveNonzeroFixture.size.width * bytesPerPixelRGB)
+          adaptiveNonzeroFixture.size.height then
+        throw (IO.userError "adaptive filter failed to choose any nonzero row filter")
+  | none =>
+      throw (IO.userError "adaptive filter PNG failed to inflate")
+  let gray1Adaptive ←
+    expectFilteredGray1RoundTrip "Gray1 adaptive filter" (gray1FixtureBitmap 17 4) .adaptive
+  if (inflatedPngRaw? gray1Adaptive).isNone then
+    throw (IO.userError "Gray1 adaptive filter PNG failed to inflate")
+  let zeroBmp := mkBlankBitmap 5 3 { r := Png.u8 0, g := Png.u8 0, b := Png.u8 0 }
+  let zeroBytes ← expectFilteredBitmapRoundTrip "adaptive zero tie" zeroBmp .adaptive
+  match inflatedPngRaw? zeroBytes with
+  | some raw =>
+      if !allRowsHaveFilter raw (zeroBmp.size.width * bytesPerPixelRGB) zeroBmp.size.height 0 then
+        throw (IO.userError "adaptive all-zero tie did not choose filter 0")
+  | none =>
+      throw (IO.userError "adaptive zero PNG failed to inflate")
+
 private def expect16To8Downsample : IO Unit := do
   let rgbBytes ← encodeFixturePng rgb16DownsampleFixture
   match Png.decodeBitmap (px := PixelRGB8) rgbBytes with
@@ -1445,6 +1616,8 @@ def run : IO Unit := do
   IO.println "png Adam7 fixtures: ok"
   expectGray1Fixtures
   IO.println "png Gray1 fixtures: ok"
+  expectPngEncodeFilters
+  IO.println "png encoder filter fixtures: ok"
   expectColorSpaceChunks
   IO.println "png sRGB/gAMA fixtures: ok"
   pngAncillaryChunkFixtures

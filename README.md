@@ -71,6 +71,11 @@ This library has proofs about:
   (`pngColorTypeBitDepthSupported_gray1`,
   `pngColorTypeBitDepthSupported_rgb1_false`, `gray1FlatToFilterZeroRaw_size`,
   `encodeRawGray1_size`);
+- focused encoder-filter helper facts for valid filter bytes, filter row size
+  preservation, fixed-filter option sizing, adaptive filter-byte validity, and
+  default filter-0 raw compatibility (`pngRowFilter_toByte_valid`,
+  `filterRow_size`, `filterRowForStrategy_fixed_size`,
+  `adaptiveFilterRow_toByte_valid`, `encodeRawWithFilter_none_size`);
 - stored DEFLATE block forward correctness against an inductive
   `StoredDeflateStreamSpec` independent of the encoder
   (`storedBlockSpec_decode_correct`, `storedDeflateStreamSpec_decode_correct`,
@@ -138,7 +143,7 @@ has focused layout and validation lemmas plus runtime fixture coverage.
 | Color types | `0` Grayscale, `2` RGB, `4` Grayscale+Alpha, `6` RGBA |
 | Bit depth | Grayscale: 1, 8, or 16 bits per channel. RGB, Grayscale+Alpha, and RGBA: 8 or 16 bits per channel |
 | Pixel formats | `PixelGray1`/`BitmapGray1`, `PixelGray8`, `PixelRGB8`, `PixelGrayAlpha8`, `PixelRGBA8`, `PixelGray16`, `PixelRGB16`, `PixelGrayAlpha16`, `PixelRGBA16` |
-| Filter type | `0` (None) only — every encoded row is written with filter byte `0x00` |
+| Filter type | Existing `encodeBitmap` APIs emit filter `0` rows. `encodeBitmapWithOptionsChecked` and `encodeBitmapGray1WithOptionsChecked` can opt into fixed filters `0` None, `1` Sub, `2` Up, `3` Average, `4` Paeth, or deterministic adaptive per-row selection |
 | Compression modes | `.stored` (uncompressed DEFLATE), `.fixed` (fixed-Huffman with LZ77 distance-1 run encoding), `.dynamic` (dynamic-block header; payload currently delegates to fixed-Huffman) |
 | Interlace | None (encoder always emits non-interlaced PNGs) |
 | Chunks emitted | Existing `encodeBitmap` APIs emit `IHDR`, one `IDAT`, `IEND` only. `encodeBitmapWithOptionsChecked` and `encodeBitmapGray1WithOptionsChecked` can also emit validated `gAMA` or `sRGB` chunks, with optional compatible `gAMA=45455` before `sRGB` |
@@ -174,7 +179,6 @@ has focused layout and validation lemmas plus runtime fixture coverage.
 - `sBIT` chunks — explicitly **rejected** (decoder returns `none`) rather than silently ignored, to avoid the silent-corruption hazard of dropping precision metadata that affects pixel semantics
 - Unknown critical chunks (any chunk type whose first byte is uppercase and not `IHDR`/`PLTE`/`IDAT`/`IEND`) — rejected per the PNG spec
 - Reading-back of most ancillary chunk **content** (`tEXt`, `pHYs`, `cHRM`, `iCCP`, etc.) — those chunks are validated and skipped; `decodeBitmapWithMetadata` preserves supported `gAMA`, `sRGB`, `bKGD`, and `tRNS`
-- Encoder-side filter selection (always emits filter 0)
 - Genuinely-distinct dynamic-Huffman encoding — `.dynamic` emits a dynamic-block header but delegates the deflate payload to fixed-Huffman
 
 ## Usage

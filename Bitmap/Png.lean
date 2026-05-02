@@ -210,9 +210,31 @@ inductive PngEncodeColorSpace
   | srgb (intent : PngSrgbIntent) (includeCompatGamma : Bool)
 deriving Repr, DecidableEq
 
+inductive PngRowFilter
+  | none
+  | sub
+  | up
+  | average
+  | paeth
+deriving Repr, DecidableEq
+
+def PngRowFilter.toByte : PngRowFilter -> UInt8
+  | .none => u8 0
+  | .sub => u8 1
+  | .up => u8 2
+  | .average => u8 3
+  | .paeth => u8 4
+
+inductive PngFilterStrategy
+  | none
+  | fixed (filter : PngRowFilter)
+  | adaptive
+deriving Repr, DecidableEq
+
 structure PngEncodeOptions where
   mode : PngEncodeMode := .fixed
   colorSpace : Option PngEncodeColorSpace := none
+  filter : PngFilterStrategy := .none
 deriving Repr, DecidableEq
 
 structure BitWriter where
@@ -2310,6 +2332,68 @@ def unfilterRow (filter : UInt8) (row : ByteArray) (prev : ByteArray) (bpp : Nat
       out := out.push recon
     return out
 
+def filterResidualByte (sample predictor : UInt8) : UInt8 :=
+  u8 (sample.toNat + 256 - predictor.toNat)
+
+def filterRowPredictor (filter : PngRowFilter) (row prev : ByteArray) (bpp i : Nat) :
+    UInt8 :=
+  let a := if i >= bpp then row.get! (i - bpp) else (0 : UInt8)
+  let b := if i < prev.size then prev.get! i else (0 : UInt8)
+  let c := if i >= bpp && i < prev.size then prev.get! (i - bpp) else (0 : UInt8)
+  match filter with
+  | .none => 0
+  | .sub => a
+  | .up => b
+  | .average => u8 ((a.toNat + b.toNat) / 2)
+  | .paeth => u8 (paethPredictor a.toNat b.toNat c.toNat)
+
+def filterRow (filter : PngRowFilter) (row prev : ByteArray) (bpp : Nat) : ByteArray :=
+  match filter with
+  | .none => row
+  | _ =>
+      Id.run do
+        let rowLen := row.size
+        let mut out := ByteArray.emptyWithCapacity rowLen
+        for i in [0:rowLen] do
+          let sample := row.get! i
+          let predictor := filterRowPredictor filter row prev bpp i
+          out := out.push (filterResidualByte sample predictor)
+        return out
+
+def filterScoreByte (b : UInt8) : Nat :=
+  let n := b.toNat
+  if n < 128 then n else 256 - n
+
+def filterRowScore (row : ByteArray) : Nat :=
+  Id.run do
+    let mut score := 0
+    for i in [0:row.size] do
+      score := score + filterScoreByte (row.get! i)
+    return score
+
+def chooseLowerFilterScore (best candidate : PngRowFilter × ByteArray) :
+    PngRowFilter × ByteArray :=
+  if filterRowScore candidate.2 < filterRowScore best.2 then
+    candidate
+  else
+    best
+
+def adaptiveFilterRow (row prev : ByteArray) (bpp : Nat) : PngRowFilter × ByteArray :=
+  let best : PngRowFilter × ByteArray := (.none, row)
+  let best := chooseLowerFilterScore best (.sub, filterRow .sub row prev bpp)
+  let best := chooseLowerFilterScore best (.up, filterRow .up row prev bpp)
+  let best := chooseLowerFilterScore best (.average, filterRow .average row prev bpp)
+  chooseLowerFilterScore best (.paeth, filterRow .paeth row prev bpp)
+
+def filterRowForStrategy (strategy : PngFilterStrategy) (row prev : ByteArray) (bpp : Nat) :
+    UInt8 × ByteArray :=
+  match strategy with
+  | .none => (PngRowFilter.none.toByte, row)
+  | .fixed filter => (filter.toByte, filterRow filter row prev bpp)
+  | .adaptive =>
+      let chosen := adaptiveFilterRow row prev bpp
+      (chosen.1.toByte, chosen.2)
+
 structure Adam7Pass where
   startX : Nat
   startY : Nat
@@ -3679,11 +3763,50 @@ def encodeRawFast {px : Type u} [Pixel px] (bmp : Bitmap px) : ByteArray :=
   let raw := ByteArray.mk <| Array.replicate rawSize 0
   encodeRawPrefix bmp.data rowBytes h raw
 
+def encodeRawFilteredRows (data : ByteArray) (rowBytes h y : Nat)
+    (prev raw : ByteArray) (strategy : PngFilterStrategy) (bpp : Nat) : ByteArray :=
+  if hlt : y < h then
+    let start := y * rowBytes
+    let row := data.extract start (start + rowBytes)
+    let filtered := filterRowForStrategy strategy row prev bpp
+    let raw := raw.push filtered.1
+    let raw := raw ++ filtered.2
+    encodeRawFilteredRows data rowBytes h (y + 1) row raw strategy bpp
+  else
+    raw
+termination_by h - y
+decreasing_by
+  have hy : y < h := hlt
+  have hy' : y < y + 1 := Nat.lt_succ_self y
+  exact Nat.sub_lt_sub_left hy hy'
+
+def encodeRawWithFilter {px : Type u} [Pixel px] (bmp : Bitmap px)
+    (strategy : PngFilterStrategy) : ByteArray :=
+  match strategy with
+  | .none => encodeRawFast bmp
+  | _ =>
+      let w := bmp.size.width
+      let h := bmp.size.height
+      let bpp := Pixel.bytesPerPixel (α := px)
+      let rowBytes := w * bpp
+      let rawSize := h * (rowBytes + 1)
+      let raw := ByteArray.emptyWithCapacity rawSize
+      encodeRawFilteredRows bmp.data rowBytes h 0 ByteArray.empty raw strategy bpp
+
 def encodeRawGray1 (bmp : BitmapGray1) : ByteArray :=
   let rowBytes := gray1RowBytes bmp.size.width
   let rawSize := bmp.size.height * (rowBytes + 1)
   let raw := ByteArray.mk <| Array.replicate rawSize 0
   encodeRawPrefix bmp.data rowBytes bmp.size.height raw
+
+def encodeRawGray1WithFilter (bmp : BitmapGray1) (strategy : PngFilterStrategy) : ByteArray :=
+  match strategy with
+  | .none => encodeRawGray1 bmp
+  | _ =>
+      let rowBytes := gray1RowBytes bmp.size.width
+      let rawSize := bmp.size.height * (rowBytes + 1)
+      let raw := ByteArray.emptyWithCapacity rawSize
+      encodeRawFilteredRows bmp.data rowBytes bmp.size.height 0 ByteArray.empty raw strategy 1
 
 def encodeColorSpaceChunks? (colorSpace : Option PngEncodeColorSpace) : Option ByteArray :=
   match colorSpace with
@@ -3790,7 +3913,7 @@ def encodeBitmapGray1WithOptions (bmp : BitmapGray1)
     (options : PngEncodeOptions := {}) : Option ByteArray :=
   have _ := hw
   have _ := hh
-  let raw := encodeRawGray1 bmp
+  let raw := encodeRawGray1WithFilter bmp options.filter
   let ihdr := u32be bmp.size.width ++ u32be bmp.size.height ++
     ByteArray.mk #[u8 1, u8 0, u8 0, u8 0, u8 0]
   encodeBitmapCore raw ihdr options.mode options.colorSpace
@@ -3845,7 +3968,10 @@ def encodeBitmapWithOptions {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap
     (options : PngEncodeOptions := {}) : Option ByteArray :=
   have _ := hw
   have _ := hh
-  let raw := PngPixel.encodeRaw (α := px) bmp
+  let raw :=
+    match options.filter with
+    | .none => PngPixel.encodeRaw (α := px) bmp
+    | _ => encodeRawWithFilter bmp options.filter
   let ihdr := u32be bmp.size.width ++ u32be bmp.size.height ++
     ByteArray.mk #[PngPixel.bitDepth (α := px), PngPixel.colorType (α := px), u8 0, u8 0, u8 0]
   encodeBitmapCore raw ihdr options.mode options.colorSpace
@@ -3903,6 +4029,19 @@ def BitmapGray1.readPng (path : FilePath) : IO (Except String BitmapGray1) := do
 def BitmapGray1.writePng (path : FilePath) (bmp : BitmapGray1)
     (mode : PngEncodeMode := .fixed) : IO (Except String Unit) :=
   match encodeBitmapGray1Checked bmp mode with
+  | Except.error err => pure (Except.error err)
+  | Except.ok bytes => ioToExcept (IO.FS.writeBinFile path bytes)
+
+def BitmapGray1.writePngWithOptions (path : FilePath) (bmp : BitmapGray1)
+    (options : PngEncodeOptions := {}) : IO (Except String Unit) :=
+  match encodeBitmapGray1WithOptionsChecked bmp options with
+  | Except.error err => pure (Except.error err)
+  | Except.ok bytes => ioToExcept (IO.FS.writeBinFile path bytes)
+
+def Bitmap.writePngWithOptions {px : Type u} [Pixel px] [PngPixel px]
+    (path : FilePath) (bmp : Bitmap px) (options : PngEncodeOptions := {}) :
+    IO (Except String Unit) :=
+  match encodeBitmapWithOptionsChecked (px := px) bmp options with
   | Except.error err => pure (Except.error err)
   | Except.ok bytes => ioToExcept (IO.FS.writeBinFile path bytes)
 
