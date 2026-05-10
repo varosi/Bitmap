@@ -1,5 +1,6 @@
 import Bitmap.Basic
 import Bitmap.Png
+import Bitmap.Widget
 
 open Bitmaps
 
@@ -534,6 +535,9 @@ private def timeChunk (time : Png.PngTime) : ByteArray :=
   match Png.encodeTimeData? time with
   | some data => Png.mkChunkBytes Png.timeTypeBytes data
   | none => Png.mkChunkBytes Png.timeTypeBytes ByteArray.empty
+
+private def physical300Dpi : Png.PngPhysicalPixelDimensions :=
+  Png.PngPhysicalPixelDimensions.ofDpiRounded 300 300
 
 private def plteChunk : ByteArray :=
   Png.mkChunkBytes Png.plteTypeBytes
@@ -1517,6 +1521,70 @@ private def expectTimeChunks : IO Unit := do
   catch _ =>
     pure ()
 
+private def expectPhysicalMetadata : IO Unit := do
+  let rgbFixture : BitmapRGB8 :=
+    Bitmap.ofPixelFn 2 1 (fun idx : Fin (2 * 1) =>
+      match idx.val with
+      | 0 => { r := Png.u8 22, g := Png.u8 44, b := Png.u8 66 }
+      | _ => { r := Png.u8 88, g := Png.u8 110, b := Png.u8 132 })
+  match Png.encodeBitmapWithOptionsChecked (px := PixelRGB8) rgbFixture
+      { mode := .fixed
+        colorSpace := some (.srgb .perceptual true)
+        physical := some physical300Dpi
+        modificationTime := some fixedPngTime } with
+  | Except.ok bytes =>
+      if bytes.extract 37 41 != Png.gamaTypeBytes then
+        throw (IO.userError "encoder did not emit compatibility gAMA before sRGB")
+      if bytes.extract 53 57 != Png.srgbTypeBytes then
+        throw (IO.userError "encoder did not emit sRGB before pHYs")
+      if bytes.extract 66 70 != Png.physTypeBytes then
+        throw (IO.userError "encoder did not emit pHYs after color-space metadata")
+      if bytes.extract 87 91 != Png.timeTypeBytes then
+        throw (IO.userError "encoder did not emit tIME after pHYs")
+      match Png.decodeBitmapWithMetadata (px := PixelRGB8) bytes with
+      | some decoded =>
+          if decoded.bitmap.data != rgbFixture.data then
+            throw (IO.userError "pHYs encode changed RGB samples")
+          if decoded.metadata.physical != some physical300Dpi then
+            throw (IO.userError "encoded pHYs metadata failed to parse")
+      | none =>
+          throw (IO.userError "encoded pHYs PNG failed to decode")
+  | Except.error err =>
+      throw (IO.userError err)
+  let path := System.FilePath.mk "/tmp/bitmap_phys_write.png"
+  match ← Png.Bitmap.writePngWithOptions (px := PixelRGB8) path rgbFixture
+      { mode := .fixed, physical := some physical300Dpi, modificationTime := some fixedPngTime } with
+  | Except.error err =>
+      throw (IO.userError err)
+  | Except.ok _ =>
+      let bytes ← IO.FS.readBinFile path
+      match Png.decodeBitmapWithMetadata (px := PixelRGB8) bytes with
+      | some decoded =>
+          if decoded.metadata.physical != some physical300Dpi then
+            throw (IO.userError "file write did not preserve pHYs metadata")
+      | none =>
+          throw (IO.userError "pHYs file write failed to decode")
+  try
+    IO.FS.removeFile path
+  catch _ =>
+    pure ()
+  let props :=
+    (Bitmaps.Widget.BitmapRGB8.widgetProps rgbFixture).withPngMetadata
+      { Png.PngMetadata.empty with physical := some physical300Dpi }
+  if props.physicalXPixelsPerUnit != some physical300Dpi.xPixelsPerUnit ||
+      props.physicalYPixelsPerUnit != some physical300Dpi.yPixelsPerUnit ||
+      props.physicalUnitIsMeter != true then
+    throw (IO.userError "widget props did not preserve meter pHYs metadata")
+  let aspectOnly : Png.PngPhysicalPixelDimensions :=
+    { xPixelsPerUnit := 2, yPixelsPerUnit := 1, unit := .unknown }
+  let aspectProps :=
+    (Bitmaps.Widget.BitmapRGB8.widgetProps rgbFixture).withPngMetadata
+      { Png.PngMetadata.empty with physical := some aspectOnly }
+  if aspectProps.physicalXPixelsPerUnit != some 2 ||
+      aspectProps.physicalYPixelsPerUnit != some 1 ||
+      aspectProps.physicalUnitIsMeter != false then
+    throw (IO.userError "widget props did not preserve aspect-only pHYs metadata")
+
 -- Verify the tolerate-and-skip behavior for ancillary chunks plus the
 -- rejection guarantees for pixel-affecting chunks, unknown critical chunks,
 -- and CRC mismatches. All fixtures live under Bitmap/Tests/.
@@ -1736,6 +1804,8 @@ def run : IO Unit := do
   IO.println "png sRGB/gAMA fixtures: ok"
   expectTimeChunks
   IO.println "png tIME fixtures: ok"
+  expectPhysicalMetadata
+  IO.println "png pHYs fixtures: ok"
   pngAncillaryChunkFixtures
   IO.println "png ancillary-chunk fixtures: ok"
   validateDynamicTableValidationBoundary

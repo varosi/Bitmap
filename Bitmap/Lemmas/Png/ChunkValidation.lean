@@ -442,6 +442,52 @@ lemma encodeTimeData?_valid_size :
         ByteArray.size = some 7 := by
   native_decide
 
+/-- A valid `pHYs` payload decodes to its physical pixel dimensions.
+This pins the field layout used to preserve density metadata. -/
+lemma parsePhysData_accepts_meter_300dpi :
+    parsePhysData
+      (ByteArray.mk #[u8 0, u8 0, u8 46, u8 35, u8 0, u8 0, u8 46, u8 35, u8 1]) =
+        some
+          { xPixelsPerUnit := 11811
+            yPixelsPerUnit := 11811
+            unit := .meter } := by
+  native_decide
+
+/-- `pHYs` has an exact nine-byte payload shape.
+This exposes the length check before the density fields are read. -/
+lemma parsePhysData_rejects_bad_length (data : ByteArray)
+    (hlen : data.size ≠ 9) :
+    parsePhysData data = none := by
+  unfold parsePhysData
+  simp [hlen]
+
+/-- Invalid `pHYs` unit specifiers are rejected.
+This prevents reserved unit bytes from entering preserved metadata. -/
+lemma parsePhysData_rejects_bad_unit :
+    parsePhysData
+      (ByteArray.mk #[u8 0, u8 0, u8 11, u8 19, u8 0, u8 0, u8 11, u8 19, u8 2]) =
+        none := by
+  native_decide
+
+/-- Encoder-side `pHYs` payloads use exactly the nine bytes required by PNG.
+This keeps the ancillary writer aligned with the parser shape. -/
+lemma encodePhysData?_valid_size :
+    (encodePhysData? (PngPhysicalPixelDimensions.ofDpiRounded 300 300)).map
+      ByteArray.size = some 9 := by
+  native_decide
+
+/-- Rounded DPI conversion maps 300 DPI to the standard 11811 pixels/metre.
+This fixes the user-facing DPI helper at a common print density. -/
+lemma dpiToPixelsPerMeterRounded_300 :
+    dpiToPixelsPerMeterRounded 300 = 11811 := by
+  native_decide
+
+/-- Rounded pixels/metre conversion maps 11811 back to 300 DPI.
+This gives the inverse display fact for the common 300 DPI case. -/
+lemma pixelsPerMeterToDpiRounded_11811 :
+    pixelsPerMeterToDpiRounded 11811 = 300 := by
+  native_decide
+
 /-- The metadata-aware parser records a valid `tIME` chunk and continues.
 This is the branch-level preservation fact for modification-time metadata. -/
 lemma parsePngLoopFuelWithMetadata_accepts_tIME (fuel : Nat)
@@ -495,6 +541,86 @@ lemma parsePngLoopFuelWithMetadata_rejects_duplicate_tIME (fuel : Nat)
   unfold parsePngLoopFuelWithMetadata
   simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
     hnotTRNS, hnotBKGD, hnotGAMA, hnotSRGB, hTIME, hdup]
+
+/-- The metadata-aware parser records a valid `pHYs` chunk and continues.
+This is the branch-level preservation fact for density metadata. -/
+lemma parsePngLoopFuelWithMetadata_accepts_pHYs (fuel : Nat)
+    (bytes : ByteArray) (pos : Nat) (state : PngMetadataParseState)
+    (hdr : PngHeader) (typBytes chunkData : ByteArray) (posNext : Nat)
+    (physical : PngPhysicalPixelDimensions)
+    (hpos : pos + 8 ≤ bytes.size) (hLen : pos + 3 < bytes.size)
+    (hread : readChunk bytes pos hLen = some (typBytes, chunkData, posNext))
+    (hheader : state.header = some hdr)
+    (hnotIHDR : (typBytes == ihdrTypeBytes) = false)
+    (hnotPLTE : (typBytes == plteTypeBytes) = false)
+    (hnotIDAT : (typBytes == idatTypeBytes) = false)
+    (hnotIEND : (typBytes == iendTypeBytes) = false)
+    (hnotTRNS : (typBytes == trnsTypeBytes) = false)
+    (hnotBKGD : (typBytes == bkgdTypeBytes) = false)
+    (hnotGAMA : (typBytes == gamaTypeBytes) = false)
+    (hnotSRGB : (typBytes == srgbTypeBytes) = false)
+    (hnotTIME : (typBytes == timeTypeBytes) = false)
+    (hPHYS : (typBytes == physTypeBytes) = true)
+    (hseen : state.seenIDAT = false)
+    (hdup : state.metadata.physical.isSome = false)
+    (hparse : parsePhysData chunkData = some physical) :
+    parsePngLoopFuelWithMetadata (fuel + 1) bytes pos state =
+      parsePngLoopFuelWithMetadata fuel bytes posNext
+        { state with metadata := { state.metadata with physical := some physical } } := by
+  conv =>
+    lhs
+    unfold parsePngLoopFuelWithMetadata
+  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
+    hnotTRNS, hnotBKGD, hnotGAMA, hnotSRGB, hnotTIME, hPHYS, hseen, hdup, hparse]
+
+/-- `pHYs` must appear before the first `IDAT` chunk.
+This proves the metadata parser rejects late density metadata. -/
+lemma parsePngLoopFuelWithMetadata_rejects_pHYs_after_idat (fuel : Nat)
+    (bytes : ByteArray) (pos : Nat) (state : PngMetadataParseState)
+    (hdr : PngHeader) (typBytes chunkData : ByteArray) (posNext : Nat)
+    (hpos : pos + 8 ≤ bytes.size) (hLen : pos + 3 < bytes.size)
+    (hread : readChunk bytes pos hLen = some (typBytes, chunkData, posNext))
+    (hheader : state.header = some hdr)
+    (hnotIHDR : (typBytes == ihdrTypeBytes) = false)
+    (hnotPLTE : (typBytes == plteTypeBytes) = false)
+    (hnotIDAT : (typBytes == idatTypeBytes) = false)
+    (hnotIEND : (typBytes == iendTypeBytes) = false)
+    (hnotTRNS : (typBytes == trnsTypeBytes) = false)
+    (hnotBKGD : (typBytes == bkgdTypeBytes) = false)
+    (hnotGAMA : (typBytes == gamaTypeBytes) = false)
+    (hnotSRGB : (typBytes == srgbTypeBytes) = false)
+    (hnotTIME : (typBytes == timeTypeBytes) = false)
+    (hPHYS : (typBytes == physTypeBytes) = true)
+    (hseen : state.seenIDAT = true) :
+    parsePngLoopFuelWithMetadata (fuel + 1) bytes pos state = none := by
+  unfold parsePngLoopFuelWithMetadata
+  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
+    hnotTRNS, hnotBKGD, hnotGAMA, hnotSRGB, hnotTIME, hPHYS, hseen]
+
+/-- A second `pHYs` chunk is rejected rather than replacing the original value.
+This makes physical pixel metadata deterministic. -/
+lemma parsePngLoopFuelWithMetadata_rejects_duplicate_pHYs (fuel : Nat)
+    (bytes : ByteArray) (pos : Nat) (state : PngMetadataParseState)
+    (hdr : PngHeader) (typBytes chunkData : ByteArray) (posNext : Nat)
+    (hpos : pos + 8 ≤ bytes.size) (hLen : pos + 3 < bytes.size)
+    (hread : readChunk bytes pos hLen = some (typBytes, chunkData, posNext))
+    (hheader : state.header = some hdr)
+    (hnotIHDR : (typBytes == ihdrTypeBytes) = false)
+    (hnotPLTE : (typBytes == plteTypeBytes) = false)
+    (hnotIDAT : (typBytes == idatTypeBytes) = false)
+    (hnotIEND : (typBytes == iendTypeBytes) = false)
+    (hnotTRNS : (typBytes == trnsTypeBytes) = false)
+    (hnotBKGD : (typBytes == bkgdTypeBytes) = false)
+    (hnotGAMA : (typBytes == gamaTypeBytes) = false)
+    (hnotSRGB : (typBytes == srgbTypeBytes) = false)
+    (hnotTIME : (typBytes == timeTypeBytes) = false)
+    (hPHYS : (typBytes == physTypeBytes) = true)
+    (hseen : state.seenIDAT = false)
+    (hdup : state.metadata.physical.isSome = true) :
+    parsePngLoopFuelWithMetadata (fuel + 1) bytes pos state = none := by
+  unfold parsePngLoopFuelWithMetadata
+  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
+    hnotTRNS, hnotBKGD, hnotGAMA, hnotSRGB, hnotTIME, hPHYS, hseen, hdup]
 
 /-- The metadata-aware parser records a valid `gAMA` chunk and continues.
 This is the branch-level preservation fact for image gamma metadata. -/
@@ -735,11 +861,12 @@ lemma parsePngLoopFuel_rejects_sBIT (fuel : Nat)
     (hnotGAMA : (typBytes == gamaTypeBytes) = false)
     (hnotSRGB : (typBytes == srgbTypeBytes) = false)
     (hnotTIME : (typBytes == timeTypeBytes) = false)
+    (hnotPHYS : (typBytes == physTypeBytes) = false)
     (hSBIT : (typBytes == sbitTypeBytes) = true) :
     parsePngLoopFuel (fuel + 1) bytes pos state = none := by
   unfold parsePngLoopFuel
   simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
-    hnotTRNS, hnotGAMA, hnotSRGB, hnotTIME, hSBIT]
+    hnotTRNS, hnotGAMA, hnotSRGB, hnotTIME, hnotPHYS, hSBIT]
 
 /-- Unknown critical chunk types are rejected after the header. -/
 lemma parsePngLoopFuel_rejects_unknown_critical (fuel : Nat)
@@ -756,12 +883,13 @@ lemma parsePngLoopFuel_rejects_unknown_critical (fuel : Nat)
     (hnotGAMA : (typBytes == gamaTypeBytes) = false)
     (hnotSRGB : (typBytes == srgbTypeBytes) = false)
     (hnotTIME : (typBytes == timeTypeBytes) = false)
+    (hnotPHYS : (typBytes == physTypeBytes) = false)
     (hnotSBIT : (typBytes == sbitTypeBytes) = false)
     (hcritical : isCriticalChunkType typBytes = true) :
     parsePngLoopFuel (fuel + 1) bytes pos state = none := by
   unfold parsePngLoopFuel
   simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
-    hnotTRNS, hnotGAMA, hnotSRGB, hnotTIME, hnotSBIT, hcritical]
+    hnotTRNS, hnotGAMA, hnotSRGB, hnotTIME, hnotPHYS, hnotSBIT, hcritical]
 
 /-- Ancillary chunks (other than the explicitly handled color/precision metadata)
 before the `IDAT` run do not change parser state. -/
@@ -779,6 +907,7 @@ lemma parsePngLoopFuel_ignores_ancillary_before_idat (fuel : Nat)
     (hnotGAMA : (typBytes == gamaTypeBytes) = false)
     (hnotSRGB : (typBytes == srgbTypeBytes) = false)
     (hnotTIME : (typBytes == timeTypeBytes) = false)
+    (hnotPHYS : (typBytes == physTypeBytes) = false)
     (hnotSBIT : (typBytes == sbitTypeBytes) = false)
     (hcritical : isCriticalChunkType typBytes = false)
     (hseen : state.seenIDAT = false) :
@@ -788,7 +917,7 @@ lemma parsePngLoopFuel_ignores_ancillary_before_idat (fuel : Nat)
     lhs
     unfold parsePngLoopFuel
   simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
-    hnotTRNS, hnotGAMA, hnotSRGB, hnotTIME, hnotSBIT, hcritical, hseen]
+    hnotTRNS, hnotGAMA, hnotSRGB, hnotTIME, hnotPHYS, hnotSBIT, hcritical, hseen]
 
 /-- An `IDAT` chunk in an open `IDAT` run appends its payload and continues. -/
 lemma parsePngLoopFuel_idat_appends_when_open (fuel : Nat)

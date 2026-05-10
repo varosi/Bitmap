@@ -18,67 +18,96 @@ structure BitmapWidgetProps where
   showGrid : Bool := true
   background : String := "#070a16"
   caption : Option String := none
+  physicalXPixelsPerUnit : Option Nat := none
+  physicalYPixelsPerUnit : Option Nat := none
+  physicalUnitIsMeter : Bool := false
   deriving Repr, Inhabited, BEq, DecidableEq, ToJson, FromJson, Server.RpcEncodable
+
+def BitmapWidgetProps.withPhysical (props : BitmapWidgetProps)
+    (physical : Option Png.PngPhysicalPixelDimensions) : BitmapWidgetProps :=
+  match physical with
+  | none => props
+  | some physical =>
+      { props with
+        physicalXPixelsPerUnit := some physical.xPixelsPerUnit,
+        physicalYPixelsPerUnit := some physical.yPixelsPerUnit,
+        physicalUnitIsMeter := decide (physical.unit = .meter) }
+
+def BitmapWidgetProps.withPngMetadata (props : BitmapWidgetProps)
+    (metadata : Png.PngMetadata) : BitmapWidgetProps :=
+  props.withPhysical metadata.physical
 
 def BitmapRGB8.widgetProps (bmp : BitmapRGB8)
     (pixelSize : Nat := 12)
     (showGrid : Bool := true)
     (background : String := "#050914")
-    (caption : Option String := none) :
+    (caption : Option String := none)
+    (physical : Option Png.PngPhysicalPixelDimensions := none) :
     BitmapWidgetProps :=
-  { width := bmp.size.width
-    height := bmp.size.height
-    bytes := bmp.data
-    bytesPerPixel := bytesPerPixelRGB
-    pixelSize := max pixelSize 1
-    showGrid
-    background
-    caption }
+  let props : BitmapWidgetProps :=
+    { width := bmp.size.width
+      height := bmp.size.height
+      bytes := bmp.data
+      bytesPerPixel := bytesPerPixelRGB
+      pixelSize := max pixelSize 1
+      showGrid := showGrid
+      background := background
+      caption := caption }
+  props.withPhysical physical
 
 def BitmapRGBA8.widgetProps (bmp : BitmapRGBA8)
     (pixelSize : Nat := 12)
     (showGrid : Bool := true)
     (background : String := "#050914")
-    (caption : Option String := none) :
+    (caption : Option String := none)
+    (physical : Option Png.PngPhysicalPixelDimensions := none) :
     BitmapWidgetProps :=
-  { width := bmp.size.width
-    height := bmp.size.height
-    bytes := bmp.data
-    bytesPerPixel := bytesPerPixelRGBA
-    pixelSize := max pixelSize 1
-    showGrid
-    background
-    caption }
+  let props : BitmapWidgetProps :=
+    { width := bmp.size.width
+      height := bmp.size.height
+      bytes := bmp.data
+      bytesPerPixel := bytesPerPixelRGBA
+      pixelSize := max pixelSize 1
+      showGrid := showGrid
+      background := background
+      caption := caption }
+  props.withPhysical physical
 
 def BitmapGray8.widgetProps (bmp : BitmapGray8)
     (pixelSize : Nat := 12)
     (showGrid : Bool := true)
     (background : String := "#050914")
-    (caption : Option String := none) :
+    (caption : Option String := none)
+    (physical : Option Png.PngPhysicalPixelDimensions := none) :
     BitmapWidgetProps :=
-  { width := bmp.size.width
-    height := bmp.size.height
-    bytes := bmp.data
-    bytesPerPixel := bytesPerPixelGray
-    pixelSize := max pixelSize 1
-    showGrid
-    background
-    caption }
+  let props : BitmapWidgetProps :=
+    { width := bmp.size.width
+      height := bmp.size.height
+      bytes := bmp.data
+      bytesPerPixel := bytesPerPixelGray
+      pixelSize := max pixelSize 1
+      showGrid := showGrid
+      background := background
+      caption := caption }
+  props.withPhysical physical
 
 def BitmapGrayAlpha8.widgetProps (bmp : BitmapGrayAlpha8)
     (pixelSize : Nat := 12)
     (showGrid : Bool := true)
     (background : String := "#050914")
-    (caption : Option String := none) :
+    (caption : Option String := none)
+    (physical : Option Png.PngPhysicalPixelDimensions := none) :
     BitmapWidgetProps :=
-  { width := bmp.size.width
-    height := bmp.size.height
-    bytes := bmp.data
-    bytesPerPixel := bytesPerPixelGrayAlpha
-    pixelSize := max pixelSize 1
-    showGrid
-    background
-    caption }
+  let props : BitmapWidgetProps :=
+    { width := bmp.size.width
+      height := bmp.size.height
+      bytes := bmp.data
+      bytesPerPixel := bytesPerPixelGrayAlpha
+      pixelSize := max pixelSize 1
+      showGrid := showGrid
+      background := background
+      caption := caption }
+  props.withPhysical physical
 
 private def expandGray1ToGray8Data (bmp : BitmapGray1) : ByteArray :=
   Id.run do
@@ -92,16 +121,19 @@ def BitmapGray1.widgetProps (bmp : BitmapGray1)
     (pixelSize : Nat := 12)
     (showGrid : Bool := true)
     (background : String := "#050914")
-    (caption : Option String := none) :
+    (caption : Option String := none)
+    (physical : Option Png.PngPhysicalPixelDimensions := none) :
     BitmapWidgetProps :=
-  { width := bmp.size.width
-    height := bmp.size.height
-    bytes := expandGray1ToGray8Data bmp
-    bytesPerPixel := bytesPerPixelGray
-    pixelSize := max pixelSize 1
-    showGrid
-    background
-    caption }
+  let props : BitmapWidgetProps :=
+    { width := bmp.size.width
+      height := bmp.size.height
+      bytes := expandGray1ToGray8Data bmp
+      bytesPerPixel := bytesPerPixelGray
+      pixelSize := max pixelSize 1
+      showGrid := showGrid
+      background := background
+      caption := caption }
+  props.withPhysical physical
 
 private def downsampleRGB16ToRGB8Data (data : ByteArray) : ByteArray :=
   Id.run do
@@ -149,61 +181,73 @@ def BitmapRGB16.widgetProps (bmp : BitmapRGB16)
     (pixelSize : Nat := 12)
     (showGrid : Bool := true)
     (background : String := "#050914")
-    (caption : Option String := none) :
+    (caption : Option String := none)
+    (physical : Option Png.PngPhysicalPixelDimensions := none) :
     BitmapWidgetProps :=
-  { width := bmp.size.width
-    height := bmp.size.height
-    bytes := downsampleRGB16ToRGB8Data bmp.data
-    bytesPerPixel := bytesPerPixelRGB
-    pixelSize := max pixelSize 1
-    showGrid
-    background
-    caption }
+  let props : BitmapWidgetProps :=
+    { width := bmp.size.width
+      height := bmp.size.height
+      bytes := downsampleRGB16ToRGB8Data bmp.data
+      bytesPerPixel := bytesPerPixelRGB
+      pixelSize := max pixelSize 1
+      showGrid := showGrid
+      background := background
+      caption := caption }
+  props.withPhysical physical
 
 def BitmapRGBA16.widgetProps (bmp : BitmapRGBA16)
     (pixelSize : Nat := 12)
     (showGrid : Bool := true)
     (background : String := "#050914")
-    (caption : Option String := none) :
+    (caption : Option String := none)
+    (physical : Option Png.PngPhysicalPixelDimensions := none) :
     BitmapWidgetProps :=
-  { width := bmp.size.width
-    height := bmp.size.height
-    bytes := downsampleRGBA16ToRGBA8Data bmp.data
-    bytesPerPixel := bytesPerPixelRGBA
-    pixelSize := max pixelSize 1
-    showGrid
-    background
-    caption }
+  let props : BitmapWidgetProps :=
+    { width := bmp.size.width
+      height := bmp.size.height
+      bytes := downsampleRGBA16ToRGBA8Data bmp.data
+      bytesPerPixel := bytesPerPixelRGBA
+      pixelSize := max pixelSize 1
+      showGrid := showGrid
+      background := background
+      caption := caption }
+  props.withPhysical physical
 
 def BitmapGray16.widgetProps (bmp : BitmapGray16)
     (pixelSize : Nat := 12)
     (showGrid : Bool := true)
     (background : String := "#050914")
-    (caption : Option String := none) :
+    (caption : Option String := none)
+    (physical : Option Png.PngPhysicalPixelDimensions := none) :
     BitmapWidgetProps :=
-  { width := bmp.size.width
-    height := bmp.size.height
-    bytes := downsampleGray16ToGray8Data bmp.data
-    bytesPerPixel := bytesPerPixelGray
-    pixelSize := max pixelSize 1
-    showGrid
-    background
-    caption }
+  let props : BitmapWidgetProps :=
+    { width := bmp.size.width
+      height := bmp.size.height
+      bytes := downsampleGray16ToGray8Data bmp.data
+      bytesPerPixel := bytesPerPixelGray
+      pixelSize := max pixelSize 1
+      showGrid := showGrid
+      background := background
+      caption := caption }
+  props.withPhysical physical
 
 def BitmapGrayAlpha16.widgetProps (bmp : BitmapGrayAlpha16)
     (pixelSize : Nat := 12)
     (showGrid : Bool := true)
     (background : String := "#050914")
-    (caption : Option String := none) :
+    (caption : Option String := none)
+    (physical : Option Png.PngPhysicalPixelDimensions := none) :
     BitmapWidgetProps :=
-  { width := bmp.size.width
-    height := bmp.size.height
-    bytes := downsampleGrayAlpha16ToGrayAlpha8Data bmp.data
-    bytesPerPixel := bytesPerPixelGrayAlpha
-    pixelSize := max pixelSize 1
-    showGrid
-    background
-    caption }
+  let props : BitmapWidgetProps :=
+    { width := bmp.size.width
+      height := bmp.size.height
+      bytes := downsampleGrayAlpha16ToGrayAlpha8Data bmp.data
+      bytesPerPixel := bytesPerPixelGrayAlpha
+      pixelSize := max pixelSize 1
+      showGrid := showGrid
+      background := background
+      caption := caption }
+  props.withPhysical physical
 
 -------------------------------------------------------------------------------
 -- Sample bitmap and widget integration
@@ -341,6 +385,31 @@ def bitmapWidget : Lean.Widget.Module where
       const width = props.width ?? 0
       const height = props.height ?? 0
       const pixelSize = Math.max(props.pixelSize ?? 10, 1)
+      const ppuX = props.physicalXPixelsPerUnit ?? null
+      const ppuY = props.physicalYPixelsPerUnit ?? null
+      const hasPhysical = Number.isFinite(ppuX) && Number.isFinite(ppuY) && ppuX > 0 && ppuY > 0
+      const unitIsMeter = props.physicalUnitIsMeter ?? false
+      const cssPxPerMeter = 96 / 0.0254
+      let displayWidth = width * pixelSize
+      let displayHeight = height * pixelSize
+      let pixelWidth = pixelSize
+      let pixelHeight = pixelSize
+      let densityText = null
+      if (hasPhysical && unitIsMeter) {
+        displayWidth = width / ppuX * cssPxPerMeter
+        displayHeight = height / ppuY * cssPxPerMeter
+        pixelWidth = displayWidth / Math.max(width, 1)
+        pixelHeight = displayHeight / Math.max(height, 1)
+        const dpiX = Math.round(ppuX * 0.0254)
+        const dpiY = Math.round(ppuY * 0.0254)
+        densityText = dpiX === dpiY ? `${dpiX} DPI` : `${dpiX} × ${dpiY} DPI`
+      } else if (hasPhysical) {
+        displayWidth = width * pixelSize
+        displayHeight = height * pixelSize * (ppuX / ppuY)
+        pixelWidth = pixelSize
+        pixelHeight = pixelSize * (ppuX / ppuY)
+        densityText = `pixel aspect ${ppuY}:${ppuX}`
+      }
 
       React.useEffect(() => {
         const canvas = canvasRef.current
@@ -392,8 +461,8 @@ def bitmapWidget : Lean.Widget.Module where
 
       const frameStyle = {
         position: 'relative',
-        width: width * pixelSize,
-        height: height * pixelSize,
+        width: displayWidth,
+        height: displayHeight,
         borderRadius: '0.5rem',
         overflow: 'hidden'
       }
@@ -412,7 +481,7 @@ def bitmapWidget : Lean.Widget.Module where
               inset: 0,
               pointerEvents: 'none',
               backgroundImage: `linear-gradient(rgba(255,255,255,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.08) 1px, transparent 1px)`,
-              backgroundSize: `${pixelSize}px ${pixelSize}px`
+              backgroundSize: `${pixelWidth}px ${pixelHeight}px`
             }
           })
         : null
@@ -430,7 +499,8 @@ def bitmapWidget : Lean.Widget.Module where
           React.createElement('canvas', { ref: canvasRef, style: canvasStyle }),
           gridOverlay
         ),
-        React.createElement('div', { style: infoStyle }, `${width} × ${height} pixels`),
+        React.createElement('div', { style: infoStyle },
+          densityText ? `${width} × ${height} pixels, ${densityText}` : `${width} × ${height} pixels`),
         caption
       )
     }

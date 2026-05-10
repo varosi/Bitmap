@@ -103,6 +103,7 @@ def gamaTypeBytes : ByteArray := "gAMA".toUTF8
 def srgbTypeBytes : ByteArray := "sRGB".toUTF8
 def sbitTypeBytes : ByteArray := "sBIT".toUTF8
 def timeTypeBytes : ByteArray := "tIME".toUTF8
+def physTypeBytes : ByteArray := "pHYs".toUTF8
 
 structure PngTime where
   year : Nat
@@ -160,6 +161,52 @@ def encodeTimeData? (time : PngTime) : Option ByteArray :=
     ]
   else
     none
+
+inductive PngPhysicalUnit where
+  | unknown
+  | meter
+deriving Repr, DecidableEq
+
+def PngPhysicalUnit.toByte : PngPhysicalUnit -> UInt8
+  | .unknown => u8 0
+  | .meter => u8 1
+
+def PngPhysicalUnit.ofByte (b : UInt8) : Option PngPhysicalUnit :=
+  if b == u8 0 then
+    some .unknown
+  else if b == u8 1 then
+    some .meter
+  else
+    none
+
+structure PngPhysicalPixelDimensions where
+  xPixelsPerUnit : Nat
+  yPixelsPerUnit : Nat
+  unit : PngPhysicalUnit
+deriving Repr, DecidableEq
+
+def PngPhysicalPixelDimensions.valid (physical : PngPhysicalPixelDimensions) : Bool :=
+  decide (physical.xPixelsPerUnit < 2 ^ 32) &&
+  decide (physical.yPixelsPerUnit < 2 ^ 32)
+
+def dpiToPixelsPerMeterRounded (dpi : Nat) : Nat :=
+  (dpi * 10000 + 127) / 254
+
+def pixelsPerMeterToDpiRounded (pixelsPerMeter : Nat) : Nat :=
+  (pixelsPerMeter * 254 + 5000) / 10000
+
+def PngPhysicalPixelDimensions.ofDpiRounded (xDpi yDpi : Nat) : PngPhysicalPixelDimensions :=
+  { xPixelsPerUnit := dpiToPixelsPerMeterRounded xDpi
+    yPixelsPerUnit := dpiToPixelsPerMeterRounded yDpi
+    unit := .meter }
+
+def PngPhysicalPixelDimensions.dpi? (physical : PngPhysicalPixelDimensions) :
+    Option (Nat × Nat) :=
+  match physical.unit with
+  | .unknown => none
+  | .meter =>
+      some (pixelsPerMeterToDpiRounded physical.xPixelsPerUnit,
+        pixelsPerMeterToDpiRounded physical.yPixelsPerUnit)
 
 def mkChunkBytes (typBytes : ByteArray) (data : ByteArray) : ByteArray :=
   let lenBytes := u32be data.size
@@ -294,6 +341,7 @@ structure PngEncodeOptions where
   mode : PngEncodeMode := .fixed
   colorSpace : Option PngEncodeColorSpace := none
   filter : PngFilterStrategy := .none
+  physical : Option PngPhysicalPixelDimensions := none
   modificationTime : Option PngTime := none
 deriving Repr, DecidableEq
 
@@ -1817,6 +1865,7 @@ structure PngMetadata where
   background : Option PngBackground := none
   gamma : Option Nat := none
   srgb : Option PngSrgbIntent := none
+  physical : Option PngPhysicalPixelDimensions := none
   modificationTime : Option PngTime := none
 deriving Repr, DecidableEq
 
@@ -1825,6 +1874,7 @@ def PngMetadata.empty : PngMetadata :=
     background := none
     gamma := none
     srgb := none
+    physical := none
     modificationTime := none }
 
 structure PngDecodeResult (px : Type u) [Pixel px] where
@@ -1878,6 +1928,16 @@ def parseTimeData (data : ByteArray) : Option PngTime := do
       some time
     else
       none
+
+def parsePhysData (data : ByteArray) : Option PngPhysicalPixelDimensions := do
+  if hlen : data.size = 9 then
+    let unit ← PngPhysicalUnit.ofByte (data.get! 8)
+    some
+      { xPixelsPerUnit := readU32BE data 0 (by omega)
+        yPixelsPerUnit := readU32BE data 4 (by omega)
+        unit }
+  else
+    none
 
 def parseTrnsData (hdr : PngHeader) (data : ByteArray) : Option PngTransparency := do
   if hdr.colorType == 0 then
@@ -2208,6 +2268,15 @@ def parsePngLoopFuel (fuel : Nat) (bytes : ByteArray) (pos : Nat)
                       { state with
                           closedIDAT := if state.seenIDAT then true else state.closedIDAT
                           metadata := { state.metadata with modificationTime := some modificationTime } }
+                  else if typBytes == physTypeBytes then
+                    if state.seenIDAT then
+                      none
+                    if state.metadata.physical.isSome then
+                      none
+                    let physical ← parsePhysData chunkData
+                    parsePngLoopFuel fuel bytes posNext
+                      { state with
+                          metadata := { state.metadata with physical := some physical } }
                   else if typBytes == sbitTypeBytes then
                     -- sBIT records the significant bit count per channel; ignoring it would
                     -- silently misrepresent pixel precision.
@@ -2361,6 +2430,15 @@ def parsePngLoopFuelWithMetadata (fuel : Nat) (bytes : ByteArray) (pos : Nat)
                       { state with
                           closedIDAT := if state.seenIDAT then true else state.closedIDAT
                           metadata := { state.metadata with modificationTime := some modificationTime } }
+                  else if typBytes == physTypeBytes then
+                    if state.seenIDAT then
+                      none
+                    if state.metadata.physical.isSome then
+                      none
+                    let physical ← parsePhysData chunkData
+                    parsePngLoopFuelWithMetadata fuel bytes posNext
+                      { state with
+                          metadata := { state.metadata with physical := some physical } }
                   else if typBytes == sbitTypeBytes then
                     -- sBIT records the significant bit count per channel; ignoring it would
                     -- silently misrepresent pixel precision.
@@ -3927,16 +4005,32 @@ def encodeTimeChunk? (modificationTime : Option PngTime) : Option ByteArray := d
       let data ← encodeTimeData? time
       some (mkChunkBytes timeTypeBytes data)
 
+def encodePhysData? (physical : PngPhysicalPixelDimensions) : Option ByteArray :=
+  if physical.valid then
+    some <| u32be physical.xPixelsPerUnit ++ u32be physical.yPixelsPerUnit ++
+      ByteArray.mk #[physical.unit.toByte]
+  else
+    none
+
+def encodePhysChunk? (physical : Option PngPhysicalPixelDimensions) : Option ByteArray := do
+  match physical with
+  | none => some ByteArray.empty
+  | some physical =>
+      let data ← encodePhysData? physical
+      some (mkChunkBytes physTypeBytes data)
+
 def encodeAncillaryChunks? (colorSpace : Option PngEncodeColorSpace)
+    (physical : Option PngPhysicalPixelDimensions)
     (modificationTime : Option PngTime) : Option ByteArray := do
   let colorSpaceChunks ← encodeColorSpaceChunks? colorSpace
+  let physChunk ← encodePhysChunk? physical
   let timeChunk ← encodeTimeChunk? modificationTime
-  some (colorSpaceChunks ++ timeChunk)
+  some (colorSpaceChunks ++ physChunk ++ timeChunk)
 
 def encodeBitmapCore (raw ihdr : ByteArray) (mode : PngEncodeMode)
-    (colorSpace : Option PngEncodeColorSpace) (modificationTime : Option PngTime) :
-    Option ByteArray := do
-  let ancillary ← encodeAncillaryChunks? colorSpace modificationTime
+    (colorSpace : Option PngEncodeColorSpace) (physical : Option PngPhysicalPixelDimensions)
+    (modificationTime : Option PngTime) : Option ByteArray := do
+  let ancillary ← encodeAncillaryChunks? colorSpace physical modificationTime
   let idat :=
     match mode with
     | .stored => zlibCompressStored raw
@@ -4027,7 +4121,7 @@ def encodeBitmapGray1WithOptions (bmp : BitmapGray1)
   let raw := encodeRawGray1WithFilter bmp options.filter
   let ihdr := u32be bmp.size.width ++ u32be bmp.size.height ++
     ByteArray.mk #[u8 1, u8 0, u8 0, u8 0, u8 0]
-  encodeBitmapCore raw ihdr options.mode options.colorSpace options.modificationTime
+  encodeBitmapCore raw ihdr options.mode options.colorSpace options.physical options.modificationTime
 
 def encodeBitmapGray1Checked (bmp : BitmapGray1)
     (mode : PngEncodeMode := .fixed) : Except String ByteArray :=
@@ -4085,7 +4179,7 @@ def encodeBitmapWithOptions {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap
     | _ => encodeRawWithFilter bmp options.filter
   let ihdr := u32be bmp.size.width ++ u32be bmp.size.height ++
     ByteArray.mk #[PngPixel.bitDepth (α := px), PngPixel.colorType (α := px), u8 0, u8 0, u8 0]
-  encodeBitmapCore raw ihdr options.mode options.colorSpace options.modificationTime
+  encodeBitmapCore raw ihdr options.mode options.colorSpace options.physical options.modificationTime
 
 -- Encode a bitmap using the buffered fixed-Huffman deflate blocks (perf testing).
 

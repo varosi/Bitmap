@@ -17,7 +17,7 @@ empty `IEND` chunk. This is exactly the shape `encodeBitmap` produces
 and the shape `parsePngSimple` validates in one pass.
 
 A later commit will extend the spec to multiple `IDAT` chunks and
-tolerated ancillary chunks (`gAMA`, `pHYs`, `tEXt`, …), proving forward
+supported or tolerated ancillary chunks (`gAMA`, `pHYs`, `tEXt`, …), proving forward
 correctness through `parsePngLoopFuel` and the existing
 `ChunkValidation.lean` lemmas. -/
 
