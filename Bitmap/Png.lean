@@ -100,6 +100,7 @@ def plteTypeBytes : ByteArray := "PLTE".toUTF8
 def trnsTypeBytes : ByteArray := "tRNS".toUTF8
 def bkgdTypeBytes : ByteArray := "bKGD".toUTF8
 def gamaTypeBytes : ByteArray := "gAMA".toUTF8
+def chrmTypeBytes : ByteArray := "cHRM".toUTF8
 def srgbTypeBytes : ByteArray := "sRGB".toUTF8
 def sbitTypeBytes : ByteArray := "sBIT".toUTF8
 def timeTypeBytes : ByteArray := "tIME".toUTF8
@@ -207,6 +208,52 @@ def PngPhysicalPixelDimensions.dpi? (physical : PngPhysicalPixelDimensions) :
   | .meter =>
       some (pixelsPerMeterToDpiRounded physical.xPixelsPerUnit,
         pixelsPerMeterToDpiRounded physical.yPixelsPerUnit)
+
+def int32Min : Int := -2147483648
+
+def int32Max : Int := 2147483647
+
+def signed32FromU32 (n : Nat) : Int :=
+  if n < 2147483648 then
+    Int.ofNat n
+  else
+    Int.ofNat n - Int.ofNat 4294967296
+
+def signed32InRange (n : Int) : Bool :=
+  decide (int32Min ≤ n) && decide (n ≤ int32Max)
+
+def signed32ToU32? (n : Int) : Option Nat :=
+  if signed32InRange n then
+    if n < 0 then
+      some (n + Int.ofNat 4294967296).toNat
+    else
+      some n.toNat
+  else
+    none
+
+structure PngChromaticityPoint where
+  x : Int
+  y : Int
+deriving Repr, DecidableEq
+
+def PngChromaticityPoint.valid (p : PngChromaticityPoint) : Bool :=
+  signed32InRange p.x && signed32InRange p.y
+
+structure PngChromaticities where
+  white : PngChromaticityPoint
+  red : PngChromaticityPoint
+  green : PngChromaticityPoint
+  blue : PngChromaticityPoint
+deriving Repr, DecidableEq
+
+def PngChromaticities.valid (c : PngChromaticities) : Bool :=
+  c.white.valid && c.red.valid && c.green.valid && c.blue.valid
+
+def PngChromaticities.srgb : PngChromaticities :=
+  { white := { x := 31270, y := 32900 }
+    red := { x := 64000, y := 33000 }
+    green := { x := 30000, y := 60000 }
+    blue := { x := 15000, y := 6000 } }
 
 def mkChunkBytes (typBytes : ByteArray) (data : ByteArray) : ByteArray :=
   let lenBytes := u32be data.size
@@ -340,6 +387,7 @@ deriving Repr, DecidableEq
 structure PngEncodeOptions where
   mode : PngEncodeMode := .fixed
   colorSpace : Option PngEncodeColorSpace := none
+  chromaticities : Option PngChromaticities := none
   filter : PngFilterStrategy := .none
   physical : Option PngPhysicalPixelDimensions := none
   modificationTime : Option PngTime := none
@@ -1864,6 +1912,7 @@ structure PngMetadata where
   transparency : Option PngTransparency := none
   background : Option PngBackground := none
   gamma : Option Nat := none
+  chromaticities : Option PngChromaticities := none
   srgb : Option PngSrgbIntent := none
   physical : Option PngPhysicalPixelDimensions := none
   modificationTime : Option PngTime := none
@@ -1873,6 +1922,7 @@ def PngMetadata.empty : PngMetadata :=
   { transparency := none
     background := none
     gamma := none
+    chromaticities := none
     srgb := none
     physical := none
     modificationTime := none }
@@ -1897,6 +1947,9 @@ def readU16BE! (bytes : ByteArray) (pos : Nat) : Nat :=
 def readU16BEUInt16! (bytes : ByteArray) (pos : Nat) : UInt16 :=
   UInt16.ofNat (readU16BE! bytes pos)
 
+def readI32BE (bytes : ByteArray) (pos : Nat) (h : pos + 3 < bytes.size) : Int :=
+  signed32FromU32 (readU32BE bytes pos h)
+
 def parseGammaData (data : ByteArray) : Option Nat := do
   if hlen : data.size = 4 then
     let gammaScaled := readU32BE data 0 (by omega)
@@ -1904,6 +1957,16 @@ def parseGammaData (data : ByteArray) : Option Nat := do
       none
     else
       some gammaScaled
+  else
+    none
+
+def parseChrmData (data : ByteArray) : Option PngChromaticities := do
+  if hlen : data.size = 32 then
+    some
+      { white := { x := readI32BE data 0 (by omega), y := readI32BE data 4 (by omega) }
+        red := { x := readI32BE data 8 (by omega), y := readI32BE data 12 (by omega) }
+        green := { x := readI32BE data 16 (by omega), y := readI32BE data 20 (by omega) }
+        blue := { x := readI32BE data 24 (by omega), y := readI32BE data 28 (by omega) } }
   else
     none
 
@@ -2242,24 +2305,58 @@ def parsePngLoopFuel (fuel : Nat) (bytes : ByteArray) (pos : Nat)
                     parsePngLoopFuel fuel bytes posNext
                       { state with
                           metadata := { state.metadata with gamma := some gamma } }
+                  else if typBytes == chrmTypeBytes then
+                    if state.seenPLTE || state.seenIDAT then
+                      none
+                    if state.metadata.chromaticities.isSome then
+                      none
+                    let chromaticities ← parseChrmData chunkData
+                    match state.metadata.srgb with
+                    | some _ =>
+                        if chromaticities = PngChromaticities.srgb then
+                          parsePngLoopFuel fuel bytes posNext
+                            { state with
+                                metadata := { state.metadata with
+                                  chromaticities := some chromaticities } }
+                        else
+                          none
+                    | none =>
+                        parsePngLoopFuel fuel bytes posNext
+                          { state with
+                              metadata := { state.metadata with
+                                chromaticities := some chromaticities } }
                   else if typBytes == srgbTypeBytes then
                     if state.seenPLTE || state.seenIDAT then
                       none
                     if state.metadata.srgb.isSome then
                       none
                     let intent ← parseSrgbData chunkData
+                    let continueWithSrgb :=
+                        parsePngLoopFuel fuel bytes posNext
+                          { state with
+                              metadata := { state.metadata with srgb := some intent } }
                     match state.metadata.gamma with
                     | some gamma =>
                         if gamma != 45455 then
                           none
                         else
-                          parsePngLoopFuel fuel bytes posNext
-                            { state with
-                                metadata := { state.metadata with srgb := some intent } }
+                          match state.metadata.chromaticities with
+                          | some chromaticities =>
+                              if chromaticities = PngChromaticities.srgb then
+                                continueWithSrgb
+                              else
+                                none
+                          | none =>
+                              continueWithSrgb
                     | none =>
-                        parsePngLoopFuel fuel bytes posNext
-                          { state with
-                              metadata := { state.metadata with srgb := some intent } }
+                        match state.metadata.chromaticities with
+                        | some chromaticities =>
+                            if chromaticities = PngChromaticities.srgb then
+                              continueWithSrgb
+                            else
+                              none
+                        | none =>
+                            continueWithSrgb
                   else if typBytes == timeTypeBytes then
                     if state.metadata.modificationTime.isSome then
                       none
@@ -2404,24 +2501,58 @@ def parsePngLoopFuelWithMetadata (fuel : Nat) (bytes : ByteArray) (pos : Nat)
                     parsePngLoopFuelWithMetadata fuel bytes posNext
                       { state with
                           metadata := { state.metadata with gamma := some gamma } }
+                  else if typBytes == chrmTypeBytes then
+                    if state.seenPLTE || state.seenIDAT then
+                      none
+                    if state.metadata.chromaticities.isSome then
+                      none
+                    let chromaticities ← parseChrmData chunkData
+                    match state.metadata.srgb with
+                    | some _ =>
+                        if chromaticities = PngChromaticities.srgb then
+                          parsePngLoopFuelWithMetadata fuel bytes posNext
+                            { state with
+                                metadata := { state.metadata with
+                                  chromaticities := some chromaticities } }
+                        else
+                          none
+                    | none =>
+                        parsePngLoopFuelWithMetadata fuel bytes posNext
+                          { state with
+                              metadata := { state.metadata with
+                                chromaticities := some chromaticities } }
                   else if typBytes == srgbTypeBytes then
                     if state.seenPLTE || state.seenIDAT then
                       none
                     if state.metadata.srgb.isSome then
                       none
                     let intent ← parseSrgbData chunkData
+                    let continueWithSrgb :=
+                        parsePngLoopFuelWithMetadata fuel bytes posNext
+                          { state with
+                              metadata := { state.metadata with srgb := some intent } }
                     match state.metadata.gamma with
                     | some gamma =>
                         if gamma != 45455 then
                           none
                         else
-                          parsePngLoopFuelWithMetadata fuel bytes posNext
-                            { state with
-                                metadata := { state.metadata with srgb := some intent } }
+                          match state.metadata.chromaticities with
+                          | some chromaticities =>
+                              if chromaticities = PngChromaticities.srgb then
+                                continueWithSrgb
+                              else
+                                none
+                          | none =>
+                              continueWithSrgb
                     | none =>
-                        parsePngLoopFuelWithMetadata fuel bytes posNext
-                          { state with
-                              metadata := { state.metadata with srgb := some intent } }
+                        match state.metadata.chromaticities with
+                        | some chromaticities =>
+                            if chromaticities = PngChromaticities.srgb then
+                              continueWithSrgb
+                            else
+                              none
+                        | none =>
+                            continueWithSrgb
                   else if typBytes == timeTypeBytes then
                     if state.metadata.modificationTime.isSome then
                       none
@@ -2477,7 +2608,10 @@ def parsePngForDecode (bytes : ByteArray) (hsize : 8 <= bytes.size) :
   | none => parsePngWithMetadata bytes hsize
 
 def PngMetadata.pixelOnlyColorSpace (metadata : PngMetadata) : PngMetadata :=
-  { PngMetadata.empty with gamma := metadata.gamma, srgb := metadata.srgb }
+  { PngMetadata.empty with
+    gamma := metadata.gamma
+    chromaticities := metadata.chromaticities
+    srgb := metadata.srgb }
 
 def paethPredictor (a b c : Nat) : Nat :=
   let p : Int := (a : Int) + (b : Int) - (c : Int)
@@ -3653,20 +3787,351 @@ def applyGamma16ToPixels (gammaScaled : Nat) (colorType : UInt8)
       return out
   some out
 
-def applyPngColorSpaceTransform (metadata : PngMetadata) (targetColorType targetBitDepth : UInt8)
-    (pixels : ByteArray) : Option ByteArray :=
+structure PngMatrix3 where
+  m00 : Float
+  m01 : Float
+  m02 : Float
+  m10 : Float
+  m11 : Float
+  m12 : Float
+  m20 : Float
+  m21 : Float
+  m22 : Float
+deriving Repr
+
+def PngMatrix3.mulVec (m : PngMatrix3) (x y z : Float) : Float × Float × Float :=
+  (m.m00 * x + m.m01 * y + m.m02 * z,
+   m.m10 * x + m.m11 * y + m.m12 * z,
+   m.m20 * x + m.m21 * y + m.m22 * z)
+
+def PngMatrix3.mul (a b : PngMatrix3) : PngMatrix3 :=
+  { m00 := a.m00 * b.m00 + a.m01 * b.m10 + a.m02 * b.m20
+    m01 := a.m00 * b.m01 + a.m01 * b.m11 + a.m02 * b.m21
+    m02 := a.m00 * b.m02 + a.m01 * b.m12 + a.m02 * b.m22
+    m10 := a.m10 * b.m00 + a.m11 * b.m10 + a.m12 * b.m20
+    m11 := a.m10 * b.m01 + a.m11 * b.m11 + a.m12 * b.m21
+    m12 := a.m10 * b.m02 + a.m11 * b.m12 + a.m12 * b.m22
+    m20 := a.m20 * b.m00 + a.m21 * b.m10 + a.m22 * b.m20
+    m21 := a.m20 * b.m01 + a.m21 * b.m11 + a.m22 * b.m21
+    m22 := a.m20 * b.m02 + a.m21 * b.m12 + a.m22 * b.m22 }
+
+def PngMatrix3.det (m : PngMatrix3) : Float :=
+  m.m00 * (m.m11 * m.m22 - m.m12 * m.m21) -
+  m.m01 * (m.m10 * m.m22 - m.m12 * m.m20) +
+  m.m02 * (m.m10 * m.m21 - m.m11 * m.m20)
+
+def PngMatrix3.inverse? (m : PngMatrix3) : Option PngMatrix3 :=
+  let det := m.det
+  if det == 0.0 then
+    none
+  else
+    some
+      { m00 := (m.m11 * m.m22 - m.m12 * m.m21) / det
+        m01 := (m.m02 * m.m21 - m.m01 * m.m22) / det
+        m02 := (m.m01 * m.m12 - m.m02 * m.m11) / det
+        m10 := (m.m12 * m.m20 - m.m10 * m.m22) / det
+        m11 := (m.m00 * m.m22 - m.m02 * m.m20) / det
+        m12 := (m.m02 * m.m10 - m.m00 * m.m12) / det
+        m20 := (m.m10 * m.m21 - m.m11 * m.m20) / det
+        m21 := (m.m01 * m.m20 - m.m00 * m.m21) / det
+        m22 := (m.m00 * m.m11 - m.m01 * m.m10) / det }
+
+def PngChromaticityPoint.toXyz? (p : PngChromaticityPoint) :
+    Option (Float × Float × Float) :=
+  let x := Float.ofInt p.x / 100000.0
+  let y := Float.ofInt p.y / 100000.0
+  if y == 0.0 then
+    none
+  else
+    some (x / y, 1.0, (1.0 - x - y) / y)
+
+def PngChromaticities.rgbToXyz? (c : PngChromaticities) : Option PngMatrix3 := do
+  let (xw, yw, zw) ← c.white.toXyz?
+  let (xr, yr, zr) ← c.red.toXyz?
+  let (xg, yg, zg) ← c.green.toXyz?
+  let (xb, yb, zb) ← c.blue.toXyz?
+  let primary : PngMatrix3 :=
+    { m00 := xr, m01 := xg, m02 := xb
+      m10 := yr, m11 := yg, m12 := yb
+      m20 := zr, m21 := zg, m22 := zb }
+  let inv ← primary.inverse?
+  let (sr, sg, sb) := inv.mulVec xw yw zw
+  some
+    { m00 := xr * sr, m01 := xg * sg, m02 := xb * sb
+      m10 := yr * sr, m11 := yg * sg, m12 := yb * sb
+      m20 := zr * sr, m21 := zg * sg, m22 := zb * sb }
+
+def bradfordMatrix : PngMatrix3 :=
+  { m00 := 0.8951, m01 := 0.2664, m02 := -0.1614
+    m10 := -0.7502, m11 := 1.7135, m12 := 0.0367
+    m20 := 0.0389, m21 := -0.0685, m22 := 1.0296 }
+
+def bradfordInverseMatrix : PngMatrix3 :=
+  { m00 := 0.9869929, m01 := -0.1470543, m02 := 0.1599627
+    m10 := 0.4323053, m11 := 0.5183603, m12 := 0.0492912
+    m20 := -0.0085287, m21 := 0.0400428, m22 := 0.9684867 }
+
+def srgbXyzToRgbMatrix : PngMatrix3 :=
+  { m00 := 3.2404542, m01 := -1.5371385, m02 := -0.4985314
+    m10 := -0.9692660, m11 := 1.8760108, m12 := 0.0415560
+    m20 := 0.0556434, m21 := -0.2040259, m22 := 1.0572252 }
+
+def bradfordAdaptationMatrix? (sourceWhite targetWhite : Float × Float × Float) :
+    Option PngMatrix3 := do
+  let (sx, sy, sz) := sourceWhite
+  let (tx, ty, tz) := targetWhite
+  let (sl, sm, ss) := bradfordMatrix.mulVec sx sy sz
+  let (tl, tm, ts) := bradfordMatrix.mulVec tx ty tz
+  if sl == 0.0 || sm == 0.0 || ss == 0.0 then
+    none
+  else
+    let scale : PngMatrix3 :=
+      { m00 := tl / sl, m01 := 0.0, m02 := 0.0
+        m10 := 0.0, m11 := tm / sm, m12 := 0.0
+        m20 := 0.0, m21 := 0.0, m22 := ts / ss }
+    some (bradfordInverseMatrix.mul (scale.mul bradfordMatrix))
+
+def PngChromaticities.sourceToSrgbMatrix? (c : PngChromaticities) :
+    Option PngMatrix3 := do
+  let rgbToXyz ← c.rgbToXyz?
+  let sourceWhite ← c.white.toXyz?
+  let targetWhite ← PngChromaticities.srgb.white.toXyz?
+  let adapt ← bradfordAdaptationMatrix? sourceWhite targetWhite
+  some (srgbXyzToRgbMatrix.mul (adapt.mul rgbToXyz))
+
+@[inline] def sourceSampleToLinear (gamma : Option Nat) (sample maxValue : Nat) : Float :=
+  if maxValue == 0 then
+    0.0
+  else
+    let encoded := Float.ofNat sample / Float.ofNat maxValue
+    match gamma with
+    | some gammaScaled =>
+        if gammaScaled == 0 then
+          clamp01 encoded
+        else
+          Float.pow (clamp01 encoded) (1.0 / (Float.ofNat gammaScaled / 100000.0))
+    | none =>
+        clamp01 encoded
+
+@[inline] def chrmRgbToLinearSrgb (matrix : PngMatrix3) (gamma : Option Nat)
+    (r g b maxValue : Nat) : Float × Float × Float :=
+  let rl := sourceSampleToLinear gamma r maxValue
+  let gl := sourceSampleToLinear gamma g maxValue
+  let bl := sourceSampleToLinear gamma b maxValue
+  matrix.mulVec rl gl bl
+
+@[inline] def chrmRgbToSrgbNat (matrix : PngMatrix3) (gamma : Option Nat)
+    (r g b maxValue : Nat) : Nat × Nat × Nat :=
+  let (rl, gl, bl) := chrmRgbToLinearSrgb matrix gamma r g b maxValue
+  (roundedUnitToNat (linearToSrgb rl) maxValue,
+   roundedUnitToNat (linearToSrgb gl) maxValue,
+   roundedUnitToNat (linearToSrgb bl) maxValue)
+
+@[inline] def chrmRgbToGrayNat (matrix : PngMatrix3) (gamma : Option Nat)
+    (r g b maxValue : Nat) : Nat :=
+  let (rl, gl, bl) := chrmRgbToLinearSrgb matrix gamma r g b maxValue
+  let y := 0.2126 * clamp01 rl + 0.7152 * clamp01 gl + 0.0722 * clamp01 bl
+  roundedUnitToNat (linearToSrgb y) maxValue
+
+def applyChrm8ToPixels (matrix : PngMatrix3) (gamma : Option Nat) (colorType : UInt8)
+    (pixels : ByteArray) : Option ByteArray := do
+  let stride ← pngBytesPerPixelForColorTypeAndBitDepth? colorType.toNat 8
+  if stride == 0 || pixels.size % stride != 0 then
+    none
+  if colorType != u8 2 && colorType != u8 6 then
+    some pixels
+  else
+    let count := pixels.size / stride
+    let out :=
+      Id.run do
+        let mut out := pixels
+        for i in [0:count] do
+          let base := i * stride
+          let (r, g, b) := chrmRgbToSrgbNat matrix gamma
+            (pixels.get! base).toNat (pixels.get! (base + 1)).toNat
+            (pixels.get! (base + 2)).toNat 255
+          out := out.set! base (u8 r)
+          out := out.set! (base + 1) (u8 g)
+          out := out.set! (base + 2) (u8 b)
+        return out
+    some out
+
+def applyChrm16ToPixels (matrix : PngMatrix3) (gamma : Option Nat) (colorType : UInt8)
+    (pixels : ByteArray) : Option ByteArray := do
+  let stride ← pngBytesPerPixelForColorTypeAndBitDepth? colorType.toNat 16
+  if stride == 0 || pixels.size % stride != 0 then
+    none
+  if colorType != u8 2 && colorType != u8 6 then
+    some pixels
+  else
+    let count := pixels.size / stride
+    let out :=
+      Id.run do
+        let mut out := pixels
+        for i in [0:count] do
+          let base := i * stride
+          let (r, g, b) := chrmRgbToSrgbNat matrix gamma
+            (rowU16Nat pixels base) (rowU16Nat pixels (base + 2))
+            (rowU16Nat pixels (base + 4)) 65535
+          out := setU16Nat! out base r
+          out := setU16Nat! out (base + 2) g
+          out := setU16Nat! out (base + 4) b
+        return out
+    some out
+
+def applyPngColorSpaceTransform (metadata : PngMetadata) (sourceColorType : Nat)
+    (targetColorType targetBitDepth : UInt8) (pixels : ByteArray) : Option ByteArray :=
   match metadata.srgb with
   | some _ => some pixels
   | none =>
-      match metadata.gamma with
-      | none => some pixels
-      | some gamma =>
-          if targetBitDepth == u8 8 then
-            applyGamma8ToPixels gamma targetColorType pixels
-          else if targetBitDepth == u8 16 then
-            applyGamma16ToPixels gamma targetColorType pixels
+      match metadata.chromaticities with
+      | some chromaticities =>
+          if sourceColorType == 2 || sourceColorType == 6 then
+            match chromaticities.sourceToSrgbMatrix? with
+            | none => none
+            | some matrix =>
+                if targetBitDepth == u8 8 then
+                  applyChrm8ToPixels matrix metadata.gamma targetColorType pixels
+                else if targetBitDepth == u8 16 then
+                  applyChrm16ToPixels matrix metadata.gamma targetColorType pixels
+                else
+                  some pixels
           else
-            some pixels
+            match metadata.gamma with
+            | none => some pixels
+            | some gamma =>
+                if targetBitDepth == u8 8 then
+                  applyGamma8ToPixels gamma targetColorType pixels
+                else if targetBitDepth == u8 16 then
+                  applyGamma16ToPixels gamma targetColorType pixels
+                else
+                  some pixels
+      | none =>
+          match metadata.gamma with
+          | none => some pixels
+          | some gamma =>
+              if targetBitDepth == u8 8 then
+                applyGamma8ToPixels gamma targetColorType pixels
+              else if targetBitDepth == u8 16 then
+                applyGamma16ToPixels gamma targetColorType pixels
+              else
+                some pixels
+
+def decodeRowChrmToGray8 (matrix : PngMatrix3) (gamma : Option Nat)
+    (row : ByteArray) (w y bpp : Nat)
+    (pixels : ByteArray) : ByteArray :=
+  Id.run do
+    let mut pixels := pixels
+    for x in [0:w] do
+      let base := x * bpp
+      let gray := chrmRgbToGrayNat matrix gamma
+        (row.get! base).toNat (row.get! (base + 1)).toNat
+        (row.get! (base + 2)).toNat 255
+      let pixBase := (y * w + x) * bytesPerPixelGray
+      pixels := pixels.set! pixBase (u8 gray)
+    return pixels
+
+def decodeRowChrmToGrayAlpha8 (matrix : PngMatrix3) (gamma : Option Nat)
+    (sourceColorType : Nat) (row : ByteArray) (w y bpp : Nat)
+    (pixels : ByteArray) : ByteArray :=
+  Id.run do
+    let mut pixels := pixels
+    for x in [0:w] do
+      let base := x * bpp
+      let gray := chrmRgbToGrayNat matrix gamma
+        (row.get! base).toNat (row.get! (base + 1)).toNat
+        (row.get! (base + 2)).toNat 255
+      let alpha := if sourceColorType == 6 then row.get! (base + 3) else u8 255
+      let pixBase := (y * w + x) * bytesPerPixelGrayAlpha
+      pixels := pixels.set! pixBase (u8 gray)
+      pixels := pixels.set! (pixBase + 1) alpha
+    return pixels
+
+def decodeRowChrmToGray16 (matrix : PngMatrix3) (gamma : Option Nat)
+    (row : ByteArray) (w y bpp : Nat)
+    (pixels : ByteArray) : ByteArray :=
+  Id.run do
+    let mut pixels := pixels
+    for x in [0:w] do
+      let base := x * bpp
+      let gray := chrmRgbToGrayNat matrix gamma
+        (rowU16Nat row base) (rowU16Nat row (base + 2))
+        (rowU16Nat row (base + 4)) 65535
+      let pixBase := (y * w + x) * bytesPerPixelGray16
+      pixels := setU16Nat! pixels pixBase gray
+    return pixels
+
+def decodeRowChrmToGrayAlpha16 (matrix : PngMatrix3) (gamma : Option Nat)
+    (sourceColorType : Nat) (row : ByteArray) (w y bpp : Nat)
+    (pixels : ByteArray) : ByteArray :=
+  Id.run do
+    let mut pixels := pixels
+    for x in [0:w] do
+      let base := x * bpp
+      let gray := chrmRgbToGrayNat matrix gamma
+        (rowU16Nat row base) (rowU16Nat row (base + 2))
+        (rowU16Nat row (base + 4)) 65535
+      let alpha := if sourceColorType == 6 then rowU16Nat row (base + 6) else 65535
+      let pixBase := (y * w + x) * bytesPerPixelGrayAlpha16
+      pixels := setU16Nat! pixels pixBase gray
+      pixels := setU16Nat! pixels (pixBase + 2) alpha
+    return pixels
+
+def decodeRowChrmDown16ToGray8 (matrix : PngMatrix3) (gamma : Option Nat)
+    (row : ByteArray) (w y bpp : Nat)
+    (pixels : ByteArray) : ByteArray :=
+  Id.run do
+    let mut pixels := pixels
+    for x in [0:w] do
+      let base := x * bpp
+      let gray := chrmRgbToGrayNat matrix gamma
+        (rowU16Nat row base) (rowU16Nat row (base + 2))
+        (rowU16Nat row (base + 4)) 65535
+      let pixBase := (y * w + x) * bytesPerPixelGray
+      pixels := pixels.set! pixBase (u8 (gray / 256))
+    return pixels
+
+def decodeRowChrmDown16ToGrayAlpha8 (matrix : PngMatrix3) (gamma : Option Nat)
+    (sourceColorType : Nat) (row : ByteArray) (w y bpp : Nat)
+    (pixels : ByteArray) : ByteArray :=
+  Id.run do
+    let mut pixels := pixels
+    for x in [0:w] do
+      let base := x * bpp
+      let gray := chrmRgbToGrayNat matrix gamma
+        (rowU16Nat row base) (rowU16Nat row (base + 2))
+        (rowU16Nat row (base + 4)) 65535
+      let alpha := if sourceColorType == 6 then rowU16High row (base + 6) else u8 255
+      let pixBase := (y * w + x) * bytesPerPixelGrayAlpha
+      pixels := pixels.set! pixBase (u8 (gray / 256))
+      pixels := pixels.set! (pixBase + 1) alpha
+    return pixels
+
+def decodeRowsLoopChrmToGrayTarget (matrix : PngMatrix3) (gamma : Option Nat)
+    (targetColorType : UInt8) (sourceColorType : Nat) (source16 target8 target16 : Bool)
+    (raw : ByteArray) (w h bpp rowBytes : Nat) (pixels0 : ByteArray) : Option ByteArray :=
+  if targetColorType == u8 0 then
+    if source16 && target8 then
+      decodeRowsLoopCore raw w h bpp rowBytes bytesPerPixelGray
+        (decodeRowChrmDown16ToGray8 matrix gamma) 0 0 ByteArray.empty pixels0
+    else if source16 && target16 then
+      decodeRowsLoopCore raw w h bpp rowBytes bytesPerPixelGray16
+        (decodeRowChrmToGray16 matrix gamma) 0 0 ByteArray.empty pixels0
+    else
+      decodeRowsLoopCore raw w h bpp rowBytes bytesPerPixelGray
+        (decodeRowChrmToGray8 matrix gamma) 0 0 ByteArray.empty pixels0
+  else if targetColorType == u8 4 then
+    if source16 && target8 then
+      decodeRowsLoopCore raw w h bpp rowBytes bytesPerPixelGrayAlpha
+        (decodeRowChrmDown16ToGrayAlpha8 matrix gamma sourceColorType) 0 0 ByteArray.empty pixels0
+    else if source16 && target16 then
+      decodeRowsLoopCore raw w h bpp rowBytes bytesPerPixelGrayAlpha16
+        (decodeRowChrmToGrayAlpha16 matrix gamma sourceColorType) 0 0 ByteArray.empty pixels0
+    else
+      decodeRowsLoopCore raw w h bpp rowBytes bytesPerPixelGrayAlpha
+        (decodeRowChrmToGrayAlpha8 matrix gamma sourceColorType) 0 0 ByteArray.empty pixels0
+  else
+    none
 
 class PngPixel (α : Type u) [Pixel α] where
   encodeRaw : Bitmap α -> ByteArray
@@ -3726,8 +4191,21 @@ def decodeParsedBitmapWithMetadata {px : Type u} [Pixel px] [PngPixel px]
       some (raw, bpp, rowBytes)
   let totalBytes := hdr.width * hdr.height * Pixel.bytesPerPixel (α := px)
   let pixels0 := ByteArray.mk <| Array.replicate totalBytes 0
+  let chrmGrayActive :=
+    parsed.metadata.srgb.isNone && parsed.metadata.chromaticities.isSome &&
+    (hdr.colorType == 2 || hdr.colorType == 6) &&
+    (targetColorType == u8 0 || targetColorType == u8 4)
   let decodeDefaultRows : Option ByteArray :=
-    if source16 && target8 then
+    if chrmGrayActive then
+      match parsed.metadata.chromaticities with
+      | some chromaticities =>
+          match chromaticities.sourceToSrgbMatrix? with
+          | some matrix =>
+              decodeRowsLoopChrmToGrayTarget matrix parsed.metadata.gamma targetColorType
+                hdr.colorType source16 target8 target16 raw hdr.width hdr.height bpp rowBytes pixels0
+          | none => none
+      | none => none
+    else if source16 && target8 then
       decodeRowsLoopDown16To8 targetColorType hdr.colorType
         raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
     else
@@ -3805,7 +4283,8 @@ def decodeParsedBitmapWithMetadata {px : Type u} [Pixel px] [PngPixel px]
               decodeDefaultRows
         else
           decodeDefaultRows
-  let pixels ← applyPngColorSpaceTransform parsed.metadata targetColorType targetBitDepth pixels
+  let pixels ← applyPngColorSpaceTransform parsed.metadata hdr.colorType
+    targetColorType targetBitDepth pixels
   let size : Size := { width := hdr.width, height := hdr.height }
   if hsize : pixels.size = size.width * size.height * Pixel.bytesPerPixel (α := px) then
     some
@@ -3886,14 +4365,28 @@ def decodeBitmap {px : Type u} [Pixel px] [PngPixel px]
       some (raw, bpp, rowBytes)
   let totalBytes := hdr.width * hdr.height * Pixel.bytesPerPixel (α := px)
   let pixels0 := ByteArray.mk <| Array.replicate totalBytes 0
+  let targetColorType := PngPixel.colorType (α := px)
+  let chrmGrayActive :=
+    parsed.metadata.srgb.isNone && parsed.metadata.chromaticities.isSome &&
+    (hdr.colorType == 2 || hdr.colorType == 6) &&
+    (targetColorType == u8 0 || targetColorType == u8 4)
   let pixels ←
-    if source16 && target8 then
-      decodeRowsLoopDown16To8 (PngPixel.colorType (α := px)) hdr.colorType
+    if chrmGrayActive then
+      match parsed.metadata.chromaticities with
+      | some chromaticities =>
+          match chromaticities.sourceToSrgbMatrix? with
+          | some matrix =>
+              decodeRowsLoopChrmToGrayTarget matrix parsed.metadata.gamma targetColorType
+                hdr.colorType source16 target8 target16 raw hdr.width hdr.height bpp rowBytes pixels0
+          | none => none
+      | none => none
+    else if source16 && target8 then
+      decodeRowsLoopDown16To8 targetColorType hdr.colorType
         raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
     else
       PngPixel.decodeRowsLoop (α := px) raw hdr.width hdr.height bpp rowBytes 0 0 ByteArray.empty pixels0
-  let pixels ← applyPngColorSpaceTransform parsed.metadata (PngPixel.colorType (α := px))
-    targetBitDepth pixels
+  let pixels ← applyPngColorSpaceTransform parsed.metadata hdr.colorType
+    targetColorType targetBitDepth pixels
   let size : Size := { width := hdr.width, height := hdr.height }
   if hsize : pixels.size = size.width * size.height * Pixel.bytesPerPixel (α := px) then
     return { size, data := pixels, valid := hsize }
@@ -3983,20 +4476,54 @@ def encodeRawGray1WithFilter (bmp : BitmapGray1) (strategy : PngFilterStrategy) 
       let raw := ByteArray.emptyWithCapacity rawSize
       encodeRawFilteredRows bmp.data rowBytes bmp.size.height 0 ByteArray.empty raw strategy 1
 
-def encodeColorSpaceChunks? (colorSpace : Option PngEncodeColorSpace) : Option ByteArray :=
-  match colorSpace with
+def encodeI32BE? (n : Int) : Option ByteArray := do
+  let encoded ← signed32ToU32? n
+  some (u32be encoded)
+
+def encodeChrmData? (chromaticities : PngChromaticities) : Option ByteArray := do
+  if !chromaticities.valid then
+    none
+  let wx ← encodeI32BE? chromaticities.white.x
+  let wy ← encodeI32BE? chromaticities.white.y
+  let rx ← encodeI32BE? chromaticities.red.x
+  let ry ← encodeI32BE? chromaticities.red.y
+  let gx ← encodeI32BE? chromaticities.green.x
+  let gy ← encodeI32BE? chromaticities.green.y
+  let bx ← encodeI32BE? chromaticities.blue.x
+  let byBytes ← encodeI32BE? chromaticities.blue.y
+  some (wx ++ wy ++ rx ++ ry ++ gx ++ gy ++ bx ++ byBytes)
+
+def encodeChrmChunk? (chromaticities : Option PngChromaticities) : Option ByteArray := do
+  match chromaticities with
   | none => some ByteArray.empty
+  | some chromaticities =>
+      let data ← encodeChrmData? chromaticities
+      some (mkChunkBytes chrmTypeBytes data)
+
+def encodeColorSpaceChunks? (colorSpace : Option PngEncodeColorSpace)
+    (chromaticities : Option PngChromaticities) : Option ByteArray := do
+  let chrmChunk ← encodeChrmChunk? chromaticities
+  match colorSpace with
+  | none => some chrmChunk
   | some (.gamma gammaScaled) =>
       if gammaScaled == 0 then
         none
       else
-        some (mkChunkBytes gamaTypeBytes (u32be gammaScaled))
+        some (mkChunkBytes gamaTypeBytes (u32be gammaScaled) ++ chrmChunk)
   | some (.srgb intent includeCompatGamma) =>
+      match chromaticities with
+      | some chromaticities =>
+          if chromaticities ≠ PngChromaticities.srgb then
+            none
+      | none =>
+          pure ()
       let srgbChunk := mkChunkBytes srgbTypeBytes (ByteArray.mk #[intent.toByte])
-      if includeCompatGamma then
-        some (mkChunkBytes gamaTypeBytes (u32be 45455) ++ srgbChunk)
-      else
-        some srgbChunk
+      let prefixBytes :=
+        if includeCompatGamma then
+          mkChunkBytes gamaTypeBytes (u32be 45455)
+        else
+          ByteArray.empty
+      some (prefixBytes ++ chrmChunk ++ srgbChunk)
 
 def encodeTimeChunk? (modificationTime : Option PngTime) : Option ByteArray := do
   match modificationTime with
@@ -4020,17 +4547,19 @@ def encodePhysChunk? (physical : Option PngPhysicalPixelDimensions) : Option Byt
       some (mkChunkBytes physTypeBytes data)
 
 def encodeAncillaryChunks? (colorSpace : Option PngEncodeColorSpace)
+    (chromaticities : Option PngChromaticities)
     (physical : Option PngPhysicalPixelDimensions)
     (modificationTime : Option PngTime) : Option ByteArray := do
-  let colorSpaceChunks ← encodeColorSpaceChunks? colorSpace
+  let colorSpaceChunks ← encodeColorSpaceChunks? colorSpace chromaticities
   let physChunk ← encodePhysChunk? physical
   let timeChunk ← encodeTimeChunk? modificationTime
   some (colorSpaceChunks ++ physChunk ++ timeChunk)
 
 def encodeBitmapCore (raw ihdr : ByteArray) (mode : PngEncodeMode)
-    (colorSpace : Option PngEncodeColorSpace) (physical : Option PngPhysicalPixelDimensions)
+    (colorSpace : Option PngEncodeColorSpace) (chromaticities : Option PngChromaticities)
+    (physical : Option PngPhysicalPixelDimensions)
     (modificationTime : Option PngTime) : Option ByteArray := do
-  let ancillary ← encodeAncillaryChunks? colorSpace physical modificationTime
+  let ancillary ← encodeAncillaryChunks? colorSpace chromaticities physical modificationTime
   let idat :=
     match mode with
     | .stored => zlibCompressStored raw
@@ -4121,7 +4650,8 @@ def encodeBitmapGray1WithOptions (bmp : BitmapGray1)
   let raw := encodeRawGray1WithFilter bmp options.filter
   let ihdr := u32be bmp.size.width ++ u32be bmp.size.height ++
     ByteArray.mk #[u8 1, u8 0, u8 0, u8 0, u8 0]
-  encodeBitmapCore raw ihdr options.mode options.colorSpace options.physical options.modificationTime
+  encodeBitmapCore raw ihdr options.mode options.colorSpace options.chromaticities
+    options.physical options.modificationTime
 
 def encodeBitmapGray1Checked (bmp : BitmapGray1)
     (mode : PngEncodeMode := .fixed) : Except String ByteArray :=
@@ -4179,7 +4709,8 @@ def encodeBitmapWithOptions {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap
     | _ => encodeRawWithFilter bmp options.filter
   let ihdr := u32be bmp.size.width ++ u32be bmp.size.height ++
     ByteArray.mk #[PngPixel.bitDepth (α := px), PngPixel.colorType (α := px), u8 0, u8 0, u8 0]
-  encodeBitmapCore raw ihdr options.mode options.colorSpace options.physical options.modificationTime
+  encodeBitmapCore raw ihdr options.mode options.colorSpace options.chromaticities
+    options.physical options.modificationTime
 
 -- Encode a bitmap using the buffered fixed-Huffman deflate blocks (perf testing).
 

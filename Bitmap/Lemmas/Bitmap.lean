@@ -213,6 +213,7 @@ lemma decodeBitmap_encodeBitmap_common {px : Type u} [Pixel px] [PngPixel px]
               (bmp.size.width * bmp.size.height * Pixel.bytesPerPixel (α := px)) 0 }).bind
         fun decodedPixels ↦
           (applyPngColorSpaceTransform PngMetadata.empty
+            (PngPixel.colorType (α := px)).toNat
             (PngPixel.colorType (α := px)) (PngPixel.bitDepth (α := px)) decodedPixels).bind
             fun pixels ↦
               if h : pixels.size = bmp.size.width * bmp.size.height * Pixel.bytesPerPixel (α := px) then

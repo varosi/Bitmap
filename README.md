@@ -44,13 +44,22 @@ This library has proofs about:
   `parseGammaData_rejects_bad_length`,
   `parseSrgbData_accepts_intents`,
   `parseSrgbData_rejects_bad_intent`,
+  `parseChrmData_accepts_signed_values`,
+  `parseChrmData_rejects_bad_length`,
+  `encodeChrmData?_valid_size`,
+  `encodeChrmData?_rejects_out_of_range`,
   `parsePngLoopFuelWithMetadata_accepts_gAMA`,
+  `parsePngLoopFuelWithMetadata_accepts_cHRM`,
   `parsePngLoopFuelWithMetadata_accepts_sRGB`,
   `parsePngLoopFuelWithMetadata_rejects_gAMA_after_plte_or_idat`,
+  `parsePngLoopFuelWithMetadata_rejects_cHRM_after_plte_or_idat`,
   `parsePngLoopFuelWithMetadata_rejects_sRGB_after_plte_or_idat`,
   `parsePngLoopFuelWithMetadata_rejects_duplicate_gAMA`,
+  `parsePngLoopFuelWithMetadata_rejects_duplicate_cHRM`,
   `parsePngLoopFuelWithMetadata_rejects_duplicate_sRGB`,
+  `parsePngLoopFuelWithMetadata_rejects_cHRM_after_incompatible_sRGB`,
   `parsePngLoopFuelWithMetadata_rejects_sRGB_after_incompatible_gAMA`,
+  `parsePngLoopFuelWithMetadata_rejects_sRGB_after_incompatible_cHRM`,
   `parseTimeData_accepts_valid_time`,
   `parseTimeData_rejects_bad_length`,
   `parseTimeData_rejects_bad_month`,
@@ -69,6 +78,8 @@ This library has proofs about:
   `parsePngLoopFuelWithMetadata_rejects_duplicate_pHYs`,
   `applyPngColorSpaceTransform_no_metadata`,
   `applyPngColorSpaceTransform_sRGB_noop`,
+  `applyChrm8ToPixels_preserves_size`,
+  `applyChrm8ToPixels_preserves_rgba_alpha_sample`,
   `applyGamma8ToPixels_preserves_rgba_alpha_sample`,
   `applyGamma16ToPixels_preserves_grayAlpha_alpha_sample`,
   `parsePngLoopFuelWithMetadata_rejects_plte_after_metadata`,
@@ -163,7 +174,7 @@ has focused layout and validation lemmas plus runtime fixture coverage.
 | Filter type | Existing `encodeBitmap` APIs emit filter `0` rows. `encodeBitmapWithOptionsChecked` and `encodeBitmapGray1WithOptionsChecked` can opt into fixed filters `0` None, `1` Sub, `2` Up, `3` Average, `4` Paeth, or deterministic adaptive per-row selection |
 | Compression modes | `.stored` (uncompressed DEFLATE), `.fixed` (fixed-Huffman with LZ77 distance-1 run encoding), `.dynamic` (dynamic-block header; payload currently delegates to fixed-Huffman) |
 | Interlace | None (encoder always emits non-interlaced PNGs) |
-| Chunks emitted | Existing pure `encodeBitmap` APIs emit `IHDR`, one `IDAT`, `IEND` only. `encodeBitmapWithOptionsChecked` and `encodeBitmapGray1WithOptionsChecked` can also emit validated `gAMA`, `sRGB`, `pHYs`, or explicit `tIME` chunks, with optional compatible `gAMA=45455` before `sRGB`. File-writing helpers emit the current UTC `tIME` by default; `writePngWithoutTime` keeps deterministic no-`tIME` output |
+| Chunks emitted | Existing pure `encodeBitmap` APIs emit `IHDR`, one `IDAT`, `IEND` only. `encodeBitmapWithOptionsChecked` and `encodeBitmapGray1WithOptionsChecked` can also emit validated `gAMA`, `cHRM`, `sRGB`, `pHYs`, or explicit `tIME` chunks, with optional compatible `gAMA=45455` before `sRGB` and compatible sRGB chromaticities before `sRGB`. File-writing helpers emit the current UTC `tIME` by default; `writePngWithoutTime` keeps deterministic no-`tIME` output |
 | Integrity | CRC-32 per chunk, Adler-32 in the zlib trailer |
 | Dimension limits | width and height each `< 2^32`, enforced by `encodeBitmapChecked` |
 
@@ -178,11 +189,11 @@ has focused layout and validation lemmas plus runtime fixture coverage.
 | Compression | `inflateStored` tried first, then fixed- and dynamic-Huffman zlib streams (full `HLIT`/`HDIST`/`HCLEN` + code-length-code + literal/length and distance tables) |
 | LZ77 | Length codes 257–285 and distance codes 0–29 with extra bits; `copyDistance` supports overlap (distance < length) |
 | Color conversion | 1-bit grayscale PNGs can be decoded into `BitmapGray1` exactly or expanded into 8-/16-bit grayscale, RGB, or RGBA targets using full-range black/white samples. RGB PNGs can be decoded into `BitmapRGBA8` (fills α = 255), gray+alpha PNGs into `BitmapRGBA8` (preserves alpha as expanded gray), and RGBA PNGs into `BitmapRGB8` (drops alpha). 16-bit PNGs may be decoded into matching 8-bit bitmap formats by taking the high byte of each sample |
-| Color space | `sRGB` chunks are validated, preserved in metadata-aware decode, and treated as already-sRGB samples. `gAMA` chunks are validated, preserved, and when no `sRGB` chunk is present, non-alpha decoded samples are converted to sRGB output samples for 8- and 16-bit bitmap targets. `sRGB` with `gAMA` is accepted only for compatible `gAMA=45455`, with `sRGB` taking precedence |
+| Color space | `sRGB` chunks are validated, preserved in metadata-aware decode, and treated as already-sRGB samples. `gAMA` chunks are validated and preserved. `cHRM` chunks are validated, preserved, and when no `sRGB` chunk is present, RGB/RGBA source samples are converted to sRGB using cHRM primaries plus `gAMA` when present, or linear-light source samples when `gAMA` is absent. `sRGB` with `gAMA` is accepted only for compatible `gAMA=45455`; `sRGB` with `cHRM` is accepted only for compatible sRGB chromaticities; `sRGB` takes precedence |
 | Physical density | `pHYs` chunks are validated, preserved in metadata-aware decode, and exposed as exact pixels-per-unit values plus helper DPI conversion for metre-based density. The widget uses metre-based `pHYs` for CSS physical size and unknown-unit `pHYs` for pixel-aspect correction |
 | PNG structure | 8-byte signature, `IHDR` first, multiple consecutive `IDAT` chunks accepted and concatenated, `IEND` last, required `PLTE` ordering checks, rejects unknown critical chunks, compression/filter method ≠ 0, and interlace methods other than `0` or `1` |
-| Tolerated ancillary chunks | `cHRM`, `iCCP`, `tEXt`, `zTXt`, `iTXt`, `hIST`, `sPLT`, plus any unknown chunk type whose first byte is lowercase — CRC-validated and skipped. Supported `gAMA`, `sRGB`, `pHYs`, `tIME`, `bKGD`, and `tRNS` are validated by their dedicated parser branches |
-| Metadata-aware decode | `decodeBitmapWithMetadata` validates and returns supported `gAMA`, `sRGB`, `pHYs`, `tIME`, 1-bit grayscale plus 8- and 16-bit grayscale/RGB `bKGD` metadata; it applies supported grayscale/RGB `tRNS` transparency when decoding to RGBA, composites `tRNS` or RGBA alpha over `bKGD` when decoding to RGB, and composites grayscale+alpha over grayscale `bKGD` when decoding to RGB or grayscale. 16-bit sources can target exact 16-bit bitmaps or matching 8-bit bitmaps by high-byte downsampling after metadata handling |
+| Tolerated ancillary chunks | `iCCP`, `tEXt`, `zTXt`, `iTXt`, `hIST`, `sPLT`, plus any unknown chunk type whose first byte is lowercase — CRC-validated and skipped. Supported `gAMA`, `cHRM`, `sRGB`, `pHYs`, `tIME`, `bKGD`, and `tRNS` are validated by their dedicated parser branches |
+| Metadata-aware decode | `decodeBitmapWithMetadata` validates and returns supported `gAMA`, `cHRM`, `sRGB`, `pHYs`, `tIME`, 1-bit grayscale plus 8- and 16-bit grayscale/RGB `bKGD` metadata; it applies supported grayscale/RGB `tRNS` transparency when decoding to RGBA, composites `tRNS` or RGBA alpha over `bKGD` when decoding to RGB, and composites grayscale+alpha over grayscale `bKGD` when decoding to RGB or grayscale. 16-bit sources can target exact 16-bit bitmaps or matching 8-bit bitmaps by high-byte downsampling after metadata handling |
 | Integrity | CRC-32 verified for every parsed chunk; mismatch rejects the entire input. Adler-32 verified at end of zlib stream |
 
 ### Not supported
@@ -196,7 +207,7 @@ has focused layout and validation lemmas plus runtime fixture coverage.
 - Gray+alpha through the pixel-only `decodeBitmap` API into non-alpha targets — use `decodeBitmapWithMetadata` for `BitmapRGB8` or `BitmapGray8` when a valid grayscale `bKGD` background is present
 - `sBIT` chunks — explicitly **rejected** (decoder returns `none`) rather than silently ignored, to avoid the silent-corruption hazard of dropping precision metadata that affects pixel semantics
 - Unknown critical chunks (any chunk type whose first byte is uppercase and not `IHDR`/`PLTE`/`IDAT`/`IEND`) — rejected per the PNG spec
-- Reading-back of most ancillary chunk **content** (`tEXt`, `cHRM`, `iCCP`, etc.) — those chunks are validated and skipped; `decodeBitmapWithMetadata` preserves supported `gAMA`, `sRGB`, `pHYs`, `tIME`, `bKGD`, and `tRNS`
+- Reading-back of most ancillary chunk **content** (`tEXt`, `iCCP`, etc.) — those chunks are validated and skipped; `decodeBitmapWithMetadata` preserves supported `gAMA`, `cHRM`, `sRGB`, `pHYs`, `tIME`, `bKGD`, and `tRNS`
 - Genuinely-distinct dynamic-Huffman encoding — `.dynamic` emits a dynamic-block header but delegates the deflate payload to fixed-Huffman
 
 ## Usage

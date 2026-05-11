@@ -528,6 +528,11 @@ private def gamaChunk (gammaScaled : Nat) : ByteArray :=
 private def srgbChunk (intent : Png.PngSrgbIntent) : ByteArray :=
   Png.mkChunkBytes Png.srgbTypeBytes (ByteArray.mk #[intent.toByte])
 
+private def chrmChunk (chromaticities : Png.PngChromaticities) : ByteArray :=
+  match Png.encodeChrmData? chromaticities with
+  | some data => Png.mkChunkBytes Png.chrmTypeBytes data
+  | none => Png.mkChunkBytes Png.chrmTypeBytes ByteArray.empty
+
 private def fixedPngTime : Png.PngTime :=
   { year := 2026, month := 5, day := 2, hour := 17, minute := 45, second := 12 }
 
@@ -572,6 +577,104 @@ private def gammaTransformGray16Data (gammaScaled : Nat) (data : ByteArray) : By
       let corrected := Png.gammaSampleToSrgbNat gammaScaled sample 65535
       out := out ++ u16be corrected
     return out
+
+private def wideChromaticities : Png.PngChromaticities :=
+  { white := { x := 31270, y := 32900 }
+    red := { x := 68000, y := 32000 }
+    green := { x := 21000, y := 71000 }
+    blue := { x := 15000, y := 6000 } }
+
+private def chrmTransformRgb8Data
+    (chromaticities : Png.PngChromaticities) (gamma : Option Nat)
+    (data : ByteArray) : ByteArray :=
+  match chromaticities.sourceToSrgbMatrix? with
+  | none => data
+  | some matrix =>
+      Id.run do
+        let mut out := ByteArray.emptyWithCapacity data.size
+        let count := data.size / 3
+        for i in [0:count] do
+          let base := i * 3
+          let (r, g, b) := Png.chrmRgbToSrgbNat matrix gamma
+            (data.get! base).toNat (data.get! (base + 1)).toNat
+            (data.get! (base + 2)).toNat 255
+          out := out.push (Png.u8 r)
+          out := out.push (Png.u8 g)
+          out := out.push (Png.u8 b)
+        return out
+
+private def chrmTransformRgba8Data
+    (chromaticities : Png.PngChromaticities) (gamma : Option Nat)
+    (data : ByteArray) : ByteArray :=
+  match chromaticities.sourceToSrgbMatrix? with
+  | none => data
+  | some matrix =>
+      Id.run do
+        let mut out := ByteArray.emptyWithCapacity data.size
+        let count := data.size / 4
+        for i in [0:count] do
+          let base := i * 4
+          let (r, g, b) := Png.chrmRgbToSrgbNat matrix gamma
+            (data.get! base).toNat (data.get! (base + 1)).toNat
+            (data.get! (base + 2)).toNat 255
+          out := out.push (Png.u8 r)
+          out := out.push (Png.u8 g)
+          out := out.push (Png.u8 b)
+          out := out.push (data.get! (base + 3))
+        return out
+
+private def chrmTransformRgb16Data
+    (chromaticities : Png.PngChromaticities) (gamma : Option Nat)
+    (data : ByteArray) : ByteArray :=
+  match chromaticities.sourceToSrgbMatrix? with
+  | none => data
+  | some matrix =>
+      Id.run do
+        let mut out := ByteArray.emptyWithCapacity data.size
+        let count := data.size / 6
+        for i in [0:count] do
+          let base := i * 6
+          let r0 := (data.get! base).toNat * 256 + (data.get! (base + 1)).toNat
+          let g0 := (data.get! (base + 2)).toNat * 256 + (data.get! (base + 3)).toNat
+          let b0 := (data.get! (base + 4)).toNat * 256 + (data.get! (base + 5)).toNat
+          let (r, g, b) := Png.chrmRgbToSrgbNat matrix gamma r0 g0 b0 65535
+          out := out ++ u16be r ++ u16be g ++ u16be b
+        return out
+
+private def chrmTransformGray8Data
+    (chromaticities : Png.PngChromaticities) (gamma : Option Nat)
+    (data : ByteArray) : ByteArray :=
+  match chromaticities.sourceToSrgbMatrix? with
+  | none => data
+  | some matrix =>
+      Id.run do
+        let mut out := ByteArray.emptyWithCapacity (data.size / 3)
+        let count := data.size / 3
+        for i in [0:count] do
+          let base := i * 3
+          let gray := Png.chrmRgbToGrayNat matrix gamma
+            (data.get! base).toNat (data.get! (base + 1)).toNat
+            (data.get! (base + 2)).toNat 255
+          out := out.push (Png.u8 gray)
+        return out
+
+private def chrmTransformGrayAlpha8Data
+    (chromaticities : Png.PngChromaticities) (gamma : Option Nat)
+    (data : ByteArray) : ByteArray :=
+  match chromaticities.sourceToSrgbMatrix? with
+  | none => data
+  | some matrix =>
+      Id.run do
+        let mut out := ByteArray.emptyWithCapacity (data.size / 2)
+        let count := data.size / 4
+        for i in [0:count] do
+          let base := i * 4
+          let gray := Png.chrmRgbToGrayNat matrix gamma
+            (data.get! base).toNat (data.get! (base + 1)).toNat
+            (data.get! (base + 2)).toNat 255
+          out := out.push (Png.u8 gray)
+          out := out.push (data.get! (base + 3))
+        return out
 
 private def rgb16MetadataFixture : BitmapRGB16 :=
   BitmapRGB16.ofPixelFn 2 1 (fun idx : Fin (2 * 1) =>
@@ -1366,6 +1469,79 @@ private def expectColorSpaceChunks : IO Unit := do
         throw (IO.userError "compatible gAMA+sRGB metadata was not preserved")
   | none =>
       throw (IO.userError "compatible gAMA+sRGB fixture failed to decode")
+  let chrmGammaBytes := pngWithAncillary rgbFixture (chrmChunk wideChromaticities ++ gamaChunk gamma)
+  match Png.decodeBitmap (px := PixelRGB8) chrmGammaBytes with
+  | some bmp =>
+      if bmp.data != chrmTransformRgb8Data wideChromaticities (some gamma) rgbFixture.data then
+        throw (IO.userError "cHRM+gAMA RGB8 decode did not convert samples to sRGB")
+  | none =>
+      throw (IO.userError "cHRM+gAMA RGB8 fixture failed to decode")
+  match Png.decodeBitmapWithMetadata (px := PixelRGB8) chrmGammaBytes with
+  | some decoded =>
+      if decoded.metadata.chromaticities != some wideChromaticities ||
+          decoded.metadata.gamma != some gamma then
+        throw (IO.userError "cHRM+gAMA metadata was not preserved")
+  | none =>
+      throw (IO.userError "cHRM+gAMA metadata decode failed")
+  match Png.decodeBitmap (px := PixelRGBA8)
+      (pngWithAncillary rgbaFixture (chrmChunk wideChromaticities ++ gamaChunk gamma)) with
+  | some bmp =>
+      if bmp.data != chrmTransformRgba8Data wideChromaticities (some gamma) rgbaFixture.data then
+        throw (IO.userError "cHRM+gAMA RGBA8 decode changed alpha or missed conversion")
+  | none =>
+      throw (IO.userError "cHRM+gAMA RGBA8 fixture failed to decode")
+  let chrmLinearBytes := pngWithAncillary rgbFixture (chrmChunk wideChromaticities)
+  match Png.decodeBitmap (px := PixelRGB8) chrmLinearBytes with
+  | some bmp =>
+      if bmp.data != chrmTransformRgb8Data wideChromaticities none rgbFixture.data then
+        throw (IO.userError "cHRM without gAMA did not use linear-source conversion")
+  | none =>
+      throw (IO.userError "linear cHRM RGB8 fixture failed to decode")
+  match Png.decodeBitmap (px := PixelGray8) chrmGammaBytes with
+  | some bmp =>
+      if bmp.data != chrmTransformGray8Data wideChromaticities (some gamma) rgbFixture.data then
+        throw (IO.userError "cHRM RGB-to-gray decode did not use sRGB luminance")
+  | none =>
+      throw (IO.userError "cHRM RGB-to-gray fixture failed to decode")
+  match Png.decodeBitmap (px := PixelGrayAlpha8)
+      (pngWithAncillary rgbaFixture (chrmChunk wideChromaticities ++ gamaChunk gamma)) with
+  | some bmp =>
+      if bmp.data != chrmTransformGrayAlpha8Data wideChromaticities (some gamma) rgbaFixture.data then
+        throw (IO.userError "cHRM RGBA-to-gray-alpha decode missed luma or alpha")
+  | none =>
+      throw (IO.userError "cHRM RGBA-to-gray-alpha fixture failed to decode")
+  match Png.decodeBitmap (px := PixelRGB16)
+      (pngWithAncillary rgb16MetadataFixture (chrmChunk wideChromaticities ++ gamaChunk gamma)) with
+  | some bmp =>
+      if bmp.data != chrmTransformRgb16Data wideChromaticities (some gamma)
+          rgb16MetadataFixture.data then
+        throw (IO.userError "cHRM+gAMA RGB16 decode did not convert samples to sRGB")
+  | none =>
+      throw (IO.userError "cHRM+gAMA RGB16 fixture failed to decode")
+  let compatChrmBytes :=
+    pngWithAncillary rgbFixture
+      (gamaChunk 45455 ++ chrmChunk Png.PngChromaticities.srgb ++ srgbChunk .perceptual)
+  match Png.decodeBitmapWithMetadata (px := PixelRGB8) compatChrmBytes with
+  | some decoded =>
+      if decoded.bitmap.data != rgbFixture.data then
+        throw (IO.userError "sRGB precedence failed for compatible gAMA+cHRM+sRGB")
+      if decoded.metadata.gamma != some 45455 ||
+          decoded.metadata.chromaticities != some Png.PngChromaticities.srgb ||
+          decoded.metadata.srgb != some .perceptual then
+        throw (IO.userError "compatible gAMA+cHRM+sRGB metadata was not preserved")
+  | none =>
+      throw (IO.userError "compatible gAMA+cHRM+sRGB fixture failed to decode")
+  match Png.encodeBitmapWithOptionsChecked (px := PixelRGB8) rgbFixture
+      { mode := .fixed, chromaticities := some wideChromaticities } with
+  | Except.ok bytes =>
+      match Png.decodeBitmapWithMetadata (px := PixelRGB8) bytes with
+      | some decoded =>
+          if decoded.metadata.chromaticities != some wideChromaticities then
+            throw (IO.userError "encoded cHRM metadata failed to parse")
+      | none =>
+          throw (IO.userError "encoded cHRM PNG failed to decode")
+  | Except.error err =>
+      throw (IO.userError err)
   expectMetadataDecodeNoneBytes
     (pngWithAncillary rgbFixture (Png.mkChunkBytes Png.gamaTypeBytes (ByteArray.mk #[Png.u8 1])))
     "bad gAMA length"
@@ -1801,7 +1977,7 @@ def run : IO Unit := do
   expectPngEncodeFilters
   IO.println "png encoder filter fixtures: ok"
   expectColorSpaceChunks
-  IO.println "png sRGB/gAMA fixtures: ok"
+  IO.println "png sRGB/gAMA/cHRM fixtures: ok"
   expectTimeChunks
   IO.println "png tIME fixtures: ok"
   expectPhysicalMetadata
