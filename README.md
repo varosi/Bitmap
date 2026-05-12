@@ -113,7 +113,13 @@ This library has proofs about:
   `bytes_extract_skip_signature`, Phase 3a-3c-3d-partial);
 - fixed-block forward-correctness scaffold: `FixedPayloadTransition`,
   `FixedPayloadFinish`, `FixedPayloadTrace`, and `FixedBlockSpec` inductive
-  structures parallel to the dynamic spec (Phase 1b scaffold);
+  structures parallel to the dynamic spec, plus the slow-variant
+  forward-correctness theorem `fixedBlockSpec_decode_correct` (Phase 1b);
+- fixed-block fast/slow decoder bridge: the runtime's fast
+  `decodeFixedBlockFuelFast` is extensionally equivalent to the slow
+  `decodeFixedBlockFuel` (`decodeFixedLiteralSymFast9_eq_decodeFixedLiteralSym`,
+  `decodeFixedBlockFuelFast_eq_decodeFixedBlockFuel`,
+  `fixedBlockSpec_decode_correct_fast`);
 - there are no buffer overflows;
 - PNG encode and decode are total functions.
 
@@ -147,15 +153,19 @@ A multi-phase plan is in progress to extend the proof coverage to byte streams
 - **Phase 4 (row filter)**: `Bitmap/Lemmas/Png/RowFilterSpec.lean` — complete.
 - **Phase 1a (stored block)**: `Bitmap/Lemmas/Png/StoredBlockProofsSpec.lean` —
   complete, including the multi-block stream theorem.
-- **Phase 3a-3d (PNG container)**: `Bitmap/Lemmas/Png/ContainerSpec.lean` — IHDR
-  round trip + size/signature lemmas + signature-skip helper landed; the full
-  `parsePng_simpleContainerSpec_correct` theorem (chunk-by-chunk byte arithmetic
-  for IHDR/IDAT/IEND) is deferred.
+- **Phase 3a-3d (PNG container)**: `Bitmap/Lemmas/Png/ContainerSpec.lean` —
+  complete, including `parsePng_simpleContainerSpec_correct`.
 - **Phase 1b (fixed block)**: `Bitmap/Lemmas/Png/FixedBlockProofsSpec.lean` —
-  scaffold (inductive structures defined). The forward-correctness theorem is
-  deferred and would mirror the dynamic spec's induction over the trace.
-- **Phase 2 (mixed `BlockSpec` ADT) and Phase 5 (end-to-end composition)**: not
-  yet started; depend on Phase 1b's final theorem.
+  complete (`fixedBlockSpec_decode_correct`). The runtime's fast variant
+  is bridged in `Bitmap/Lemmas/Png/FixedBlockFastSlowBridge.lean` with
+  `decodeFixedBlockFuelFast_eq_decodeFixedBlockFuel` and
+  `fixedBlockSpec_decode_correct_fast`.
+- **Phase 2 (mixed `BlockSpec` ADT)**: `Bitmap/Lemmas/Png/DeflateStreamSpec.lean` —
+  ADT defined (stored / fixed / dynamic blocks). The
+  `deflateStreamSpec_decode_correct` theorem is the next step.
+- **Phase 5 (end-to-end composition)**: `Bitmap/Lemmas/ExternalPngSpec.lean` —
+  scaffold (`ExternalPngSpec` structure). Final theorem
+  `decodeBitmap_external_correct` depends on Phase 2.
 
 ## Supported PNG features
 

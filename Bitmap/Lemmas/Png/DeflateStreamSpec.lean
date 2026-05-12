@@ -15,24 +15,14 @@ dispatch on `BTYPE`.
 
 ### Bridging / runtime mismatch
 
-The forward-correctness theorem for this spec still has one open
-bridging issue:
-
-* **Fixed block, fast vs. slow**: the runtime's fixed branch calls
-  `decodeFixedBlockFast = decodeFixedBlockFuelFast`, but Phase 1b's
-  `fixedBlockSpec_decode_correct` proves correctness against the
-  *slow* `decodeFixedBlockFuel`. Bridging requires the extensional
-  equivalence `decodeFixedBlockFuelFast = decodeFixedBlockFuel`.
-
-  Foundation for this bridge has landed in
-  `FixedBlockFastSlowBridge.lean` (Option A scaffold): `readBit_lt_two`,
-  `readBitsAux_lt_two_pow`, `readBitsAux_bitIndex_data`, the
-  `readBitsAux9_mod7` / `readBitsAux9_mod8` mod identities, and the
-  `readBitsAux_8_split_of` / `readBitsAux_9_split_of` chain
-  decompositions. The remaining work is the per-symbol bridge
-  theorem `decodeFixedLiteralSymFast9_eq_decodeFixedLiteralSym`,
-  its fuel-level lifting, and the
-  `fixedBlockSpec_decode_correct_fast` corollary. -/
+The forward-correctness theorem for this spec is now unblocked: the
+runtime's fixed branch calls `decodeFixedBlockFast = decodeFixedBlockFuelFast`,
+and `FixedBlockFastSlowBridge.lean` proves the extensional equivalence
+`decodeFixedBlockFuelFast = decodeFixedBlockFuel` (per-symbol bridge
+`decodeFixedLiteralSymFast9_eq_decodeFixedLiteralSym` + fuel-level lifting
+`decodeFixedBlockFuelFast_eq_decodeFixedBlockFuel`). The fast-variant
+corollary `fixedBlockSpec_decode_correct_fast` composes with the slow
+`fixedBlockSpec_decode_correct` from Phase 1b. -/
 
 /-! ### Stored-block BitReader wrapper
 
