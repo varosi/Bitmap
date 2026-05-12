@@ -16,16 +16,23 @@ dispatch on `BTYPE`.
 ### Bridging / runtime mismatch
 
 The forward-correctness theorem for this spec still has one open
-bridging issue (the stored bridge below was added in this commit):
+bridging issue:
 
 * **Fixed block, fast vs. slow**: the runtime's fixed branch calls
   `decodeFixedBlockFast = decodeFixedBlockFuelFast`, but Phase 1b's
   `fixedBlockSpec_decode_correct` proves correctness against the
-  *slow* `decodeFixedBlockFuel`. Bridging requires either an
-  extensional equivalence
-  `decodeFixedBlockFuelFast = decodeFixedBlockFuel`, or a parallel
-  `FixedBlockSpec_fast_decode_correct` proved against the existing
-  fast step lemmas in `FixedBlockProofsDecode.lean`. -/
+  *slow* `decodeFixedBlockFuel`. Bridging requires the extensional
+  equivalence `decodeFixedBlockFuelFast = decodeFixedBlockFuel`.
+
+  Foundation for this bridge has landed in
+  `FixedBlockFastSlowBridge.lean` (Option A scaffold): `readBit_lt_two`,
+  `readBitsAux_lt_two_pow`, `readBitsAux_bitIndex_data`, the
+  `readBitsAux9_mod7` / `readBitsAux9_mod8` mod identities, and the
+  `readBitsAux_8_split_of` / `readBitsAux_9_split_of` chain
+  decompositions. The remaining work is the per-symbol bridge
+  theorem `decodeFixedLiteralSymFast9_eq_decodeFixedLiteralSym`,
+  its fuel-level lifting, and the
+  `fixedBlockSpec_decode_correct_fast` corollary. -/
 
 /-! ### Stored-block BitReader wrapper
 
