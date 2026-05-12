@@ -67,6 +67,27 @@ lemma bytesPerPixel_grayAlpha :
     Pixel.bytesPerPixel (α := PixelGrayAlpha8) = bytesPerPixelGrayAlpha := by
   rfl
 
+/-- Bytes per pixel for `PixelRGB16`.
+This exposes the six-byte 16-bit RGB layout to PNG round-trip proofs. -/
+lemma bytesPerPixel_rgb16 : Pixel.bytesPerPixel (α := PixelRGB16) = bytesPerPixelRGB16 := by
+  rfl
+
+/-- Bytes per pixel for `PixelRGBA16`.
+This exposes the eight-byte 16-bit RGBA layout to PNG round-trip proofs. -/
+lemma bytesPerPixel_rgba16 : Pixel.bytesPerPixel (α := PixelRGBA16) = bytesPerPixelRGBA16 := by
+  rfl
+
+/-- Bytes per pixel for `PixelGray16`.
+This exposes the two-byte 16-bit grayscale layout to PNG round-trip proofs. -/
+lemma bytesPerPixel_gray16 : Pixel.bytesPerPixel (α := PixelGray16) = bytesPerPixelGray16 := by
+  rfl
+
+/-- Bytes per pixel for `PixelGrayAlpha16`.
+This exposes the four-byte 16-bit grayscale+alpha layout to PNG round-trip proofs. -/
+lemma bytesPerPixel_grayAlpha16 :
+    Pixel.bytesPerPixel (α := PixelGrayAlpha16) = bytesPerPixelGrayAlpha16 := by
+  rfl
+
 -- PNG color type for RGB8.
 @[simp] lemma pngPixel_colorType_rgb : PngPixel.colorType (α := PixelRGB8) = u8 2 := by
   rfl
@@ -85,6 +106,63 @@ The encoder emits PNG color type 4 for grayscale+alpha pixels. -/
     PngPixel.colorType (α := PixelGrayAlpha8) = u8 4 := by
   rfl
 
+/-- PNG color type for `PixelRGB16`.
+The 16-bit RGB encoder uses the same PNG color type as RGB8. -/
+@[simp] lemma pngPixel_colorType_rgb16 : PngPixel.colorType (α := PixelRGB16) = u8 2 := by
+  rfl
+
+/-- PNG color type for `PixelRGBA16`.
+The 16-bit RGBA encoder uses the same PNG color type as RGBA8. -/
+@[simp] lemma pngPixel_colorType_rgba16 : PngPixel.colorType (α := PixelRGBA16) = u8 6 := by
+  rfl
+
+/-- PNG color type for `PixelGray16`.
+The 16-bit grayscale encoder uses PNG color type 0. -/
+@[simp] lemma pngPixel_colorType_gray16 : PngPixel.colorType (α := PixelGray16) = u8 0 := by
+  rfl
+
+/-- PNG color type for `PixelGrayAlpha16`.
+The 16-bit grayscale+alpha encoder uses PNG color type 4. -/
+@[simp] lemma pngPixel_colorType_grayAlpha16 :
+    PngPixel.colorType (α := PixelGrayAlpha16) = u8 4 := by
+  rfl
+
+@[simp] lemma pngPixel_bitDepth_rgb : PngPixel.bitDepth (α := PixelRGB8) = u8 8 := by
+  rfl
+
+@[simp] lemma pngPixel_bitDepth_rgba : PngPixel.bitDepth (α := PixelRGBA8) = u8 8 := by
+  rfl
+
+@[simp] lemma pngPixel_bitDepth_gray : PngPixel.bitDepth (α := PixelGray8) = u8 8 := by
+  rfl
+
+/-- PNG bit depth for `PixelGrayAlpha8`.
+It pins color type 4 round-trips to 8-bit samples. -/
+@[simp] lemma pngPixel_bitDepth_grayAlpha :
+    PngPixel.bitDepth (α := PixelGrayAlpha8) = u8 8 := by
+  rfl
+
+/-- PNG bit depth for `PixelRGB16`.
+It pins 16-bit RGB round-trips to 16-bit samples. -/
+@[simp] lemma pngPixel_bitDepth_rgb16 : PngPixel.bitDepth (α := PixelRGB16) = u8 16 := by
+  rfl
+
+/-- PNG bit depth for `PixelRGBA16`.
+It pins 16-bit RGBA round-trips to 16-bit samples. -/
+@[simp] lemma pngPixel_bitDepth_rgba16 : PngPixel.bitDepth (α := PixelRGBA16) = u8 16 := by
+  rfl
+
+/-- PNG bit depth for `PixelGray16`.
+It pins grayscale UInt16 round-trips to 16-bit samples. -/
+@[simp] lemma pngPixel_bitDepth_gray16 : PngPixel.bitDepth (α := PixelGray16) = u8 16 := by
+  rfl
+
+/-- PNG bit depth for `PixelGrayAlpha16`.
+It pins grayscale+alpha UInt16 round-trips to 16-bit samples. -/
+@[simp] lemma pngPixel_bitDepth_grayAlpha16 :
+    PngPixel.bitDepth (α := PixelGrayAlpha16) = u8 16 := by
+  rfl
+
 -- PNG raw encoding for RGB8.
 @[simp] lemma pngPixel_encodeRaw_rgb : PngPixel.encodeRaw (α := PixelRGB8) = encodeRawFast := by
   rfl
@@ -101,6 +179,21 @@ The encoder emits PNG color type 4 for grayscale+alpha pixels. -/
 This keeps grayscale+alpha on the same filter-0 raw encoder path. -/
 @[simp] lemma pngPixel_encodeRaw_grayAlpha :
     PngPixel.encodeRaw (α := PixelGrayAlpha8) = encodeRawFast := by
+  rfl
+
+@[simp] lemma pngPixel_encodeRaw_rgb16 : PngPixel.encodeRaw (α := PixelRGB16) = encodeRawFast := by
+  rfl
+
+@[simp] lemma pngPixel_encodeRaw_rgba16 : PngPixel.encodeRaw (α := PixelRGBA16) = encodeRawFast := by
+  rfl
+
+@[simp] lemma pngPixel_encodeRaw_gray16 : PngPixel.encodeRaw (α := PixelGray16) = encodeRawFast := by
+  rfl
+
+/-- Raw PNG row encoding for `PixelGrayAlpha16`.
+This keeps 16-bit grayscale+alpha on the shared filter-0 encoder path. -/
+@[simp] lemma pngPixel_encodeRaw_grayAlpha16 :
+    PngPixel.encodeRaw (α := PixelGrayAlpha16) = encodeRawFast := by
   rfl
 
 -- PNG row decoder for RGB8.
@@ -122,6 +215,24 @@ This keeps grayscale+alpha on the same filter-0 raw encoder path. -/
 It lets the generic round-trip proof specialize to color type 4. -/
 @[simp] lemma pngPixel_decodeRowsLoop_grayAlpha :
     PngPixel.decodeRowsLoop (α := PixelGrayAlpha8) = decodeRowsLoopGrayAlpha := by
+  rfl
+
+@[simp] lemma pngPixel_decodeRowsLoop_rgb16 :
+    PngPixel.decodeRowsLoop (α := PixelRGB16) = decodeRowsLoopRGB16 := by
+  rfl
+
+@[simp] lemma pngPixel_decodeRowsLoop_rgba16 :
+    PngPixel.decodeRowsLoop (α := PixelRGBA16) = decodeRowsLoopRGBA16 := by
+  rfl
+
+@[simp] lemma pngPixel_decodeRowsLoop_gray16 :
+    PngPixel.decodeRowsLoop (α := PixelGray16) = decodeRowsLoopGray16 := by
+  rfl
+
+/-- Row decoder selected by the `PixelGrayAlpha16` PNG instance.
+It lets the generic round-trip proof specialize to 16-bit color type 4. -/
+@[simp] lemma pngPixel_decodeRowsLoop_grayAlpha16 :
+    PngPixel.decodeRowsLoop (α := PixelGrayAlpha16) = decodeRowsLoopGrayAlpha16 := by
   rfl
 
 -- Little-endian 16-bit encoding has length 2.
@@ -1138,12 +1249,30 @@ lemma zlibDecompressStored_zlibCompressStored (raw : ByteArray)
   simp [bytes, hcmf, hflg, hmin, hinflate, hadler, hmod, hbtype, hflg0]
 
 
--- Fixed tail bytes in the IHDR payload (bit depth, color type, and flags).
+-- Tail bytes in the IHDR payload (bit depth, color type, and flags).
+def ihdrTailDepth (bd ct : UInt8) : ByteArray :=
+  ByteArray.mk #[bd, ct, u8 0, u8 0, u8 0]
+
+-- Fixed 8-bit tail bytes in the IHDR payload used by legacy proof clients.
 def ihdrTailColor (ct : UInt8) : ByteArray :=
-  ByteArray.mk #[u8 8, ct, u8 0, u8 0, u8 0]
+  ihdrTailDepth (u8 8) ct
+
+@[simp] lemma ihdrTailDepth_size (bd ct : UInt8) : (ihdrTailDepth bd ct).size = 5 := by
+  simp [ihdrTailDepth, ByteArray.size]
+
+@[simp] lemma ihdrTailDepth_get0 (bd ct : UInt8) : (ihdrTailDepth bd ct).get! 0 = bd := by
+  rfl
+@[simp] lemma ihdrTailDepth_get1 (bd ct : UInt8) : (ihdrTailDepth bd ct).get! 1 = ct := by
+  rfl
+@[simp] lemma ihdrTailDepth_get2 (bd ct : UInt8) : (ihdrTailDepth bd ct).get! 2 = u8 0 := by
+  rfl
+@[simp] lemma ihdrTailDepth_get3 (bd ct : UInt8) : (ihdrTailDepth bd ct).get! 3 = u8 0 := by
+  rfl
+@[simp] lemma ihdrTailDepth_get4 (bd ct : UInt8) : (ihdrTailDepth bd ct).get! 4 = u8 0 := by
+  rfl
 
 @[simp] lemma ihdrTailColor_size (ct : UInt8) : (ihdrTailColor ct).size = 5 := by
-  simp [ihdrTailColor, ByteArray.size]
+  simp [ihdrTailColor]
 
 @[simp] lemma ihdrTailColor_get0 (ct : UInt8) : (ihdrTailColor ct).get! 0 = u8 8 := by
   rfl
@@ -1158,25 +1287,29 @@ def ihdrTailColor (ct : UInt8) : ByteArray :=
 
 
 -- IHDR payload is always 13 bytes.
+lemma ihdr_payload_size_depth (w h : Nat) (bd ct : UInt8) :
+    (u32be w ++ u32be h ++ ihdrTailDepth bd ct).size = 13 := by
+  simp [ByteArray.size_append, u32be_size, Nat.add_comm]
+
 lemma ihdr_payload_size (w h : Nat) (ct : UInt8) :
     (u32be w ++ u32be h ++ ihdrTailColor ct).size = 13 := by
-  simp [ByteArray.size_append, u32be_size, Nat.add_comm]
+  simpa [ihdrTailColor] using ihdr_payload_size_depth w h (u8 8) ct
 
 -- RGB-compatible IHDR tail (color type 2).
 def ihdrTail : ByteArray :=
   ihdrTailColor (u8 2)
 
 -- IHDR payload width slice is the encoded width.
-lemma ihdr_payload_extract_width (w h : Nat) (ct : UInt8) :
-    (u32be w ++ u32be h ++ ihdrTailColor ct).extract 0 4 =
+lemma ihdr_payload_extract_width_depth (w h : Nat) (bd ct : UInt8) :
+    (u32be w ++ u32be h ++ ihdrTailDepth bd ct).extract 0 4 =
       u32be w := by
-  let tail := ihdrTailColor ct
+  let tail := ihdrTailDepth bd ct
   let ihdr := u32be w ++ u32be h ++ tail
   ext i hi
   · -- size goal
     have hle : 0 + 4 ≤ ihdr.size := by
       have : ihdr.size = 13 := by
-        simpa [ihdr, tail] using ihdr_payload_size w h ct
+        simpa [ihdr, tail] using ihdr_payload_size_depth w h bd ct
       omega
     have hsize : (ihdr.extract 0 4).size = 4 := by
       simp [ByteArray.size_extract, Nat.min_eq_left hle]
@@ -1184,7 +1317,7 @@ lemma ihdr_payload_extract_width (w h : Nat) (ct : UInt8) :
   · -- element goal
     have hle : 0 + 4 ≤ ihdr.size := by
       have : ihdr.size = 13 := by
-        simpa [ihdr, tail] using ihdr_payload_size w h ct
+        simpa [ihdr, tail] using ihdr_payload_size_depth w h bd ct
       omega
     have hsize : (ihdr.extract 0 4).size = 4 := by
       simp [ByteArray.size_extract, Nat.min_eq_left hle]
@@ -1203,17 +1336,22 @@ lemma ihdr_payload_extract_width (w h : Nat) (ct : UInt8) :
       (ihdr.extract 0 4)[i] = ihdr[i]'hi_ihdr := hget'
       _ = (u32be w)[i]'hiw := hget
 
+lemma ihdr_payload_extract_width (w h : Nat) (ct : UInt8) :
+    (u32be w ++ u32be h ++ ihdrTailColor ct).extract 0 4 =
+      u32be w := by
+  simpa [ihdrTailColor] using ihdr_payload_extract_width_depth w h (u8 8) ct
+
 -- IHDR payload height slice is the encoded height.
-lemma ihdr_payload_extract_height (w h : Nat) (ct : UInt8) :
-    (u32be w ++ u32be h ++ ihdrTailColor ct).extract 4 8 =
+lemma ihdr_payload_extract_height_depth (w h : Nat) (bd ct : UInt8) :
+    (u32be w ++ u32be h ++ ihdrTailDepth bd ct).extract 4 8 =
       u32be h := by
-  let tail := ihdrTailColor ct
+  let tail := ihdrTailDepth bd ct
   let ihdr := u32be w ++ u32be h ++ tail
   ext i hi
   · -- size goal
     have hle : 4 + 4 ≤ ihdr.size := by
       have : ihdr.size = 13 := by
-        simpa [ihdr, tail] using ihdr_payload_size w h ct
+        simpa [ihdr, tail] using ihdr_payload_size_depth w h bd ct
       omega
     have hsize : (ihdr.extract 4 8).size = 4 := by
       simp [ByteArray.size_extract, Nat.min_eq_left hle]
@@ -1221,7 +1359,7 @@ lemma ihdr_payload_extract_height (w h : Nat) (ct : UInt8) :
   · -- element goal
     have hle : 4 + 4 ≤ ihdr.size := by
       have : ihdr.size = 13 := by
-        simpa [ihdr, tail] using ihdr_payload_size w h ct
+        simpa [ihdr, tail] using ihdr_payload_size_depth w h bd ct
       omega
     have hsize : (ihdr.extract 4 8).size = 4 := by
       simp [ByteArray.size_extract, Nat.min_eq_left hle]
@@ -1231,7 +1369,7 @@ lemma ihdr_payload_extract_height (w h : Nat) (ct : UInt8) :
       simpa [u32be_size] using hi4
     have hright : ihdr[4 + i]'(by
       have : ihdr.size = 13 := by
-        simpa [ihdr, tail] using ihdr_payload_size w h ct
+        simpa [ihdr, tail] using ihdr_payload_size_depth w h bd ct
       omega) = (u32be h ++ tail)[i]'(by
           have : i < (u32be h ++ tail).size := by
             have : (u32be h).size = 4 := u32be_size h
@@ -1243,7 +1381,7 @@ lemma ihdr_payload_extract_height (w h : Nat) (ct : UInt8) :
         simp [u32be_size]
       have hlt' : 4 + i < ihdr.size := by
         have : ihdr.size = 13 := by
-          simpa [ihdr, tail] using ihdr_payload_size w h ct
+          simpa [ihdr, tail] using ihdr_payload_size_depth w h bd ct
         omega
       have h := ByteArray.get_append_right (a := u32be w) (b := u32be h ++ tail)
         (i := 4 + i) hle' (by simpa [ihdr, tail, ByteArray.append_assoc] using hlt')
@@ -1260,13 +1398,13 @@ lemma ihdr_payload_extract_height (w h : Nat) (ct : UInt8) :
       simpa [tail] using h
     have hget' : (ihdr.extract 4 8)[i] = ihdr[4 + i]'(by
         have : ihdr.size = 13 := by
-          simpa [ihdr, tail] using ihdr_payload_size w h ct
+          simpa [ihdr, tail] using ihdr_payload_size_depth w h bd ct
         omega) := by
       simp
     calc
       (ihdr.extract 4 8)[i] = ihdr[4 + i]'(by
         have : ihdr.size = 13 := by
-          simpa [ihdr, tail] using ihdr_payload_size w h ct
+          simpa [ihdr, tail] using ihdr_payload_size_depth w h bd ct
         omega) := hget'
       _ = (u32be h ++ tail)[i]'(by
         have : i < (u32be h ++ tail).size := by
@@ -1276,6 +1414,11 @@ lemma ihdr_payload_extract_height (w h : Nat) (ct : UInt8) :
             (Nat.lt_of_lt_of_le h' (Nat.le_add_right _ _))
         simpa using this) := hright
       _ = (u32be h)[i]'hih := hleft
+
+lemma ihdr_payload_extract_height (w h : Nat) (ct : UInt8) :
+    (u32be w ++ u32be h ++ ihdrTailColor ct).extract 4 8 =
+      u32be h := by
+  simpa [ihdrTailColor] using ihdr_payload_extract_height_depth w h (u8 8) ct
 
 -- Reading the width from an IHDR payload yields the original width.
 lemma readU32BE_ihdr_width (w h : Nat) (ct : UInt8) (hw : w < 2 ^ 32) :
@@ -1329,23 +1472,27 @@ lemma readU32BE_ihdr_height (w h : Nat) (ct : UInt8) (hh : h < 2 ^ 32) :
   simp [hread'] at hread
   exact hread
 
--- The fixed IHDR tail bytes are present.
-lemma ihdr_payload_extract_tail (w h : Nat) (ct : UInt8) :
-    (u32be w ++ u32be h ++ ihdrTailColor ct).extract 8 13 = ihdrTailColor ct := by
+-- The IHDR tail bytes are present.
+lemma ihdr_payload_extract_tail_depth (w h : Nat) (bd ct : UInt8) :
+    (u32be w ++ u32be h ++ ihdrTailDepth bd ct).extract 8 13 = ihdrTailDepth bd ct := by
   have hsize : (u32be w ++ u32be h).size = 8 := by
     simp [ByteArray.size_append, u32be_size]
   have hshift :
-      (u32be w ++ u32be h ++ ihdrTailColor ct).extract 8 13 =
-        (ihdrTailColor ct).extract 0 5 := by
+      (u32be w ++ u32be h ++ ihdrTailDepth bd ct).extract 8 13 =
+        (ihdrTailDepth bd ct).extract 0 5 := by
     simpa [ByteArray.append_assoc, hsize] using
       (ByteArray.extract_append_size_add
         (a := u32be w ++ u32be h)
-        (b := ihdrTailColor ct)
+        (b := ihdrTailDepth bd ct)
         (i := 0) (j := 5))
-  have htail : (ihdrTailColor ct).extract 0 5 = ihdrTailColor ct := by
-    have hsize : (ihdrTailColor ct).size = 5 := by simp
-    simpa [hsize] using (ByteArray.extract_zero_size (b := ihdrTailColor ct))
+  have htail : (ihdrTailDepth bd ct).extract 0 5 = ihdrTailDepth bd ct := by
+    have hsize : (ihdrTailDepth bd ct).size = 5 := by simp
+    simpa [hsize] using (ByteArray.extract_zero_size (b := ihdrTailDepth bd ct))
   simpa [htail] using hshift
+
+lemma ihdr_payload_extract_tail (w h : Nat) (ct : UInt8) :
+    (u32be w ++ u32be h ++ ihdrTailColor ct).extract 8 13 = ihdrTailColor ct := by
+  simpa [ihdrTailColor] using ihdr_payload_extract_tail_depth w h (u8 8) ct
 
 -- IHDR tag is 4 bytes in UTF-8.
 lemma ihdr_utf8_size : ("IHDR".toUTF8).size = 4 := by decide
@@ -1372,7 +1519,7 @@ lemma encodeBitmap_signature {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitma
       (a := pngSignature)
       (b := mkChunk "IHDR"
             (u32be bmp.size.width ++ u32be bmp.size.height ++
-              ihdrTailColor (PngPixel.colorType (α := px))) ++
+              ihdrTailDepth (PngPixel.bitDepth (α := px)) (PngPixel.colorType (α := px))) ++
           mkChunk "IDAT" idat ++
           mkChunk "IEND" ByteArray.empty)
       (i := pngSignature.size) rfl)
@@ -1476,11 +1623,11 @@ lemma encodeBitmap_extract_ihdr_len {px : Type u} [Pixel px] [PngPixel px] (bmp 
     (encodeBitmap bmp hw hh mode).extract 8 12 = u32be 13 := by
   let ihdr :=
     u32be bmp.size.width ++ u32be bmp.size.height ++
-      ihdrTailColor (PngPixel.colorType (α := px))
+      ihdrTailDepth (PngPixel.bitDepth (α := px)) (PngPixel.colorType (α := px))
   let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
   have hsig : pngSignature.size = 8 := pngSignature_size
   have hihdr : ihdr.size = 13 := by
-    simpa [ihdr] using ihdr_payload_size bmp.size.width bmp.size.height (PngPixel.colorType (α := px))
+    simpa [ihdr] using ihdr_payload_size_depth bmp.size.width bmp.size.height (PngPixel.bitDepth (α := px)) (PngPixel.colorType (α := px))
   have hchunk_ge : 4 ≤ (mkChunk "IHDR" ihdr).size := by
     have hsize : (mkChunk "IHDR" ihdr).size = ihdr.size + "IHDR".utf8ByteSize + 8 :=
       mkChunk_size _ _
@@ -1524,7 +1671,7 @@ lemma encodeBitmap_extract_ihdr_type {px : Type u} [Pixel px] [PngPixel px] (bmp
     (encodeBitmap bmp hw hh mode).extract 12 16 = "IHDR".toUTF8 := by
   let ihdr :=
     u32be bmp.size.width ++ u32be bmp.size.height ++
-      ihdrTailColor (PngPixel.colorType (α := px))
+      ihdrTailDepth (PngPixel.bitDepth (α := px)) (PngPixel.colorType (α := px))
   let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
   have hsig : pngSignature.size = 8 := pngSignature_size
   have hchunk_ge : 8 ≤ (mkChunk "IHDR" ihdr).size := by
@@ -1561,14 +1708,14 @@ lemma encodeBitmap_extract_ihdr_data {px : Type u} [Pixel px] [PngPixel px] (bmp
     (mode : PngEncodeMode := .stored) :
     (encodeBitmap bmp hw hh mode).extract 16 29 =
       (u32be bmp.size.width ++ u32be bmp.size.height ++
-        ihdrTailColor (PngPixel.colorType (α := px))) := by
+        ihdrTailDepth (PngPixel.bitDepth (α := px)) (PngPixel.colorType (α := px))) := by
   let ihdr :=
     u32be bmp.size.width ++ u32be bmp.size.height ++
-      ihdrTailColor (PngPixel.colorType (α := px))
+      ihdrTailDepth (PngPixel.bitDepth (α := px)) (PngPixel.colorType (α := px))
   let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
   have hsig : pngSignature.size = 8 := pngSignature_size
   have hihdr : ihdr.size = 13 := by
-    simpa [ihdr] using ihdr_payload_size bmp.size.width bmp.size.height (PngPixel.colorType (α := px))
+    simpa [ihdr] using ihdr_payload_size_depth bmp.size.width bmp.size.height (PngPixel.bitDepth (α := px)) (PngPixel.colorType (α := px))
   have hchunk_ge : 21 ≤ (mkChunk "IHDR" ihdr).size := by
     have hsize : (mkChunk "IHDR" ihdr).size = ihdr.size + "IHDR".utf8ByteSize + 8 :=
       mkChunk_size _ _
@@ -1604,12 +1751,12 @@ lemma encodeBitmap_sig_ihdr_size {px : Type u} [Pixel px] [PngPixel px] (bmp : B
     (pngSignature ++
         mkChunk "IHDR"
           (u32be bmp.size.width ++ u32be bmp.size.height ++
-            ihdrTailColor (PngPixel.colorType (α := px)))).size = 33 := by
+            ihdrTailDepth (PngPixel.bitDepth (α := px)) (PngPixel.colorType (α := px)))).size = 33 := by
   let ihdr :=
     u32be bmp.size.width ++ u32be bmp.size.height ++
-      ihdrTailColor (PngPixel.colorType (α := px))
+      ihdrTailDepth (PngPixel.bitDepth (α := px)) (PngPixel.colorType (α := px))
   have hihdr : ihdr.size = 13 := by
-    simpa [ihdr] using ihdr_payload_size bmp.size.width bmp.size.height (PngPixel.colorType (α := px))
+    simpa [ihdr] using ihdr_payload_size_depth bmp.size.width bmp.size.height (PngPixel.bitDepth (α := px)) (PngPixel.colorType (α := px))
   calc
     (pngSignature ++ mkChunk "IHDR" ihdr).size
         = pngSignature.size + (mkChunk "IHDR" ihdr).size := by
@@ -1627,7 +1774,7 @@ lemma encodeBitmap_extract_idat_len {px : Type u} [Pixel px] [PngPixel px] (bmp 
       u32be (encodeBitmapIdat (bmp := bmp) (mode := mode)).size := by
   let ihdr :=
     u32be bmp.size.width ++ u32be bmp.size.height ++
-      ihdrTailColor (PngPixel.colorType (α := px))
+      ihdrTailDepth (PngPixel.bitDepth (α := px)) (PngPixel.colorType (α := px))
   let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
   have hsig : (pngSignature ++ mkChunk "IHDR" ihdr).size = 33 := by
     simpa [ihdr] using encodeBitmap_sig_ihdr_size (bmp := bmp)
@@ -1679,7 +1826,7 @@ lemma encodeBitmap_extract_idat_type {px : Type u} [Pixel px] [PngPixel px] (bmp
     (encodeBitmap bmp hw hh mode).extract 37 41 = "IDAT".toUTF8 := by
   let ihdr :=
     u32be bmp.size.width ++ u32be bmp.size.height ++
-      ihdrTailColor (PngPixel.colorType (α := px))
+      ihdrTailDepth (PngPixel.bitDepth (α := px)) (PngPixel.colorType (α := px))
   let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
   have hsig : (pngSignature ++ mkChunk "IHDR" ihdr).size = 33 := by
     simpa [ihdr] using encodeBitmap_sig_ihdr_size (bmp := bmp)
@@ -1720,14 +1867,14 @@ lemma encodeBitmap_extract_idat_data {px : Type u} [Pixel px] [PngPixel px] (bmp
       encodeBitmapIdat (bmp := bmp) (mode := mode) := by
   let ihdr :=
     u32be bmp.size.width ++ u32be bmp.size.height ++
-      ihdrTailColor (PngPixel.colorType (α := px))
+      ihdrTailDepth (PngPixel.bitDepth (α := px)) (PngPixel.colorType (α := px))
   let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
   let sigIhdr := pngSignature ++ mkChunk "IHDR" ihdr
   let tail := mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty
   have hsig : sigIhdr.size = 33 := by
     simpa [sigIhdr, ihdr] using encodeBitmap_sig_ihdr_size (bmp := bmp)
   have hdef : encodeBitmap bmp hw hh mode = sigIhdr ++ tail := by
-    simp [encodeBitmap, sigIhdr, tail, ihdr, idat, ihdrTailColor,
+    simp [encodeBitmap, sigIhdr, tail, ihdr, idat, ihdrTailDepth,
       encodeBitmapIdat, ByteArray.append_assoc, Id.run]
     rfl
   have hshift' :
@@ -1779,7 +1926,7 @@ lemma encodeBitmap_extract_iend_len {px : Type u} [Pixel px] [PngPixel px] (bmp 
         (49 + (encodeBitmapIdat (bmp := bmp) (mode := mode)).size) = u32be 0 := by
   let ihdr :=
     u32be bmp.size.width ++ u32be bmp.size.height ++
-      ihdrTailColor (PngPixel.colorType (α := px))
+      ihdrTailDepth (PngPixel.bitDepth (α := px)) (PngPixel.colorType (α := px))
   let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
   let sigIhdr := pngSignature ++ mkChunk "IHDR" ihdr
   let tail := mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty
@@ -1794,7 +1941,7 @@ lemma encodeBitmap_extract_iend_len {px : Type u} [Pixel px] [PngPixel px] (bmp 
       _ = idat.size + 12 := by
           simp [idat_utf8ByteSize]
   have hdef : encodeBitmap bmp hw hh mode = sigIhdr ++ tail := by
-    simp [encodeBitmap, sigIhdr, tail, ihdr, idat, ihdrTailColor,
+    simp [encodeBitmap, sigIhdr, tail, ihdr, idat, ihdrTailDepth,
       encodeBitmapIdat, ByteArray.append_assoc, Id.run]
     rfl
   have hshift' :
@@ -1863,7 +2010,7 @@ lemma encodeBitmap_extract_iend_type {px : Type u} [Pixel px] [PngPixel px] (bmp
         (53 + (encodeBitmapIdat (bmp := bmp) (mode := mode)).size) = "IEND".toUTF8 := by
   let ihdr :=
     u32be bmp.size.width ++ u32be bmp.size.height ++
-      ihdrTailColor (PngPixel.colorType (α := px))
+      ihdrTailDepth (PngPixel.bitDepth (α := px)) (PngPixel.colorType (α := px))
   let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
   let sigIhdr := pngSignature ++ mkChunk "IHDR" ihdr
   let tail := mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty
@@ -1878,7 +2025,7 @@ lemma encodeBitmap_extract_iend_type {px : Type u} [Pixel px] [PngPixel px] (bmp
       _ = idat.size + 12 := by
           simp [idat_utf8ByteSize]
   have hdef : encodeBitmap bmp hw hh mode = sigIhdr ++ tail := by
-    simp [encodeBitmap, sigIhdr, tail, ihdr, idat, ihdrTailColor,
+    simp [encodeBitmap, sigIhdr, tail, ihdr, idat, ihdrTailDepth,
       encodeBitmapIdat, ByteArray.append_assoc, Id.run]
     rfl
   have hshift' :
@@ -1933,7 +2080,8 @@ lemma encodeBitmap_size {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
   | stored =>
       unfold encodeBitmap encodeBitmapIdat
       have htail :
-          (ByteArray.mk #[u8 8, PngPixel.colorType (α := px), u8 0, u8 0, u8 0]).size = 5 := by
+          (ByteArray.mk #[PngPixel.bitDepth (α := px), PngPixel.colorType (α := px),
+            u8 0, u8 0, u8 0]).size = 5 := by
         simp [ByteArray.size]
       simp [Id.run, ByteArray.size_append, mkChunk_size, pngSignature_size, htail,
         ihdr_utf8ByteSize, idat_utf8ByteSize, iend_utf8ByteSize, u32be_size,
@@ -1942,7 +2090,8 @@ lemma encodeBitmap_size {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
   | fixed =>
       unfold encodeBitmap encodeBitmapIdat
       have htail :
-          (ByteArray.mk #[u8 8, PngPixel.colorType (α := px), u8 0, u8 0, u8 0]).size = 5 := by
+          (ByteArray.mk #[PngPixel.bitDepth (α := px), PngPixel.colorType (α := px),
+            u8 0, u8 0, u8 0]).size = 5 := by
         simp [ByteArray.size]
       simp [Id.run, ByteArray.size_append, mkChunk_size, pngSignature_size, htail,
         ihdr_utf8ByteSize, idat_utf8ByteSize, iend_utf8ByteSize, u32be_size,
@@ -1951,7 +2100,8 @@ lemma encodeBitmap_size {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
   | dynamic =>
       unfold encodeBitmap encodeBitmapIdat
       have htail :
-          (ByteArray.mk #[u8 8, PngPixel.colorType (α := px), u8 0, u8 0, u8 0]).size = 5 := by
+          (ByteArray.mk #[PngPixel.bitDepth (α := px), PngPixel.colorType (α := px),
+            u8 0, u8 0, u8 0]).size = 5 := by
         simp [ByteArray.size]
       simp [Id.run, ByteArray.size_append, mkChunk_size, pngSignature_size, htail,
         ihdr_utf8ByteSize, idat_utf8ByteSize, iend_utf8ByteSize, u32be_size,
@@ -1967,14 +2117,14 @@ lemma readU32BE_encodeBitmap_ihdr_crc {px : Type u} [Pixel px] [PngPixel px]
     readU32BE (encodeBitmap bmp hw hh mode) 29 h =
       (crc32Chunk "IHDR".toUTF8
         (u32be bmp.size.width ++ u32be bmp.size.height ++
-          ihdrTailColor (PngPixel.colorType (α := px)))).toNat := by
+          ihdrTailDepth (PngPixel.bitDepth (α := px)) (PngPixel.colorType (α := px)))).toNat := by
   let ihdr :=
     u32be bmp.size.width ++ u32be bmp.size.height ++
-      ihdrTailColor (PngPixel.colorType (α := px))
+      ihdrTailDepth (PngPixel.bitDepth (α := px)) (PngPixel.colorType (α := px))
   let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
   have hsig : pngSignature.size = 8 := pngSignature_size
   have hihdr : ihdr.size = 13 := by
-    simpa [ihdr] using ihdr_payload_size bmp.size.width bmp.size.height (PngPixel.colorType (α := px))
+    simpa [ihdr] using ihdr_payload_size_depth bmp.size.width bmp.size.height (PngPixel.bitDepth (α := px)) (PngPixel.colorType (α := px))
   have hchunk_ge : 25 ≤ (mkChunk "IHDR" ihdr).size := by
     have hsize : (mkChunk "IHDR" ihdr).size = ihdr.size + "IHDR".utf8ByteSize + 8 :=
       mkChunk_size _ _
@@ -2024,14 +2174,14 @@ lemma readU32BE_encodeBitmap_idat_crc {px : Type u} [Pixel px] [PngPixel px]
       (crc32Chunk "IDAT".toUTF8 (encodeBitmapIdat (bmp := bmp) (mode := mode))).toNat := by
   let ihdr :=
     u32be bmp.size.width ++ u32be bmp.size.height ++
-      ihdrTailColor (PngPixel.colorType (α := px))
+      ihdrTailDepth (PngPixel.bitDepth (α := px)) (PngPixel.colorType (α := px))
   let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
   let sigIhdr := pngSignature ++ mkChunk "IHDR" ihdr
   let tail := mkChunk "IDAT" idat ++ mkChunk "IEND" ByteArray.empty
   have hsig : sigIhdr.size = 33 := by
     simpa [sigIhdr, ihdr] using encodeBitmap_sig_ihdr_size (bmp := bmp)
   have hdef : encodeBitmap bmp hw hh mode = sigIhdr ++ tail := by
-    simp [encodeBitmap, sigIhdr, tail, ihdr, idat, ihdrTailColor,
+    simp [encodeBitmap, sigIhdr, tail, ihdr, idat, ihdrTailDepth,
       encodeBitmapIdat, ByteArray.append_assoc, Id.run]
     rfl
   have hchunk_ge : 12 + idat.size ≤ (mkChunk "IDAT" idat).size := by
@@ -2096,7 +2246,7 @@ lemma readU32BE_encodeBitmap_iend_crc {px : Type u} [Pixel px] [PngPixel px]
       (crc32Chunk "IEND".toUTF8 ByteArray.empty).toNat := by
   let ihdr :=
     u32be bmp.size.width ++ u32be bmp.size.height ++
-      ihdrTailColor (PngPixel.colorType (α := px))
+      ihdrTailDepth (PngPixel.bitDepth (α := px)) (PngPixel.colorType (α := px))
   let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
   let pre := pngSignature ++ mkChunk "IHDR" ihdr ++ mkChunk "IDAT" idat
   let iend := mkChunk "IEND" ByteArray.empty
@@ -2112,7 +2262,7 @@ lemma readU32BE_encodeBitmap_iend_crc {px : Type u} [Pixel px] [PngPixel px]
     simp [pre, ByteArray.size_append, hsigIhdr, hidat]
     omega
   have hdef : encodeBitmap bmp hw hh mode = pre ++ iend := by
-    simp [encodeBitmap, pre, iend, ihdr, idat, ihdrTailColor,
+    simp [encodeBitmap, pre, iend, ihdr, idat, ihdrTailDepth,
       encodeBitmapIdat, ByteArray.append_assoc, Id.run]
     rfl
   have hextract :
@@ -2154,11 +2304,11 @@ lemma readChunk_encodeBitmap_ihdr {px : Type u} [Pixel px] [PngPixel px]
     readChunk (encodeBitmap bmp hw hh mode) 8 hLen =
       some ("IHDR".toUTF8,
         u32be bmp.size.width ++ u32be bmp.size.height ++
-          ihdrTailColor (PngPixel.colorType (α := px)),
+          ihdrTailDepth (PngPixel.bitDepth (α := px)) (PngPixel.colorType (α := px)),
         33) := by
   let ihdr :=
     u32be bmp.size.width ++ u32be bmp.size.height ++
-      ihdrTailColor (PngPixel.colorType (α := px))
+      ihdrTailDepth (PngPixel.bitDepth (α := px)) (PngPixel.colorType (α := px))
   let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
   have hlenval : readU32BE (encodeBitmap bmp hw hh mode) 8 hLen = 13 := by
     exact readU32BE_encodeBitmap_ihdr_len (bmp := bmp) (hw := hw) (hh := hh) (h := hLen)
@@ -2274,18 +2424,25 @@ lemma parsePngSimple_encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : 
     (hct : (PngPixel.colorType (α := px)).toNat = 0 ∨
       (PngPixel.colorType (α := px)).toNat = 2 ∨
       (PngPixel.colorType (α := px)).toNat = 4 ∨
-      (PngPixel.colorType (α := px)).toNat = 6) :
+      (PngPixel.colorType (α := px)).toNat = 6)
+    (_hbd : pngBitDepthSupported (PngPixel.bitDepth (α := px)).toNat = true)
+    (hctbd :
+      pngColorTypeBitDepthSupported
+        (PngPixel.colorType (α := px)).toNat
+        (PngPixel.bitDepth (α := px)).toNat = true) :
     parsePngSimple (encodeBitmap bmp hw hh mode) hsize =
       some ({ width := bmp.size.width, height := bmp.size.height
-            , colorType := (PngPixel.colorType (α := px)).toNat, bitDepth := 8 },
+            , colorType := (PngPixel.colorType (α := px)).toNat
+            , bitDepth := (PngPixel.bitDepth (α := px)).toNat },
             encodeBitmapIdat (bmp := bmp) (mode := mode)) := by
   let w := bmp.size.width
   let h := bmp.size.height
   let ct := PngPixel.colorType (α := px)
-  let ihdr := u32be w ++ u32be h ++ ihdrTailColor ct
+  let bd := PngPixel.bitDepth (α := px)
+  let ihdr := u32be w ++ u32be h ++ ihdrTailDepth bd ct
   let idat := encodeBitmapIdat (bmp := bmp) (mode := mode)
   have hlen' : ihdr.size = 13 := by
-    simpa [ihdr] using ihdr_payload_size w h ct
+    simpa [ihdr] using ihdr_payload_size_depth w h bd ct
   have hsize' : (encodeBitmap bmp hw hh mode).size = idat.size + 57 := by
     simpa [idat] using encodeBitmap_size (bmp := bmp) (hw := hw) (hh := hh) (mode := mode)
   have hlen1 : 8 + 3 < (encodeBitmap bmp hw hh mode).size := by
@@ -2323,10 +2480,10 @@ lemma parsePngSimple_encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : 
     exact bne_self_eq_false' (a := "IDAT".toByteArray)
   have hiendNeBA : ("IEND".toByteArray != "IEND".toByteArray) = false := by
     exact bne_self_eq_false' (a := "IEND".toByteArray)
-  have htailEq : ihdr.extract 8 13 = ihdrTailColor ct := by
-    simpa [ihdr] using ihdr_payload_extract_tail w h ct
-  have hbitDepth : ((ihdr.extract 8 13).get! 0).toNat = 8 := by
-    simpa [htailEq] using (by decide : (u8 8).toNat = 8)
+  have htailEq : ihdr.extract 8 13 = ihdrTailDepth bd ct := by
+    simpa [ihdr] using ihdr_payload_extract_tail_depth w h bd ct
+  have hbitDepth : ((ihdr.extract 8 13).get! 0).toNat = bd.toNat := by
+    simp [htailEq]
   have hctEq : ((ihdr.extract 8 13).get! 1).toNat = ct.toNat := by
     simp [htailEq]
   have hcomp : ((ihdr.extract 8 13).get! 2).toNat = 0 := by
@@ -2357,11 +2514,11 @@ lemma parsePngSimple_encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : 
     omega
   have hwidth0 : readU32BE ihdr 0 hpos0 = w := by
     have hextract : ihdr.extract 0 4 = u32be w := by
-      simpa [ihdr] using ihdr_payload_extract_width w h ct
+      simpa [ihdr] using ihdr_payload_extract_width_depth w h bd ct
     exact readU32BE_of_extract_eq ihdr 0 w hpos0 hextract hw
   have hheight0 : readU32BE ihdr 4 hpos4 = h := by
     have hextract : ihdr.extract 4 8 = u32be h := by
-      simpa [ihdr] using ihdr_payload_extract_height w h ct
+      simpa [ihdr] using ihdr_payload_extract_height_depth w h bd ct
     exact readU32BE_of_extract_eq ihdr 4 h hpos4 hextract hh
   have hwidth : readU32BE ihdr 0 (by simp [hlen']) = w := by
     have hproof :=
@@ -2375,7 +2532,7 @@ lemma parsePngSimple_encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : 
     exact hproof.trans hheight0
   have hparseIHDR :
       parseIHDRData ihdr =
-        some ({ width := w, height := h, colorType := ct.toNat, bitDepth := 8 } : PngHeader) := by
+        some ({ width := w, height := h, colorType := ct.toNat, bitDepth := bd.toNat } : PngHeader) := by
     unfold parseIHDRData
     simp [hlen', hwidth, hheight, hbitDepth, hctEq, hcomp, hfilter, hinterlace]
   have hnotColorBad :
@@ -2387,8 +2544,8 @@ lemma parsePngSimple_encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : 
   unfold parsePngSimple
   simp [hsig, hlen1, hlen2, hlen3, hread1, hread2, hread3,
     hsigNe, hihdrNeBA, hidatNeBA, hiendNeBA,
-    hnotColorBad, hparseIHDR, hend,
-    w, h, ct, ihdr, idat,
+    hnotColorBad, hparseIHDR, hctbd, hend,
+    w, h, ct, bd, ihdr, idat,
     ihdrTypeBytes, idatTypeBytes, iendTypeBytes, String.toUTF8_eq_toByteArray]
 
 -- Parsing an encoded bitmap with the full PNG parser yields the header and payload.
@@ -2400,12 +2557,19 @@ lemma parsePng_encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap
     (hct : (PngPixel.colorType (α := px)).toNat = 0 ∨
       (PngPixel.colorType (α := px)).toNat = 2 ∨
       (PngPixel.colorType (α := px)).toNat = 4 ∨
-      (PngPixel.colorType (α := px)).toNat = 6) :
+      (PngPixel.colorType (α := px)).toNat = 6)
+    (hbd : pngBitDepthSupported (PngPixel.bitDepth (α := px)).toNat = true)
+    (hctbd :
+      pngColorTypeBitDepthSupported
+        (PngPixel.colorType (α := px)).toNat
+        (PngPixel.bitDepth (α := px)).toNat = true) :
     parsePng (encodeBitmap bmp hw hh mode) hsize =
       some ({ width := bmp.size.width, height := bmp.size.height
-            , colorType := (PngPixel.colorType (α := px)).toNat, bitDepth := 8 },
+            , colorType := (PngPixel.colorType (α := px)).toNat
+            , bitDepth := (PngPixel.bitDepth (α := px)).toNat },
             encodeBitmapIdat (bmp := bmp) (mode := mode)) := by
-  have hsimple := parsePngSimple_encodeBitmap (bmp := bmp) hw hh (mode := mode) hidat hsize hct
+  have hsimple :=
+    parsePngSimple_encodeBitmap (bmp := bmp) hw hh (mode := mode) hidat hsize hct hbd hctbd
   unfold parsePng
   simp [hsimple]
 
@@ -3446,6 +3610,58 @@ lemma decodeRowsLoopGrayAlpha_encodeRaw (bmp : BitmapGrayAlpha8) :
       some bmp.data := by
   simpa [decodeRowsLoopGrayAlpha, bytesPerPixel_grayAlpha, bytesPerPixelGrayAlpha] using
     (decodeRowsLoopCore_encodeRaw (bmp := bmp) (convert := decodeRowGrayAlpha))
+
+/-- Decoding 16-bit RGB raw rows reconstructs the original pixels.
+This instantiates the generic row-loop theorem for six-byte RGB samples. -/
+lemma decodeRowsLoopRGB16_encodeRaw (bmp : BitmapRGB16) :
+    let w := bmp.size.width
+    let h := bmp.size.height
+    let rowBytes := w * bytesPerPixelRGB16
+    let raw := encodeRaw bmp
+    let pixels0 := ByteArray.mk <| Array.replicate (h * rowBytes) 0
+    decodeRowsLoopRGB16 raw w h bytesPerPixelRGB16 rowBytes 0 0 ByteArray.empty pixels0 =
+      some bmp.data := by
+  simpa [decodeRowsLoopRGB16, bytesPerPixel_rgb16, bytesPerPixelRGB16] using
+    (decodeRowsLoopCore_encodeRaw (bmp := bmp) (convert := decodeRowDropAlpha16))
+
+/-- Decoding 16-bit RGBA raw rows reconstructs the original pixels.
+This instantiates the generic row-loop theorem for eight-byte RGBA samples. -/
+lemma decodeRowsLoopRGBA16_encodeRaw (bmp : BitmapRGBA16) :
+    let w := bmp.size.width
+    let h := bmp.size.height
+    let rowBytes := w * bytesPerPixelRGBA16
+    let raw := encodeRaw bmp
+    let pixels0 := ByteArray.mk <| Array.replicate (h * rowBytes) 0
+    decodeRowsLoopRGBA16 raw w h bytesPerPixelRGBA16 rowBytes 0 0 ByteArray.empty pixels0 =
+      some bmp.data := by
+  simpa [decodeRowsLoopRGBA16, bytesPerPixel_rgba16, bytesPerPixelRGBA16] using
+    (decodeRowsLoopCore_encodeRaw (bmp := bmp) (convert := decodeRowAddAlpha16))
+
+/-- Decoding 16-bit grayscale raw rows reconstructs the original pixels.
+This instantiates the generic row-loop theorem for two-byte grayscale samples. -/
+lemma decodeRowsLoopGray16_encodeRaw (bmp : BitmapGray16) :
+    let w := bmp.size.width
+    let h := bmp.size.height
+    let rowBytes := w * bytesPerPixelGray16
+    let raw := encodeRaw bmp
+    let pixels0 := ByteArray.mk <| Array.replicate (h * rowBytes) 0
+    decodeRowsLoopGray16 raw w h bytesPerPixelGray16 rowBytes 0 0 ByteArray.empty pixels0 =
+      some bmp.data := by
+  simpa [decodeRowsLoopGray16, bytesPerPixel_gray16, bytesPerPixelGray16] using
+    (decodeRowsLoopCore_encodeRaw (bmp := bmp) (convert := decodeRowGray16))
+
+/-- Decoding 16-bit grayscale+alpha raw rows reconstructs the original pixels.
+This instantiates the generic row-loop theorem for four-byte color type 4 samples. -/
+lemma decodeRowsLoopGrayAlpha16_encodeRaw (bmp : BitmapGrayAlpha16) :
+    let w := bmp.size.width
+    let h := bmp.size.height
+    let rowBytes := w * bytesPerPixelGrayAlpha16
+    let raw := encodeRaw bmp
+    let pixels0 := ByteArray.mk <| Array.replicate (h * rowBytes) 0
+    decodeRowsLoopGrayAlpha16 raw w h bytesPerPixelGrayAlpha16 rowBytes 0 0 ByteArray.empty pixels0 =
+      some bmp.data := by
+  simpa [decodeRowsLoopGrayAlpha16, bytesPerPixel_grayAlpha16, bytesPerPixelGrayAlpha16] using
+    (decodeRowsLoopCore_encodeRaw (bmp := bmp) (convert := decodeRowGrayAlpha16))
 
 
 end Lemmas

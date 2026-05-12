@@ -17,7 +17,7 @@ empty `IEND` chunk. This is exactly the shape `encodeBitmap` produces
 and the shape `parsePngSimple` validates in one pass.
 
 A later commit will extend the spec to multiple `IDAT` chunks and
-tolerated ancillary chunks (`gAMA`, `pHYs`, `tEXt`, …), proving forward
+supported or tolerated ancillary chunks (`gAMA`, `pHYs`, `tEXt`, …), proving forward
 correctness through `parsePngLoopFuel` and the existing
 `ChunkValidation.lean` lemmas. -/
 
@@ -46,6 +46,7 @@ structure SimpleContainerSpec where
   hColorType :
     header.colorType = 0 ∨ header.colorType = 2 ∨
       header.colorType = 4 ∨ header.colorType = 6
+  hInterlace : header.interlace = 0
   hWidth : header.width < 2 ^ 32
   hHeight : header.height < 2 ^ 32
 
@@ -81,7 +82,7 @@ in `EncodeDecodeBase.lean`. -/
 lemma encodeIHDRData_eq_via_ihdrTailColor (h : PngHeader) (hBitDepth : h.bitDepth = 8) :
     encodeIHDRData h = u32be h.width ++ u32be h.height ++ ihdrTailColor (u8 h.colorType) := by
   unfold encodeIHDRData ihdrTailColor
-  simp [hBitDepth]
+  simp [hBitDepth, ihdrTailDepth]
 
 /-- The on-the-wire size of a chunk built by `mkChunkBytes`: 12-byte
 overhead (4 length + 4 type + 4 CRC) plus the payload size. -/
@@ -98,7 +99,8 @@ to ensure each field is preserved through the `UInt8.ofNat`/`UInt8.toNat`
 truncations. -/
 lemma parseIHDRData_encodeIHDRData (h : PngHeader)
     (hWidth : h.width < 2 ^ 32) (hHeight : h.height < 2 ^ 32)
-    (hBitDepth : h.bitDepth = 8) (hColorType : h.colorType < 256) :
+    (hBitDepth : h.bitDepth = 8) (hInterlace : h.interlace = 0)
+    (hColorType : h.colorType < 256) :
     parseIHDRData (encodeIHDRData h) = some h := by
   rw [encodeIHDRData_eq_via_ihdrTailColor h hBitDepth]
   unfold parseIHDRData
@@ -115,9 +117,10 @@ lemma parseIHDRData_encodeIHDRData (h : PngHeader)
   -- final structure equality by destructuring the original header and using
   -- `hBitDepth : h.bitDepth = 8`.
   simp [hSize, hWidthRead, hHeightRead, hTailExtract, hCT_ofNat, hBD_ofNat, hZero_ofNat]
-  obtain ⟨w, ht, ct, bd⟩ := h
-  simp at hBitDepth
+  obtain ⟨w, ht, ct, bd, interlace⟩ := h
+  simp at hBitDepth hInterlace
   cases hBitDepth
+  cases hInterlace
   rfl
 
 /-- The total byte size of a simple-container's on-the-wire bytes: 8 (signature)
@@ -599,39 +602,57 @@ theorem parsePngSimple_simpleContainerSpec_correct (s : SimpleContainerSpec)
   have hRead3 := readChunk_simpleContainer_iend s hLen3
   -- Color type < 256 (from being in {0, 2, 6}).
   have hCT256 : s.header.colorType < 256 := by
-    rcases s.hColorType with h | h | h <;> rw [h] <;> decide
+    rcases s.hColorType with h0 | hrest
+    · rw [h0]; decide
+    rcases hrest with h2 | hrest
+    · rw [h2]; decide
+    rcases hrest with h4 | h6
+    · rw [h4]; decide
+    · rw [h6]; decide
   -- IHDR data round-trip parses to the original header.
-  have hParseHdr := parseIHDRData_encodeIHDRData s.header s.hWidth s.hHeight s.hBitDepth hCT256
+  have hParseHdr :=
+    parseIHDRData_encodeIHDRData s.header s.hWidth s.hHeight s.hBitDepth s.hInterlace hCT256
   -- Color type IS in {0, 2, 6}, so the bad-color-type check fails.
   have hCTok :
-      (s.header.colorType != 0 && s.header.colorType != 2 && s.header.colorType != 6)
+      (s.header.colorType != 0 && s.header.colorType != 2 &&
+        s.header.colorType != 4 && s.header.colorType != 6)
         = false := by
-    rcases s.hColorType with h | h | h <;> rw [h] <;> decide
+    rcases s.hColorType with h0 | hrest
+    · rw [h0]; decide
+    rcases hrest with h2 | hrest
+    · rw [h2]; decide
+    rcases hrest with h4 | h6
+    · rw [h4]; decide
+    · rw [h6]; decide
   -- Bit depth IS 8, so the wrong-bit-depth check fails.
-  have hBitDepthOk : (s.header.bitDepth != 8) = false := by
-    simp [s.hBitDepth]
+  have hBitDepthOk : pngBitDepthSupported s.header.bitDepth = true := by
+    simp [pngBitDepthSupported, s.hBitDepth]
   -- IEND data is empty, so the non-empty-IEND check fails.
   have hEmpty : (ByteArray.empty.size != 0) = false := by decide
   -- Final position (57 + s.idatData.size) equals s.bytes.size, so the
   -- trailing-bytes check fails.
   have hFinal : ((57 + s.idatData.size) != s.bytes.size) = false := by
     rw [hSize]; simp; omega
+  have hCTProp :
+      ¬s.header.colorType = 0 → ¬s.header.colorType = 2 →
+        ¬s.header.colorType = 4 → s.header.colorType = 6 := by
+    intro h0 h2 h4
+    rcases s.hColorType with hc0 | hrest
+    · exact (h0 hc0).elim
+    rcases hrest with hc2 | hrest
+    · exact (h2 hc2).elim
+    rcases hrest with hc4 | hc6
+    · exact (h4 hc4).elim
+    · exact hc6
   -- Combine all branches via simp.
-  simp [hSig, hLen1, hRead1, hParseHdr, hBitDepthOk, hCTok,
-    hLen2, hRead2, hLen3, hRead3, hEmpty, hFinal]
-  -- Remaining goal is a conjunction of trivial equalities and the spec
-  -- constraints; discharge each in turn.
-  refine ⟨?_, ?_, ?_, ?_, ?_, ?_⟩
-  · exact bne_self_eq_false' (a := pngSignature)
-  · exact bne_self_eq_false' (a := ihdrTypeBytes)
-  · exact s.hBitDepth
-  · intro h0 h2
-    rcases s.hColorType with h | h | h
-    · exact (h0 h).elim
-    · exact (h2 h).elim
-    · exact h
-  · exact bne_self_eq_false' (a := idatTypeBytes)
-  · exact bne_self_eq_false' (a := iendTypeBytes)
+  simp [hSig, hLen1, hRead1, hParseHdr, hBitDepthOk,
+    hLen2, hRead2, hLen3, hRead3, hFinal]
+  exact
+    ⟨bne_self_eq_false' (a := pngSignature),
+      bne_self_eq_false' (a := ihdrTypeBytes),
+      hCTProp,
+      bne_self_eq_false' (a := idatTypeBytes),
+      bne_self_eq_false' (a := iendTypeBytes)⟩
 
 /-- The full Phase 3 forward-correctness theorem: `parsePng` accepts any
 byte stream matching `SimpleContainerSpec` and returns the spec's header
