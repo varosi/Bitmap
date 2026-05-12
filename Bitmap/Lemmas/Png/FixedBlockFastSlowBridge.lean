@@ -537,6 +537,69 @@ lemma decodeFixedLiteralSymFast9_eq_decodeFixedLiteralSym (br : BitReader) :
     unfold decodeFixedLiteralSymFast9
     rw [dif_neg h9]
 
+/-! ### Per-fuel-step bridge -/
+
+set_option maxHeartbeats 1600000 in
+set_option maxRecDepth 2048 in
+lemma decodeFixedBlockFuelFast_eq_decodeFixedBlockFuel :
+    ∀ (fuel : Nat) (br : BitReader) (out : ByteArray),
+      decodeFixedBlockFuelFast fuel br out = decodeFixedBlockFuel fuel br out := by
+  intro fuel
+  induction fuel with
+  | zero =>
+      intro br out
+      simp [decodeFixedBlockFuelFast, decodeFixedBlockFuel]
+  | succ n ih =>
+      intro br out
+      unfold decodeFixedBlockFuelFast decodeFixedBlockFuel
+      -- Use the per-symbol bridge to align the two symbol decoder calls.
+      rw [decodeFixedLiteralSymFast9_eq_decodeFixedLiteralSym]
+      -- After that, the bodies are syntactically identical except for the
+      -- recursive call name. Walk through the dispatch with `split` and
+      -- use `ih` at the two recursive call sites (literal + match).
+      -- Use Option.bind_congr to factor through the symbol decoder.
+      apply Option.bind_congr
+      rintro ⟨sym, br'⟩ _hp
+      dsimp only
+      -- Walk through the dispatch in lockstep, using `ih` at recursive call sites.
+      -- `split_ifs` is greedy and will split through the outer dispatch
+      -- (literal/EOB/length-range) plus the `hbits` feasibility check.
+      split_ifs with h256 h256eq hlen hbits
+      · -- sym < 256: literal — recursive call.
+        exact ih _ _
+      · -- sym == 256: end-of-block — same on both sides.
+        rfl
+      · -- 257 ≤ sym ≤ 285 ∧ hbits feasible: inner bind on distance decoder.
+        apply Option.bind_congr
+        rintro ⟨distSym, br'''⟩ _hp2
+        dsimp only
+        split_ifs with hdist hbitsD
+        · -- hbitsD feasible: inner bind on copyDistance.
+          apply Option.bind_congr
+          rintro out' _hp3
+          exact ih _ _
+        · rfl
+        · rfl
+      · -- 257 ≤ sym ≤ 285 ∧ ¬hbits: none.
+        rfl
+      · -- ¬ length range: none.
+        rfl
+
+/-! ### Fast-variant corollary -/
+
+/-- Fast-variant fixed-block forward-correctness theorem. The runtime's
+`zlibDecompressLoopFuel` calls `decodeFixedBlockFuelFast`, which is now
+proved equivalent to the slow `decodeFixedBlockFuel` against which the
+`fixedBlockSpec_decode_correct` theorem is stated. -/
+lemma fixedBlockSpec_decode_correct_fast
+    {final : Bool} {br br' : BitReader} {out out' : ByteArray}
+    (hspec : FixedBlockSpec final br out br' out')
+    (hfuel : hspec.steps ≤ hspec.payloadReader.data.size * 8 + 1) :
+    decodeFixedBlockFuelFast (hspec.steps + 1) hspec.payloadReader out =
+      some (br', out') := by
+  rw [decodeFixedBlockFuelFast_eq_decodeFixedBlockFuel]
+  exact fixedBlockSpec_decode_correct hspec hfuel
+
 end Png
 
 end Bitmaps
