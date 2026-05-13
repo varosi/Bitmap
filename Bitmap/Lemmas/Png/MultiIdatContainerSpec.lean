@@ -294,6 +294,74 @@ lemma idatChunksBytesUpTo_extract_at (chunks : List ByteArray) (i : Nat)
   rw [← hchunkSize]
   exact ByteArray.extract_zero_size
 
+/-! ### Bytes-layout helpers: skip past signature/IHDR -/
+
+/-- Re-associate the chained appends in `s.bytes` so the signature
+appears as the leftmost prefix. Mirrors
+`SimpleContainerSpec.bytes_eq_signature_then_chunks`. -/
+lemma bytes_eq_signature_then_chunks (s : MultiIdatContainerSpec) :
+    s.bytes =
+      pngSignature ++
+        (mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header) ++
+          (s.idatChunksBytes ++ mkChunkBytes iendTypeBytes ByteArray.empty)) := by
+  unfold MultiIdatContainerSpec.bytes
+  simp [ByteArray.append_assoc]
+
+/-- The first 8 bytes of any multi-IDAT spec are the PNG signature. -/
+lemma bytes_extract_signature (s : MultiIdatContainerSpec) :
+    s.bytes.extract 0 8 = pngSignature := by
+  rw [s.bytes_eq_signature_then_chunks]
+  have hSig : pngSignature.size = 8 := pngSignature_size
+  rw [byteArray_extract_append_prefix
+    (a := pngSignature)
+    (b := mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header) ++
+      (s.idatChunksBytes ++ mkChunkBytes iendTypeBytes ByteArray.empty))
+    (n := 8) (by simp [hSig])]
+  rw [← hSig]
+  exact ByteArray.extract_zero_size
+
+/-- Slicing past the 8-byte signature gives access to the chunk region. -/
+lemma bytes_extract_skip_signature (s : MultiIdatContainerSpec)
+    (start finish : Nat) (_h : 8 + finish ≤ s.bytes.size) :
+    s.bytes.extract (8 + start) (8 + finish) =
+      (mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header) ++
+        (s.idatChunksBytes ++ mkChunkBytes iendTypeBytes ByteArray.empty)).extract
+          start finish := by
+  rw [s.bytes_eq_signature_then_chunks]
+  have hSig : pngSignature.size = 8 := pngSignature_size
+  have h' := ByteArray.extract_append_size_add
+    (a := pngSignature)
+    (b := mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header) ++
+      (s.idatChunksBytes ++ mkChunkBytes iendTypeBytes ByteArray.empty))
+    (i := start) (j := finish)
+  simpa [hSig] using h'
+
+/-- Slicing past signature + IHDR gives access to the IDAT chunks + IEND. -/
+lemma bytes_extract_skip_through_ihdr (s : MultiIdatContainerSpec)
+    (start finish : Nat) (_h : 33 + finish ≤ s.bytes.size) :
+    s.bytes.extract (33 + start) (33 + finish) =
+      (s.idatChunksBytes ++ mkChunkBytes iendTypeBytes ByteArray.empty).extract start finish := by
+  have hSig : pngSignature.size = 8 := pngSignature_size
+  have hIhdr : (mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header)).size = 25 := by
+    rw [mkChunkBytes_size _ _ (by rfl : ihdrTypeBytes.size = 4), encodeIHDRData_size]
+  rw [s.bytes_eq_signature_then_chunks]
+  have hRe :
+      pngSignature ++
+        (mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header) ++
+          (s.idatChunksBytes ++ mkChunkBytes iendTypeBytes ByteArray.empty)) =
+      (pngSignature ++ mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header)) ++
+        (s.idatChunksBytes ++ mkChunkBytes iendTypeBytes ByteArray.empty) := by
+    simp [ByteArray.append_assoc]
+  rw [hRe]
+  have hPrefSize :
+      (pngSignature ++ mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header)).size = 33 := by
+    rw [ByteArray.size_append, hSig, hIhdr]
+  have h := ByteArray.extract_append_size_add
+    (a := pngSignature ++ mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header))
+    (b := s.idatChunksBytes ++ mkChunkBytes iendTypeBytes ByteArray.empty)
+    (i := start) (j := finish)
+  simpa [hPrefSize] using h
+
 /-! ### Forward correctness — general N-chunk case (deferred)
 
 The general theorem for `idatChunks.length ≥ 1` chains
