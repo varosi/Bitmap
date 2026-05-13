@@ -455,6 +455,63 @@ lemma bytes_extract_skip_through_ihdr (s : MultiIdatContainerSpec)
     (i := start) (j := finish)
   simpa [hPrefSize] using h
 
+/-! ### Project per-chunk extracts to `s.bytes` -/
+
+/-- `idatPrefixWireSize` walking past one more chunk doesn't decrease the prefix size. -/
+private lemma idatPrefixWireSize_succ_ge (chunks : List ByteArray) (m : Nat) :
+    idatPrefixWireSize chunks m ≤ idatPrefixWireSize chunks (m + 1) := by
+  by_cases hbnd : m < chunks.length
+  · rw [idatPrefixWireSize_succ chunks m hbnd]; omega
+  · have : idatPrefixWireSize chunks (m + 1) = idatPrefixWireSize chunks m := by
+      unfold idatPrefixWireSize
+      rw [List.take_of_length_le (by omega : chunks.length ≤ m),
+          List.take_of_length_le (by omega : chunks.length ≤ m + 1)]
+    omega
+
+/-- `idatPrefixWireSize` is monotone in the prefix length. -/
+private lemma idatPrefixWireSize_mono (chunks : List ByteArray) (m n : Nat)
+    (h : m ≤ n) :
+    idatPrefixWireSize chunks m ≤ idatPrefixWireSize chunks n := by
+  induction n with
+  | zero =>
+      have : m = 0 := Nat.le_zero.mp h
+      rw [this]
+  | succ k ihk =>
+      by_cases hmk : m ≤ k
+      · exact Nat.le_trans (ihk hmk) (idatPrefixWireSize_succ_ge chunks k)
+      · have : m = k + 1 := by omega
+        rw [this]
+
+/-- The i-th wrapped IDAT chunk in `s.bytes` lives at the right offset. -/
+lemma bytes_extract_idat_at (s : MultiIdatContainerSpec) (i : Nat)
+    (h : i < s.idatChunks.length) :
+    s.bytes.extract (idatOffset s i) (idatOffset s (i + 1)) =
+      mkChunkBytes idatTypeBytes s.idatChunks[i] := by
+  unfold idatOffset
+  -- Step 1: skip past signature + IHDR.
+  have hSizeBound : 33 + idatPrefixWireSize s.idatChunks (i + 1) ≤ s.bytes.size := by
+    rw [s.bytes_size_eq]
+    unfold idatTotalWireSize
+    have hmono := idatPrefixWireSize_mono s.idatChunks (i + 1) s.idatChunks.length (by omega)
+    omega
+  rw [s.bytes_extract_skip_through_ihdr (idatPrefixWireSize s.idatChunks i)
+        (idatPrefixWireSize s.idatChunks (i + 1)) hSizeBound]
+  -- Step 2: the extract is entirely within `idatChunksBytes` (not crossing into IEND).
+  have hWithinIdat : idatPrefixWireSize s.idatChunks (i + 1) ≤ s.idatChunksBytes.size := by
+    rw [show s.idatChunksBytes.size = idatPrefixWireSize s.idatChunks s.idatChunks.length from ?_]
+    · exact idatPrefixWireSize_mono s.idatChunks (i + 1) s.idatChunks.length (by omega)
+    · rw [← idatChunksBytesUpTo_size, idatChunksBytesUpTo_full]
+  rw [byteArray_extract_append_left
+        (a := s.idatChunksBytes)
+        (b := mkChunkBytes iendTypeBytes ByteArray.empty)
+        (i := idatPrefixWireSize s.idatChunks i)
+        (j := idatPrefixWireSize s.idatChunks (i + 1))
+        (Nat.le_trans (idatPrefixWireSize_mono s.idatChunks i (i + 1) (by omega))
+          hWithinIdat)
+        hWithinIdat]
+  -- Step 3: apply the per-chunk extract on `idatChunksBytes`.
+  exact idatChunksBytes_extract_at s i h
+
 /-! ### Forward correctness — general N-chunk case (deferred)
 
 The general theorem for `idatChunks.length ≥ 1` chains
