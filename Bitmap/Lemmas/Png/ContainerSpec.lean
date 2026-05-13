@@ -624,9 +624,11 @@ theorem parsePngSimple_simpleContainerSpec_correct (s : SimpleContainerSpec)
     rcases hrest with h4 | h6
     · rw [h4]; decide
     · rw [h6]; decide
-  -- Bit depth IS 8, so the wrong-bit-depth check fails.
-  have hBitDepthOk : pngBitDepthSupported s.header.bitDepth = true := by
-    simp [pngBitDepthSupported, s.hBitDepth]
+  -- Color type ∈ {0, 2, 4, 6} and bit depth = 8 ⇒ the joint check passes.
+  have hCtBdOk :
+      pngColorTypeBitDepthSupported s.header.colorType s.header.bitDepth = true := by
+    rw [s.hBitDepth]
+    rcases s.hColorType with h | h | h | h <;> rw [h] <;> decide
   -- IEND data is empty, so the non-empty-IEND check fails.
   have hEmpty : (ByteArray.empty.size != 0) = false := by decide
   -- Final position (57 + s.idatData.size) equals s.bytes.size, so the
@@ -645,7 +647,7 @@ theorem parsePngSimple_simpleContainerSpec_correct (s : SimpleContainerSpec)
     · exact (h4 hc4).elim
     · exact hc6
   -- Combine all branches via simp.
-  simp [hSig, hLen1, hRead1, hParseHdr, hBitDepthOk,
+  simp [hSig, hLen1, hRead1, hParseHdr, hCtBdOk,
     hLen2, hRead2, hLen3, hRead3, hFinal]
   exact
     ⟨bne_self_eq_false' (a := pngSignature),
