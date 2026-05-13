@@ -226,6 +226,35 @@ private lemma idatPrefixWireSize_succ (chunks : List ByteArray) (n : Nat)
   rw [List.foldl_append]
   simp [List.foldl]
 
+/-- The IDAT-chunks bytes for the first `n` chunks. -/
+private def idatChunksBytesUpTo (chunks : List ByteArray) (n : Nat) : ByteArray :=
+  (chunks.take n).foldl (fun acc c => acc ++ mkChunkBytes idatTypeBytes c)
+    ByteArray.empty
+
+/-- For `n = chunks.length`, `idatChunksBytesUpTo` equals `idatChunksBytes`. -/
+lemma idatChunksBytesUpTo_full (s : MultiIdatContainerSpec) :
+    idatChunksBytesUpTo s.idatChunks s.idatChunks.length = s.idatChunksBytes := by
+  unfold idatChunksBytesUpTo idatChunksBytes
+  rw [List.take_length]
+
+/-- `idatChunksBytesUpTo` distributes over cons: walking past the next
+chunk appends its wrapped `mkChunkBytes`. -/
+private lemma idatChunksBytesUpTo_succ (chunks : List ByteArray) (n : Nat)
+    (h : n < chunks.length) :
+    idatChunksBytesUpTo chunks (n + 1) =
+      idatChunksBytesUpTo chunks n ++ mkChunkBytes idatTypeBytes chunks[n] := by
+  unfold idatChunksBytesUpTo
+  rw [List.take_succ_eq_append_getElem h]
+  rw [List.foldl_append]
+  simp [List.foldl]
+
+/-- Size of `idatChunksBytesUpTo` matches `idatPrefixWireSize`. -/
+lemma idatChunksBytesUpTo_size (chunks : List ByteArray) (n : Nat) :
+    (idatChunksBytesUpTo chunks n).size = idatPrefixWireSize chunks n := by
+  unfold idatChunksBytesUpTo idatPrefixWireSize
+  rw [idatChunksBytes_size_aux ByteArray.empty (chunks.take n)]
+  simp
+
 /-! ### Forward correctness — general N-chunk case (deferred)
 
 The general theorem for `idatChunks.length ≥ 1` chains
