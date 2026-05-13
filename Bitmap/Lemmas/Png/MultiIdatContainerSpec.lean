@@ -255,6 +255,45 @@ lemma idatChunksBytesUpTo_size (chunks : List ByteArray) (n : Nat) :
   rw [idatChunksBytes_size_aux ByteArray.empty (chunks.take n)]
   simp
 
+/-! ### Extract per-chunk slices from `s.bytes` -/
+
+/-- Extracting the i-th IDAT chunk's wrapped bytes from `idatChunksBytesUpTo (i+1)`:
+the last `12 + chunks[i].size` bytes equal `mkChunkBytes idatTypeBytes chunks[i]`. -/
+lemma idatChunksBytesUpTo_extract_at (chunks : List ByteArray) (i : Nat)
+    (h : i < chunks.length) :
+    (idatChunksBytesUpTo chunks (i + 1)).extract
+        (idatPrefixWireSize chunks i) (idatPrefixWireSize chunks (i + 1)) =
+      mkChunkBytes idatTypeBytes chunks[i] := by
+  rw [idatChunksBytesUpTo_succ chunks i h]
+  rw [idatPrefixWireSize_succ chunks i h]
+  -- The goal is now:
+  --  (upTo i ++ mkChunkBytes idatTypeBytes chunks[i]).extract
+  --    (idatPrefixWireSize chunks i)
+  --    (idatPrefixWireSize chunks i + 12 + chunks[i].size) =
+  --      mkChunkBytes idatTypeBytes chunks[i]
+  have hsize : (idatChunksBytesUpTo chunks i).size = idatPrefixWireSize chunks i :=
+    idatChunksBytesUpTo_size chunks i
+  have hchunkSize : (mkChunkBytes idatTypeBytes chunks[i]).size = chunks[i].size + 12 :=
+    mkChunkBytes_size idatTypeBytes chunks[i] (by rfl)
+  -- extract starting at `(prefix).size` of (prefix ++ chunk) is just chunk.
+  -- The shape is `(a ++ b).extract a.size (a.size + j) = b.extract 0 j`
+  have hExtract :
+      (idatChunksBytesUpTo chunks i ++ mkChunkBytes idatTypeBytes chunks[i]).extract
+          ((idatChunksBytesUpTo chunks i).size + 0)
+          ((idatChunksBytesUpTo chunks i).size + (chunks[i].size + 12)) =
+        (mkChunkBytes idatTypeBytes chunks[i]).extract 0 (chunks[i].size + 12) :=
+    ByteArray.extract_append_size_add' (a := idatChunksBytesUpTo chunks i)
+      (b := mkChunkBytes idatTypeBytes chunks[i]) (i := 0)
+      (j := chunks[i].size + 12) rfl
+  have hReplace1 : idatPrefixWireSize chunks i =
+      (idatChunksBytesUpTo chunks i).size + 0 := by rw [hsize]; omega
+  have hReplace2 : idatPrefixWireSize chunks i + 12 + chunks[i].size =
+      (idatChunksBytesUpTo chunks i).size + (chunks[i].size + 12) := by
+    rw [hsize]; omega
+  rw [hReplace2, hReplace1, hExtract]
+  rw [← hchunkSize]
+  exact ByteArray.extract_zero_size
+
 /-! ### Forward correctness — general N-chunk case (deferred)
 
 The general theorem for `idatChunks.length ≥ 1` chains
