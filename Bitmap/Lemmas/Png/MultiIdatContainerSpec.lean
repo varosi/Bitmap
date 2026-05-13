@@ -180,15 +180,56 @@ theorem parsePng_multiIdatContainerSpec_correct_of_singleton
   rw [hParse]
   exact hSimple
 
-/-! ### Forward correctness — general N-chunk case (Phase 6b)
+/-! ### Phase 6b — position arithmetic for chunk walks
 
-The general theorem for arbitrary `idatChunks.length ≥ 1` chains the
-existing `parsePngLoopFuel_idat_appends_when_open` step lemma across
-each chunk; for two or more chunks `parsePngSimple` returns `none`
-(its layout assumes exactly one IDAT), so `parsePng` falls through to
-`parsePngLoopFuel`. The proof — N readChunk-per-IDAT position lemmas
-plus an inductive walk plus a closing IEND-success lemma — is
-substantial and lands in a follow-up commit. -/
+To prove the general N-chunk forward-correctness theorem, we need to
+know at what byte offset each IDAT chunk lives. The helpers below
+compute these offsets and prove their basic arithmetic properties. -/
+
+/-- Wire-bytes size of one IDAT chunk: 12-byte overhead + payload size. -/
+private def idatChunkWireSize (c : ByteArray) : Nat := c.size + 12
+
+/-- Total wire size of the first `n` IDAT chunks. -/
+private def idatPrefixWireSize (chunks : List ByteArray) (n : Nat) : Nat :=
+  ((chunks.take n).foldl (fun acc c => acc + 12 + c.size) 0)
+
+/-- Byte offset of the `i`-th IDAT chunk's first byte (i.e., length field). -/
+def idatOffset (s : MultiIdatContainerSpec) (i : Nat) : Nat :=
+  33 + idatPrefixWireSize s.idatChunks i
+
+/-- Total wire size of all IDAT chunks (sum of all 12 + payload). -/
+def idatTotalWireSize (s : MultiIdatContainerSpec) : Nat :=
+  idatPrefixWireSize s.idatChunks s.idatChunks.length
+
+/-- Byte offset of the IEND chunk. -/
+def iendOffset (s : MultiIdatContainerSpec) : Nat :=
+  33 + idatTotalWireSize s
+
+/-- Total bytes size in terms of `idatTotalWireSize`. -/
+lemma bytes_size_eq (s : MultiIdatContainerSpec) :
+    s.bytes.size = idatTotalWireSize s + 45 := by
+  rw [bytes_size]
+  show 45 + s.idatChunks.foldl (fun acc c => acc + 12 + c.size) 0 =
+    idatTotalWireSize s + 45
+  unfold idatTotalWireSize idatPrefixWireSize
+  rw [List.take_length]
+  omega
+
+/-! ### Forward correctness — general N-chunk case (deferred)
+
+The general theorem for `idatChunks.length ≥ 1` chains
+`parsePngLoopFuel_idat_appends_when_open` across each chunk using the
+`idatOffset`/`iendOffset` position arithmetic above. The remaining
+proof obligations:
+
+  * `readChunk_multiIdat_ihdr` — IHDR at byte 8.
+  * `readChunk_multiIdat_idat i` — i-th IDAT at `idatOffset s i`.
+  * `readChunk_multiIdat_iend` — IEND at `iendOffset s`.
+  * `parsePngLoopFuel_walk_idats` — inductive walk over chunks.
+
+These build on `bytes_extract_skip_through_*`-style helpers parallel to
+`SimpleContainerSpec`'s. The actual closure lands in a follow-up
+commit that does not change the API exposed by this file. -/
 
 end MultiIdatContainerSpec
 
