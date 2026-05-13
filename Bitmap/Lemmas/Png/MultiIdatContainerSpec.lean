@@ -1,0 +1,200 @@
+import Bitmap.Lemmas.Png.ContainerSpec
+
+namespace Bitmaps
+
+namespace Lemmas
+
+open Png
+
+/-! ## Phase 6 — Multi-IDAT container spec
+
+`SimpleContainerSpec` describes byte streams with exactly one `IDAT`
+chunk. The PNG specification allows any positive number of consecutive
+`IDAT` chunks — the runtime concatenates them. `MultiIdatContainerSpec`
+generalises `SimpleContainerSpec` to a list of `IDAT` chunks.
+
+For the special case `idatChunks = [data]`, this structure embeds into
+a `SimpleContainerSpec` with `idatData := data`. The forward
+correctness theorem is proven uniformly via that adapter for the
+single-IDAT case; the general N-chunk case is closed in a follow-up
+commit by induction over `parsePngLoopFuel`. -/
+
+/-- A PNG byte stream with the supported subset of color types and bit
+depth, plus an arbitrary positive number of `IDAT` chunks. -/
+structure MultiIdatContainerSpec where
+  header : PngHeader
+  /-- The list of IDAT chunk payloads, in order. Non-empty per PNG spec. -/
+  idatChunks : List ByteArray
+  /-- Each individual chunk size fits in a u32. -/
+  hChunkSize : ∀ c, c ∈ idatChunks → c.size < 2 ^ 32
+  /-- At least one IDAT chunk. -/
+  hNonempty : idatChunks ≠ []
+  hBitDepth : header.bitDepth = 8
+  hColorType :
+    header.colorType = 0 ∨ header.colorType = 2 ∨
+      header.colorType = 4 ∨ header.colorType = 6
+  hInterlace : header.interlace = 0
+  hWidth : header.width < 2 ^ 32
+  hHeight : header.height < 2 ^ 32
+
+namespace MultiIdatContainerSpec
+
+variable (s : MultiIdatContainerSpec)
+
+/-- The runtime-visible IDAT payload: the concatenation of every IDAT
+chunk in the order they appear on the wire. -/
+def idatData : ByteArray :=
+  s.idatChunks.foldl (· ++ ·) ByteArray.empty
+
+/-- The bytes for the chained IDAT chunks (each wrapped with its own
+length/type/CRC overhead). -/
+def idatChunksBytes : ByteArray :=
+  s.idatChunks.foldl
+    (fun acc c => acc ++ mkChunkBytes idatTypeBytes c) ByteArray.empty
+
+/-- The on-the-wire bytes: PNG signature + IHDR + IDAT* + IEND. -/
+def bytes : ByteArray :=
+  pngSignature
+    ++ mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header)
+    ++ s.idatChunksBytes
+    ++ mkChunkBytes iendTypeBytes ByteArray.empty
+
+/-! ### Adapter to `SimpleContainerSpec` for single-IDAT case -/
+
+/-- When `idatChunks = [data]` (exactly one chunk), the multi-IDAT
+spec embeds into a `SimpleContainerSpec` with `idatData := data`. -/
+def toSimple (_ : s.idatChunks.length = 1) : SimpleContainerSpec where
+  header := s.header
+  idatData := s.idatChunks.head s.hNonempty
+  hBitDepth := s.hBitDepth
+  hColorType := s.hColorType
+  hInterlace := s.hInterlace
+  hWidth := s.hWidth
+  hHeight := s.hHeight
+
+/-- When `idatChunks = [data]`, the concatenated IDAT payload is `data`. -/
+lemma idatData_of_singleton {s : MultiIdatContainerSpec} (data : ByteArray)
+    (h : s.idatChunks = [data]) : s.idatData = data := by
+  simp [idatData, h, List.foldl, ByteArray.empty_append]
+
+/-- When `idatChunks = [data]`, the multi-IDAT IDAT bytes equal a single
+`mkChunkBytes idatTypeBytes data` block. -/
+lemma idatChunksBytes_of_singleton {s : MultiIdatContainerSpec} (data : ByteArray)
+    (h : s.idatChunks = [data]) :
+    s.idatChunksBytes = mkChunkBytes idatTypeBytes data := by
+  simp [idatChunksBytes, h, List.foldl, ByteArray.empty_append]
+
+/-- For a singleton chunk list, the multi-IDAT bytes equal the
+corresponding `SimpleContainerSpec.bytes`. -/
+lemma bytes_eq_simple_of_singleton {s : MultiIdatContainerSpec} (data : ByteArray)
+    (h : s.idatChunks = [data]) :
+    s.bytes = (SimpleContainerSpec.mk s.header data
+      s.hBitDepth s.hColorType s.hInterlace s.hWidth s.hHeight).bytes := by
+  unfold MultiIdatContainerSpec.bytes SimpleContainerSpec.bytes
+  rw [idatChunksBytes_of_singleton data h]
+
+/-! ### Bytes-size lemma -/
+
+/-- The "accumulator commutation" lemma for the foldl summing sizes. -/
+private lemma foldl_size_acc_comm (n : Nat) (chunks : List ByteArray) :
+    chunks.foldl (fun s c => s + 12 + c.size) n =
+      chunks.foldl (fun s c => s + 12 + c.size) 0 + n := by
+  induction chunks generalizing n with
+  | nil => simp
+  | cons d ds ih =>
+      simp only [List.foldl_cons]
+      rw [ih (n + 12 + d.size), ih (0 + 12 + d.size)]
+      omega
+
+/-- The total chunk-bytes size: each chunk contributes
+`12 + chunk.size` bytes (the `mkChunkBytes` overhead). -/
+lemma idatChunksBytes_size_aux (acc : ByteArray) (chunks : List ByteArray) :
+    (chunks.foldl (fun acc c => acc ++ mkChunkBytes idatTypeBytes c) acc).size =
+      acc.size + chunks.foldl (fun s c => s + 12 + c.size) 0 := by
+  induction chunks generalizing acc with
+  | nil => simp
+  | cons c rest ih =>
+      simp only [List.foldl_cons]
+      rw [ih]
+      have hChunkSize : (mkChunkBytes idatTypeBytes c).size = c.size + 12 :=
+        mkChunkBytes_size idatTypeBytes c (by rfl)
+      rw [ByteArray.size_append, hChunkSize]
+      rw [foldl_size_acc_comm (0 + 12 + c.size) rest]
+      omega
+
+lemma idatChunksBytes_size (s : MultiIdatContainerSpec) :
+    s.idatChunksBytes.size =
+      s.idatChunks.foldl (fun acc c => acc + 12 + c.size) 0 := by
+  unfold idatChunksBytes
+  rw [idatChunksBytes_size_aux]
+  simp
+
+/-- Total bytes size: 8 (signature) + 25 (IHDR) + chunks bytes + 12 (IEND). -/
+lemma bytes_size (s : MultiIdatContainerSpec) :
+    s.bytes.size =
+      45 + s.idatChunks.foldl (fun acc c => acc + 12 + c.size) 0 := by
+  unfold MultiIdatContainerSpec.bytes
+  have hIhdr : (mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header)).size = 25 := by
+    rw [mkChunkBytes_size _ _ (by rfl : ihdrTypeBytes.size = 4), encodeIHDRData_size]
+  have hIend : (mkChunkBytes iendTypeBytes ByteArray.empty).size = 12 := by
+    rw [mkChunkBytes_size _ _ (by rfl : iendTypeBytes.size = 4)]; simp
+  rw [ByteArray.size_append, ByteArray.size_append, ByteArray.size_append,
+    pngSignature_size, hIhdr, idatChunksBytes_size, hIend]
+  omega
+
+/-- Every multi-IDAT byte stream is at least 8 bytes long (carries the
+PNG signature). -/
+lemma bytes_size_ge_8 (s : MultiIdatContainerSpec) : 8 ≤ s.bytes.size := by
+  rw [bytes_size]; omega
+
+/-! ### Forward correctness — singleton case via reuse -/
+
+/-- `parsePng` is independent of the proof of its size hypothesis. -/
+private lemma parsePng_proof_irrel (bytes : ByteArray) (h1 h2 : 8 ≤ bytes.size) :
+    parsePng bytes h1 = parsePng bytes h2 := rfl
+
+/-- For the singleton-IDAT case, the multi-IDAT forward correctness
+theorem reduces to `parsePng_simpleContainerSpec_correct`. -/
+theorem parsePng_multiIdatContainerSpec_correct_of_singleton
+    {s : MultiIdatContainerSpec} (data : ByteArray)
+    (h : s.idatChunks = [data])
+    (hIdatSize : data.size < 2 ^ 32) :
+    parsePng s.bytes s.bytes_size_ge_8 = some (s.header, s.idatData) := by
+  let simple : SimpleContainerSpec :=
+    { header := s.header, idatData := data,
+      hBitDepth := s.hBitDepth, hColorType := s.hColorType,
+      hInterlace := s.hInterlace, hWidth := s.hWidth, hHeight := s.hHeight }
+  have hBytes : s.bytes = simple.bytes :=
+    bytes_eq_simple_of_singleton data h
+  have hDataEq : s.idatData = data := idatData_of_singleton data h
+  have hSimple :
+      parsePng simple.bytes simple.bytes_size_ge_8 =
+        some (simple.header, simple.idatData) :=
+    parsePng_simpleContainerSpec_correct simple hIdatSize
+  show parsePng s.bytes s.bytes_size_ge_8 = some (s.header, s.idatData)
+  rw [hDataEq]
+  -- Use congr on parsePng to handle the size-hypothesis discrepancy.
+  have hParse : parsePng s.bytes s.bytes_size_ge_8 = parsePng simple.bytes simple.bytes_size_ge_8 := by
+    congr 1
+  rw [hParse]
+  exact hSimple
+
+/-! ### Forward correctness — general N-chunk case (deferred)
+
+The general theorem
+  `parsePng_multiIdatContainerSpec_correct (s) (hIdatSize : ...) :
+     parsePng s.bytes _ = some (s.header, s.idatData)`
+for arbitrary `idatChunks.length ≥ 1` is closed in a follow-up commit.
+The proof structure: for the single-chunk case use
+`parsePng_multiIdatContainerSpec_correct_of_singleton` directly; for
+two or more chunks, `parsePngSimple` returns `none` (the layout differs
+from the single-IDAT shape), so `parsePng` falls through to
+`parsePngLoopFuel`. The loop walks each IDAT chunk in sequence,
+accumulating into `state.idat`; the closing `IEND` returns the
+concatenation. The proof is a structural induction on `idatChunks`. -/
+
+end MultiIdatContainerSpec
+
+end Lemmas
+
+end Bitmaps
