@@ -173,9 +173,13 @@ A multi-phase plan is in progress to extend the proof coverage to byte streams
   `zlibDecompressLoop`, via per-block-type step lemmas (stored /
   fixed / dynamic) composed by induction.
 - **Phase 5 (end-to-end composition)**: `Bitmap/Lemmas/ExternalPngSpec.lean` —
-  scaffold (`ExternalPngSpec` structure). With Phases 1a/1b/2/3/4
-  complete, the final theorem `decodeBitmap_external_correct` reduces
-  to a routing exercise.
+  reworked `ExternalPngSpec` structure with decoder-side witnesses
+  (the encoder-dependent `zlibCompressOf` reference is gone). Layer-1
+  composition lands as `parsePngForDecode_external`. The final theorem
+  `decodeBitmap_external_correct` remains deferred — the mathematical
+  content is captured by the witnesses, but threading them through
+  `decodeBitmap`'s many runtime predicate branches is a mechanical
+  follow-up that exceeded this commit's scope.
 
 ## Supported PNG features
 
