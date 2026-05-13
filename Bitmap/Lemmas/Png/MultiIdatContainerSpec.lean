@@ -1,4 +1,5 @@
 import Bitmap.Lemmas.Png.ContainerSpec
+import Bitmap.Lemmas.Png.ChunkValidation
 
 namespace Bitmaps
 
@@ -179,19 +180,15 @@ theorem parsePng_multiIdatContainerSpec_correct_of_singleton
   rw [hParse]
   exact hSimple
 
-/-! ### Forward correctness — general N-chunk case (deferred)
+/-! ### Forward correctness — general N-chunk case (Phase 6b)
 
-The general theorem
-  `parsePng_multiIdatContainerSpec_correct (s) (hIdatSize : ...) :
-     parsePng s.bytes _ = some (s.header, s.idatData)`
-for arbitrary `idatChunks.length ≥ 1` is closed in a follow-up commit.
-The proof structure: for the single-chunk case use
-`parsePng_multiIdatContainerSpec_correct_of_singleton` directly; for
-two or more chunks, `parsePngSimple` returns `none` (the layout differs
-from the single-IDAT shape), so `parsePng` falls through to
-`parsePngLoopFuel`. The loop walks each IDAT chunk in sequence,
-accumulating into `state.idat`; the closing `IEND` returns the
-concatenation. The proof is a structural induction on `idatChunks`. -/
+The general theorem for arbitrary `idatChunks.length ≥ 1` chains the
+existing `parsePngLoopFuel_idat_appends_when_open` step lemma across
+each chunk; for two or more chunks `parsePngSimple` returns `none`
+(its layout assumes exactly one IDAT), so `parsePng` falls through to
+`parsePngLoopFuel`. The proof — N readChunk-per-IDAT position lemmas
+plus an inductive walk plus a closing IEND-success lemma — is
+substantial and lands in a follow-up commit. -/
 
 end MultiIdatContainerSpec
 
