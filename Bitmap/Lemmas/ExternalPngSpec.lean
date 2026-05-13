@@ -11,7 +11,7 @@ namespace Lemmas
 
 open Png
 
-/-! ## End-to-end external-PNG spec (Phase 5)
+/-! ## End-to-end external-PNG spec (Phase 5 — complete)
 
 `ExternalPngSpec px` describes a byte stream that the runtime
 `decodeBitmap` accepts as a valid PNG of the supported subset and that

@@ -124,6 +124,11 @@ This library has proofs about:
   `DeflateStreamSpec` covering stored, fixed, and dynamic blocks chained
   through `BFINAL` (`deflateStreamSpec_decodeFuel_correct`,
   `deflateStreamSpec_decode_correct`, Phase 2 of the external-PNG plan);
+- end-to-end external-PNG correctness: any byte stream matching an
+  `ExternalPngSpec` (8-bit depth, color types 0/2/4/6, non-interlaced,
+  no ancillary chunks, no metadata, source matching target pixel type)
+  is accepted by `decodeBitmap` and decodes to the spec's bitmap
+  (`decodeBitmap_external_correct`, Phase 5 of the external-PNG plan);
 - there are no buffer overflows;
 - PNG encode and decode are total functions.
 
@@ -173,13 +178,13 @@ A multi-phase plan is in progress to extend the proof coverage to byte streams
   `zlibDecompressLoop`, via per-block-type step lemmas (stored /
   fixed / dynamic) composed by induction.
 - **Phase 5 (end-to-end composition)**: `Bitmap/Lemmas/ExternalPngSpec.lean` —
-  reworked `ExternalPngSpec` structure with decoder-side witnesses
-  (the encoder-dependent `zlibCompressOf` reference is gone). Layer-1
-  composition lands as `parsePngForDecode_external`. The final theorem
-  `decodeBitmap_external_correct` remains deferred — the mathematical
-  content is captured by the witnesses, but threading them through
-  `decodeBitmap`'s many runtime predicate branches is a mechanical
-  follow-up that exceeded this commit's scope.
+  complete. `ExternalPngSpec` is a decoder-side spec with witnesses
+  for each layer (container / zlib / row-filter + pixel extraction).
+  The end-to-end theorem `decodeBitmap_external_correct` proves that
+  any byte stream matching the spec is accepted by `decodeBitmap`
+  and decodes to the spec's bitmap. Supported subset: 8-bit depth,
+  color types 0/2/4/6, non-interlaced, no ancillary chunks, empty
+  metadata, source color type matching target pixel type.
 
 ## Supported PNG features
 
