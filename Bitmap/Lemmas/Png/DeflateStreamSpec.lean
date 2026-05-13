@@ -113,23 +113,15 @@ inductive DeflateStreamSpec :
       (rest : DeflateStreamSpec blocks brMid outMid br' out') :
       DeflateStreamSpec (blocks + 1) br out br' out'
 
-/-! ### Forward correctness (deferred)
+/-! ### Forward correctness
 
-The public theorem
-  `deflateStreamSpec_decode_correct :
-     DeflateStreamSpec blocks br out br' out' → blocks ≤ … →
-     zlibDecompressLoop br out = some (br', out')`
-is deferred to a follow-up commit. Once landed, Phase 5 (end-to-end
-`decodeBitmap_external_correct`) becomes a routing exercise composing
-this theorem with the container spec, the row-filter spec, and the
-zlib envelope.
-
-The proof structure mirrors `dynamicDeflateStreamSpec_decode_correct`
-in `DynamicBlockProofsLoop.lean`, but with a 2-way (eventually 3-way)
-case split over the `BlockSpec` constructor at each block. The
-existing `zlibDecompressLoopFuel_step_dynamic_{final,nonfinal}_of_trace`
-lemmas serve as templates; analogous fixed (and stored) step lemmas
-need to be added once the bridging issues above are resolved. -/
+The public theorems
+  `deflateStreamSpec_decodeFuel_correct` and
+  `deflateStreamSpec_decode_correct`
+live in `DeflateStreamProofs.lean`. They state that any well-formed
+`DeflateStreamSpec` is accepted by the runtime `zlibDecompressLoop`,
+via a 3-way case split over the `BlockSpec` constructor (stored /
+fixed / dynamic) and an induction over the stream constructor. -/
 
 end Png
 

@@ -120,6 +120,10 @@ This library has proofs about:
   `decodeFixedBlockFuel` (`decodeFixedLiteralSymFast9_eq_decodeFixedLiteralSym`,
   `decodeFixedBlockFuelFast_eq_decodeFixedBlockFuel`,
   `fixedBlockSpec_decode_correct_fast`);
+- mixed DEFLATE-stream forward correctness against an inductive
+  `DeflateStreamSpec` covering stored, fixed, and dynamic blocks chained
+  through `BFINAL` (`deflateStreamSpec_decodeFuel_correct`,
+  `deflateStreamSpec_decode_correct`, Phase 2 of the external-PNG plan);
 - there are no buffer overflows;
 - PNG encode and decode are total functions.
 
@@ -160,12 +164,18 @@ A multi-phase plan is in progress to extend the proof coverage to byte streams
   is bridged in `Bitmap/Lemmas/Png/FixedBlockFastSlowBridge.lean` with
   `decodeFixedBlockFuelFast_eq_decodeFixedBlockFuel` and
   `fixedBlockSpec_decode_correct_fast`.
-- **Phase 2 (mixed `BlockSpec` ADT)**: `Bitmap/Lemmas/Png/DeflateStreamSpec.lean` —
-  ADT defined (stored / fixed / dynamic blocks). The
-  `deflateStreamSpec_decode_correct` theorem is the next step.
+- **Phase 2 (mixed `BlockSpec` ADT + stream correctness)**:
+  `Bitmap/Lemmas/Png/DeflateStreamSpec.lean` defines the
+  `StoredBlockBitSpec`, `BlockSpec` (3-way sum), and `DeflateStreamSpec`
+  inductive structures. `Bitmap/Lemmas/Png/DeflateStreamProofs.lean`
+  proves `deflateStreamSpec_decode_correct` — any well-formed
+  `DeflateStreamSpec` is accepted by the runtime
+  `zlibDecompressLoop`, via per-block-type step lemmas (stored /
+  fixed / dynamic) composed by induction.
 - **Phase 5 (end-to-end composition)**: `Bitmap/Lemmas/ExternalPngSpec.lean` —
-  scaffold (`ExternalPngSpec` structure). Final theorem
-  `decodeBitmap_external_correct` depends on Phase 2.
+  scaffold (`ExternalPngSpec` structure). With Phases 1a/1b/2/3/4
+  complete, the final theorem `decodeBitmap_external_correct` reduces
+  to a routing exercise.
 
 ## Supported PNG features
 
