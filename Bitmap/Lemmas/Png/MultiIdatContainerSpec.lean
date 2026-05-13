@@ -294,6 +294,99 @@ lemma idatChunksBytesUpTo_extract_at (chunks : List ByteArray) (i : Nat)
   rw [← hchunkSize]
   exact ByteArray.extract_zero_size
 
+/-! ### Lift `idatChunksBytesUpTo_extract_at` to the full chunks bytes -/
+
+/-- Walking past chunk `m` is a prefix of walking past chunk `m+k`:
+the first `idatPrefixWireSize m` bytes are unchanged. -/
+private lemma idatChunksBytesUpTo_extract_zero_prefix (chunks : List ByteArray)
+    (m k : Nat) (h : m + k ≤ chunks.length) :
+    (idatChunksBytesUpTo chunks (m + k)).extract 0 (idatPrefixWireSize chunks m) =
+      idatChunksBytesUpTo chunks m := by
+  induction k with
+  | zero =>
+      simp only [Nat.add_zero]
+      have hsize : (idatChunksBytesUpTo chunks m).size = idatPrefixWireSize chunks m :=
+        idatChunksBytesUpTo_size chunks m
+      rw [← hsize]
+      exact ByteArray.extract_zero_size
+  | succ k ih =>
+      have hk : m + k ≤ chunks.length := by omega
+      have hk' : m + k < chunks.length := by omega
+      have hmk' : m + k + 1 = m + (k + 1) := by omega
+      rw [show m + (k + 1) = (m + k) + 1 by omega]
+      rw [idatChunksBytesUpTo_succ chunks (m + k) hk']
+      have hupSize : (idatChunksBytesUpTo chunks (m + k)).size =
+          idatPrefixWireSize chunks (m + k) :=
+        idatChunksBytesUpTo_size chunks (m + k)
+      have hPrefixLe : idatPrefixWireSize chunks m ≤ idatPrefixWireSize chunks (m + k) := by
+        have : ∀ j, idatPrefixWireSize chunks m ≤ idatPrefixWireSize chunks (m + j) := by
+          intro j
+          induction j with
+          | zero => simp
+          | succ j ihj =>
+              by_cases hbnd : m + j < chunks.length
+              · rw [show m + (j + 1) = (m + j) + 1 by omega,
+                    idatPrefixWireSize_succ chunks (m + j) hbnd]
+                omega
+              · have : idatPrefixWireSize chunks (m + (j + 1)) =
+                    idatPrefixWireSize chunks (m + j) := by
+                  unfold idatPrefixWireSize
+                  rw [List.take_of_length_le (by omega : chunks.length ≤ m + j),
+                      List.take_of_length_le (by omega : chunks.length ≤ m + (j + 1))]
+                rw [this]; exact ihj
+        exact this k
+      -- Use byteArray_extract_append_prefix.
+      rw [byteArray_extract_append_prefix
+            (a := idatChunksBytesUpTo chunks (m + k))
+            (b := mkChunkBytes idatTypeBytes chunks[m + k])
+            (n := idatPrefixWireSize chunks m)
+            (by rw [hupSize]; exact hPrefixLe)]
+      exact ih hk
+
+/-- Lifted version: extracting the i-th IDAT chunk from `s.idatChunksBytes`. -/
+lemma idatChunksBytes_extract_at (s : MultiIdatContainerSpec) (i : Nat)
+    (h : i < s.idatChunks.length) :
+    s.idatChunksBytes.extract
+        (idatPrefixWireSize s.idatChunks i) (idatPrefixWireSize s.idatChunks (i + 1)) =
+      mkChunkBytes idatTypeBytes s.idatChunks[i] := by
+  -- Use the prefix property: the extract on `idatChunksBytes` (full) equals
+  -- the extract on `idatChunksBytesUpTo (i+1)` when the upper bound fits.
+  have hUpToFull := idatChunksBytesUpTo_full s
+  have hExtractEq :
+      s.idatChunksBytes.extract
+          (idatPrefixWireSize s.idatChunks i) (idatPrefixWireSize s.idatChunks (i + 1)) =
+        (idatChunksBytesUpTo s.idatChunks (i + 1)).extract
+          (idatPrefixWireSize s.idatChunks i) (idatPrefixWireSize s.idatChunks (i + 1)) := by
+    rw [← hUpToFull]
+    -- Need: (upTo n).extract a b = (upTo (i+1)).extract a b when b ≤ size of upTo (i+1).
+    have hPrefixEq :
+        (idatChunksBytesUpTo s.idatChunks s.idatChunks.length).extract 0
+            (idatPrefixWireSize s.idatChunks (i + 1)) =
+          idatChunksBytesUpTo s.idatChunks (i + 1) := by
+      -- We need m + k = chunks.length with m = i+1.
+      have hk := s.idatChunks.length - (i + 1)
+      have hk_eq : (i + 1) + (s.idatChunks.length - (i + 1)) = s.idatChunks.length := by omega
+      rw [← hk_eq]
+      exact idatChunksBytesUpTo_extract_zero_prefix s.idatChunks (i + 1)
+        (s.idatChunks.length - (i + 1)) (by omega)
+    -- Now use byteArray_extract_eq_of_prefix_eq.
+    exact byteArray_extract_eq_of_prefix_eq
+      (a := idatChunksBytesUpTo s.idatChunks s.idatChunks.length)
+      (b := idatChunksBytesUpTo s.idatChunks (i + 1))
+      (n := idatPrefixWireSize s.idatChunks (i + 1))
+      (i := idatPrefixWireSize s.idatChunks i)
+      (j := idatPrefixWireSize s.idatChunks (i + 1))
+      (by
+        rw [hPrefixEq]
+        have hupSize : (idatChunksBytesUpTo s.idatChunks (i + 1)).size =
+            idatPrefixWireSize s.idatChunks (i + 1) :=
+          idatChunksBytesUpTo_size s.idatChunks (i + 1)
+        rw [← hupSize]
+        exact ByteArray.extract_zero_size.symm)
+      le_rfl
+  rw [hExtractEq]
+  exact idatChunksBytesUpTo_extract_at s.idatChunks i h
+
 /-! ### Bytes-layout helpers: skip past signature/IHDR -/
 
 /-- Re-associate the chained appends in `s.bytes` so the signature
