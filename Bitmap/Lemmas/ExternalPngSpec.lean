@@ -191,26 +191,161 @@ lemma ct4_noReject_external (s : ExternalPngSpec px) :
   have : PngPixel.colorType (α := px) = u8 4 := by rw [s.hPxColorType, h4]
   exact absurd this hne
 
-/-! ### End-to-end forward correctness (deferred)
+/-! ### End-to-end forward correctness -/
 
-The full theorem
-  `decodeBitmap_external_correct (s : ExternalPngSpec px) :
-     Png.decodeBitmap s.container.bytes = some s.bitmap`
-threads the four layer witnesses through the runtime `decodeBitmap`
-control flow. The decoder dispatches on many runtime predicates
-(transparency, chrm/srgb metadata, source/target bit-depth combos,
-color-type-4 special-case, alpha conversion) that all reduce to
-trivially-`false` branches under the spec's restrictions, but the
-elaboration is sensitive to the order in which those facts are
-substituted. The remaining work is mechanical bookkeeping; the
-mathematical content is fully captured by the witnesses on the spec
-above and by the composition lemmas:
-
-  * `parsePngForDecode_external` — Phase 3 routing.
-  * `zlibInflate_external` — Phase 2 / zlib envelope routing.
-  * `pngColorTypeBitDepthSupported_external`,
-    `colorTypeCases_external`, `ct4_noReject_external` —
-    decoder-predicate-discharging helpers. -/
+set_option maxHeartbeats 16000000 in
+set_option maxRecDepth 4096 in
+/-- Phase 5 closure: any `ExternalPngSpec` is accepted by `decodeBitmap`
+and decodes to the spec's bitmap. -/
+theorem decodeBitmap_external_correct (s : ExternalPngSpec px) :
+    Png.decodeBitmap s.container.bytes = some s.bitmap := by
+  -- Container layer.
+  have hParseForDecode := s.parsePngForDecode_external
+  -- Local abbreviations matching the round-trip proof.
+  let ct := (PngPixel.colorType (α := px)).toNat
+  let bd := (PngPixel.bitDepth (α := px)).toNat
+  let bpp := Pixel.bytesPerPixel (α := px)
+  -- Container header facts.
+  have hBitDepth : s.container.header.bitDepth = 8 := s.container.hBitDepth
+  have hCtSet : s.container.header.colorType = 0 ∨ s.container.header.colorType = 2 ∨
+      s.container.header.colorType = 4 ∨ s.container.header.colorType = 6 :=
+    s.container.hColorType
+  -- Bit-depth facts.
+  have hbd_8 : bd = 8 := by
+    show (PngPixel.bitDepth (α := px)).toNat = 8
+    rw [s.hTargetBitDepth]; decide
+  have hBdNot1' : ¬ bd = 1 := by rw [hbd_8]; decide
+  have hbdNoReject : pngBitDepthSupported bd = true := by rw [hbd_8]; decide
+  have hbitDepthEq :
+      ((PngPixel.bitDepth (α := px)).toNat != bd) = false := by simp [bd]
+  have hbitDepthEqHeader :
+      (bd != (PngPixel.bitDepth (α := px)).toNat) = false := by simp [bd]
+  have hnoDownsample :
+      ¬((PngPixel.bitDepth (α := px)).toNat = 16 ∧ PngPixel.bitDepth (α := px) = u8 8) := by
+    rintro ⟨h16, _⟩
+    rw [s.hTargetBitDepth] at h16
+    revert h16; decide
+  -- Color-type facts (in `ct`-form, matching the round-trip's vocabulary).
+  have hct'eq : ct = s.container.header.colorType := by simp [ct, s.hColorType]
+  have hct' : ct = 0 ∨ ct = 2 ∨ ct = 4 ∨ ct = 6 := by rw [hct'eq]; exact hCtSet
+  have hctProp : ¬ ct = 0 → ¬ ct = 2 → ¬ ct = 4 → ct = 6 := by
+    intro h0 h2 h4
+    rcases hct' with hc | hc | hc | hc
+    · exact absurd hc h0
+    · exact absurd hc h2
+    · exact absurd hc h4
+    · exact hc
+  have hctNoReject :
+      ct = 4 → ¬ PngPixel.colorType (α := px) = u8 4 →
+        PngPixel.colorType (α := px) = u8 6 := by
+    intro h4 hne
+    have hCtH : s.container.header.colorType = 4 := by rw [← hct'eq]; exact h4
+    have : PngPixel.colorType (α := px) = u8 4 := by rw [s.hPxColorType, hCtH]
+    exact absurd this hne
+  -- Color-type/bit-depth joint check passes.
+  have hctbd' : pngColorTypeBitDepthSupported ct bd = true := by
+    rw [hct'eq, hbd_8]
+    rcases hCtSet with h | h | h | h <;> rw [h] <;> decide
+  -- bpp lookup matches.
+  have hpngBpp' : pngBytesPerPixelForColorTypeAndBitDepth? ct bd = some bpp := by
+    rw [hct'eq, hbd_8, ← hBitDepth]; exact s.hBppLookup
+  -- Metadata + transparency facts.
+  have hmetadataNoTransparency : PngMetadata.empty.transparency = none := rfl
+  -- Inflated bytes size in the round-trip's form.
+  have hrawEq' :
+      s.inflatedRaw.size = s.bitmap.size.height * (s.bitmap.size.width * bpp + 1) := by
+    simpa [bpp] using s.hRawSize
+  have hvalid :
+      s.bitmap.data.size = s.bitmap.size.width * s.bitmap.size.height * bpp := by
+    simpa [bpp] using s.bitmap.valid
+  -- Composed pixel-decoding equation.
+  have hrowsEq :
+      ((PngPixel.decodeRowsLoop (α := px) s.inflatedRaw s.bitmap.size.width
+            s.bitmap.size.height bpp (s.bitmap.size.width * bpp) 0 0 ByteArray.empty
+            { data := Array.replicate
+                (s.bitmap.size.width * s.bitmap.size.height * Pixel.bytesPerPixel (α := px))
+                0 }).bind
+        fun decodedPixels ↦
+          (applyPngColorSpaceTransform PngMetadata.empty
+            (PngPixel.colorType (α := px)).toNat
+            (PngPixel.colorType (α := px)) (PngPixel.bitDepth (α := px)) decodedPixels).bind
+            fun pixels ↦
+              if h : pixels.size = s.bitmap.size.width * s.bitmap.size.height *
+                  Pixel.bytesPerPixel (α := px) then
+                some { size := { width := s.bitmap.size.width,
+                                 height := s.bitmap.size.height },
+                       data := pixels, valid := h }
+              else none) =
+      some s.bitmap := by
+    simp [s.hPixels, hvalid, applyPngColorSpaceTransform, PngMetadata.empty, bpp]
+  -- Conjunct #2 from the round-trip's simp residual: the joint check (in
+  -- container-header form, with bitDepth already reduced to 8 by simp).
+  have hctbdHdr8 :
+      pngColorTypeBitDepthSupported s.container.header.colorType 8 = true :=
+    s.pngColorTypeBitDepthSupported_external
+  -- Conjunct #4: `8 = (u8 8).toNat` (a triviality simp doesn't auto-discharge).
+  have h8eq : (8 : Nat) = (u8 8).toNat := by decide
+  -- Inner bpp-lookup chain reducing to `some s.bitmap` (conjunct #6).
+  have hBppChain :
+      ((pngBytesPerPixelForColorTypeAndBitDepth? s.container.header.colorType 8).bind
+        fun bpp ↦
+          if s.inflatedRaw.size = s.bitmap.size.height * (s.bitmap.size.width * bpp + 1) then
+            (PngPixel.decodeRowsLoop (α := px) s.inflatedRaw s.bitmap.size.width
+                  s.bitmap.size.height bpp (s.bitmap.size.width * bpp) 0 0 ByteArray.empty
+                  { data := Array.replicate
+                      (s.bitmap.size.width * s.bitmap.size.height *
+                        Pixel.bytesPerPixel (α := px)) 0 }).bind
+              fun y ↦
+                (applyPngColorSpaceTransform PngMetadata.empty
+                    s.container.header.colorType (PngPixel.colorType (α := px))
+                    (u8 8) y).bind
+                  fun pixels ↦
+                    if h : pixels.size = s.bitmap.size.width * s.bitmap.size.height *
+                        Pixel.bytesPerPixel (α := px) then
+                      some { size := { width := s.bitmap.size.width,
+                                       height := s.bitmap.size.height },
+                             data := pixels, valid := h }
+                    else none
+          else none) = some s.bitmap := by
+    have hBpp8 : pngBytesPerPixelForColorTypeAndBitDepth?
+        s.container.header.colorType 8 =
+          some (Pixel.bytesPerPixel (α := px)) := by
+      rw [← hBitDepth]; exact s.hBppLookup
+    rw [hBpp8]
+    simp only [Option.bind_some]
+    have hsize : s.inflatedRaw.size =
+        s.bitmap.size.height * (s.bitmap.size.width * Pixel.bytesPerPixel (α := px) + 1) :=
+      s.hRawSize
+    simp [hsize, s.hPixels, applyPngColorSpaceTransform, PngMetadata.empty,
+      s.bitmap.valid]
+  -- Conjuncts #3 and #5: container-header forms (using helper lemmas).
+  have hCtCases := s.colorTypeCases_external
+  have hCt4Reject := s.ct4_noReject_external
+  -- chrm-gray-active is false (no chromaticities under empty metadata).
+  have hChrmIsSome : (PngMetadata.empty.chromaticities.isSome : Bool) = false := by decide
+  -- Finish via simpa using.
+  unfold Png.decodeBitmap
+  rcases s.hInflated with hStored | ⟨hStoredNone, hZlib⟩
+  · simpa [s.container.bytes_size_ge_8, hParseForDecode, hStored,
+      ct, bd, hbdNoReject, hbitDepthEq, hbitDepthEqHeader, hnoDownsample, hpngBpp',
+      hctbd', hBdNot1', normalizeRawByInterlace?, PngMetadata.pixelOnlyColorSpace,
+      s.hIdatMin, s.hInterlace, s.hWidth, s.hHeight, hBitDepth,
+      s.hTargetBitDepth, hChrmIsSome] using
+      (And.intro hmetadataNoTransparency
+        (And.intro hctbdHdr8
+          (And.intro hCtCases
+            (And.intro h8eq
+              (And.intro hCt4Reject hBppChain)))))
+  · simpa [s.container.bytes_size_ge_8, hParseForDecode, hStoredNone, hZlib,
+      ct, bd, hbdNoReject, hbitDepthEq, hbitDepthEqHeader, hnoDownsample, hpngBpp',
+      hctbd', hBdNot1', normalizeRawByInterlace?, PngMetadata.pixelOnlyColorSpace,
+      s.hIdatMin, s.hInterlace, s.hWidth, s.hHeight, hBitDepth,
+      s.hTargetBitDepth, hChrmIsSome] using
+      (And.intro hmetadataNoTransparency
+        (And.intro hctbdHdr8
+          (And.intro hCtCases
+            (And.intro h8eq
+              (And.intro hCt4Reject hBppChain)))))
 
 end ExternalPngSpec
 
