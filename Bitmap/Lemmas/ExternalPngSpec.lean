@@ -139,6 +139,27 @@ theorem parsePngForDecode_external (s : ExternalPngSpec px) :
   unfold parsePngForDecode parsePngSimpleWithMetadata
   simp [hSimple]
 
+/-! ### Layer-2 (zlib) composition
+
+`decodeBitmap` calls `zlibDecompressStored` first, falling back to
+`zlibDecompress` if it returns `none`. Either path through the
+`hInflated` witness yields `some s.inflatedRaw`. This composition
+lemma resolves the inflate `do`-bind down to the inflated bytes. -/
+
+/-- The `do`-bind on the zlib inflate step reduces to `f s.inflatedRaw`
+under either branch of the `hInflated` disjunction. -/
+theorem zlibInflate_external {α : Type} (s : ExternalPngSpec px)
+    (f : ByteArray → Option α) :
+    (do
+      let inflated ←
+        match zlibDecompressStored s.container.idatData s.hIdatMin with
+        | some raw => some raw
+        | none => zlibDecompress s.container.idatData s.hIdatMin
+      f inflated) = f s.inflatedRaw := by
+  rcases s.hInflated with hStored | ⟨hStoredNone, hZlib⟩
+  · simp [hStored]
+  · simp [hStoredNone, hZlib]
+
 /-! ### End-to-end forward correctness (deferred)
 
 The full theorem
@@ -152,7 +173,7 @@ trivially-`false` branches under the spec's restrictions, but the
 elaboration is sensitive to the order in which those facts are
 substituted. The remaining work is mechanical bookkeeping; the
 mathematical content is fully captured by the witnesses on the spec
-above and by `parsePngForDecode_external`. -/
+above and by `parsePngForDecode_external` / `zlibInflate_external`. -/
 
 end ExternalPngSpec
 
