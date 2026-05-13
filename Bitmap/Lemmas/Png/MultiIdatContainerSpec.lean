@@ -215,6 +215,17 @@ lemma bytes_size_eq (s : MultiIdatContainerSpec) :
   rw [List.take_length]
   omega
 
+/-- `idatPrefixWireSize` distributes over cons: walking past the next
+chunk adds `12 + chunk.size` to the prefix size. -/
+private lemma idatPrefixWireSize_succ (chunks : List ByteArray) (n : Nat)
+    (h : n < chunks.length) :
+    idatPrefixWireSize chunks (n + 1) =
+      idatPrefixWireSize chunks n + 12 + chunks[n].size := by
+  unfold idatPrefixWireSize
+  rw [List.take_succ_eq_append_getElem h]
+  rw [List.foldl_append]
+  simp [List.foldl]
+
 /-! ### Forward correctness — general N-chunk case (deferred)
 
 The general theorem for `idatChunks.length ≥ 1` chains
