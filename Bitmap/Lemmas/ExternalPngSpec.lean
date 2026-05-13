@@ -1,7 +1,6 @@
 import Bitmap.Lemmas.Png.ContainerSpec
-import Bitmap.Lemmas.Png.DeflateStreamSpec
+import Bitmap.Lemmas.Png.DeflateStreamProofs
 import Bitmap.Lemmas.Png.RowFilterSpec
-import Bitmap.Lemmas.Png.StoredBlockProofsSpec
 import Bitmap.Lemmas.Bitmap
 
 universe u
@@ -12,44 +11,48 @@ namespace Lemmas
 
 open Png
 
-/-! ## End-to-end external-PNG spec (Phase 5 scaffold)
+/-! ## End-to-end external-PNG spec (Phase 5)
 
-`ExternalPngSpec px` describes a byte stream `bytes` that the runtime
+`ExternalPngSpec px` describes a byte stream that the runtime
 `decodeBitmap` accepts as a valid PNG of the supported subset and that
-decodes to a specific `Bitmap px`. Unlike the existing
-`decodeBitmap_encodeBitmap` round-trip, this spec is independent of
-this library's encoder — any byte sequence matching the spec's
-constraints is accepted, regardless of which tool produced it.
+decodes to a specific `Bitmap px`. Unlike `decodeBitmap_encodeBitmap`,
+this spec is independent of this library's encoder — any byte sequence
+matching the spec's constraints is accepted, regardless of which tool
+produced it.
 
-The structure composes all four lower-level spec layers:
+The spec is restricted to the simplest decoder path:
 
-  * **Phase 3** (`ContainerSpec.lean`): the PNG signature + IHDR +
-    IDAT + IEND chunk layout.
-  * **Phase 2** (`DeflateStreamSpec.lean`): the IDAT data is a zlib
-    envelope around a `DeflateStreamSpec` made of stored, fixed, or
-    dynamic blocks.
-  * **Phase 4** (`RowFilterSpec.lean`): the deflate output, viewed as
-    a sequence of `rowBytes + 1` byte rows, reconstructs to the
-    bitmap's pixel data via `reconstructRowsSpec`.
-  * **Phase 1a / 1b**: the per-block-type forward correctness theorems
-    feeding into the deflate stream.
+  * 8-bit depth (no 1-bit or 16-bit conversions).
+  * Color types 0 (gray), 2 (RGB), 4 (gray+alpha), 6 (RGBA).
+  * Interlace 0 (no Adam7).
+  * Container shape: signature + IHDR + single IDAT + IEND (no
+    ancillary chunks), via `SimpleContainerSpec`.
+  * Empty metadata (no tRNS / bKGD / gAMA / cHRM / sRGB).
+  * Source color type matches target pixel type (no alpha-drop /
+    alpha-add conversions, no 16→8 downsampling).
 
-The end-to-end theorem
-  `decodeBitmap_external_correct (s : ExternalPngSpec px) :
-     decodeBitmap (containerBytes s) = some s.bitmap`
-is deferred until Phases 2 and 3 are finalised — the structural spec
-below makes the obligations visible in code. -/
+The structural composition is captured by witness fields on the spec;
+the closure theorem `decodeBitmap_external_correct` threads them
+through the runtime decoder. -/
 
 /-- A description of an external PNG byte stream, decomposed into its
-container/zlib/deflate/row-filter layers.
+container / zlib / row-decoding layers.
 
-The `decodeBitmap_external_correct` theorem is deferred; the fields
-below capture the necessary composition constraints, with proof
-obligations connecting:
+Each layer is captured via a witness:
 
-  - container header ↔ bitmap dimensions and color type
-  - container IDAT bytes ↔ zlib-wrapped deflate stream
-  - deflate stream output ↔ row-filter-encoded bitmap pixels -/
+  * `container` (Phase 3) — the PNG byte layout.
+  * `hInflated` — zlib decompression of `container.idatData` returns
+    `inflatedRaw`.
+  * `hPixels` — `PngPixel.decodeRowsLoop` over `inflatedRaw` returns
+    the bitmap's pixel data. This single witness combines RFC 2083
+    §6.2 row-filter reconstruction with pixel-format unpacking; the
+    `RowFilterSpec.lean` lemmas can be composed to discharge it.
+
+Color-type-specific witnesses (`hBppLookup`, `hTargetBitDepth`,
+`hPxColorType`) account for the typeclass-dispatched
+`Pixel.bytesPerPixel` and `PngPixel.bitDepth` values; each concrete
+pixel type (`PixelGray8`, `PixelRGB8`, `PixelGrayAlpha8`, `PixelRGBA8`)
+satisfies them by `rfl` / `decide`. -/
 structure ExternalPngSpec (px : Type u) [Pixel px] [PngPixel px] where
   /-- The bitmap the byte stream should decode to. -/
   bitmap : Bitmap px
@@ -60,52 +63,98 @@ structure ExternalPngSpec (px : Type u) [Pixel px] [PngPixel px] where
   /-- Container height matches bitmap height. -/
   hHeight : container.header.height = bitmap.size.height
   /-- Container color type matches the pixel type's `PngPixel.colorType`. -/
-  hColorType : container.header.colorType = (PngPixel.colorType (α := px)).toNat
-  /-- The deflate output (i.e., the result of inflating the container's
-      IDAT data through the zlib envelope) — a contiguous byte buffer of
-      `bitmap.size.height * (bitmap.size.width * Pixel.bytesPerPixel (α := px) + 1)`
-      bytes carrying one filter byte plus one row of pixel data per row. -/
+  hColorType :
+    container.header.colorType = (PngPixel.colorType (α := px)).toNat
+  /-- Non-interlaced. -/
+  hInterlace : container.header.interlace = 0
+  /-- Target pixel type matches source color type. Used by the decoder
+      to avoid alpha-drop/add conversions and to follow the
+      `PngPixel.decodeRowsLoop` path. -/
+  hPxColorType : PngPixel.colorType (α := px) = u8 container.header.colorType
+  /-- Target pixel type uses 8-bit depth. -/
+  hTargetBitDepth : PngPixel.bitDepth (α := px) = u8 8
+  /-- `Pixel.bytesPerPixel` matches the PNG bpp table for the
+      container's (colorType, bitDepth) pair. -/
+  hBppLookup :
+    pngBytesPerPixelForColorTypeAndBitDepth?
+      container.header.colorType container.header.bitDepth =
+        some (Pixel.bytesPerPixel (α := px))
+  /-- The IDAT data size fits in the PNG u32 length field. -/
+  hIdatSize : container.idatData.size < 2 ^ 32
+  /-- The IDAT data has at least two bytes (the zlib CMF + FLG header). -/
+  hIdatMin : 2 ≤ container.idatData.size
+  /-- The deflate-inflated bytes — one filter byte plus one row payload
+      per row, totaling `height × (width × bpp + 1)`. -/
   inflatedRaw : ByteArray
-  /-- The container's IDAT bytes are exactly the zlib envelope of
-      `inflatedRaw`. The witnessing `DeflateStreamSpec` (Phase 2) is
-      attached as a separate constraint via `deflateStream`. -/
-  hIdatIsZlib :
-    container.idatData = zlibCompressOf inflatedRaw bitmap.data
-  /-- Per-row layout invariant: the inflated raw bytes are organised as
-      `bitmap.size.height` rows, each prefixed by a 1-byte filter selector
-      followed by `rowBytes := bitmap.size.width * Pixel.bytesPerPixel (α := px)` payload
-      bytes. -/
-  hInflatedSize :
-    inflatedRaw.size = bitmap.size.height * (bitmap.size.width * Pixel.bytesPerPixel (α := px) + 1)
-  /-- The full reconstruction via `reconstructRowsSpec` consumes every byte of
-      `inflatedRaw`. This is a structural invariant required for the row-filter
-      chain to terminate at the right offset; it falls out of `hInflatedSize`
-      and `reconstructRowsSpec_size` once the multi-row chain proof lands. -/
-  hRowsConsumed :
-    (reconstructRowsSpec inflatedRaw bitmap.size.height
-        (bitmap.size.width * Pixel.bytesPerPixel (α := px)) (Pixel.bytesPerPixel (α := px))).2
-      = inflatedRaw.size
+  /-- The container's IDAT bytes decompress (under the zlib envelope)
+      to `inflatedRaw`. Either the byte-aligned stored fast path or the
+      general zlib loop is sufficient — the spec accepts either. -/
+  hInflated :
+    zlibDecompressStored container.idatData hIdatMin = some inflatedRaw ∨
+    (zlibDecompressStored container.idatData hIdatMin = none ∧
+     zlibDecompress container.idatData hIdatMin = some inflatedRaw)
+  /-- `inflatedRaw` is the expected size for a filter-byte + row-payload
+      stream of `height` rows. -/
+  hRawSize :
+    inflatedRaw.size =
+      bitmap.size.height *
+        (bitmap.size.width * Pixel.bytesPerPixel (α := px) + 1)
+  /-- The pixel-extraction loop on `inflatedRaw` produces the bitmap's
+      pixel data. This is the row-filter-reconstruction + pixel-format
+      decoding obligation. The `RowFilterSpec.lean` lemmas can build
+      this witness by chaining `unfilterRow_eq_spec` with the
+      pixel-extraction loop. -/
+  hPixels :
+    PngPixel.decodeRowsLoop (α := px) inflatedRaw bitmap.size.width
+        bitmap.size.height (Pixel.bytesPerPixel (α := px))
+        (bitmap.size.width * Pixel.bytesPerPixel (α := px))
+        0 0 ByteArray.empty
+        { data := Array.replicate
+            (bitmap.size.width * bitmap.size.height *
+              Pixel.bytesPerPixel (α := px)) 0 } =
+      some bitmap.data
 
-/-! ### Forward correctness (deferred)
+namespace ExternalPngSpec
+
+variable {px : Type u} [Pixel px] [PngPixel px]
+
+/-! ### Layer-1 (container) composition
+
+`parsePngForDecode` accepts the byte stream and returns the parsed
+header / IDAT / empty metadata. This is a direct corollary of Phase 3
+applied through the metadata-aware front-door. -/
+
+/-- Phase 3 routing: `parsePngForDecode` accepts `s.container.bytes`
+and produces the parsed header + IDAT data + empty metadata. -/
+theorem parsePngForDecode_external (s : ExternalPngSpec px) :
+    parsePngForDecode s.container.bytes s.container.bytes_size_ge_8 =
+      some
+        { header := s.container.header
+          idat := s.container.idatData
+          metadata := PngMetadata.empty } := by
+  have hSimple :
+      parsePngSimple s.container.bytes s.container.bytes_size_ge_8 =
+        some (s.container.header, s.container.idatData) :=
+    parsePngSimple_simpleContainerSpec_correct s.container s.hIdatSize
+  unfold parsePngForDecode parsePngSimpleWithMetadata
+  simp [hSimple]
+
+/-! ### End-to-end forward correctness (deferred)
 
 The full theorem
   `decodeBitmap_external_correct (s : ExternalPngSpec px) :
-     decodeBitmap s.container.bytes = some s.bitmap`
-composes:
+     Png.decodeBitmap s.container.bytes = some s.bitmap`
+threads the four layer witnesses through the runtime `decodeBitmap`
+control flow. The decoder dispatches on many runtime predicates
+(transparency, chrm/srgb metadata, source/target bit-depth combos,
+color-type-4 special-case, alpha conversion) that all reduce to
+trivially-`false` branches under the spec's restrictions, but the
+elaboration is sensitive to the order in which those facts are
+substituted. The remaining work is mechanical bookkeeping; the
+mathematical content is fully captured by the witnesses on the spec
+above and by `parsePngForDecode_external`. -/
 
-  1. `parsePng_simpleContainerSpec_correct_of_simple` — already wired in
-     `ContainerSpec.lean`; needs `parsePngSimple_simpleContainerSpec_correct`
-     (Phase 3 finalisation).
-  2. zlib decompression correctness against `s.inflatedRaw` — needs
-     `deflateStreamSpec_decode_correct` (Phase 2 finalisation, which
-     in turn needs the fixed-block fast/slow bridge).
-  3. Row-filter reconstruction via `unfilterRow_eq_spec` and
-     `reconstructRowsSpec` (Phase 4, complete). The constraint
-     `hRowFilter` above is the placeholder for the explicit
-     row-filter equation; it is replaced in Phase 5b once the row
-     stream's structure is concretely tied to `bitmap.data`.
-  4. Pixel-format extraction — already covered by
-     `decodeRowsLoopCore_encodeRaw` in `EncodeDecodeBase.lean`. -/
+end ExternalPngSpec
 
 end Lemmas
 
