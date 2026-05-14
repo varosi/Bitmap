@@ -129,6 +129,10 @@ This library has proofs about:
   no ancillary chunks, no metadata, source matching target pixel type)
   is accepted by `decodeBitmap` and decodes to the spec's bitmap
   (`decodeBitmap_external_correct`, Phase 5 of the external-PNG plan);
+- end-to-end multi-IDAT correctness: the same end-to-end guarantee
+  generalised to byte streams with any positive number of `IDAT` chunks
+  (`decodeBitmap_external_multiIdat_correct`, Phase 6 of the
+  external-PNG plan);
 - there are no buffer overflows;
 - PNG encode and decode are total functions.
 
@@ -185,6 +189,18 @@ A multi-phase plan is in progress to extend the proof coverage to byte streams
   and decodes to the spec's bitmap. Supported subset: 8-bit depth,
   color types 0/2/4/6, non-interlaced, no ancillary chunks, empty
   metadata, source color type matching target pixel type.
+- **Phase 6 (multi-IDAT container)**:
+  `Bitmap/Lemmas/Png/MultiIdatContainerSpec.lean` —
+  complete. `MultiIdatContainerSpec` generalises `SimpleContainerSpec`
+  to a non-empty list of `IDAT` chunk payloads (PNG spec compliance);
+  `parsePng_multiIdatContainerSpec_correct` and
+  `parsePngForDecode_multiIdatContainerSpec_correct` prove the
+  basic-loop and metadata-aware parsers accept any matching byte
+  stream. `Bitmap/Lemmas/MultiIdatExternalPngSpec.lean` lifts Phase 5
+  to `ExternalPngMultiIdatSpec` /
+  `decodeBitmap_external_multiIdat_correct`, threading the
+  multi-chunk container through the unchanged zlib + row-filter
+  witnesses (they consume the concatenated `container.idatData`).
 
 ## Supported PNG features
 
