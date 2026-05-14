@@ -763,6 +763,106 @@ lemma readChunk_multiIdat_idat (s : MultiIdatContainerSpec) (i : Nat)
   exact readChunk_at_mkChunkBytes s.bytes (idatOffset s i)
     idatTypeBytes s.idatChunks[i] (by rfl) hChunkSize hWrap hChunkRangeBound hLen
 
+/-! ### IHDR and IEND readChunk lemmas (via the kernel) -/
+
+/-- The IHDR chunk's bytes live at byte offset 8 in `s.bytes`. -/
+lemma bytes_extract_ihdr (s : MultiIdatContainerSpec) :
+    s.bytes.extract 8 (8 + 12 + (encodeIHDRData s.header).size) =
+      mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header) := by
+  have hIhdrSize : (encodeIHDRData s.header).size = 13 := encodeIHDRData_size s.header
+  -- Substitute (encodeIHDRData s.header).size to its numeric value 13 first.
+  rw [hIhdrSize]
+  have h := s.bytes_extract_skip_signature 0 (12 + 13)
+    (by rw [s.bytes_size_eq]; unfold idatTotalWireSize; omega)
+  rw [show (8 : Nat) + 0 = 8 from rfl] at h
+  rw [h]
+  -- The result is (IHDR ++ (chunks ++ IEND)).extract 0 25 = IHDR (since IHDR has size 25).
+  have hIhdrChunkSize :
+      (mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header)).size = 25 := by
+    rw [mkChunkBytes_size _ _ (by rfl : ihdrTypeBytes.size = 4), hIhdrSize]
+  rw [byteArray_extract_append_prefix
+        (a := mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header))
+        (b := s.idatChunksBytes ++ mkChunkBytes iendTypeBytes ByteArray.empty)
+        (n := 25)
+        (by rw [hIhdrChunkSize])]
+  rw [show (25 : Nat) = (mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header)).size from
+    hIhdrChunkSize.symm]
+  exact ByteArray.extract_zero_size
+
+set_option maxHeartbeats 800000 in
+/-- readChunk at byte 8 reads `(ihdrTypeBytes, encodeIHDRData s.header, 33)`. -/
+lemma readChunk_multiIdat_ihdr (s : MultiIdatContainerSpec)
+    (hLen : 8 + 3 < s.bytes.size) :
+    readChunk s.bytes 8 hLen =
+      some (ihdrTypeBytes, encodeIHDRData s.header, 33) := by
+  have hIhdrSize : (encodeIHDRData s.header).size = 13 := encodeIHDRData_size s.header
+  have hSize : 8 + 12 + (encodeIHDRData s.header).size ≤ s.bytes.size := by
+    rw [s.bytes_size_eq, hIhdrSize]
+    unfold idatTotalWireSize
+    omega
+  have hIhdrFits : (encodeIHDRData s.header).size < 2 ^ 32 := by
+    rw [hIhdrSize]; decide
+  have h := readChunk_at_mkChunkBytes s.bytes 8 ihdrTypeBytes (encodeIHDRData s.header)
+    (by rfl) hIhdrFits (s.bytes_extract_ihdr) hSize hLen
+  rw [show 8 + 8 + (encodeIHDRData s.header).size + 4 = 33 from by rw [hIhdrSize]] at h
+  exact h
+
+/-- The IEND chunk's bytes live at byte offset `iendOffset s`. -/
+lemma bytes_extract_iend (s : MultiIdatContainerSpec) :
+    s.bytes.extract (iendOffset s) (iendOffset s + 12 + ByteArray.empty.size) =
+      mkChunkBytes iendTypeBytes ByteArray.empty := by
+  have hEmptySize : (ByteArray.empty : ByteArray).size = 0 := rfl
+  -- Use bytes_extract_skip_through_ihdr with offsets relative to byte 33.
+  -- iendOffset = 33 + idatTotalWireSize. We want extract from iendOffset to iendOffset+12.
+  -- Skipping past 33 gives us bytes in (idatChunksBytes ++ iendChunk).
+  unfold iendOffset
+  rw [show (33 + idatTotalWireSize s : Nat) = 33 + idatTotalWireSize s from rfl]
+  rw [hEmptySize, Nat.add_zero]
+  have hSize : 33 + (idatTotalWireSize s + 12) ≤ s.bytes.size := by
+    rw [s.bytes_size_eq]; omega
+  have h := s.bytes_extract_skip_through_ihdr (idatTotalWireSize s)
+    (idatTotalWireSize s + 12) hSize
+  rw [show (33 + (idatTotalWireSize s + 12) : Nat) = 33 + idatTotalWireSize s + 12 by omega] at h
+  rw [h]
+  -- (idatChunksBytes ++ iendChunk).extract idatTotalWireSize (idatTotalWireSize + 12) = iendChunk
+  have hIdatChunksSize : s.idatChunksBytes.size = idatTotalWireSize s := by
+    rw [idatChunksBytes_size]
+    unfold idatTotalWireSize idatPrefixWireSize
+    rw [List.take_length]
+  have h' := ByteArray.extract_append_size_add (a := s.idatChunksBytes)
+    (b := mkChunkBytes iendTypeBytes ByteArray.empty)
+    (i := 0) (j := 12)
+  rw [hIdatChunksSize] at h'
+  rw [show (s.idatTotalWireSize + 0 : Nat) = s.idatTotalWireSize from by omega] at h'
+  rw [h']
+  -- Result is iendChunk.extract 0 12 = iendChunk.
+  have hIendSize : (mkChunkBytes iendTypeBytes ByteArray.empty).size = 12 := by
+    rw [mkChunkBytes_size _ _ (by rfl : iendTypeBytes.size = 4)]
+    simp
+  rw [show (12 : Nat) = (mkChunkBytes iendTypeBytes ByteArray.empty).size from hIendSize.symm]
+  exact ByteArray.extract_zero_size
+
+set_option maxHeartbeats 800000 in
+/-- readChunk at `iendOffset s` reads `(iendTypeBytes, empty, bytes.size)`. -/
+lemma readChunk_multiIdat_iend (s : MultiIdatContainerSpec)
+    (hLen : iendOffset s + 3 < s.bytes.size) :
+    readChunk s.bytes (iendOffset s) hLen =
+      some (iendTypeBytes, ByteArray.empty, s.bytes.size) := by
+  have hSize : iendOffset s + 12 + ByteArray.empty.size ≤ s.bytes.size := by
+    rw [s.bytes_size_eq]
+    unfold iendOffset
+    simp
+    omega
+  have hEmptyFits : (ByteArray.empty : ByteArray).size < 2 ^ 32 := by decide
+  have h := readChunk_at_mkChunkBytes s.bytes (iendOffset s) iendTypeBytes ByteArray.empty
+    (by rfl) hEmptyFits (s.bytes_extract_iend) hSize hLen
+  rw [show iendOffset s + 8 + ByteArray.empty.size + 4 = s.bytes.size from ?_] at h
+  · exact h
+  · rw [s.bytes_size_eq]
+    unfold iendOffset
+    simp
+    omega
+
 /-! ### Forward correctness — general N-chunk case (deferred)
 
 The general theorem for `idatChunks.length ≥ 1` chains
