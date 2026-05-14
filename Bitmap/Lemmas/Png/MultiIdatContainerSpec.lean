@@ -15,10 +15,11 @@ chunk. The PNG specification allows any positive number of consecutive
 generalises `SimpleContainerSpec` to a list of `IDAT` chunks.
 
 For the special case `idatChunks = [data]`, this structure embeds into
-a `SimpleContainerSpec` with `idatData := data`. The forward
-correctness theorem is proven uniformly via that adapter for the
-single-IDAT case; the general N-chunk case is closed in a follow-up
-commit by induction over `parsePngLoopFuel`. -/
+a `SimpleContainerSpec` with `idatData := data`. The singleton case is
+proven uniformly via that adapter; the general N-chunk case
+(`parsePng_multiIdatContainerSpec_correct`) is closed by induction over
+`parsePngLoopFuel`, with `parsePngSimple_eq_none_of_multi` ruling out
+the fast-path return for length ≥ 2. -/
 
 /-- A PNG byte stream with the supported subset of color types and bit
 depth, plus an arbitrary positive number of `IDAT` chunks. -/
@@ -1267,22 +1268,6 @@ theorem parsePng_multiIdatContainerSpec_correct (s : MultiIdatContainerSpec) :
       unfold parsePng
       simp [hSimpleNone, hSigCheck]
       exact parsePngLoopFuel_walk_ihdr_step s s.bytes.size hLoopFuel hHeader
-
-/-! ### Forward correctness — general N-chunk case (deferred)
-
-The general theorem for `idatChunks.length ≥ 1` chains
-`parsePngLoopFuel_idat_appends_when_open` across each chunk using the
-`idatOffset`/`iendOffset` position arithmetic above. The remaining
-proof obligations:
-
-  * `readChunk_multiIdat_ihdr` — IHDR at byte 8.
-  * `readChunk_multiIdat_idat i` — i-th IDAT at `idatOffset s i`.
-  * `readChunk_multiIdat_iend` — IEND at `iendOffset s`.
-  * `parsePngLoopFuel_walk_idats` — inductive walk over chunks.
-
-These build on `bytes_extract_skip_through_*`-style helpers parallel to
-`SimpleContainerSpec`'s. The actual closure lands in a follow-up
-commit that does not change the API exposed by this file. -/
 
 end MultiIdatContainerSpec
 
