@@ -550,6 +550,219 @@ private lemma bytes_subextract_idat_at (s : MultiIdatContainerSpec) (i : Nat)
     exact h
   rw [← hCalc]; exact hExtract
 
+/-! ### Generic `readChunk` at `mkChunkBytes` offset
+
+`readChunk_at_mkChunkBytes` is a reusable lemma over any
+`mkChunkBytes`-shaped region in a byte stream: given a bytes-level
+extract that the region's bytes equal a wrapped chunk, `readChunk`
+returns the corresponding type / data / next-position triple. -/
+
+-- `mkChunkBytes` length field is the first 4 bytes.
+private lemma mkChunkBytes_extract_len (typBytes data : ByteArray) :
+    (mkChunkBytes typBytes data).extract 0 4 = u32be data.size := by
+  have hlen : (u32be data.size).size = 4 := u32be_size _
+  simpa [mkChunkBytes_def, hlen] using
+    (ByteArray.extract_append_eq_left
+      (a := u32be data.size)
+      (b := typBytes ++ data ++ u32be (crc32Chunk typBytes data).toNat)
+      (i := (u32be data.size).size) rfl)
+
+-- `mkChunkBytes` type bytes are at positions [4, 8).
+private lemma mkChunkBytes_extract_type (typBytes data : ByteArray)
+    (htyp : typBytes.size = 4) :
+    (mkChunkBytes typBytes data).extract 4 8 = typBytes := by
+  have hlen : (u32be data.size).size = 4 := u32be_size _
+  have h1 :
+      (mkChunkBytes typBytes data).extract 4 8 =
+        (typBytes ++ data ++ u32be (crc32Chunk typBytes data).toNat).extract 0 4 := by
+    simpa [mkChunkBytes_def, hlen, ByteArray.append_assoc] using
+      (ByteArray.extract_append_size_add
+        (a := u32be data.size)
+        (b := typBytes ++ data ++ u32be (crc32Chunk typBytes data).toNat)
+        (i := 0) (j := 4))
+  have h2' :
+      (typBytes ++ data ++ u32be (crc32Chunk typBytes data).toNat).extract 0
+          typBytes.size = typBytes := by
+    simpa [ByteArray.append_assoc] using
+      (ByteArray.extract_append_eq_left
+        (a := typBytes)
+        (b := data ++ u32be (crc32Chunk typBytes data).toNat)
+        (i := typBytes.size) rfl)
+  have h2 :
+      (typBytes ++ data ++ u32be (crc32Chunk typBytes data).toNat).extract 0 4 =
+        typBytes := by
+    simpa [htyp] using h2'
+  rw [h1, h2]
+
+-- `mkChunkBytes` data bytes are at positions [8, 8 + data.size).
+private lemma mkChunkBytes_extract_data (typBytes data : ByteArray)
+    (htyp : typBytes.size = 4) :
+    (mkChunkBytes typBytes data).extract 8 (8 + data.size) = data := by
+  have hlen : (u32be data.size).size = 4 := u32be_size _
+  have hprefix : (u32be data.size ++ typBytes).size = 8 := by
+    rw [ByteArray.size_append, hlen, htyp]
+  have h1 :
+      (mkChunkBytes typBytes data).extract 8 (8 + data.size) =
+        (data ++ u32be (crc32Chunk typBytes data).toNat).extract 0 data.size := by
+    simpa [mkChunkBytes_def, hprefix, ByteArray.append_assoc] using
+      (ByteArray.extract_append_size_add
+        (a := u32be data.size ++ typBytes)
+        (b := data ++ u32be (crc32Chunk typBytes data).toNat)
+        (i := 0) (j := data.size))
+  have h2 :
+      (data ++ u32be (crc32Chunk typBytes data).toNat).extract 0 data.size = data := by
+    simpa using
+      (ByteArray.extract_append_eq_left
+        (a := data)
+        (b := u32be (crc32Chunk typBytes data).toNat)
+        (i := data.size) rfl)
+  rw [h1, h2]
+
+-- `mkChunkBytes` CRC is at positions [8 + data.size, 12 + data.size).
+private lemma mkChunkBytes_extract_crc (typBytes data : ByteArray)
+    (htyp : typBytes.size = 4) :
+    (mkChunkBytes typBytes data).extract (8 + data.size) (12 + data.size) =
+      u32be (crc32Chunk typBytes data).toNat := by
+  have hlen : (u32be data.size).size = 4 := u32be_size _
+  have hprefix : (u32be data.size ++ typBytes ++ data).size = 8 + data.size := by
+    rw [ByteArray.size_append, ByteArray.size_append, hlen, htyp]
+  -- Rewrite mkChunkBytes into its left-associated form first.
+  rw [mkChunkBytes_def]
+  -- Now LHS is `(u32be size ++ typBytes ++ data ++ u32be CRC).extract ...`
+  have h1 :
+      (u32be data.size ++ typBytes ++ data ++ u32be (crc32Chunk typBytes data).toNat).extract
+          (8 + data.size) (12 + data.size) =
+        (u32be (crc32Chunk typBytes data).toNat).extract 0 4 := by
+    have h := ByteArray.extract_append_size_add
+      (a := u32be data.size ++ typBytes ++ data)
+      (b := u32be (crc32Chunk typBytes data).toNat)
+      (i := 0) (j := 4)
+    rw [hprefix] at h
+    rw [show (12 + data.size : Nat) = 8 + data.size + 4 by omega]
+    simpa using h
+  rw [h1]
+  have hcrcLen : (u32be (crc32Chunk typBytes data).toNat).size = 4 := u32be_size _
+  rw [show (4 : Nat) = (u32be (crc32Chunk typBytes data).toNat).size from hcrcLen.symm]
+  exact ByteArray.extract_zero_size
+
+set_option maxHeartbeats 800000 in
+/-- The generic `readChunk` reduction over any `mkChunkBytes`-shaped
+region in a byte stream. Given that `bytes[pos..pos+12+data.size]`
+equals the wrapped chunk, `readChunk` returns the matching triple.
+
+This is the reusable kernel that both single-IDAT and multi-IDAT
+readChunk lemmas can build on, avoiding per-position simp-evaluation
+of the readChunk case-analytic definition. -/
+lemma readChunk_at_mkChunkBytes (bytes : ByteArray) (pos : Nat)
+    (typBytes data : ByteArray)
+    (hTypSize : typBytes.size = 4)
+    (hDataSize : data.size < 2 ^ 32)
+    (hWrap : bytes.extract pos (pos + 12 + data.size) = mkChunkBytes typBytes data)
+    (hSize : pos + 12 + data.size ≤ bytes.size)
+    (hLen : pos + 3 < bytes.size) :
+    readChunk bytes pos hLen =
+      some (typBytes, data, pos + 8 + data.size + 4) := by
+  -- Derive each sub-extract from the wrapped-chunk extract via
+  -- `ByteArray.extract_extract`, then apply the `mkChunkBytes_extract_*` lemmas.
+  have hWrapSize : (mkChunkBytes typBytes data).size = data.size + 12 :=
+    mkChunkBytes_size typBytes data hTypSize
+  have hChunkRange : pos + 12 + data.size = pos + (12 + data.size) := by omega
+  -- Sub-extract helper: for `0 ≤ a ≤ b ≤ 12 + data.size`, the sub-extract on
+  -- bytes equals the sub-extract on the wrapped chunk.
+  have hSubExtract : ∀ (a b : Nat), a ≤ b → b ≤ 12 + data.size →
+      bytes.extract (pos + a) (pos + b) =
+        (mkChunkBytes typBytes data).extract a b := by
+    intro a b _hab hb
+    have hMin : min (pos + b) (pos + 12 + data.size) = pos + b := by
+      omega
+    have hExt :
+        (bytes.extract pos (pos + 12 + data.size)).extract a b =
+          bytes.extract (pos + a) (pos + b) := by
+      have h := ByteArray.extract_extract (a := bytes)
+        (i := pos) (j := pos + 12 + data.size) (k := a) (l := b)
+      rw [hMin] at h
+      exact h
+    rw [← hExt, hWrap]
+  -- Length field.
+  have hExtractLen :
+      bytes.extract pos (pos + 4) = u32be data.size := by
+    have h := hSubExtract 0 4 (by omega) (by omega)
+    simp at h
+    rw [h]
+    exact mkChunkBytes_extract_len typBytes data
+  have hLenRead : readU32BE bytes pos hLen = data.size :=
+    readU32BE_of_extract_eq bytes pos data.size hLen hExtractLen hDataSize
+  -- Type bytes.
+  have hExtractType :
+      bytes.extract (pos + 4) (pos + 8) = typBytes := by
+    have h := hSubExtract 4 8 (by omega) (by omega)
+    rw [h]
+    exact mkChunkBytes_extract_type typBytes data hTypSize
+  -- Data bytes.
+  have hExtractData :
+      bytes.extract (pos + 8) (pos + 8 + data.size) = data := by
+    have h := hSubExtract 8 (8 + data.size) (by omega) (by omega)
+    rw [show pos + 8 + data.size = pos + (8 + data.size) by omega]
+    rw [h]
+    exact mkChunkBytes_extract_data typBytes data hTypSize
+  -- CRC bytes.
+  have hExtractCrc :
+      bytes.extract (pos + 8 + data.size) (pos + 12 + data.size) =
+        u32be (crc32Chunk typBytes data).toNat := by
+    have h := hSubExtract (8 + data.size) (12 + data.size) (by omega) (by omega)
+    rw [show pos + 8 + data.size = pos + (8 + data.size) by omega,
+        show pos + 12 + data.size = pos + (12 + data.size) by omega]
+    rw [h]
+    exact mkChunkBytes_extract_crc typBytes data hTypSize
+  -- CRC value.
+  have hExtractCrc' :
+      bytes.extract (pos + 8 + data.size) (pos + 8 + data.size + 4) =
+        u32be (crc32Chunk typBytes data).toNat := by
+    rw [show pos + 8 + data.size + 4 = pos + 12 + data.size by omega]
+    exact hExtractCrc
+  have hCrcRead :
+      readU32BE bytes (pos + 8 + data.size) (by omega) =
+        (crc32Chunk typBytes data).toNat :=
+    readU32BE_of_extract_eq bytes (pos + 8 + data.size) _
+      (by omega) hExtractCrc' (UInt32.toNat_lt _)
+  -- CRC-end bound.
+  have hCrcEnd : pos + 8 + data.size + 4 ≤ bytes.size := by omega
+  -- Combine via readChunk's definition.
+  unfold readChunk
+  simp [hLenRead, hCrcEnd, hExtractType, hExtractData, hCrcRead]
+
+/-! ### Per-chunk readChunk lemma (uses the generic helper) -/
+
+set_option maxHeartbeats 800000 in
+/-- readChunk at the i-th IDAT chunk's offset reads idatTypeBytes, the
+chunk data, and the position right after the chunks CRC. -/
+lemma readChunk_multiIdat_idat (s : MultiIdatContainerSpec) (i : Nat)
+    (h : i < s.idatChunks.length)
+    (hLen : idatOffset s i + 3 < s.bytes.size) :
+    readChunk s.bytes (idatOffset s i) hLen =
+      some (idatTypeBytes, s.idatChunks[i],
+        idatOffset s i + 8 + s.idatChunks[i].size + 4) := by
+  have hChunkSize := s.hChunkSize s.idatChunks[i] (List.getElem_mem h)
+  have hChunkRangeBound : idatOffset s i + 12 + s.idatChunks[i].size ≤ s.bytes.size := by
+    rw [s.bytes_size_eq]
+    unfold idatOffset idatTotalWireSize
+    have hStep : idatPrefixWireSize s.idatChunks i + 12 + s.idatChunks[i].size =
+        idatPrefixWireSize s.idatChunks (i + 1) := by
+      rw [idatPrefixWireSize_succ s.idatChunks i h]
+    have hmono := idatPrefixWireSize_mono s.idatChunks (i + 1) s.idatChunks.length (by omega)
+    omega
+  -- The wrapped chunk's bytes live at the right offset.
+  have hWrap :
+      s.bytes.extract (idatOffset s i) (idatOffset s i + 12 + s.idatChunks[i].size) =
+        mkChunkBytes idatTypeBytes s.idatChunks[i] := by
+    have h' := s.bytes_extract_idat_at i h
+    have hWidth : idatOffset s (i + 1) = idatOffset s i + 12 + s.idatChunks[i].size := by
+      unfold idatOffset
+      rw [idatPrefixWireSize_succ s.idatChunks i h]; omega
+    rw [← hWidth]; exact h'
+  exact readChunk_at_mkChunkBytes s.bytes (idatOffset s i)
+    idatTypeBytes s.idatChunks[i] (by rfl) hChunkSize hWrap hChunkRangeBound hLen
+
 /-! ### Forward correctness — general N-chunk case (deferred)
 
 The general theorem for `idatChunks.length ≥ 1` chains
