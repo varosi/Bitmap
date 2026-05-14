@@ -1605,6 +1605,53 @@ theorem parsePngForDecode_multiIdatContainerSpec_correct (s : MultiIdatContainer
 
 end MultiIdatContainerSpec
 
+/-! ## Simple → multi adapter (Phase 5↔6 bridge)
+
+Every `SimpleContainerSpec` is the singleton case of a
+`MultiIdatContainerSpec`: lifting wraps `idatData` into a one-element
+`idatChunks` list. Combined with `bytes_eq_simple_of_singleton`, this
+makes `decodeBitmap_external_correct` derivable as a corollary of the
+multi-IDAT theorem. -/
+
+/-- Lift a `SimpleContainerSpec` to a singleton `MultiIdatContainerSpec`.
+Requires the u32 length-field fit (`s.idatData.size < 2^32`), the same
+side condition Phase 5's `decodeBitmap_external_correct` carries via
+`ExternalPngSpec.hIdatSize`. -/
+def SimpleContainerSpec.toMulti (s : SimpleContainerSpec)
+    (hSize : s.idatData.size < 2 ^ 32) : MultiIdatContainerSpec where
+  header := s.header
+  idatChunks := [s.idatData]
+  hChunkSize := by
+    intro c hMem
+    rw [List.mem_singleton] at hMem
+    rw [hMem]; exact hSize
+  hNonempty := by simp
+  hBitDepth := s.hBitDepth
+  hColorType := s.hColorType
+  hInterlace := s.hInterlace
+  hWidth := s.hWidth
+  hHeight := s.hHeight
+
+/-- The lifted multi-spec's bytes equal the original simple-spec's bytes. -/
+lemma SimpleContainerSpec.toMulti_bytes (s : SimpleContainerSpec)
+    (hSize : s.idatData.size < 2 ^ 32) :
+    (s.toMulti hSize).bytes = s.bytes := by
+  have hChunks : (s.toMulti hSize).idatChunks = [s.idatData] := rfl
+  have h := MultiIdatContainerSpec.bytes_eq_simple_of_singleton
+    (s := s.toMulti hSize) s.idatData hChunks
+  -- The auxiliary simple built inside the lemma has the same fields as `s`.
+  show (s.toMulti hSize).bytes = s.bytes
+  rw [h]
+  -- The inner `SimpleContainerSpec.mk ...` matches `s` field-by-field.
+  rfl
+
+/-- The lifted multi-spec's concatenated IDAT payload equals the simple
+spec's `idatData`. -/
+lemma SimpleContainerSpec.toMulti_idatData (s : SimpleContainerSpec)
+    (hSize : s.idatData.size < 2 ^ 32) :
+    (s.toMulti hSize).idatData = s.idatData :=
+  MultiIdatContainerSpec.idatData_of_singleton s.idatData rfl
+
 end Lemmas
 
 end Bitmaps

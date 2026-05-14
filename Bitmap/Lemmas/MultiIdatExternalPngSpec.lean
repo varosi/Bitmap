@@ -293,6 +293,53 @@ theorem decodeBitmap_external_multiIdat_correct (s : ExternalPngMultiIdatSpec px
 
 end ExternalPngMultiIdatSpec
 
+/-! ## Phase 5 → Phase 6 bridge
+
+Every `ExternalPngSpec` is the singleton case of an
+`ExternalPngMultiIdatSpec`: lifting wraps the container via
+`SimpleContainerSpec.toMulti`. This makes `decodeBitmap_external_correct`
+a corollary of `decodeBitmap_external_multiIdat_correct`. -/
+
+/-- Lift an `ExternalPngSpec` to a singleton `ExternalPngMultiIdatSpec`,
+preserving all decode-side witnesses. -/
+def ExternalPngSpec.toMultiIdat {px : Type u} [Pixel px] [PngPixel px]
+    (s : ExternalPngSpec px) : ExternalPngMultiIdatSpec px where
+  bitmap := s.bitmap
+  container := s.container.toMulti s.hIdatSize
+  hWidth := s.hWidth
+  hHeight := s.hHeight
+  hColorType := s.hColorType
+  hInterlace := s.hInterlace
+  hPxColorType := s.hPxColorType
+  hTargetBitDepth := s.hTargetBitDepth
+  hBppLookup := s.hBppLookup
+  hIdatMin := by
+    rw [s.container.toMulti_idatData s.hIdatSize]
+    exact s.hIdatMin
+  inflatedRaw := s.inflatedRaw
+  hInflated := by
+    simp only [s.container.toMulti_idatData s.hIdatSize]
+    exact s.hInflated
+  hRawSize := s.hRawSize
+  hPixels := s.hPixels
+
+/-- The lifted multi-spec's container bytes equal the simple spec's
+container bytes. -/
+lemma ExternalPngSpec.toMultiIdat_bytes {px : Type u} [Pixel px] [PngPixel px]
+    (s : ExternalPngSpec px) :
+    s.toMultiIdat.container.bytes = s.container.bytes :=
+  s.container.toMulti_bytes s.hIdatSize
+
+/-- Phase 5 reduces to Phase 6: `decodeBitmap_external_correct` follows
+from `decodeBitmap_external_multiIdat_correct` applied to the singleton
+lift. -/
+theorem decodeBitmap_external_correct_via_multiIdat
+    {px : Type u} [Pixel px] [PngPixel px] (s : ExternalPngSpec px) :
+    Png.decodeBitmap s.container.bytes = some s.bitmap := by
+  have h := s.toMultiIdat.decodeBitmap_external_multiIdat_correct
+  rw [s.toMultiIdat_bytes] at h
+  exact h
+
 end Lemmas
 
 end Bitmaps
