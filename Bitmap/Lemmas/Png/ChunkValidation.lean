@@ -1150,6 +1150,33 @@ lemma parsePngLoopFuel_idat_appends_when_open (fuel : Nat)
     unfold parsePngLoopFuel
   simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hIDAT, hclosed, hpalette]
 
+/-- Metadata-aware analogue of `parsePngLoopFuel_idat_appends_when_open`:
+an `IDAT` chunk in an open `IDAT` run appends its payload and continues,
+preserving the accumulated metadata. -/
+lemma parsePngLoopFuelWithMetadata_idat_appends_when_open (fuel : Nat)
+    (bytes : ByteArray) (pos : Nat) (state : PngMetadataParseState)
+    (hdr : PngHeader) (typBytes chunkData : ByteArray) (posNext : Nat)
+    (hpos : pos + 8 ≤ bytes.size) (hLen : pos + 3 < bytes.size)
+    (hread : readChunk bytes pos hLen = some (typBytes, chunkData, posNext))
+    (hheader : state.header = some hdr)
+    (hnotIHDR : (typBytes == ihdrTypeBytes) = false)
+    (hnotPLTE : (typBytes == plteTypeBytes) = false)
+    (hIDAT : (typBytes == idatTypeBytes) = true)
+    (hclosed : state.closedIDAT = false)
+    (hpalette : (hdr.colorType == 3 && !state.seenPLTE) = false) :
+    parsePngLoopFuelWithMetadata (fuel + 1) bytes pos state =
+      parsePngLoopFuelWithMetadata fuel bytes posNext
+        { header := some hdr
+          idat := state.idat ++ chunkData
+          seenPLTE := state.seenPLTE
+          seenIDAT := true
+          closedIDAT := false
+          metadata := state.metadata } := by
+  conv =>
+    lhs
+    unfold parsePngLoopFuelWithMetadata
+  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hIDAT, hclosed, hpalette]
+
 end Lemmas
 
 end Bitmaps
