@@ -984,6 +984,290 @@ lemma parsePngLoopFuel_walk_idat_step (s : MultiIdatContainerSpec) (i : Nat)
   rw [hStateEq]
   exact hRest
 
+/-! ### Inductive walk and main theorem -/
+
+set_option maxHeartbeats 1200000 in
+/-- Inductive walk: starting from the state after `i` IDAT chunks at the
+i-th chunk's offset, with sufficient fuel, the loop walks all remaining
+chunks plus IEND and returns the final state. -/
+lemma parsePngLoopFuel_walk_idats_aux (s : MultiIdatContainerSpec) (i : Nat)
+    (hi : i ≤ s.idatChunks.length)
+    (fuel : Nat) (hFuel : s.idatChunks.length - i + 1 ≤ fuel) :
+    parsePngLoopFuel fuel s.bytes (idatOffset s i)
+      (stateAfterIdats s i) = some (s.header, s.idatData) := by
+  -- Induction on `n - i`.
+  induction h : s.idatChunks.length - i generalizing i fuel with
+  | zero =>
+      -- i = n, state-after-n has full idat. Read IEND.
+      have hin : i = s.idatChunks.length := by omega
+      cases fuel with
+      | zero =>
+          rw [hin] at hFuel
+          simp at hFuel
+      | succ fuel' =>
+          have hOffsetEq : idatOffset s i = iendOffset s := by
+            unfold idatOffset iendOffset idatTotalWireSize
+            rw [hin]
+          rw [hOffsetEq]
+          have hLen : iendOffset s + 3 < s.bytes.size := by
+            rw [s.bytes_size_eq]; unfold iendOffset; omega
+          have hPos : iendOffset s + 8 ≤ s.bytes.size := by
+            rw [s.bytes_size_eq]; unfold iendOffset; omega
+          have hReadIend := s.readChunk_multiIdat_iend hLen
+          have hSeenIDAT : (stateAfterIdats s i).seenIDAT = true := by
+            unfold stateAfterIdats
+            simp
+            rw [hin]
+            cases hChunks : s.idatChunks with
+            | nil => exact absurd hChunks s.hNonempty
+            | cons _ _ => simp
+          have hHeader : (stateAfterIdats s i).header = some s.header := rfl
+          have hIdatEq : (stateAfterIdats s i).idat = s.idatData := by
+            rw [hin]
+            exact stateAfterIdats_idat_full s
+          rw [← hIdatEq]
+          exact parsePngLoopFuel_iend_success_step fuel' s.bytes (iendOffset s)
+            (stateAfterIdats s i) s.header hPos hLen hReadIend hHeader hSeenIDAT
+  | succ k ih =>
+      -- i < n, walk one chunk then recurse.
+      have hilt : i < s.idatChunks.length := by omega
+      cases fuel with
+      | zero =>
+          have : s.idatChunks.length - i + 1 ≤ 0 := hFuel
+          omega
+      | succ fuel' =>
+          have hi' : i + 1 ≤ s.idatChunks.length := by omega
+          have hk' : s.idatChunks.length - (i + 1) = k := by omega
+          have hFuel' : s.idatChunks.length - (i + 1) + 1 ≤ fuel' := by
+            have hkfuel : s.idatChunks.length - i + 1 ≤ fuel' + 1 := hFuel
+            omega
+          have hRest := ih (i := i + 1) hi' fuel' hFuel' hk'
+          exact parsePngLoopFuel_walk_idat_step s i hilt fuel' hRest
+
+set_option maxHeartbeats 1200000 in
+/-- The opening step: from the empty state at byte 8, after one fuel unit
+the loop transitions to the state after 0 IDATs (just IHDR read). -/
+lemma parsePngLoopFuel_walk_ihdr_step (s : MultiIdatContainerSpec) (fuel : Nat)
+    (hFuel : s.idatChunks.length + 1 ≤ fuel)
+    (hHeader : (encodeIHDRData s.header).size < 2 ^ 32 := by decide) :
+    parsePngLoopFuel (fuel + 1) s.bytes 8
+      { header := none, idat := ByteArray.empty,
+        seenPLTE := false, seenIDAT := false, closedIDAT := false,
+        metadata := PngMetadata.empty } =
+      some (s.header, s.idatData) := by
+  have hPos : (8 : Nat) + 8 ≤ s.bytes.size := by
+    rw [s.bytes_size_eq]; unfold idatTotalWireSize
+    have hmono := idatPrefixWireSize_mono s.idatChunks 0 s.idatChunks.length (by omega)
+    omega
+  have hLen : (8 : Nat) + 3 < s.bytes.size := by omega
+  have hReadIhdr := s.readChunk_multiIdat_ihdr hLen
+  have hIhdrSize : (encodeIHDRData s.header).size = 13 := encodeIHDRData_size s.header
+  have hCT256 : s.header.colorType < 256 := by
+    rcases s.hColorType with h | h | h | h <;> rw [h] <;> decide
+  have hParseHdr := parseIHDRData_encodeIHDRData s.header
+    s.hWidth s.hHeight s.hBitDepth s.hInterlace hCT256
+  -- Unfold parsePngLoopFuel.
+  conv => lhs; unfold parsePngLoopFuel
+  -- The state has header = none, so we take the IHDR branch.
+  have hReadU32Len : readU32BE s.bytes 8 hLen = 13 := by
+    have hExtractLen :
+        s.bytes.extract 8 (8 + 4) = u32be 13 := by
+      have h := s.bytes_extract_ihdr
+      -- The first 4 bytes of the IHDR chunk are u32be 13.
+      have hChunkLen := mkChunkBytes_extract_len ihdrTypeBytes (encodeIHDRData s.header)
+      rw [hIhdrSize] at hChunkLen
+      -- (s.bytes.extract 8 (8 + 12 + 13)).extract 0 4 = u32be 13
+      have hsub : (s.bytes.extract 8 (8 + 12 + (encodeIHDRData s.header).size)).extract 0 4 =
+          (mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header)).extract 0 4 := by
+        rw [h]
+      rw [hChunkLen] at hsub
+      -- Also (s.bytes.extract 8 X).extract 0 4 = s.bytes.extract 8 (min X (8+4))
+      have hExt := ByteArray.extract_extract (a := s.bytes) (i := 8)
+        (j := 8 + 12 + (encodeIHDRData s.header).size) (k := 0) (l := 4)
+      have hMin : min (8 + 4) (8 + 12 + (encodeIHDRData s.header).size) = 8 + 4 := by
+        rw [hIhdrSize]; omega
+      rw [hMin] at hExt
+      rw [← hExt]
+      exact hsub
+    exact readU32BE_of_extract_eq s.bytes 8 13 hLen hExtractLen (by decide)
+  -- Now compute the rest.
+  simp [hPos, hLen, hReadIhdr, hReadU32Len, hParseHdr]
+  -- After parsing IHDR, the state has header := some s.header, etc.
+  -- This matches stateAfterIdats s 0 except for `metadata := PngMetadata.empty`.
+  -- The recursive call is parsePngLoopFuel fuel s.bytes 33 newState.
+  have hOffsetEq : (33 : Nat) = idatOffset s 0 := by
+    unfold idatOffset idatPrefixWireSize
+    simp
+  have hStateEq :
+      ({ header := some s.header, idat := ByteArray.empty,
+         seenPLTE := false, seenIDAT := false, closedIDAT := false,
+         metadata := PngMetadata.empty } : PngParseState) =
+      stateAfterIdats s 0 := by
+    unfold stateAfterIdats
+    simp [List.foldl]
+  rw [hOffsetEq, hStateEq]
+  refine ⟨by decide, ?_⟩
+  exact parsePngLoopFuel_walk_idats_aux s 0 (by omega) fuel
+    (by omega)
+
+/-! ### parsePngSimple eliminator for length ≥ 2
+
+When the spec has two or more IDAT chunks, the fast-path `parsePngSimple`
+returns `none` because its third `readChunk` reads the *second* IDAT
+chunk's type bytes (rather than `iendTypeBytes`), failing the IEND-type
+check. -/
+
+set_option maxHeartbeats 1600000 in
+/-- For a multi-IDAT spec with at least two IDAT chunks, `parsePngSimple`
+returns `none`. Used by the main theorem to dispatch into the
+`parsePngLoopFuel` walk. -/
+private lemma parsePngSimple_eq_none_of_multi (s : MultiIdatContainerSpec)
+    (hLen2 : 2 ≤ s.idatChunks.length) :
+    parsePngSimple s.bytes s.bytes_size_ge_8 = none := by
+  unfold parsePngSimple
+  -- Membership facts.
+  have hPos0 : 0 < s.idatChunks.length := by omega
+  have hPos1 : 1 < s.idatChunks.length := by omega
+  have hMem0 : s.idatChunks[0] ∈ s.idatChunks := List.getElem_mem hPos0
+  have hMem1 : s.idatChunks[1] ∈ s.idatChunks := List.getElem_mem hPos1
+  have hCS0 := s.hChunkSize s.idatChunks[0] hMem0
+  have hCS1 := s.hChunkSize s.idatChunks[1] hMem1
+  -- Prefix-size values.
+  have hPref0 : idatPrefixWireSize s.idatChunks 0 = 0 := by
+    unfold idatPrefixWireSize; simp
+  have hPref1 :
+      idatPrefixWireSize s.idatChunks 1 = 12 + s.idatChunks[0].size := by
+    rw [idatPrefixWireSize_succ s.idatChunks 0 hPos0, hPref0]
+  have hPref2 :
+      idatPrefixWireSize s.idatChunks 2 =
+        24 + s.idatChunks[0].size + s.idatChunks[1].size := by
+    rw [idatPrefixWireSize_succ s.idatChunks 1 hPos1, hPref1]; omega
+  have hMonoFull :
+      idatPrefixWireSize s.idatChunks 2 ≤ idatTotalWireSize s := by
+    unfold idatTotalWireSize
+    exact idatPrefixWireSize_mono s.idatChunks 2 s.idatChunks.length (by omega)
+  -- Position bounds.
+  have hLen1 : (8 : Nat) + 3 < s.bytes.size := by rw [s.bytes_size_eq]; omega
+  have hLen2' : (33 : Nat) + 3 < s.bytes.size := by rw [s.bytes_size_eq]; omega
+  have hLen3' : (45 + s.idatChunks[0].size : Nat) + 3 < s.bytes.size := by
+    rw [s.bytes_size_eq]; omega
+  -- Signature.
+  have hSig : s.bytes.extract 0 8 = pngSignature := s.bytes_extract_signature
+  -- IHDR read at 8.
+  have hRead1 := s.readChunk_multiIdat_ihdr hLen1
+  -- IDAT[0] read at byte 33 via the kernel (avoids dependent-type rewrites).
+  have hRead2 : readChunk s.bytes 33 hLen2' =
+      some (idatTypeBytes, s.idatChunks[0], 45 + s.idatChunks[0].size) := by
+    have hWrap : s.bytes.extract 33 (33 + 12 + s.idatChunks[0].size) =
+        mkChunkBytes idatTypeBytes s.idatChunks[0] := by
+      have h0 := s.bytes_extract_idat_at 0 hPos0
+      have hO0 : idatOffset s 0 = 33 := by unfold idatOffset; rw [hPref0]
+      have hO1 : idatOffset s 1 = 33 + 12 + s.idatChunks[0].size := by
+        unfold idatOffset; rw [hPref1]; omega
+      rw [hO0, hO1] at h0; exact h0
+    have hRange : (33 : Nat) + 12 + s.idatChunks[0].size ≤ s.bytes.size := by
+      rw [s.bytes_size_eq]; omega
+    have h := readChunk_at_mkChunkBytes s.bytes 33 idatTypeBytes s.idatChunks[0]
+      (by rfl) hCS0 hWrap hRange hLen2'
+    rw [show (33 + 8 + s.idatChunks[0].size + 4 : Nat) =
+              45 + s.idatChunks[0].size from by omega] at h
+    exact h
+  -- IDAT[1] read at byte (45 + chunk_0.size) via the kernel.
+  have hRead3 :
+      readChunk s.bytes (45 + s.idatChunks[0].size) hLen3' =
+        some (idatTypeBytes, s.idatChunks[1],
+          45 + s.idatChunks[0].size + 8 + s.idatChunks[1].size + 4) := by
+    have hWrap : s.bytes.extract (45 + s.idatChunks[0].size)
+        (45 + s.idatChunks[0].size + 12 + s.idatChunks[1].size) =
+        mkChunkBytes idatTypeBytes s.idatChunks[1] := by
+      have h1 := s.bytes_extract_idat_at 1 hPos1
+      have hO1 : idatOffset s 1 = 45 + s.idatChunks[0].size := by
+        unfold idatOffset; rw [hPref1]; omega
+      have hO2 : idatOffset s 2 =
+          45 + s.idatChunks[0].size + 12 + s.idatChunks[1].size := by
+        unfold idatOffset; rw [hPref2]; omega
+      rw [hO1, hO2] at h1; exact h1
+    have hRange : 45 + s.idatChunks[0].size + 12 + s.idatChunks[1].size ≤ s.bytes.size := by
+      rw [s.bytes_size_eq]; omega
+    exact readChunk_at_mkChunkBytes s.bytes (45 + s.idatChunks[0].size)
+      idatTypeBytes s.idatChunks[1] (by rfl) hCS1 hWrap hRange hLen3'
+  -- Type bytes inequality.
+  have hIdatNeIend : (idatTypeBytes != iendTypeBytes) = true := by decide
+  -- IHDR round-trip.
+  have hCT256 : s.header.colorType < 256 := by
+    rcases s.hColorType with h | h | h | h <;> rw [h] <;> decide
+  have hParseHdr := parseIHDRData_encodeIHDRData s.header
+    s.hWidth s.hHeight s.hBitDepth s.hInterlace hCT256
+  have hCtBdOk :
+      pngColorTypeBitDepthSupported s.header.colorType s.header.bitDepth = true := by
+    rw [s.hBitDepth]
+    rcases s.hColorType with h | h | h | h <;> rw [h] <;> decide
+  have hCTProp :
+      ¬s.header.colorType = 0 → ¬s.header.colorType = 2 →
+        ¬s.header.colorType = 4 → s.header.colorType = 6 := by
+    intro h0 h2 h4
+    rcases s.hColorType with hc | hc | hc | hc
+    · exact (h0 hc).elim
+    · exact (h2 hc).elim
+    · exact (h4 hc).elim
+    · exact hc
+  -- Drive parsePngSimple's body to the IEND-type check, which fails.
+  simp [hSig, hLen1, hRead1, hParseHdr, hCtBdOk,
+        hLen2', hRead2, hLen3', hRead3, hIdatNeIend,
+        bne_self_eq_false' (a := ihdrTypeBytes)]
+
+/-! ### Main theorem: parsePng for multi-IDAT spec -/
+
+set_option maxHeartbeats 1600000 in
+/-- The general multi-IDAT forward correctness theorem: `parsePng`
+accepts any byte stream matching `MultiIdatContainerSpec` and returns
+the header + concatenated IDAT data. -/
+theorem parsePng_multiIdatContainerSpec_correct (s : MultiIdatContainerSpec) :
+    parsePng s.bytes s.bytes_size_ge_8 = some (s.header, s.idatData) := by
+  -- Case split on the chunks list.
+  match hChunks : s.idatChunks with
+  | [] => exact absurd hChunks s.hNonempty
+  | [data] =>
+      -- Singleton case: reduce via the singleton lemma.
+      have hMem : data ∈ s.idatChunks := by
+        rw [hChunks]; exact List.mem_singleton.mpr rfl
+      exact parsePng_multiIdatContainerSpec_correct_of_singleton data hChunks
+        (s.hChunkSize data hMem)
+  | c1 :: c2 :: rest =>
+      -- Length ≥ 2 case: parsePngSimple returns none, fall through to loop.
+      have hLen2 : 2 ≤ s.idatChunks.length := by rw [hChunks]; simp
+      have hSimpleNone : parsePngSimple s.bytes s.bytes_size_ge_8 = none :=
+        parsePngSimple_eq_none_of_multi s hLen2
+      have hSigExtract : s.bytes.extract 0 8 = pngSignature := s.bytes_extract_signature
+      have hSigCheck : (s.bytes.extract 0 8 != pngSignature) = false := by
+        rw [hSigExtract]; exact bne_self_eq_false' (a := pngSignature)
+      have hLoopFuel : s.idatChunks.length + 1 ≤ s.bytes.size := by
+        rw [s.bytes_size_eq]
+        unfold idatTotalWireSize idatPrefixWireSize
+        rw [List.take_length]
+        have hSum : 12 * s.idatChunks.length ≤
+            s.idatChunks.foldl (fun acc c => acc + 12 + c.size) 0 := by
+          have aux : ∀ (acc : Nat) (chunks : List ByteArray),
+              acc + 12 * chunks.length ≤
+                chunks.foldl (fun a c => a + 12 + c.size) acc := by
+            intro acc chunks
+            induction chunks generalizing acc with
+            | nil => simp
+            | cons d ds ih =>
+                simp only [List.length_cons, List.foldl_cons]
+                have h := ih (acc + 12 + d.size)
+                have : acc + 12 * (ds.length + 1) ≤
+                    acc + 12 + d.size + 12 * ds.length := by omega
+                exact Nat.le_trans this h
+          have h := aux 0 s.idatChunks
+          simpa using h
+        omega
+      have hHeader : (encodeIHDRData s.header).size < 2 ^ 32 := by
+        rw [encodeIHDRData_size s.header]; decide
+      unfold parsePng
+      simp [hSimpleNone, hSigCheck]
+      exact parsePngLoopFuel_walk_ihdr_step s s.bytes.size hLoopFuel hHeader
+
 /-! ### Forward correctness — general N-chunk case (deferred)
 
 The general theorem for `idatChunks.length ≥ 1` chains
