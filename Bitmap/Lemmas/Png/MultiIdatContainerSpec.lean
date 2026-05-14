@@ -512,6 +512,44 @@ lemma bytes_extract_idat_at (s : MultiIdatContainerSpec) (i : Nat)
   -- Step 3: apply the per-chunk extract on `idatChunksBytes`.
   exact idatChunksBytes_extract_at s i h
 
+/-! ### Per-chunk `readChunk` lemma -/
+
+/-- Helper: a sub-extract of `s.bytes` within the i-th wrapped IDAT chunk
+range equals the corresponding sub-extract of `mkChunkBytes idatTypeBytes chunks[i]`. -/
+private lemma bytes_subextract_idat_at (s : MultiIdatContainerSpec) (i : Nat)
+    (h : i < s.idatChunks.length) (a b : Nat) (hab : a ≤ b)
+    (hb : b ≤ 12 + s.idatChunks[i].size) :
+    s.bytes.extract (idatOffset s i + a) (idatOffset s i + b) =
+      (mkChunkBytes idatTypeBytes s.idatChunks[i]).extract a b := by
+  -- Use ByteArray.extract_extract to relate the sub-extract to the full chunk extract.
+  have hChunkSize : (mkChunkBytes idatTypeBytes s.idatChunks[i]).size =
+      s.idatChunks[i].size + 12 :=
+    mkChunkBytes_size idatTypeBytes s.idatChunks[i] (by rfl)
+  have hWidth : idatOffset s (i + 1) = idatOffset s i + (12 + s.idatChunks[i].size) := by
+    unfold idatOffset
+    rw [idatPrefixWireSize_succ s.idatChunks i h]
+    omega
+  have hFull := bytes_extract_idat_at s i h
+  -- (s.bytes.extract (idatOffset s i) (idatOffset s (i+1))).extract a b
+  --   = mkChunkBytes idatTypeBytes chunks[i].extract a b
+  have hExtract :
+      (s.bytes.extract (idatOffset s i) (idatOffset s (i + 1))).extract a b =
+        (mkChunkBytes idatTypeBytes s.idatChunks[i]).extract a b := by
+    rw [hFull]
+  -- LHS via extract_extract:
+  -- (s.bytes.extract i j).extract k l = s.bytes.extract (i+k) (min j (i+l))
+  have hMin : min (idatOffset s i + b) (idatOffset s (i + 1)) = idatOffset s i + b := by
+    rw [hWidth]; omega
+  have hCalc :
+      (s.bytes.extract (idatOffset s i) (idatOffset s (i + 1))).extract a b =
+        s.bytes.extract (idatOffset s i + a) (idatOffset s i + b) := by
+    have h := ByteArray.extract_extract (a := s.bytes)
+      (i := idatOffset s i) (j := idatOffset s (i + 1))
+      (k := a) (l := b)
+    rw [hMin] at h
+    exact h
+  rw [← hCalc]; exact hExtract
+
 /-! ### Forward correctness — general N-chunk case (deferred)
 
 The general theorem for `idatChunks.length ≥ 1` chains
