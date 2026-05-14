@@ -863,6 +863,127 @@ lemma readChunk_multiIdat_iend (s : MultiIdatContainerSpec)
     simp
     omega
 
+/-! ### parsePngLoopFuel step lemmas -/
+
+set_option maxHeartbeats 800000 in
+/-- `parsePngLoopFuel` step lemma for the IEND closing branch:
+given an IEND chunk that completes the byte stream, with state
+having `seenIDAT = true`, the loop returns the accumulated state. -/
+lemma parsePngLoopFuel_iend_success_step (fuel : Nat)
+    (bytes : ByteArray) (pos : Nat) (state : PngParseState)
+    (hdr : PngHeader)
+    (hpos : pos + 8 ≤ bytes.size) (hLen : pos + 3 < bytes.size)
+    (hread : readChunk bytes pos hLen = some (iendTypeBytes, ByteArray.empty, bytes.size))
+    (hheader : state.header = some hdr)
+    (hSeenIDAT : state.seenIDAT = true) :
+    parsePngLoopFuel (fuel + 1) bytes pos state = some (hdr, state.idat) := by
+  conv => lhs; unfold parsePngLoopFuel
+  have hNotIHDR : (iendTypeBytes == ihdrTypeBytes) = false := by decide
+  have hNotPLTE : (iendTypeBytes == plteTypeBytes) = false := by decide
+  have hNotIDAT : (iendTypeBytes == idatTypeBytes) = false := by decide
+  have hIsIEND : (iendTypeBytes == iendTypeBytes) = true := by decide
+  have hEmptySize : (ByteArray.empty.size != 0) = false := by decide
+  have hPosEq : (bytes.size != bytes.size) = false := by simp
+  simp [hpos, hLen, hread, hheader, hNotIHDR, hNotPLTE, hNotIDAT, hIsIEND,
+    hEmptySize, hSeenIDAT, hPosEq]
+
+/-- After processing the first `i` IDAT chunks of a multi-IDAT spec,
+the loop state has `idat = concat of first i chunks` and `seenIDAT = true`
+(for i ≥ 1). The inductive step uses
+`parsePngLoopFuel_idat_appends_when_open`. -/
+private def stateAfterIdats (s : MultiIdatContainerSpec) (i : Nat) : PngParseState :=
+  { header := some s.header
+    idat := s.idatChunks.take i |>.foldl (· ++ ·) ByteArray.empty
+    seenPLTE := false
+    seenIDAT := 0 < i
+    closedIDAT := false
+    metadata := PngMetadata.empty }
+
+/-- The accumulated `idat` after all `n` chunks equals `s.idatData`. -/
+private lemma stateAfterIdats_idat_full (s : MultiIdatContainerSpec) :
+    (stateAfterIdats s s.idatChunks.length).idat = s.idatData := by
+  unfold stateAfterIdats idatData
+  rw [List.take_length]
+
+/-- The `idat` field accumulates one more chunk at each step. -/
+private lemma stateAfterIdats_idat_succ (s : MultiIdatContainerSpec) (i : Nat)
+    (h : i < s.idatChunks.length) :
+    (stateAfterIdats s (i + 1)).idat =
+      (stateAfterIdats s i).idat ++ s.idatChunks[i] := by
+  unfold stateAfterIdats
+  show (s.idatChunks.take (i + 1)).foldl (· ++ ·) ByteArray.empty =
+    (s.idatChunks.take i).foldl (· ++ ·) ByteArray.empty ++ s.idatChunks[i]
+  rw [List.take_succ_eq_append_getElem h]
+  rw [List.foldl_append]
+  simp [List.foldl]
+
+set_option maxHeartbeats 1200000 in
+/-- `parsePngLoopFuel` walks through one IDAT chunk: given the state after
+processing the first `i` chunks, processing chunk `i` produces the state
+after `i+1` chunks at the next position. -/
+lemma parsePngLoopFuel_walk_idat_step (s : MultiIdatContainerSpec) (i : Nat)
+    (h : i < s.idatChunks.length)
+    (fuel : Nat)
+    (hRest : parsePngLoopFuel fuel s.bytes (idatOffset s (i + 1))
+              (stateAfterIdats s (i + 1)) = some (s.header, s.idatData)) :
+    parsePngLoopFuel (fuel + 1) s.bytes (idatOffset s i)
+        (stateAfterIdats s i) = some (s.header, s.idatData) := by
+  -- Compute readChunk at idatOffset s i.
+  have hChunkRangeBound : idatOffset s i + 12 + s.idatChunks[i].size ≤ s.bytes.size := by
+    rw [s.bytes_size_eq]
+    unfold idatOffset idatTotalWireSize
+    have hStep : idatPrefixWireSize s.idatChunks i + 12 + s.idatChunks[i].size =
+        idatPrefixWireSize s.idatChunks (i + 1) := by
+      rw [idatPrefixWireSize_succ s.idatChunks i h]
+    have hmono := idatPrefixWireSize_mono s.idatChunks (i + 1) s.idatChunks.length
+      (by omega)
+    omega
+  have hLen : idatOffset s i + 3 < s.bytes.size := by omega
+  have hPos : idatOffset s i + 8 ≤ s.bytes.size := by omega
+  have hReadIdat := s.readChunk_multiIdat_idat i h hLen
+  have hNextOffsetEq : idatOffset s i + 8 + s.idatChunks[i].size + 4 = idatOffset s (i + 1) := by
+    unfold idatOffset
+    rw [idatPrefixWireSize_succ s.idatChunks i h]
+    omega
+  rw [hNextOffsetEq] at hReadIdat
+  -- Color type != 3 (from hColorType).
+  have hPalette :
+      ((stateAfterIdats s i).header.elim 0 PngHeader.colorType == 3 &&
+       !(stateAfterIdats s i).seenPLTE) = false := by
+    unfold stateAfterIdats
+    simp
+    rcases s.hColorType with h | h | h | h <;> rw [h] <;> decide
+  -- Apply parsePngLoopFuel_idat_appends_when_open.
+  have hStep := parsePngLoopFuel_idat_appends_when_open fuel s.bytes (idatOffset s i)
+    (stateAfterIdats s i) s.header idatTypeBytes s.idatChunks[i] (idatOffset s (i + 1))
+    hPos hLen hReadIdat
+    (by unfold stateAfterIdats; rfl)
+    (by decide) (by decide) (by decide)
+    (by unfold stateAfterIdats; rfl)
+    (by
+      unfold stateAfterIdats
+      simp
+      rcases s.hColorType with h | h | h | h <;> rw [h] <;> decide)
+  rw [hStep]
+  -- Now state after step matches stateAfterIdats s (i+1).
+  have hIdatEq : (stateAfterIdats s i).idat ++ s.idatChunks[i] =
+      (stateAfterIdats s (i + 1)).idat := by
+    rw [stateAfterIdats_idat_succ s i h]
+  have hStateEq :
+      ({ header := some s.header
+         idat := (stateAfterIdats s i).idat ++ s.idatChunks[i]
+         seenPLTE := (stateAfterIdats s i).seenPLTE
+         seenIDAT := true
+         closedIDAT := false
+         metadata := (stateAfterIdats s i).metadata : PngParseState }) =
+      stateAfterIdats s (i + 1) := by
+    rw [hIdatEq]
+    unfold stateAfterIdats
+    have hSucc : (0 < i + 1) = True := by simp
+    rfl
+  rw [hStateEq]
+  exact hRest
+
 /-! ### Forward correctness — general N-chunk case (deferred)
 
 The general theorem for `idatChunks.length ≥ 1` chains
