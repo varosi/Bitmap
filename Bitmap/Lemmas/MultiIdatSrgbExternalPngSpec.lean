@@ -1,4 +1,5 @@
 import Bitmap.Lemmas.MultiIdatExternalPngSpec
+import Bitmap.Lemmas.ExternalPngCore
 import Bitmap.Lemmas.Png.MultiIdatSrgbContainerSpec
 
 universe u
@@ -134,164 +135,40 @@ lemma ct4_noReject_multiIdatSrgb_external (s : ExternalPngMultiIdatSrgbSpec px) 
 
 /-! ### End-to-end forward correctness -/
 
-set_option maxHeartbeats 16000000 in
-set_option maxRecDepth 4096 in
-/-- The metadata's `srgb` doesn't perturb the decoder
-color flow (`applyPngColorSpaceTransform` inspects only
-srgb/chromaticities/gamma), so the proof mirrors
-`decodeBitmap_external_multiIdat_correct`. -/
 theorem decodeBitmap_external_multiIdatSrgb_correct (s : ExternalPngMultiIdatSrgbSpec px) :
     Png.decodeBitmap s.container.bytes = some s.bitmap := by
-  have hParseForDecode := s.parsePngForDecode_multiIdatSrgb_external
-  let ct := (PngPixel.colorType (α := px)).toNat
-  let bd := (PngPixel.bitDepth (α := px)).toNat
-  let bpp := Pixel.bytesPerPixel (α := px)
-  have hBitDepth : s.container.header.bitDepth = 8 := s.container.hBitDepth
-  have hCtSet : s.container.header.colorType = 0 ∨ s.container.header.colorType = 2 ∨
-      s.container.header.colorType = 4 ∨ s.container.header.colorType = 6 :=
-    s.container.hColorType
-  have hbd_8 : bd = 8 := by
-    show (PngPixel.bitDepth (α := px)).toNat = 8
-    rw [s.hTargetBitDepth]; decide
-  have hBdNot1' : ¬ bd = 1 := by rw [hbd_8]; decide
-  have hbdNoReject : pngBitDepthSupported bd = true := by rw [hbd_8]; decide
-  have hbitDepthEq :
-      ((PngPixel.bitDepth (α := px)).toNat != bd) = false := by simp [bd]
-  have hbitDepthEqHeader :
-      (bd != (PngPixel.bitDepth (α := px)).toNat) = false := by simp [bd]
-  have hnoDownsample :
-      ¬((PngPixel.bitDepth (α := px)).toNat = 16 ∧ PngPixel.bitDepth (α := px) = u8 8) := by
-    rintro ⟨h16, _⟩
-    rw [s.hTargetBitDepth] at h16
-    revert h16; decide
-  have hct'eq : ct = s.container.header.colorType := by simp [ct, s.hColorType]
-  have hct' : ct = 0 ∨ ct = 2 ∨ ct = 4 ∨ ct = 6 := by rw [hct'eq]; exact hCtSet
-  have hctNoReject :
-      ct = 4 → ¬ PngPixel.colorType (α := px) = u8 4 →
-        PngPixel.colorType (α := px) = u8 6 := by
-    intro h4 hne
-    have hCtH : s.container.header.colorType = 4 := by rw [← hct'eq]; exact h4
-    have : PngPixel.colorType (α := px) = u8 4 := by rw [s.hPxColorType, hCtH]
-    exact absurd this hne
-  have hctbd' : pngColorTypeBitDepthSupported ct bd = true := by
-    rw [hct'eq, hbd_8]
-    rcases hCtSet with h | h | h | h <;> rw [h] <;> decide
-  have hpngBpp' : pngBytesPerPixelForColorTypeAndBitDepth? ct bd = some bpp := by
-    rw [hct'eq, hbd_8, ← hBitDepth]; exact s.hBppLookup
-  have hmetadataNoTransparency :
-      s.container.expectedMetadata.transparency = none :=
-    s.expectedMetadata_transparency_none
-  have hrawEq' :
-      s.inflatedRaw.size = s.bitmap.size.height * (s.bitmap.size.width * bpp + 1) := by
-    simpa [bpp] using s.hRawSize
-  have hvalid :
-      s.bitmap.data.size = s.bitmap.size.width * s.bitmap.size.height * bpp := by
-    simpa [bpp] using s.bitmap.valid
   have hMetaChrm : s.container.expectedMetadata.chromaticities = none :=
     s.expectedMetadata_chromaticities_none
   have hMetaGamma : s.container.expectedMetadata.gamma = none :=
     s.expectedMetadata_gamma_none
-  -- Key observation: for our spec, srgb may be `some _` or `none`; in
-  -- both cases the color-space transform is identity (srgb=some
-  -- short-circuits; srgb=none falls through with chrm/gamma both none).
   have hPixelOnlyChrm :
       (PngMetadata.pixelOnlyColorSpace s.container.expectedMetadata).chromaticities = none := by
     unfold PngMetadata.pixelOnlyColorSpace; exact hMetaChrm
   have hPixelOnlyGamma :
       (PngMetadata.pixelOnlyColorSpace s.container.expectedMetadata).gamma = none := by
     unfold PngMetadata.pixelOnlyColorSpace; exact hMetaGamma
-  have hApplyId :
-      ∀ (sct : Nat) (tct : UInt8) (tbd : UInt8) (pixels : ByteArray),
-        applyPngColorSpaceTransform
-          (PngMetadata.pixelOnlyColorSpace s.container.expectedMetadata)
-          sct tct tbd pixels = some pixels := by
-    intro sct tct tbd pixels
+  have hChrmIsSome :
+      (s.container.expectedMetadata.pixelOnlyColorSpace.chromaticities.isSome : Bool) = false := by
+    rw [hPixelOnlyChrm]; rfl
+  -- For sRGB-only metadata, the color-space transform is identity in both
+  -- srgb=none and srgb=some w cases: srgb=some short-circuits, srgb=none
+  -- falls through with chrm/gamma both none.
+  have hTransform :
+      applyPngColorSpaceTransform
+        (PngMetadata.pixelOnlyColorSpace s.container.expectedMetadata)
+        s.container.header.colorType (PngPixel.colorType (α := px))
+        (u8 8) s.bitmap.data = some s.bitmap.data := by
     unfold applyPngColorSpaceTransform
     rcases h : (PngMetadata.pixelOnlyColorSpace s.container.expectedMetadata).srgb with _ | _
     · rw [hPixelOnlyChrm, hPixelOnlyGamma]
     · rfl
-  have hrowsEq :
-      ((PngPixel.decodeRowsLoop (α := px) s.inflatedRaw s.bitmap.size.width
-            s.bitmap.size.height bpp (s.bitmap.size.width * bpp) 0 0 ByteArray.empty
-            { data := Array.replicate
-                (s.bitmap.size.width * s.bitmap.size.height * Pixel.bytesPerPixel (α := px))
-                0 }).bind
-        fun decodedPixels ↦
-          (applyPngColorSpaceTransform
-              (PngMetadata.pixelOnlyColorSpace s.container.expectedMetadata)
-            (PngPixel.colorType (α := px)).toNat
-            (PngPixel.colorType (α := px)) (PngPixel.bitDepth (α := px)) decodedPixels).bind
-            fun pixels ↦
-              if h : pixels.size = s.bitmap.size.width * s.bitmap.size.height *
-                  Pixel.bytesPerPixel (α := px) then
-                some { size := { width := s.bitmap.size.width,
-                                 height := s.bitmap.size.height },
-                       data := pixels, valid := h }
-              else none) =
-      some s.bitmap := by
-    simp [s.hPixels, hApplyId, hvalid, bpp]
-  have hctbdHdr8 :
-      pngColorTypeBitDepthSupported s.container.header.colorType 8 = true :=
-    s.pngColorTypeBitDepthSupported_multiIdatSrgb_external
-  have h8eq : (8 : Nat) = (u8 8).toNat := by decide
-  have hBppChain :
-      ((pngBytesPerPixelForColorTypeAndBitDepth? s.container.header.colorType 8).bind
-        fun bpp ↦
-          if s.inflatedRaw.size = s.bitmap.size.height * (s.bitmap.size.width * bpp + 1) then
-            (PngPixel.decodeRowsLoop (α := px) s.inflatedRaw s.bitmap.size.width
-                  s.bitmap.size.height bpp (s.bitmap.size.width * bpp) 0 0 ByteArray.empty
-                  { data := Array.replicate
-                      (s.bitmap.size.width * s.bitmap.size.height *
-                        Pixel.bytesPerPixel (α := px)) 0 }).bind
-              fun y ↦
-                (applyPngColorSpaceTransform
-                    (PngMetadata.pixelOnlyColorSpace s.container.expectedMetadata)
-                    s.container.header.colorType (PngPixel.colorType (α := px))
-                    (u8 8) y).bind
-                  fun pixels ↦
-                    if h : pixels.size = s.bitmap.size.width * s.bitmap.size.height *
-                        Pixel.bytesPerPixel (α := px) then
-                      some { size := { width := s.bitmap.size.width,
-                                       height := s.bitmap.size.height },
-                             data := pixels, valid := h }
-                    else none
-          else none) = some s.bitmap := by
-    have hBpp8 : pngBytesPerPixelForColorTypeAndBitDepth?
-        s.container.header.colorType 8 =
-          some (Pixel.bytesPerPixel (α := px)) := by
-      rw [← hBitDepth]; exact s.hBppLookup
-    rw [hBpp8]
-    simp only [Option.bind_some]
-    have hsize : s.inflatedRaw.size =
-        s.bitmap.size.height * (s.bitmap.size.width * Pixel.bytesPerPixel (α := px) + 1) :=
-      s.hRawSize
-    simp [hsize, s.hPixels, hApplyId, s.bitmap.valid]
-  have hCtCases := s.colorTypeCases_multiIdatSrgb_external
-  have hCt4Reject := s.ct4_noReject_multiIdatSrgb_external
-  have hChrmIsSome : (s.container.expectedMetadata.chromaticities.isSome : Bool) = false :=
-    s.expectedMetadata_chromaticities_isSome
-  unfold Png.decodeBitmap
-  rcases s.hInflated with hStored | ⟨hStoredNone, hZlib⟩
-  · simpa [s.container.bytes_size_ge_8, hParseForDecode, hStored,
-      ct, bd, hbdNoReject, hbitDepthEq, hbitDepthEqHeader, hnoDownsample, hpngBpp',
-      hctbd', hBdNot1', normalizeRawByInterlace?, PngMetadata.pixelOnlyColorSpace,
-      s.hIdatMin, s.hInterlace, s.hWidth, s.hHeight, hBitDepth,
-      s.hTargetBitDepth, hChrmIsSome, hMetaChrm, hMetaGamma] using
-      (And.intro hmetadataNoTransparency
-        (And.intro hctbdHdr8
-          (And.intro hCtCases
-            (And.intro h8eq
-              (And.intro hCt4Reject hBppChain)))))
-  · simpa [s.container.bytes_size_ge_8, hParseForDecode, hStoredNone, hZlib,
-      ct, bd, hbdNoReject, hbitDepthEq, hbitDepthEqHeader, hnoDownsample, hpngBpp',
-      hctbd', hBdNot1', normalizeRawByInterlace?, PngMetadata.pixelOnlyColorSpace,
-      s.hIdatMin, s.hInterlace, s.hWidth, s.hHeight, hBitDepth,
-      s.hTargetBitDepth, hChrmIsSome, hMetaChrm, hMetaGamma] using
-      (And.intro hmetadataNoTransparency
-        (And.intro hctbdHdr8
-          (And.intro hCtCases
-            (And.intro h8eq
-              (And.intro hCt4Reject hBppChain)))))
+  exact decodeBitmap_correct_of_witnesses s.container.bytes_size_ge_8
+    s.container.hBitDepth s.container.hColorType
+    s.hWidth s.hHeight s.hInterlace s.hPxColorType s.hTargetBitDepth s.hBppLookup
+    s.expectedMetadata_transparency_none
+    hChrmIsSome
+    s.parsePngForDecode_multiIdatSrgb_external
+    s.hIdatMin s.hInflated s.hRawSize s.hPixels hTransform
 
 end ExternalPngMultiIdatSrgbSpec
 
