@@ -106,6 +106,84 @@ lemma expectedMetadata_of_none (h : s.tIME = none) :
     s.expectedMetadata = PngMetadata.empty := by
   unfold expectedMetadata; rw [h]
 
+/-! ### Helpers for the `tIME = some` case -/
+
+/-- If `tIME = some w`, the witness payload has the canonical 7-byte length. -/
+lemma timeWitness_payload_size {w : TimeChunkWitness} : w.payload.size = 7 := by
+  -- parseTimeData first rejects size ≠ 7, so the round-trip witness fixes it.
+  have h := w.hParses
+  unfold parseTimeData at h
+  by_contra hne
+  simp [hne] at h
+
+/-- The wrapped `tIME` chunk bytes have size 19 when `tIME = some w`. -/
+lemma timeChunkBytes_size_of_some {w : TimeChunkWitness} (h : s.tIME = some w) :
+    s.timeChunkBytes.size = 19 := by
+  unfold timeChunkBytes
+  rw [h]
+  rw [mkChunkBytes_size timeTypeBytes w.payload (by rfl : timeTypeBytes.size = 4)]
+  rw [timeWitness_payload_size]
+
+/-- `tIMEWireSize` equals 19 when `tIME = some w`. -/
+lemma tIMEWireSize_of_some {w : TimeChunkWitness} (h : s.tIME = some w) :
+    s.tIMEWireSize = 19 := by
+  unfold tIMEWireSize
+  rw [h]
+  simp
+
+/-- `tIMEWireSize` equals 0 when `tIME = none`. -/
+lemma tIMEWireSize_of_none (h : s.tIME = none) :
+    s.tIMEWireSize = 0 := by
+  unfold tIMEWireSize
+  rw [h]
+  simp
+
+/-! ### Bytes size and position arithmetic -/
+
+/-- Total bytes size: 8 (sig) + 25 (IHDR) + tIME (0 or 19) + IDATs + 12 (IEND). -/
+lemma bytes_size :
+    s.bytes.size =
+      45 + s.tIMEWireSize + s.toMulti.idatTotalWireSize := by
+  unfold bytes
+  have hIhdrSize :
+      (mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header)).size = 25 := by
+    rw [mkChunkBytes_size _ _ (by rfl : ihdrTypeBytes.size = 4), encodeIHDRData_size]
+  have hIendSize :
+      (mkChunkBytes iendTypeBytes ByteArray.empty).size = 12 := by
+    rw [mkChunkBytes_size _ _ (by rfl : iendTypeBytes.size = 4)]; simp
+  have hTimeSize : s.timeChunkBytes.size = s.tIMEWireSize := by
+    unfold tIMEWireSize
+    match h : s.tIME with
+    | none => unfold timeChunkBytes; rw [h]; simp
+    | some w =>
+        rw [s.timeChunkBytes_size_of_some h]
+        simp
+  have hIdatSize :
+      s.toMulti.idatChunksBytes.size = s.toMulti.idatTotalWireSize := by
+    unfold MultiIdatContainerSpec.idatTotalWireSize
+    rw [MultiIdatContainerSpec.idatChunksBytes_size]
+    show s.toMulti.idatChunks.foldl (fun acc c => acc + 12 + c.size) 0 =
+      MultiIdatContainerSpec.idatPrefixWireSize s.toMulti.idatChunks
+        s.toMulti.idatChunks.length
+    unfold MultiIdatContainerSpec.idatPrefixWireSize
+    rw [List.take_length]
+  rw [ByteArray.size_append, ByteArray.size_append, ByteArray.size_append,
+      ByteArray.size_append, pngSignature_size, hIhdrSize, hTimeSize,
+      hIdatSize, hIendSize]
+  omega
+
+/-- Every multi-IDAT-with-time byte stream is at least 8 bytes long. -/
+lemma bytes_size_ge_8 : 8 ≤ s.bytes.size := by
+  rw [bytes_size]; omega
+
+/-- Byte offset of the i-th IDAT chunk's first byte. -/
+def idatOffsetT (i : Nat) : Nat :=
+  33 + s.tIMEWireSize + MultiIdatContainerSpec.idatPrefixWireSize s.idatChunks i
+
+/-- Byte offset of the IEND chunk. -/
+def iendOffsetT : Nat :=
+  33 + s.tIMEWireSize + s.toMulti.idatTotalWireSize
+
 /-! ### Forward correctness — `tIME = none` case via the multi-IDAT theorem -/
 
 /-- When no `tIME` chunk is present, the multi-IDAT-with-time spec

@@ -191,7 +191,7 @@ compute these offsets and prove their basic arithmetic properties. -/
 private def idatChunkWireSize (c : ByteArray) : Nat := c.size + 12
 
 /-- Total wire size of the first `n` IDAT chunks. -/
-private def idatPrefixWireSize (chunks : List ByteArray) (n : Nat) : Nat :=
+def idatPrefixWireSize (chunks : List ByteArray) (n : Nat) : Nat :=
   ((chunks.take n).foldl (fun acc c => acc + 12 + c.size) 0)
 
 /-- Byte offset of the `i`-th IDAT chunk's first byte (i.e., length field). -/
@@ -200,7 +200,7 @@ def idatOffset (s : MultiIdatContainerSpec) (i : Nat) : Nat :=
 
 /-- Total wire size of all IDAT chunks (sum of all 12 + payload). -/
 def idatTotalWireSize (s : MultiIdatContainerSpec) : Nat :=
-  idatPrefixWireSize s.idatChunks s.idatChunks.length
+  MultiIdatContainerSpec.idatPrefixWireSize s.idatChunks s.idatChunks.length
 
 /-- Byte offset of the IEND chunk. -/
 def iendOffset (s : MultiIdatContainerSpec) : Nat :=
