@@ -13,12 +13,23 @@ open Png
 
 /-! ## Generic decode-side composition core
 
-A single theorem `decodeBitmap_correct_of_witnesses` that takes all
-the structural witnesses an `ExternalPng…Spec` provides (container
-layer, zlib, row-filter, color-space transform) and concludes
-`decodeBitmap bytes = some bitmap`. Each per-spec end-to-end theorem
-(`decodeBitmap_external_*_correct`) is then a one-line corollary
-that supplies the witnesses. -/
+Two complementary theorems describe `decodeBitmap`'s behavior on any
+byte stream:
+
+* `decodeBitmap_correct_of_witnesses` — accepts when the parsed
+  metadata has `transparency = none` (and all the structural
+  decoder-layer witnesses line up), returning `some bitmap`.
+* `decodeBitmap_rejects_of_transparency` — rejects (returns `none`)
+  whenever the parsed metadata has `transparency.isSome = true`.
+  This handles `tRNS`-bearing byte streams: the parser accepts the
+  chunk via `parsePngLoopFuelWithMetadata_accepts_tRNS`, the
+  container-layer theorem (`parsePngForDecode_…_correct`) records
+  the transparency, and this lemma then closes the end-to-end
+  story with the decoder's deliberate `transparency.isSome` guard.
+
+Each per-spec end-to-end theorem (`decodeBitmap_external_*_correct`)
+is a one-line corollary that supplies the witnesses for the matching
+core. -/
 
 set_option maxHeartbeats 16000000 in
 set_option maxRecDepth 4096 in
@@ -200,6 +211,27 @@ theorem decodeBitmap_correct_of_witnesses
           (And.intro hCtCases
             (And.intro h8eq
               (And.intro hCt4Reject hBppChain)))))
+
+/-- The rejection core: any byte stream whose parsed metadata has
+`transparency.isSome = true` is rejected by `decodeBitmap`. This is
+the end-to-end story for `tRNS`: combined with a container-layer
+theorem proving the parser records the transparency, this closes
+the decoder behavior.
+
+Note that the witness fields needed are far fewer than the success
+case — no zlib / row-filter / color-space transform reasoning is
+required because `decodeBitmap`'s early-return on transparency
+fires before those steps. -/
+theorem decodeBitmap_rejects_of_transparency
+    {px : Type u} [Pixel px] [PngPixel px]
+    {header : PngHeader} {idat : ByteArray} {metadata : PngMetadata}
+    {bytes : ByteArray} (hSize : 8 ≤ bytes.size)
+    (hParse : parsePngForDecode bytes hSize =
+      some { header := header, idat := idat, metadata := metadata })
+    (hTransparency : metadata.transparency.isSome = true) :
+    Png.decodeBitmap (px := px) bytes = none := by
+  unfold Png.decodeBitmap
+  simp [hSize, hParse, hTransparency]
 
 end Lemmas
 
