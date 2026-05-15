@@ -8,7 +8,7 @@ open Png
 
 /-! ## Multi-IDAT container spec with optional `sRGB` (Step 2c)
 
-`MultiIdatChrmContainerSpec` extends `MultiIdatContainerSpec` with an
+`MultiIdatSrgbContainerSpec` extends `MultiIdatContainerSpec` with an
 optional `sRGB` chunk placed between IHDR and the first IDAT. This is
 the simplest ancillary-chunk extension: `sRGB` carries a modification
 gammastamp that does not affect the decoder's color flow, so the
@@ -34,7 +34,7 @@ structure SrgbChunkWitness where
 
 /-- A PNG byte stream with the multi-IDAT shape plus an optional `sRGB`
 chunk between IHDR and the first IDAT. -/
-structure MultiIdatChrmContainerSpec where
+structure MultiIdatSrgbContainerSpec where
   header : PngHeader
   idatChunks : List ByteArray
   hChunkSize : ∀ c, c ∈ idatChunks → c.size < 2 ^ 32
@@ -49,9 +49,9 @@ structure MultiIdatChrmContainerSpec where
   /-- Optional `sRGB` chunk placed between IHDR and the first IDAT. -/
   sRGB : Option SrgbChunkWitness
 
-namespace MultiIdatChrmContainerSpec
+namespace MultiIdatSrgbContainerSpec
 
-variable (s : MultiIdatChrmContainerSpec)
+variable (s : MultiIdatSrgbContainerSpec)
 
 /-- The underlying multi-IDAT spec (forgetting the `sRGB` data). -/
 def toMulti : MultiIdatContainerSpec where
@@ -797,7 +797,7 @@ set_option maxHeartbeats 1600000 in
 /-- The metadata-aware parser accepts the with-gamma byte stream and
 returns the expected header, IDAT, and metadata (with the
 `gamma` set from the `sRGB` witness). -/
-theorem parsePngForDecode_multiIdatChrmContainerSpec_correct_of_some
+theorem parsePngForDecode_multiIdatSrgbContainerSpec_correct_of_some
     {w : SrgbChunkWitness} (hw : s.sRGB = some w) :
     parsePngForDecode s.bytes s.bytes_size_ge_8 =
       some { header := s.header, idat := s.idatData,
@@ -882,7 +882,7 @@ theorem parsePngForDecode_multiIdatChrmContainerSpec_correct_of_some
 reduces to a plain `MultiIdatContainerSpec`, and the
 `parsePngForDecode` correctness theorem follows from
 `parsePngForDecode_multiIdatContainerSpec_correct`. -/
-theorem parsePngForDecode_multiIdatChrmContainerSpec_correct_of_none
+theorem parsePngForDecode_multiIdatSrgbContainerSpec_correct_of_none
     (h : s.sRGB = none) :
     parsePngForDecode s.bytes
         (by rw [bytes_eq_multi_of_none s h]; exact s.toMulti.bytes_size_ge_8) =
@@ -908,23 +908,23 @@ theorem parsePngForDecode_multiIdatChrmContainerSpec_correct_of_none
 /-! ### Unified main theorem -/
 
 /-- The unified main theorem: `parsePngForDecode` accepts any
-`MultiIdatChrmContainerSpec` byte stream and returns the header,
+`MultiIdatSrgbContainerSpec` byte stream and returns the header,
 concatenated IDAT data, and the expected metadata (with
 `gamma` set from the `sRGB` witness when present). -/
-theorem parsePngForDecode_multiIdatChrmContainerSpec_correct :
+theorem parsePngForDecode_multiIdatSrgbContainerSpec_correct :
     parsePngForDecode s.bytes s.bytes_size_ge_8 =
       some { header := s.header, idat := s.idatData,
              metadata := s.expectedMetadata } := by
   rcases h : s.sRGB with _ | w
   · -- sRGB = none
-    have hNone := s.parsePngForDecode_multiIdatChrmContainerSpec_correct_of_none h
+    have hNone := s.parsePngForDecode_multiIdatSrgbContainerSpec_correct_of_none h
     -- Byte-size proofs differ; parsePngForDecode is proof-irrelevant in its
     -- size hypothesis.
     exact hNone
   · -- sRGB = some w
-    exact s.parsePngForDecode_multiIdatChrmContainerSpec_correct_of_some h
+    exact s.parsePngForDecode_multiIdatSrgbContainerSpec_correct_of_some h
 
-end MultiIdatChrmContainerSpec
+end MultiIdatSrgbContainerSpec
 
 end Lemmas
 
