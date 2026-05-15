@@ -33,22 +33,26 @@ core. -/
 
 set_option maxHeartbeats 16000000 in
 set_option maxRecDepth 4096 in
-/-- The decode-side core: every byte stream whose decoder-layer
-witnesses line up with the bitmap is accepted by `decodeBitmap`. -/
+/-- The decode-side core, generalised over the supported target bit
+depth (8 or 16, with source = target). Every byte stream whose
+decoder-layer witnesses line up with the bitmap is accepted by
+`decodeBitmap`. The case where source bit depth ≠ target bit depth
+(i.e., 16→8 downsampling or 1→8 upsampling) is not covered here. -/
 theorem decodeBitmap_correct_of_witnesses
     {px : Type u} [Pixel px] [PngPixel px]
     {bitmap : Bitmap px}
     {header : PngHeader} {idat : ByteArray} {metadata : PngMetadata}
     {inflatedRaw preTransformPixels : ByteArray}
     {bytes : ByteArray} (hSize : 8 ≤ bytes.size)
-    (hBitDepth : header.bitDepth = 8)
+    (hBitDepthMatch : header.bitDepth = (PngPixel.bitDepth (α := px)).toNat)
+    (hTargetBitDepth : PngPixel.bitDepth (α := px) = u8 8 ∨
+                       PngPixel.bitDepth (α := px) = u8 16)
     (hColorType : header.colorType = 0 ∨ header.colorType = 2 ∨
       header.colorType = 4 ∨ header.colorType = 6)
     (hWidth : header.width = bitmap.size.width)
     (hHeight : header.height = bitmap.size.height)
     (hInterlace : header.interlace = 0)
     (hPxColorType : PngPixel.colorType (α := px) = u8 header.colorType)
-    (hTargetBitDepth : PngPixel.bitDepth (α := px) = u8 8)
     (hBppLookup : pngBytesPerPixelForColorTypeAndBitDepth?
       header.colorType header.bitDepth = some (Pixel.bytesPerPixel (α := px)))
     (hMetaTransparency : metadata.transparency = none)
@@ -79,16 +83,21 @@ theorem decodeBitmap_correct_of_witnesses
     (hTransform :
       applyPngColorSpaceTransform (PngMetadata.pixelOnlyColorSpace metadata)
         header.colorType (PngPixel.colorType (α := px))
-        (u8 8) preTransformPixels = some bitmap.data) :
+        (PngPixel.bitDepth (α := px)) preTransformPixels = some bitmap.data) :
     Png.decodeBitmap bytes = some bitmap := by
   let ct := (PngPixel.colorType (α := px)).toNat
   let bd := (PngPixel.bitDepth (α := px)).toNat
   let bpp := Pixel.bytesPerPixel (α := px)
-  have hbd_8 : bd = 8 := by
-    show (PngPixel.bitDepth (α := px)).toNat = 8
-    rw [hTargetBitDepth]; decide
-  have hBdNot1' : ¬ bd = 1 := by rw [hbd_8]; decide
-  have hbdNoReject : pngBitDepthSupported bd = true := by rw [hbd_8]; decide
+  -- Derive bit-depth facts from the disjunction.
+  have hbd_in : bd = 8 ∨ bd = 16 := by
+    show (PngPixel.bitDepth (α := px)).toNat = 8 ∨
+         (PngPixel.bitDepth (α := px)).toNat = 16
+    rcases hTargetBitDepth with h | h
+    · left; rw [h]; decide
+    · right; rw [h]; decide
+  have hBdNot1' : ¬ bd = 1 := by rcases hbd_in with h | h <;> rw [h] <;> decide
+  have hbdNoReject : pngBitDepthSupported bd = true := by
+    rcases hbd_in with h | h <;> rw [h] <;> decide
   have hbitDepthEq :
       ((PngPixel.bitDepth (α := px)).toNat != bd) = false := by simp [bd]
   have hbitDepthEqHeader :
@@ -96,21 +105,17 @@ theorem decodeBitmap_correct_of_witnesses
   have hnoDownsample :
       ¬((PngPixel.bitDepth (α := px)).toNat = 16 ∧
         PngPixel.bitDepth (α := px) = u8 8) := by
-    rintro ⟨h16, _⟩
-    rw [hTargetBitDepth] at h16
-    revert h16; decide
+    rintro ⟨h16, h8⟩
+    rcases hTargetBitDepth with h | h <;> rw [h] at h8
+    · -- target = u8 8 ⇒ u8 8 = u8 8 ✓, but then bit depth = 8 ≠ 16
+      rw [h] at h16; revert h16; decide
+    · -- target = u8 16 ⇒ u8 16 = u8 8 contradicts
+      revert h8; decide
   have hct'eq : ct = header.colorType := by
     show (PngPixel.colorType (α := px)).toNat = header.colorType
     rw [hPxColorType]
     rcases hColorType with h | h | h | h <;> rw [h] <;> decide
   have hct' : ct = 0 ∨ ct = 2 ∨ ct = 4 ∨ ct = 6 := by rw [hct'eq]; exact hColorType
-  have hctNoReject :
-      ct = 4 → ¬ PngPixel.colorType (α := px) = u8 4 →
-        PngPixel.colorType (α := px) = u8 6 := by
-    intro h4 hne
-    have hCtH : header.colorType = 4 := by rw [← hct'eq]; exact h4
-    have : PngPixel.colorType (α := px) = u8 4 := by rw [hPxColorType, hCtH]
-    exact absurd this hne
   have hCt4Reject :
       header.colorType = 4 → ¬ PngPixel.colorType (α := px) = u8 4 →
         PngPixel.colorType (α := px) = u8 6 := by
@@ -118,10 +123,12 @@ theorem decodeBitmap_correct_of_witnesses
     have : PngPixel.colorType (α := px) = u8 4 := by rw [hPxColorType, h4]
     exact absurd this hne
   have hctbd' : pngColorTypeBitDepthSupported ct bd = true := by
-    rw [hct'eq, hbd_8]
-    rcases hColorType with h | h | h | h <;> rw [h] <;> decide
+    rw [hct'eq]
+    rcases hbd_in with hb | hb <;> rw [hb] <;>
+      rcases hColorType with h | h | h | h <;> rw [h] <;> decide
   have hpngBpp' : pngBytesPerPixelForColorTypeAndBitDepth? ct bd = some bpp := by
-    rw [hct'eq, hbd_8, ← hBitDepth]; exact hBppLookup
+    rw [hct'eq, show bd = header.bitDepth from hBitDepthMatch.symm]
+    exact hBppLookup
   have hCtCases :
       ¬ header.colorType = 0 → ¬ header.colorType = 2 →
         ¬ header.colorType = 4 → header.colorType = 6 := by
@@ -131,10 +138,17 @@ theorem decodeBitmap_correct_of_witnesses
     · exact absurd hc h2
     · exact absurd hc h4
     · exact hc
-  have hctbdHdr8 :
-      pngColorTypeBitDepthSupported header.colorType 8 = true := by
-    rcases hColorType with h | h | h | h <;> rw [h] <;> decide
-  have h8eq : (8 : Nat) = (u8 8).toNat := by decide
+  have hctbdHdr_bd :
+      pngColorTypeBitDepthSupported header.colorType bd = true := by
+    rcases hbd_in with hb | hb <;> rw [hb] <;>
+      rcases hColorType with h | h | h | h <;> rw [h] <;> decide
+  have hctbdHdr_match :
+      pngColorTypeBitDepthSupported header.colorType
+        (PngPixel.bitDepth (α := px)).toNat = true := by
+    show pngColorTypeBitDepthSupported header.colorType bd = true
+    exact hctbdHdr_bd
+  have hbdMatchEq :
+      (PngPixel.bitDepth (α := px)).toNat = (PngPixel.bitDepth (α := px)).toNat := rfl
   have hrowsEq :
       ((PngPixel.decodeRowsLoop (α := px) inflatedRaw bitmap.size.width
             bitmap.size.height bpp (bitmap.size.width * bpp) 0 0 ByteArray.empty
@@ -145,7 +159,8 @@ theorem decodeBitmap_correct_of_witnesses
           (applyPngColorSpaceTransform
               (PngMetadata.pixelOnlyColorSpace metadata)
               header.colorType
-              (PngPixel.colorType (α := px)) (u8 8) decodedPixels).bind
+              (PngPixel.colorType (α := px))
+              (PngPixel.bitDepth (α := px)) decodedPixels).bind
             fun pixels ↦
               if h : pixels.size = bitmap.size.width * bitmap.size.height *
                   Pixel.bytesPerPixel (α := px) then
@@ -161,7 +176,8 @@ theorem decodeBitmap_correct_of_witnesses
       simpa [bpp] using bitmap.valid
     simp [hvalid, bpp]
   have hBppChain :
-      ((pngBytesPerPixelForColorTypeAndBitDepth? header.colorType 8).bind
+      ((pngBytesPerPixelForColorTypeAndBitDepth? header.colorType
+            (PngPixel.bitDepth (α := px)).toNat).bind
         fun bpp ↦
           if inflatedRaw.size = bitmap.size.height * (bitmap.size.width * bpp + 1) then
             (PngPixel.decodeRowsLoop (α := px) inflatedRaw bitmap.size.width
@@ -173,7 +189,7 @@ theorem decodeBitmap_correct_of_witnesses
                 (applyPngColorSpaceTransform
                     (PngMetadata.pixelOnlyColorSpace metadata)
                     header.colorType (PngPixel.colorType (α := px))
-                    (u8 8) y).bind
+                    (PngPixel.bitDepth (α := px)) y).bind
                   fun pixels ↦
                     if h : pixels.size = bitmap.size.width * bitmap.size.height *
                         Pixel.bytesPerPixel (α := px) then
@@ -182,10 +198,12 @@ theorem decodeBitmap_correct_of_witnesses
                              data := pixels, valid := h }
                     else none
           else none) = some bitmap := by
-    have hBpp8 : pngBytesPerPixelForColorTypeAndBitDepth?
-        header.colorType 8 = some (Pixel.bytesPerPixel (α := px)) := by
-      rw [← hBitDepth]; exact hBppLookup
-    rw [hBpp8]
+    have hBpp_match : pngBytesPerPixelForColorTypeAndBitDepth?
+        header.colorType (PngPixel.bitDepth (α := px)).toNat =
+          some (Pixel.bytesPerPixel (α := px)) := by
+      rw [show (PngPixel.bitDepth (α := px)).toNat = header.bitDepth from hBitDepthMatch.symm]
+      exact hBppLookup
+    rw [hBpp_match]
     simp only [Option.bind_some]
     rw [if_pos hRawSize]
     exact hrowsEq
@@ -194,22 +212,22 @@ theorem decodeBitmap_correct_of_witnesses
   · simpa [hSize, hParse, hStored,
       ct, bd, hbdNoReject, hbitDepthEq, hbitDepthEqHeader, hnoDownsample, hpngBpp',
       hctbd', hBdNot1', normalizeRawByInterlace?,
-      hIdatMin, hInterlace, hWidth, hHeight, hBitDepth,
-      hTargetBitDepth, hChrmGrayInactive] using
+      hIdatMin, hInterlace, hWidth, hHeight, hBitDepthMatch,
+      hChrmGrayInactive] using
       (And.intro hMetaTransparency
-        (And.intro hctbdHdr8
+        (And.intro hctbdHdr_match
           (And.intro hCtCases
-            (And.intro h8eq
+            (And.intro hbdMatchEq
               (And.intro hCt4Reject hBppChain)))))
   · simpa [hSize, hParse, hStoredNone, hZlib,
       ct, bd, hbdNoReject, hbitDepthEq, hbitDepthEqHeader, hnoDownsample, hpngBpp',
       hctbd', hBdNot1', normalizeRawByInterlace?,
-      hIdatMin, hInterlace, hWidth, hHeight, hBitDepth,
-      hTargetBitDepth, hChrmGrayInactive] using
+      hIdatMin, hInterlace, hWidth, hHeight, hBitDepthMatch,
+      hChrmGrayInactive] using
       (And.intro hMetaTransparency
-        (And.intro hctbdHdr8
+        (And.intro hctbdHdr_match
           (And.intro hCtCases
-            (And.intro h8eq
+            (And.intro hbdMatchEq
               (And.intro hCt4Reject hBppChain)))))
 
 /-- The rejection core: any byte stream whose parsed metadata has

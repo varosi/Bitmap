@@ -68,12 +68,16 @@ variable {px : Type u} [Pixel px] [PngPixel px]
 lemma expectedMetadata_srgb_none (s : ExternalPngMultiIdatChrmSpec px) :
     s.container.expectedMetadata.srgb = none := by
   unfold MultiIdatChrmContainerSpec.expectedMetadata
-  rcases s.container.cHRM with _ | _ <;> simp [PngMetadata.empty]
+    MultiIdatGenericPreChunkContainerSpec.expectedMetadata
+    MultiIdatChrmContainerSpec.toGeneric
+  rcases s.container.cHRM with _ | _ <;> simp [ChrmChunkWitness.toPreIdat, PngMetadata.empty]
 
 lemma expectedMetadata_transparency_none (s : ExternalPngMultiIdatChrmSpec px) :
     s.container.expectedMetadata.transparency = none := by
   unfold MultiIdatChrmContainerSpec.expectedMetadata
-  rcases s.container.cHRM with _ | _ <;> simp [PngMetadata.empty]
+    MultiIdatGenericPreChunkContainerSpec.expectedMetadata
+    MultiIdatChrmContainerSpec.toGeneric
+  rcases s.container.cHRM with _ | _ <;> simp [ChrmChunkWitness.toPreIdat, PngMetadata.empty]
 
 theorem parsePngForDecode_multiIdatChrm_external (s : ExternalPngMultiIdatChrmSpec px) :
     parsePngForDecode s.container.bytes s.container.bytes_size_ge_8 =
@@ -143,13 +147,22 @@ theorem decodeBitmap_external_multiIdatChrm_correct (s : ExternalPngMultiIdatChr
       rcases hTgt with h | h
       · rw [hPxIs] at h; exact absurd h (by decide)
       · rw [hPxIs] at h; exact absurd h (by decide)
+  have hBitDepthMatch :
+      s.container.header.bitDepth = (PngPixel.bitDepth (α := px)).toNat := by
+    rw [s.container.hBitDepth, s.hTargetBitDepth]; decide
+  have hTransform_bd :
+      applyPngColorSpaceTransform
+        (PngMetadata.pixelOnlyColorSpace s.container.expectedMetadata)
+        s.container.header.colorType (PngPixel.colorType (α := px))
+        (PngPixel.bitDepth (α := px)) s.preTransformPixels = some s.bitmap.data := by
+    rw [s.hTargetBitDepth]; exact s.hTransform
   exact decodeBitmap_correct_of_witnesses s.container.bytes_size_ge_8
-    s.container.hBitDepth s.container.hColorType
-    s.hWidth s.hHeight s.hInterlace s.hPxColorType s.hTargetBitDepth s.hBppLookup
+    hBitDepthMatch (Or.inl s.hTargetBitDepth) s.container.hColorType
+    s.hWidth s.hHeight s.hInterlace s.hPxColorType s.hBppLookup
     s.expectedMetadata_transparency_none
     hChrmGrayInactive
     s.parsePngForDecode_multiIdatChrm_external
-    s.hIdatMin s.hInflated s.hRawSize s.hPixels s.hTransform
+    s.hIdatMin s.hInflated s.hRawSize s.hPixels hTransform_bd
 
 end ExternalPngMultiIdatChrmSpec
 

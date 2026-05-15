@@ -164,16 +164,20 @@ theorem decodeBitmap_external_multiIdatPhys_correct (s : ExternalPngMultiIdatPhy
         (PngPixel.colorType (α := px) = u8 0 ∨ PngPixel.colorType (α := px) = u8 4)) := by
     intro ⟨⟨⟨_, h⟩, _⟩, _⟩
     rw [hPixelOnlyChrm] at h; exact absurd h (by decide)
+  have hBitDepthMatch :
+      s.container.header.bitDepth = (PngPixel.bitDepth (α := px)).toNat := by
+    rw [s.container.hBitDepth, s.hTargetBitDepth]; decide
   have hTransform :
       applyPngColorSpaceTransform
         (PngMetadata.pixelOnlyColorSpace s.container.expectedMetadata)
         s.container.header.colorType (PngPixel.colorType (α := px))
-        (u8 8) s.bitmap.data = some s.bitmap.data := by
+        (PngPixel.bitDepth (α := px)) s.bitmap.data = some s.bitmap.data := by
+    rw [s.hTargetBitDepth]
     unfold applyPngColorSpaceTransform
     rw [hPixelOnlySrgb, hPixelOnlyChrm, hPixelOnlyGamma]
   exact decodeBitmap_correct_of_witnesses s.container.bytes_size_ge_8
-    s.container.hBitDepth s.container.hColorType
-    s.hWidth s.hHeight s.hInterlace s.hPxColorType s.hTargetBitDepth s.hBppLookup
+    hBitDepthMatch (Or.inl s.hTargetBitDepth) s.container.hColorType
+    s.hWidth s.hHeight s.hInterlace s.hPxColorType s.hBppLookup
     s.expectedMetadata_transparency_none
     hChrmGrayInactive
     s.parsePngForDecode_multiIdatPhys_external
