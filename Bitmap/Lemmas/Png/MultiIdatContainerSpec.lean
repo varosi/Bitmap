@@ -218,7 +218,7 @@ lemma bytes_size_eq (s : MultiIdatContainerSpec) :
 
 /-- `idatPrefixWireSize` distributes over cons: walking past the next
 chunk adds `12 + chunk.size` to the prefix size. -/
-private lemma idatPrefixWireSize_succ (chunks : List ByteArray) (n : Nat)
+lemma idatPrefixWireSize_succ (chunks : List ByteArray) (n : Nat)
     (h : n < chunks.length) :
     idatPrefixWireSize chunks (n + 1) =
       idatPrefixWireSize chunks n + 12 + chunks[n].size := by
@@ -459,7 +459,7 @@ lemma bytes_extract_skip_through_ihdr (s : MultiIdatContainerSpec)
 /-! ### Project per-chunk extracts to `s.bytes` -/
 
 /-- `idatPrefixWireSize` walking past one more chunk doesn't decrease the prefix size. -/
-private lemma idatPrefixWireSize_succ_ge (chunks : List ByteArray) (m : Nat) :
+lemma idatPrefixWireSize_succ_ge (chunks : List ByteArray) (m : Nat) :
     idatPrefixWireSize chunks m ≤ idatPrefixWireSize chunks (m + 1) := by
   by_cases hbnd : m < chunks.length
   · rw [idatPrefixWireSize_succ chunks m hbnd]; omega
@@ -470,7 +470,7 @@ private lemma idatPrefixWireSize_succ_ge (chunks : List ByteArray) (m : Nat) :
     omega
 
 /-- `idatPrefixWireSize` is monotone in the prefix length. -/
-private lemma idatPrefixWireSize_mono (chunks : List ByteArray) (m n : Nat)
+lemma idatPrefixWireSize_mono (chunks : List ByteArray) (m n : Nat)
     (h : m ≤ n) :
     idatPrefixWireSize chunks m ≤ idatPrefixWireSize chunks n := by
   induction n with
@@ -559,7 +559,7 @@ extract that the region's bytes equal a wrapped chunk, `readChunk`
 returns the corresponding type / data / next-position triple. -/
 
 -- `mkChunkBytes` length field is the first 4 bytes.
-private lemma mkChunkBytes_extract_len (typBytes data : ByteArray) :
+lemma mkChunkBytes_extract_len (typBytes data : ByteArray) :
     (mkChunkBytes typBytes data).extract 0 4 = u32be data.size := by
   have hlen : (u32be data.size).size = 4 := u32be_size _
   simpa [mkChunkBytes_def, hlen] using
