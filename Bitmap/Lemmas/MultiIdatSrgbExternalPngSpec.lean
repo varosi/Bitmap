@@ -147,9 +147,13 @@ theorem decodeBitmap_external_multiIdatSrgb_correct (s : ExternalPngMultiIdatSrg
   have hPixelOnlyGamma :
       (PngMetadata.pixelOnlyColorSpace s.container.expectedMetadata).gamma = none := by
     unfold PngMetadata.pixelOnlyColorSpace; exact hMetaGamma
-  have hChrmIsSome :
-      (s.container.expectedMetadata.pixelOnlyColorSpace.chromaticities.isSome : Bool) = false := by
-    rw [hPixelOnlyChrm]; rfl
+  have hChrmGrayInactive :
+      ¬ (((s.container.expectedMetadata.pixelOnlyColorSpace.srgb = none ∧
+            s.container.expectedMetadata.pixelOnlyColorSpace.chromaticities.isSome = true) ∧
+          (s.container.header.colorType = 2 ∨ s.container.header.colorType = 6)) ∧
+        (PngPixel.colorType (α := px) = u8 0 ∨ PngPixel.colorType (α := px) = u8 4)) := by
+    intro ⟨⟨⟨_, h⟩, _⟩, _⟩
+    rw [hPixelOnlyChrm] at h; exact absurd h (by decide)
   -- For sRGB-only metadata, the color-space transform is identity in both
   -- srgb=none and srgb=some w cases: srgb=some short-circuits, srgb=none
   -- falls through with chrm/gamma both none.
@@ -166,7 +170,7 @@ theorem decodeBitmap_external_multiIdatSrgb_correct (s : ExternalPngMultiIdatSrg
     s.container.hBitDepth s.container.hColorType
     s.hWidth s.hHeight s.hInterlace s.hPxColorType s.hTargetBitDepth s.hBppLookup
     s.expectedMetadata_transparency_none
-    hChrmIsSome
+    hChrmGrayInactive
     s.parsePngForDecode_multiIdatSrgb_external
     s.hIdatMin s.hInflated s.hRawSize s.hPixels hTransform
 

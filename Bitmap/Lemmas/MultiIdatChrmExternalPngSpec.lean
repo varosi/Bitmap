@@ -1,6 +1,6 @@
 import Bitmap.Lemmas.MultiIdatExternalPngSpec
 import Bitmap.Lemmas.ExternalPngCore
-import Bitmap.Lemmas.Png.MultiIdatGammaContainerSpec
+import Bitmap.Lemmas.Png.MultiIdatChrmContainerSpec
 
 universe u
 
@@ -10,16 +10,16 @@ namespace Lemmas
 
 open Png
 
-/-! ## End-to-end multi-IDAT + gAMA spec (Step 2c gAMA end-to-end)
+/-! ## End-to-end multi-IDAT + cHRM spec (Step 2c cHRM end-to-end)
 
 Unlike tIME/pHYs/sRGB, the gamma metadata genuinely transforms the
 pixel data via `applyGamma8ToPixels`. So the spec carries an explicit
 pre-transform pixel array (`preTransformPixels`) plus a witness that
 applying the color-space transform yields `bitmap.data`. -/
 
-structure ExternalPngMultiIdatGammaSpec (px : Type u) [Pixel px] [PngPixel px] where
+structure ExternalPngMultiIdatChrmSpec (px : Type u) [Pixel px] [PngPixel px] where
   bitmap : Bitmap px
-  container : MultiIdatGammaContainerSpec
+  container : MultiIdatChrmContainerSpec
   hWidth : container.header.width = bitmap.size.width
   hHeight : container.header.height = bitmap.size.height
   hColorType :
@@ -54,45 +54,36 @@ structure ExternalPngMultiIdatGammaSpec (px : Type u) [Pixel px] [PngPixel px] w
               Pixel.bytesPerPixel (α := px)) 0 } =
       some preTransformPixels
   /-- Applying the gamma transform to `preTransformPixels` produces
-      `bitmap.data`. For gAMA-none, this reduces to identity. -/
+      `bitmap.data`. For cHRM-none, this reduces to identity. -/
   hTransform :
     applyPngColorSpaceTransform
       (PngMetadata.pixelOnlyColorSpace container.expectedMetadata)
       container.header.colorType (PngPixel.colorType (α := px))
       (u8 8) preTransformPixels = some bitmap.data
 
-namespace ExternalPngMultiIdatGammaSpec
+namespace ExternalPngMultiIdatChrmSpec
 
 variable {px : Type u} [Pixel px] [PngPixel px]
 
-lemma expectedMetadata_chromaticities_none (s : ExternalPngMultiIdatGammaSpec px) :
-    s.container.expectedMetadata.chromaticities = none := by
-  unfold MultiIdatGammaContainerSpec.expectedMetadata
-  rcases s.container.gAMA with _ | _ <;> simp [PngMetadata.empty]
-
-lemma expectedMetadata_srgb_none (s : ExternalPngMultiIdatGammaSpec px) :
+lemma expectedMetadata_srgb_none (s : ExternalPngMultiIdatChrmSpec px) :
     s.container.expectedMetadata.srgb = none := by
-  unfold MultiIdatGammaContainerSpec.expectedMetadata
-  rcases s.container.gAMA with _ | _ <;> simp [PngMetadata.empty]
+  unfold MultiIdatChrmContainerSpec.expectedMetadata
+  rcases s.container.cHRM with _ | _ <;> simp [PngMetadata.empty]
 
-lemma expectedMetadata_transparency_none (s : ExternalPngMultiIdatGammaSpec px) :
+lemma expectedMetadata_transparency_none (s : ExternalPngMultiIdatChrmSpec px) :
     s.container.expectedMetadata.transparency = none := by
-  unfold MultiIdatGammaContainerSpec.expectedMetadata
-  rcases s.container.gAMA with _ | _ <;> simp [PngMetadata.empty]
+  unfold MultiIdatChrmContainerSpec.expectedMetadata
+  rcases s.container.cHRM with _ | _ <;> simp [PngMetadata.empty]
 
-lemma expectedMetadata_chromaticities_isSome (s : ExternalPngMultiIdatGammaSpec px) :
-    (s.container.expectedMetadata.chromaticities.isSome : Bool) = false := by
-  rw [s.expectedMetadata_chromaticities_none]; rfl
-
-theorem parsePngForDecode_multiIdatGamma_external (s : ExternalPngMultiIdatGammaSpec px) :
+theorem parsePngForDecode_multiIdatChrm_external (s : ExternalPngMultiIdatChrmSpec px) :
     parsePngForDecode s.container.bytes s.container.bytes_size_ge_8 =
       some
         { header := s.container.header
           idat := s.container.idatData
           metadata := s.container.expectedMetadata } :=
-  s.container.parsePngForDecode_multiIdatGammaContainerSpec_correct
+  s.container.parsePngForDecode_multiIdatChrmContainerSpec_correct
 
-theorem zlibInflate_multiIdatGamma_external {α : Type} (s : ExternalPngMultiIdatGammaSpec px)
+theorem zlibInflate_multiIdatChrm_external {α : Type} (s : ExternalPngMultiIdatChrmSpec px)
     (f : ByteArray → Option α) :
     (do
       let inflated ←
@@ -104,12 +95,12 @@ theorem zlibInflate_multiIdatGamma_external {α : Type} (s : ExternalPngMultiIda
   · simp [hStored]
   · simp [hStoredNone, hZlib]
 
-lemma pngColorTypeBitDepthSupported_multiIdatGamma_external
-    (s : ExternalPngMultiIdatGammaSpec px) :
+lemma pngColorTypeBitDepthSupported_multiIdatChrm_external
+    (s : ExternalPngMultiIdatChrmSpec px) :
     pngColorTypeBitDepthSupported s.container.header.colorType 8 = true := by
   rcases s.container.hColorType with h | h | h | h <;> rw [h] <;> decide
 
-lemma colorTypeCases_multiIdatGamma_external (s : ExternalPngMultiIdatGammaSpec px) :
+lemma colorTypeCases_multiIdatChrm_external (s : ExternalPngMultiIdatChrmSpec px) :
     ¬ s.container.header.colorType = 0 →
     ¬ s.container.header.colorType = 2 →
     ¬ s.container.header.colorType = 4 →
@@ -121,7 +112,7 @@ lemma colorTypeCases_multiIdatGamma_external (s : ExternalPngMultiIdatGammaSpec 
   · exact absurd hc h4
   · exact hc
 
-lemma ct4_noReject_multiIdatGamma_external (s : ExternalPngMultiIdatGammaSpec px) :
+lemma ct4_noReject_multiIdatChrm_external (s : ExternalPngMultiIdatChrmSpec px) :
     s.container.header.colorType = 4 →
     ¬ PngPixel.colorType (α := px) = u8 4 →
     PngPixel.colorType (α := px) = u8 6 := by
@@ -129,28 +120,38 @@ lemma ct4_noReject_multiIdatGamma_external (s : ExternalPngMultiIdatGammaSpec px
   have : PngPixel.colorType (α := px) = u8 4 := by rw [s.hPxColorType, h4]
   exact absurd this hne
 
-theorem decodeBitmap_external_multiIdatGamma_correct (s : ExternalPngMultiIdatGammaSpec px) :
+theorem decodeBitmap_external_multiIdatChrm_correct (s : ExternalPngMultiIdatChrmSpec px) :
     Png.decodeBitmap s.container.bytes = some s.bitmap := by
+  -- For cHRM spec, target colorType = source colorType (via hColorType +
+  -- hPxColorType). If source ∈ {2,6}, target ∉ {u8 0, u8 4}; if source ∈
+  -- {0,4}, source ∉ {2,6}. Either way, chrmGrayActive is false.
   have hChrmGrayInactive :
       ¬ (((s.container.expectedMetadata.pixelOnlyColorSpace.srgb = none ∧
             s.container.expectedMetadata.pixelOnlyColorSpace.chromaticities.isSome = true) ∧
           (s.container.header.colorType = 2 ∨ s.container.header.colorType = 6)) ∧
         (PngPixel.colorType (α := px) = u8 0 ∨ PngPixel.colorType (α := px) = u8 4)) := by
-    intro ⟨⟨⟨_, h⟩, _⟩, _⟩
-    have : s.container.expectedMetadata.pixelOnlyColorSpace.chromaticities.isSome = false := by
-      unfold PngMetadata.pixelOnlyColorSpace
-      show s.container.expectedMetadata.chromaticities.isSome = false
-      exact s.expectedMetadata_chromaticities_isSome
-    rw [this] at h; exact absurd h (by decide)
+    intro ⟨⟨_, hSrc⟩, hTgt⟩
+    -- target = u8 source, so target ∈ {u8 2, u8 6}, not {u8 0, u8 4}.
+    rcases hSrc with h2 | h6
+    · have hPxIs : PngPixel.colorType (α := px) = u8 2 := by
+        rw [s.hPxColorType, h2]
+      rcases hTgt with h | h
+      · rw [hPxIs] at h; exact absurd h (by decide)
+      · rw [hPxIs] at h; exact absurd h (by decide)
+    · have hPxIs : PngPixel.colorType (α := px) = u8 6 := by
+        rw [s.hPxColorType, h6]
+      rcases hTgt with h | h
+      · rw [hPxIs] at h; exact absurd h (by decide)
+      · rw [hPxIs] at h; exact absurd h (by decide)
   exact decodeBitmap_correct_of_witnesses s.container.bytes_size_ge_8
     s.container.hBitDepth s.container.hColorType
     s.hWidth s.hHeight s.hInterlace s.hPxColorType s.hTargetBitDepth s.hBppLookup
     s.expectedMetadata_transparency_none
     hChrmGrayInactive
-    s.parsePngForDecode_multiIdatGamma_external
+    s.parsePngForDecode_multiIdatChrm_external
     s.hIdatMin s.hInflated s.hRawSize s.hPixels s.hTransform
 
-end ExternalPngMultiIdatGammaSpec
+end ExternalPngMultiIdatChrmSpec
 
 end Lemmas
 

@@ -157,9 +157,13 @@ theorem decodeBitmap_external_multiIdatPhys_correct (s : ExternalPngMultiIdatPhy
   have hPixelOnlyGamma :
       (PngMetadata.pixelOnlyColorSpace s.container.expectedMetadata).gamma = none := by
     unfold PngMetadata.pixelOnlyColorSpace; exact hMetaGamma
-  have hChrmIsSome :
-      (s.container.expectedMetadata.pixelOnlyColorSpace.chromaticities.isSome : Bool) = false := by
-    rw [hPixelOnlyChrm]; rfl
+  have hChrmGrayInactive :
+      ¬ (((s.container.expectedMetadata.pixelOnlyColorSpace.srgb = none ∧
+            s.container.expectedMetadata.pixelOnlyColorSpace.chromaticities.isSome = true) ∧
+          (s.container.header.colorType = 2 ∨ s.container.header.colorType = 6)) ∧
+        (PngPixel.colorType (α := px) = u8 0 ∨ PngPixel.colorType (α := px) = u8 4)) := by
+    intro ⟨⟨⟨_, h⟩, _⟩, _⟩
+    rw [hPixelOnlyChrm] at h; exact absurd h (by decide)
   have hTransform :
       applyPngColorSpaceTransform
         (PngMetadata.pixelOnlyColorSpace s.container.expectedMetadata)
@@ -171,7 +175,7 @@ theorem decodeBitmap_external_multiIdatPhys_correct (s : ExternalPngMultiIdatPhy
     s.container.hBitDepth s.container.hColorType
     s.hWidth s.hHeight s.hInterlace s.hPxColorType s.hTargetBitDepth s.hBppLookup
     s.expectedMetadata_transparency_none
-    hChrmIsSome
+    hChrmGrayInactive
     s.parsePngForDecode_multiIdatPhys_external
     s.hIdatMin s.hInflated s.hRawSize s.hPixels hTransform
 

@@ -41,8 +41,11 @@ theorem decodeBitmap_correct_of_witnesses
     (hBppLookup : pngBytesPerPixelForColorTypeAndBitDepth?
       header.colorType header.bitDepth = some (Pixel.bytesPerPixel (α := px)))
     (hMetaTransparency : metadata.transparency = none)
-    (hPixelOnlyChrmIsSome :
-      (metadata.pixelOnlyColorSpace.chromaticities.isSome : Bool) = false)
+    (hChrmGrayInactive :
+      ¬ (((metadata.pixelOnlyColorSpace.srgb = none ∧
+            metadata.pixelOnlyColorSpace.chromaticities.isSome = true) ∧
+          (header.colorType = 2 ∨ header.colorType = 6)) ∧
+        (PngPixel.colorType (α := px) = u8 0 ∨ PngPixel.colorType (α := px) = u8 4)))
     (hParse : parsePngForDecode bytes hSize =
       some { header := header, idat := idat, metadata := metadata })
     (hIdatMin : 2 ≤ idat.size)
@@ -181,7 +184,7 @@ theorem decodeBitmap_correct_of_witnesses
       ct, bd, hbdNoReject, hbitDepthEq, hbitDepthEqHeader, hnoDownsample, hpngBpp',
       hctbd', hBdNot1', normalizeRawByInterlace?,
       hIdatMin, hInterlace, hWidth, hHeight, hBitDepth,
-      hTargetBitDepth, hPixelOnlyChrmIsSome] using
+      hTargetBitDepth, hChrmGrayInactive] using
       (And.intro hMetaTransparency
         (And.intro hctbdHdr8
           (And.intro hCtCases
@@ -191,7 +194,7 @@ theorem decodeBitmap_correct_of_witnesses
       ct, bd, hbdNoReject, hbitDepthEq, hbitDepthEqHeader, hnoDownsample, hpngBpp',
       hctbd', hBdNot1', normalizeRawByInterlace?,
       hIdatMin, hInterlace, hWidth, hHeight, hBitDepth,
-      hTargetBitDepth, hPixelOnlyChrmIsSome] using
+      hTargetBitDepth, hChrmGrayInactive] using
       (And.intro hMetaTransparency
         (And.intro hctbdHdr8
           (And.intro hCtCases
