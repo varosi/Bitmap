@@ -42,7 +42,9 @@ is constrained to the supported subset (`bitDepth = 8` and
 structure SimpleContainerSpec where
   header : PngHeader
   idatData : ByteArray
-  hBitDepth : header.bitDepth = 8
+  /-- Bit depth is 8 or 16 (the supported subset values for this proof
+  scope; the runtime decoder accepts both with `colorType ∈ {0,2,4,6}`). -/
+  hBitDepth : header.bitDepth = 8 ∨ header.bitDepth = 16
   hColorType :
     header.colorType = 0 ∨ header.colorType = 2 ∨
       header.colorType = 4 ∨ header.colorType = 6
@@ -129,6 +131,17 @@ lemma parseIHDRData_encodeIHDRData (h : PngHeader)
   cases hBitDepth
   cases hInterlace
   rfl
+
+/-- Discharge `pngColorTypeBitDepthSupported` for the supported subset
+(bit depth ∈ {8, 16}, color type ∈ {0, 2, 4, 6}). Shared by every
+container-spec forward-correctness proof. -/
+lemma pngColorTypeBitDepthSupported_of_subset
+    {ct bd : Nat}
+    (hBitDepth : bd = 8 ∨ bd = 16)
+    (hColorType : ct = 0 ∨ ct = 2 ∨ ct = 4 ∨ ct = 6) :
+    pngColorTypeBitDepthSupported ct bd = true := by
+  rcases hBitDepth with h | h <;> rw [h] <;>
+    rcases hColorType with h | h | h | h <;> rw [h] <;> decide
 
 /-- IHDR round-trip generalised to bit depth 8 OR 16. The 16-bit case
 mirrors the 8-bit one — `parseIHDRData` reads each field generically
@@ -654,7 +667,7 @@ theorem parsePngSimple_simpleContainerSpec_correct (s : SimpleContainerSpec)
     · rw [h6]; decide
   -- IHDR data round-trip parses to the original header.
   have hParseHdr :=
-    parseIHDRData_encodeIHDRData s.header s.hWidth s.hHeight s.hBitDepth s.hInterlace hCT256
+    parseIHDRData_encodeIHDRData_8or16 s.header s.hWidth s.hHeight s.hBitDepth s.hInterlace hCT256
   -- Color type IS in {0, 2, 6}, so the bad-color-type check fails.
   have hCTok :
       (s.header.colorType != 0 && s.header.colorType != 2 &&
@@ -667,11 +680,10 @@ theorem parsePngSimple_simpleContainerSpec_correct (s : SimpleContainerSpec)
     rcases hrest with h4 | h6
     · rw [h4]; decide
     · rw [h6]; decide
-  -- Color type ∈ {0, 2, 4, 6} and bit depth = 8 ⇒ the joint check passes.
+  -- Color type ∈ {0, 2, 4, 6} and bit depth ∈ {8,16} ⇒ the joint check passes.
   have hCtBdOk :
-      pngColorTypeBitDepthSupported s.header.colorType s.header.bitDepth = true := by
-    rw [s.hBitDepth]
-    rcases s.hColorType with h | h | h | h <;> rw [h] <;> decide
+      pngColorTypeBitDepthSupported s.header.colorType s.header.bitDepth = true :=
+    pngColorTypeBitDepthSupported_of_subset s.hBitDepth s.hColorType
   -- IEND data is empty, so the non-empty-IEND check fails.
   have hEmpty : (ByteArray.empty.size != 0) = false := by decide
   -- Final position (57 + s.idatData.size) equals s.bytes.size, so the

@@ -26,7 +26,10 @@ structure ExternalPngMultiIdatBkgdSpec (px : Type u) [Pixel px] [PngPixel px] wh
     container.header.colorType = (PngPixel.colorType (α := px)).toNat
   hInterlace : container.header.interlace = 0
   hPxColorType : PngPixel.colorType (α := px) = u8 container.header.colorType
-  hTargetBitDepth : PngPixel.bitDepth (α := px) = u8 8
+  hTargetBitDepth :
+    PngPixel.bitDepth (α := px) = u8 8 ∨ PngPixel.bitDepth (α := px) = u8 16
+  hBitDepthMatch :
+    container.header.bitDepth = (PngPixel.bitDepth (α := px)).toNat
   hBppLookup :
     pngBytesPerPixelForColorTypeAndBitDepth?
       container.header.colorType container.header.bitDepth =
@@ -115,19 +118,15 @@ theorem decodeBitmap_external_multiIdatBkgd_correct (s : ExternalPngMultiIdatBkg
         (PngPixel.colorType (α := px) = u8 0 ∨ PngPixel.colorType (α := px) = u8 4)) := by
     intro ⟨⟨⟨_, h⟩, _⟩, _⟩
     rw [hPixelOnlyChrm] at h; exact absurd h (by decide)
-  have hBitDepthMatch :
-      s.container.header.bitDepth = (PngPixel.bitDepth (α := px)).toNat := by
-    rw [s.container.hBitDepth, s.hTargetBitDepth]; decide
   have hTransform :
       applyPngColorSpaceTransform
         (PngMetadata.pixelOnlyColorSpace s.container.expectedMetadata)
         s.container.header.colorType (PngPixel.colorType (α := px))
         (PngPixel.bitDepth (α := px)) s.bitmap.data = some s.bitmap.data := by
-    rw [s.hTargetBitDepth]
     unfold applyPngColorSpaceTransform
     rw [hPixelOnlySrgb, hPixelOnlyChrm, hPixelOnlyGamma]
   exact decodeBitmap_correct_of_witnesses s.container.bytes_size_ge_8
-    hBitDepthMatch (Or.inl s.hTargetBitDepth) s.container.hColorType
+    s.hBitDepthMatch s.hTargetBitDepth s.container.hColorType
     s.hWidth s.hHeight s.hInterlace s.hPxColorType s.hBppLookup
     s.expectedMetadata_transparency_none
     hChrmGrayInactive

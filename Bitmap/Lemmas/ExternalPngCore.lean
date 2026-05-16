@@ -36,10 +36,12 @@ byte stream:
 
 Each per-spec end-to-end theorem (`decodeBitmap_external_*_correct`)
 is a one-line corollary that supplies the witnesses for the matching
-core. The existing 8-bit wrappers thread `Or.inl s.hTargetBitDepth`;
-a future 16-bit `ExternalPng…Spec16` variant would thread
-`Or.inr s.hTargetBitDepth` instead, with the rest of its proof body
-identical. -/
+core. The spec's `hTargetBitDepth` is itself the
+`u8 8 ∨ u8 16` disjunction passed to the core; consistency with the
+container's `header.bitDepth` is recorded by the spec's
+`hBitDepthMatch` field. Both 8-bit and 16-bit pixel types
+(`PixelGray8`, `PixelGray16`, …) satisfy the disjunction by
+`Or.inl rfl` / `Or.inr rfl` respectively. -/
 
 set_option maxHeartbeats 16000000 in
 set_option maxRecDepth 4096 in

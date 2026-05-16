@@ -70,7 +70,7 @@ structure MultiIdatGenericPreChunkContainerSpec where
   idatChunks : List ByteArray
   hChunkSize : ∀ c, c ∈ idatChunks → c.size < 2 ^ 32
   hNonempty : idatChunks ≠ []
-  hBitDepth : header.bitDepth = 8
+  hBitDepth : header.bitDepth = 8 ∨ header.bitDepth = 16
   hColorType :
     header.colorType = 0 ∨ header.colorType = 2 ∨
       header.colorType = 4 ∨ header.colorType = 6
@@ -686,7 +686,7 @@ lemma walk_ihdr_step {w : PreIdatChunk s.header} (hw : s.preChunk = some w) (fue
   have hIhdrSize : (encodeIHDRData s.header).size = 13 := encodeIHDRData_size s.header
   have hCT256 : s.header.colorType < 256 := by
     rcases s.hColorType with h | h | h | h <;> rw [h] <;> decide
-  have hParseHdr := parseIHDRData_encodeIHDRData s.header
+  have hParseHdr := parseIHDRData_encodeIHDRData_8or16 s.header
     s.hWidth s.hHeight s.hBitDepth s.hInterlace hCT256
   conv => lhs; unfold parsePngLoopFuelWithMetadata
   have hReadU32Len : readU32BE s.bytes 8 hLen = 13 := by
@@ -780,12 +780,11 @@ theorem parsePngForDecode_correct_of_some
     have hRead2 := s.readChunk_g_preChunk hw hLen2'
     have hCT256 : s.header.colorType < 256 := by
       rcases s.hColorType with h | h | h | h <;> rw [h] <;> decide
-    have hParseHdr := parseIHDRData_encodeIHDRData s.header
+    have hParseHdr := parseIHDRData_encodeIHDRData_8or16 s.header
       s.hWidth s.hHeight s.hBitDepth s.hInterlace hCT256
     have hCtBdOk :
-        pngColorTypeBitDepthSupported s.header.colorType s.header.bitDepth = true := by
-      rw [s.hBitDepth]
-      rcases s.hColorType with h | h | h | h <;> rw [h] <;> decide
+        pngColorTypeBitDepthSupported s.header.colorType s.header.bitDepth = true :=
+      pngColorTypeBitDepthSupported_of_subset s.hBitDepth s.hColorType
     have hCTProp :
         ¬s.header.colorType = 0 → ¬s.header.colorType = 2 →
           ¬s.header.colorType = 4 → s.header.colorType = 6 := by

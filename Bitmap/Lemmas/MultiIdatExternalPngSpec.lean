@@ -49,8 +49,12 @@ structure ExternalPngMultiIdatSpec (px : Type u) [Pixel px] [PngPixel px] where
       to avoid alpha-drop/add conversions and to follow the
       `PngPixel.decodeRowsLoop` path. -/
   hPxColorType : PngPixel.colorType (α := px) = u8 container.header.colorType
-  /-- Target pixel type uses 8-bit depth. -/
-  hTargetBitDepth : PngPixel.bitDepth (α := px) = u8 8
+  /-- Target pixel type uses 8-bit or 16-bit depth. -/
+  hTargetBitDepth :
+    PngPixel.bitDepth (α := px) = u8 8 ∨ PngPixel.bitDepth (α := px) = u8 16
+  /-- Consistency between container's bit depth and the pixel type. -/
+  hBitDepthMatch :
+    container.header.bitDepth = (PngPixel.bitDepth (α := px)).toNat
   /-- `Pixel.bytesPerPixel` matches the PNG bpp table for the
       container's (colorType, bitDepth) pair. -/
   hBppLookup :
@@ -158,19 +162,15 @@ theorem decodeBitmap_external_multiIdat_correct (s : ExternalPngMultiIdatSpec px
           (s.container.header.colorType = 2 ∨ s.container.header.colorType = 6)) ∧
         (PngPixel.colorType (α := px) = u8 0 ∨ PngPixel.colorType (α := px) = u8 4)) := by
     intro ⟨⟨⟨_, h⟩, _⟩, _⟩; exact absurd h (by decide)
-  have hBitDepthMatch :
-      s.container.header.bitDepth = (PngPixel.bitDepth (α := px)).toNat := by
-    rw [s.container.hBitDepth, s.hTargetBitDepth]; decide
   have hTransform :
       applyPngColorSpaceTransform
         (PngMetadata.pixelOnlyColorSpace PngMetadata.empty)
         s.container.header.colorType (PngPixel.colorType (α := px))
         (PngPixel.bitDepth (α := px)) s.bitmap.data = some s.bitmap.data := by
-    rw [s.hTargetBitDepth]
     unfold applyPngColorSpaceTransform PngMetadata.pixelOnlyColorSpace
     rfl
   exact decodeBitmap_correct_of_witnesses s.container.bytes_size_ge_8
-    hBitDepthMatch (Or.inl s.hTargetBitDepth) s.container.hColorType
+    s.hBitDepthMatch s.hTargetBitDepth s.container.hColorType
     s.hWidth s.hHeight s.hInterlace s.hPxColorType s.hBppLookup
     (show (PngMetadata.empty : PngMetadata).transparency = none from rfl)
     hChrmGrayInactive
@@ -198,6 +198,7 @@ def ExternalPngSpec.toMultiIdat {px : Type u} [Pixel px] [PngPixel px]
   hInterlace := s.hInterlace
   hPxColorType := s.hPxColorType
   hTargetBitDepth := s.hTargetBitDepth
+  hBitDepthMatch := s.hBitDepthMatch
   hBppLookup := s.hBppLookup
   hIdatMin := by
     rw [s.container.toMulti_idatData s.hIdatSize]

@@ -26,7 +26,10 @@ structure ExternalPngMultiIdatGammaSpec (px : Type u) [Pixel px] [PngPixel px] w
     container.header.colorType = (PngPixel.colorType (α := px)).toNat
   hInterlace : container.header.interlace = 0
   hPxColorType : PngPixel.colorType (α := px) = u8 container.header.colorType
-  hTargetBitDepth : PngPixel.bitDepth (α := px) = u8 8
+  hTargetBitDepth :
+    PngPixel.bitDepth (α := px) = u8 8 ∨ PngPixel.bitDepth (α := px) = u8 16
+  hBitDepthMatch :
+    container.header.bitDepth = (PngPixel.bitDepth (α := px)).toNat
   hBppLookup :
     pngBytesPerPixelForColorTypeAndBitDepth?
       container.header.colorType container.header.bitDepth =
@@ -59,7 +62,7 @@ structure ExternalPngMultiIdatGammaSpec (px : Type u) [Pixel px] [PngPixel px] w
     applyPngColorSpaceTransform
       (PngMetadata.pixelOnlyColorSpace container.expectedMetadata)
       container.header.colorType (PngPixel.colorType (α := px))
-      (u8 8) preTransformPixels = some bitmap.data
+      (PngPixel.bitDepth (α := px)) preTransformPixels = some bitmap.data
 
 namespace ExternalPngMultiIdatGammaSpec
 
@@ -148,22 +151,13 @@ theorem decodeBitmap_external_multiIdatGamma_correct (s : ExternalPngMultiIdatGa
       show s.container.expectedMetadata.chromaticities.isSome = false
       exact s.expectedMetadata_chromaticities_isSome
     rw [this] at h; exact absurd h (by decide)
-  have hBitDepthMatch :
-      s.container.header.bitDepth = (PngPixel.bitDepth (α := px)).toNat := by
-    rw [s.container.hBitDepth, s.hTargetBitDepth]; decide
-  have hTransform_bd :
-      applyPngColorSpaceTransform
-        (PngMetadata.pixelOnlyColorSpace s.container.expectedMetadata)
-        s.container.header.colorType (PngPixel.colorType (α := px))
-        (PngPixel.bitDepth (α := px)) s.preTransformPixels = some s.bitmap.data := by
-    rw [s.hTargetBitDepth]; exact s.hTransform
   exact decodeBitmap_correct_of_witnesses s.container.bytes_size_ge_8
-    hBitDepthMatch (Or.inl s.hTargetBitDepth) s.container.hColorType
+    s.hBitDepthMatch s.hTargetBitDepth s.container.hColorType
     s.hWidth s.hHeight s.hInterlace s.hPxColorType s.hBppLookup
     s.expectedMetadata_transparency_none
     hChrmGrayInactive
     s.parsePngForDecode_multiIdatGamma_external
-    s.hIdatMin s.hInflated s.hRawSize s.hPixels hTransform_bd
+    s.hIdatMin s.hInflated s.hRawSize s.hPixels s.hTransform
 
 end ExternalPngMultiIdatGammaSpec
 

@@ -64,7 +64,7 @@ structure MultiIdatSrgbContainerSpec where
   idatChunks : List ByteArray
   hChunkSize : ∀ c, c ∈ idatChunks → c.size < 2 ^ 32
   hNonempty : idatChunks ≠ []
-  hBitDepth : header.bitDepth = 8
+  hBitDepth : header.bitDepth = 8 ∨ header.bitDepth = 16
   hColorType :
     header.colorType = 0 ∨ header.colorType = 2 ∨
       header.colorType = 4 ∨ header.colorType = 6
