@@ -18,7 +18,14 @@ byte stream:
 
 * `decodeBitmap_correct_of_witnesses` — accepts when the parsed
   metadata has `transparency = none` (and all the structural
-  decoder-layer witnesses line up), returning `some bitmap`.
+  decoder-layer witnesses line up), returning `some bitmap`. The
+  core is generalised over the target bit depth: it accepts a
+  disjunction `PngPixel.bitDepth (α := px) = u8 8 ∨ ... = u8 16`,
+  so the same theorem proves 8-bit AND 16-bit success cases. The
+  `hTransform` witness uses `(PngPixel.bitDepth (α := px))` rather
+  than `(u8 8)`, so it adapts automatically. (Source bit depth must
+  equal target bit depth; the 16→8 downsample path is not covered
+  here.)
 * `decodeBitmap_rejects_of_transparency` — rejects (returns `none`)
   whenever the parsed metadata has `transparency.isSome = true`.
   This handles `tRNS`-bearing byte streams: the parser accepts the
@@ -29,7 +36,10 @@ byte stream:
 
 Each per-spec end-to-end theorem (`decodeBitmap_external_*_correct`)
 is a one-line corollary that supplies the witnesses for the matching
-core. -/
+core. The existing 8-bit wrappers thread `Or.inl s.hTargetBitDepth`;
+a future 16-bit `ExternalPng…Spec16` variant would thread
+`Or.inr s.hTargetBitDepth` instead, with the rest of its proof body
+identical. -/
 
 set_option maxHeartbeats 16000000 in
 set_option maxRecDepth 4096 in
