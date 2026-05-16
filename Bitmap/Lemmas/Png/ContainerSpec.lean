@@ -84,6 +84,13 @@ lemma encodeIHDRData_eq_via_ihdrTailColor (h : PngHeader) (hBitDepth : h.bitDept
   unfold encodeIHDRData ihdrTailColor
   simp [hBitDepth, ihdrTailDepth]
 
+/-- Bit-depth-generic counterpart: `encodeIHDRData` factors through
+`ihdrTailDepth (u8 h.bitDepth) (u8 h.colorType)`. -/
+lemma encodeIHDRData_eq_via_ihdrTailDepth (h : PngHeader) :
+    encodeIHDRData h = u32be h.width ++ u32be h.height ++
+      ihdrTailDepth (u8 h.bitDepth) (u8 h.colorType) := by
+  rfl
+
 /-- The on-the-wire size of a chunk built by `mkChunkBytes`: 12-byte
 overhead (4 length + 4 type + 4 CRC) plus the payload size. -/
 lemma mkChunkBytes_size (typBytes data : ByteArray) (hType : typBytes.size = 4) :
@@ -120,6 +127,42 @@ lemma parseIHDRData_encodeIHDRData (h : PngHeader)
   obtain ⟨w, ht, ct, bd, interlace⟩ := h
   simp at hBitDepth hInterlace
   cases hBitDepth
+  cases hInterlace
+  rfl
+
+/-- IHDR round-trip generalised to bit depth 8 OR 16. The 16-bit case
+mirrors the 8-bit one — `parseIHDRData` reads each field generically
+once we route through `ihdrTailDepth`. -/
+lemma parseIHDRData_encodeIHDRData_8or16 (h : PngHeader)
+    (hWidth : h.width < 2 ^ 32) (hHeight : h.height < 2 ^ 32)
+    (hBitDepth : h.bitDepth = 8 ∨ h.bitDepth = 16)
+    (hInterlace : h.interlace = 0) (hColorType : h.colorType < 256) :
+    parseIHDRData (encodeIHDRData h) = some h := by
+  rw [encodeIHDRData_eq_via_ihdrTailDepth h]
+  unfold parseIHDRData
+  have hSize :
+      (u32be h.width ++ u32be h.height ++
+        ihdrTailDepth (u8 h.bitDepth) (u8 h.colorType)).size = 13 :=
+    ihdr_payload_size_depth h.width h.height (u8 h.bitDepth) (u8 h.colorType)
+  have hWidthRead :=
+    readU32BE_ihdr_width_depth h.width h.height
+      (u8 h.bitDepth) (u8 h.colorType) hWidth
+  have hHeightRead :=
+    readU32BE_ihdr_height_depth h.width h.height
+      (u8 h.bitDepth) (u8 h.colorType) hHeight
+  have hTailExtract :=
+    ihdr_payload_extract_tail_depth h.width h.height
+      (u8 h.bitDepth) (u8 h.colorType)
+  have hCT_ofNat : (u8 h.colorType).toNat = h.colorType := by
+    simp [u8, Nat.mod_eq_of_lt hColorType]
+  have hBD_ofNat : (u8 h.bitDepth).toNat = h.bitDepth := by
+    rcases hBitDepth with h8 | h16
+    · rw [h8]; decide
+    · rw [h16]; decide
+  have hZero_ofNat : (u8 0).toNat = 0 := by decide
+  simp [hSize, hWidthRead, hHeightRead, hTailExtract, hCT_ofNat, hBD_ofNat, hZero_ofNat]
+  obtain ⟨w, ht, ct, bd, interlace⟩ := h
+  simp at hInterlace
   cases hInterlace
   rfl
 

@@ -1472,6 +1472,61 @@ lemma readU32BE_ihdr_height (w h : Nat) (ct : UInt8) (hh : h < 2 ^ 32) :
   simp [hread'] at hread
   exact hread
 
+/-- Width is recoverable from the bit-depth-generic IHDR payload. -/
+lemma readU32BE_ihdr_width_depth (w h : Nat) (bd ct : UInt8) (hw : w < 2 ^ 32) :
+    readU32BE (u32be w ++ u32be h ++ ihdrTailDepth bd ct) 0 (by
+      have : (u32be w ++ u32be h ++ ihdrTailDepth bd ct).size = 13 :=
+        ihdr_payload_size_depth w h bd ct
+      omega) = w := by
+  have hpos : 0 + 3 < (u32be w ++ u32be h ++ ihdrTailDepth bd ct).size := by
+    have : (u32be w ++ u32be h ++ ihdrTailDepth bd ct).size = 13 :=
+      ihdr_payload_size_depth w h bd ct
+    omega
+  have hread :=
+    readU32BE_extract (bytes := u32be w ++ u32be h ++ ihdrTailDepth bd ct)
+      (pos := 0) hpos
+  have hwidth : (u32be w ++ u32be h ++ ihdrTailDepth bd ct).extract 0 4 =
+      u32be w :=
+    ihdr_payload_extract_width_depth w h bd ct
+  have htotal : (u32be w ++ u32be h ++ ihdrTailDepth bd ct).size = 13 :=
+    ihdr_payload_size_depth w h bd ct
+  have hsize : ((u32be w ++ u32be h ++ ihdrTailDepth bd ct).extract 0 4).size = 4 := by
+    simp [ByteArray.size_extract, htotal]
+  have hpos' : 0 + 3 < ((u32be w ++ u32be h ++ ihdrTailDepth bd ct).extract 0 4).size := by
+    simp [hsize]
+  have hread' :
+      readU32BE ((u32be w ++ u32be h ++ ihdrTailDepth bd ct).extract 0 4) 0 hpos' = w := by
+    simpa [hwidth] using readU32BE_u32be w hw
+  simp [hread'] at hread
+  exact hread
+
+/-- Height is recoverable from the bit-depth-generic IHDR payload. -/
+lemma readU32BE_ihdr_height_depth (w h : Nat) (bd ct : UInt8) (hh : h < 2 ^ 32) :
+    readU32BE (u32be w ++ u32be h ++ ihdrTailDepth bd ct) 4 (by
+      have : (u32be w ++ u32be h ++ ihdrTailDepth bd ct).size = 13 :=
+        ihdr_payload_size_depth w h bd ct
+      omega) = h := by
+  have hpos : 4 + 3 < (u32be w ++ u32be h ++ ihdrTailDepth bd ct).size := by
+    have : (u32be w ++ u32be h ++ ihdrTailDepth bd ct).size = 13 :=
+      ihdr_payload_size_depth w h bd ct
+    omega
+  have hread :=
+    readU32BE_extract (bytes := u32be w ++ u32be h ++ ihdrTailDepth bd ct)
+      (pos := 4) hpos
+  have hheight : (u32be w ++ u32be h ++ ihdrTailDepth bd ct).extract 4 8 = u32be h :=
+    ihdr_payload_extract_height_depth w h bd ct
+  have htotal : (u32be w ++ u32be h ++ ihdrTailDepth bd ct).size = 13 :=
+    ihdr_payload_size_depth w h bd ct
+  have hsize : ((u32be w ++ u32be h ++ ihdrTailDepth bd ct).extract 4 8).size = 4 := by
+    simp [ByteArray.size_extract, htotal]
+  have hpos' : 0 + 3 < ((u32be w ++ u32be h ++ ihdrTailDepth bd ct).extract 4 8).size := by
+    simp [hsize]
+  have hread' :
+      readU32BE ((u32be w ++ u32be h ++ ihdrTailDepth bd ct).extract 4 8) 0 hpos' = h := by
+    simpa [hheight] using readU32BE_u32be h hh
+  simp [hread'] at hread
+  exact hread
+
 -- The IHDR tail bytes are present.
 lemma ihdr_payload_extract_tail_depth (w h : Nat) (bd ct : UInt8) :
     (u32be w ++ u32be h ++ ihdrTailDepth bd ct).extract 8 13 = ihdrTailDepth bd ct := by
