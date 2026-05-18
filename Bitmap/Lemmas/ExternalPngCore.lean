@@ -2240,6 +2240,493 @@ theorem decodeBitmapWithMetadata_correct_of_witnesses_alphaBgRgba6To2
       PngMetadata.empty] using
       (And.intro hctbdHdr (And.intro hbdMatchEq hBppChain))
 
+set_option maxHeartbeats 16000000 in
+set_option maxRecDepth 4096 in
+/-- tRNS forward-decode for RGB16 target (source = 16-bit, target = u8 16
+RGB with tRNS + bg). Routes through `decodeRowsLoopTrnsOverBackground16`. -/
+theorem decodeBitmapWithMetadata_correct_of_witnesses_trnsRgb16
+    {px : Type u} [Pixel px] [PngPixel px]
+    {bitmap : Bitmap px}
+    {header : PngHeader} {idat : ByteArray}
+    {trns : PngTransparency} {bg : PngBackground}
+    {inflatedRaw : ByteArray}
+    {bytes : ByteArray} (hSize : 8 ≤ bytes.size)
+    (hSourceBitDepth : header.bitDepth = 16)
+    (hTargetBitDepth : PngPixel.bitDepth (α := px) = u8 16)
+    (hSourceColorType : header.colorType = 0 ∨ header.colorType = 2 ∨
+      header.colorType = 4 ∨ header.colorType = 6)
+    (hTargetColorType : PngPixel.colorType (α := px) = u8 2)
+    (hWidth : header.width = bitmap.size.width)
+    (hHeight : header.height = bitmap.size.height)
+    (hInterlace : header.interlace = 0)
+    (hPxColorType : PngPixel.colorType (α := px) = u8 header.colorType)
+    (hBppLookup : pngBytesPerPixelForColorTypeAndBitDepth?
+      header.colorType header.bitDepth = some (Pixel.bytesPerPixel (α := px)))
+    (hParse : parsePngWithMetadata bytes hSize =
+      some { header := header, idat := idat,
+             metadata := { PngMetadata.empty with
+                             transparency := some trns
+                             background := some bg } })
+    (hIdatMin : 2 ≤ idat.size)
+    (hInflated :
+      zlibDecompressStored idat hIdatMin = some inflatedRaw ∨
+      (zlibDecompressStored idat hIdatMin = none ∧
+       zlibDecompress idat hIdatMin = some inflatedRaw))
+    (hRawSize :
+      inflatedRaw.size = bitmap.size.height *
+        (bitmap.size.width * Pixel.bytesPerPixel (α := px) + 1))
+    (hPixels :
+      decodeRowsLoopTrnsOverBackground16 trns bg header.colorType inflatedRaw
+          bitmap.size.width bitmap.size.height (Pixel.bytesPerPixel (α := px))
+          (bitmap.size.width * Pixel.bytesPerPixel (α := px))
+          0 0 ByteArray.empty
+          { data := Array.replicate
+              (bitmap.size.width * bitmap.size.height *
+                Pixel.bytesPerPixel (α := px)) 0 } =
+        some bitmap.data) :
+    Png.decodeBitmapWithMetadata bytes =
+      some { bitmap := bitmap
+             metadata := { PngMetadata.empty with
+                             transparency := some trns
+                             background := some bg } } := by
+  have hbdNoReject : pngBitDepthSupported header.bitDepth = true := by
+    rw [hSourceBitDepth]; decide
+  have hctbdHdr :
+      pngColorTypeBitDepthSupported header.colorType header.bitDepth = true := by
+    rw [hSourceBitDepth]
+    rcases hSourceColorType with h | h | h | h <;> rw [h] <;> decide
+  have hbitDepthEq :
+      (header.bitDepth == (PngPixel.bitDepth (α := px)).toNat) = true := by
+    rw [hSourceBitDepth, hTargetBitDepth]; rfl
+  have hbitDepthCompatible :
+      (header.bitDepth == (PngPixel.bitDepth (α := px)).toNat ||
+        (header.bitDepth == 16 && PngPixel.bitDepth (α := px) == u8 8) ||
+        (header.bitDepth == 1 &&
+          (PngPixel.bitDepth (α := px) == u8 8 ||
+            PngPixel.bitDepth (α := px) == u8 16))) = true := by
+    simp [hbitDepthEq]
+  have hCtCases :
+      ¬ header.colorType = 0 → ¬ header.colorType = 2 →
+        ¬ header.colorType = 4 → header.colorType = 6 := by
+    intro h0 h2 h4
+    rcases hSourceColorType with hc | hc | hc | hc
+    · exact absurd hc h0
+    · exact absurd hc h2
+    · exact absurd hc h4
+    · exact hc
+  have hSourceNot1 : (header.bitDepth == 1) = false := by rw [hSourceBitDepth]; decide
+  have hSourceIs16 : (header.bitDepth == 16) = true := by rw [hSourceBitDepth]; decide
+  have hTargetNot8 : (PngPixel.bitDepth (α := px) == u8 8) = false := by
+    rw [hTargetBitDepth]; decide
+  have hTargetIs16 : (PngPixel.bitDepth (α := px) == u8 16) = true := by
+    rw [hTargetBitDepth]; decide
+  have hTargetIs2 : (PngPixel.colorType (α := px) == u8 2) = true := by
+    rw [hTargetColorType]; decide
+  have hTargetNot6 : (PngPixel.colorType (α := px) == u8 6) = false := by
+    rw [hTargetColorType]; decide
+  have hTargetNot4 : (PngPixel.colorType (α := px) == u8 4) = false := by
+    rw [hTargetColorType]; decide
+  have hTargetNot0 : (PngPixel.colorType (α := px) == u8 0) = false := by
+    rw [hTargetColorType]; decide
+  have hChrmGrayInactive :
+      ({ PngMetadata.empty with
+           transparency := some trns
+           background := some bg : PngMetadata }.srgb.isNone &&
+        { PngMetadata.empty with
+            transparency := some trns
+            background := some bg : PngMetadata }.chromaticities.isSome &&
+        (header.colorType == 2 || header.colorType == 6) &&
+        (PngPixel.colorType (α := px) == u8 0 ||
+          PngPixel.colorType (α := px) == u8 4)) = false := by
+    simp [PngMetadata.empty]
+  have hRawNorm :
+      normalizeRawByInterlace? inflatedRaw header
+        (Pixel.bytesPerPixel (α := px)) = some inflatedRaw := by
+    unfold normalizeRawByInterlace?; rw [hInterlace]; rfl
+  have hTransform :
+      applyPngColorSpaceTransform
+        { PngMetadata.empty with
+            transparency := some trns, background := some bg }
+        header.colorType (PngPixel.colorType (α := px))
+        (PngPixel.bitDepth (α := px)) bitmap.data = some bitmap.data := by
+    unfold applyPngColorSpaceTransform; rfl
+  have hValid : bitmap.data.size =
+      bitmap.size.width * bitmap.size.height *
+        Pixel.bytesPerPixel (α := px) := by simpa using bitmap.valid
+  have hbdMatchImpl : ¬ 16 = (u8 16).toNat → u8 16 = u8 8 := by
+    intro h; exact absurd (by decide : (16 : Nat) = (u8 16).toNat) h
+  have hPxIsU8_2 : u8 header.colorType = u8 2 := by
+    rw [← hPxColorType, hTargetColorType]
+  have hU16NeU8 : ¬ (u8 16 : UInt8) = u8 8 := by decide
+  have hU8_2_ne_6 : ¬ (u8 2 : UInt8) = u8 6 := by decide
+  have hRowsChain :
+      ((decodeRowsLoopTrnsOverBackground16 trns bg header.colorType inflatedRaw
+            bitmap.size.width bitmap.size.height (Pixel.bytesPerPixel (α := px))
+            (bitmap.size.width * Pixel.bytesPerPixel (α := px))
+            0 0 ByteArray.empty
+            { data := Array.replicate
+                (bitmap.size.width * bitmap.size.height *
+                  Pixel.bytesPerPixel (α := px)) 0 }).bind fun y ↦
+        (applyPngColorSpaceTransform
+            { PngMetadata.empty with
+                transparency := some trns, background := some bg }
+            header.colorType (PngPixel.colorType (α := px))
+            (PngPixel.bitDepth (α := px)) y).bind fun pixels ↦
+          if h : pixels.size = bitmap.size.width * bitmap.size.height *
+              Pixel.bytesPerPixel (α := px) then
+            some ({ bitmap := { size := { width := bitmap.size.width,
+                                            height := bitmap.size.height },
+                                  data := pixels, valid := h },
+                    metadata := { PngMetadata.empty with
+                                    transparency := some trns
+                                    background := some bg } } : PngDecodeResult px)
+          else none) =
+      some ({ bitmap := bitmap
+              metadata := { PngMetadata.empty with
+                              transparency := some trns
+                              background := some bg } } : PngDecodeResult px) := by
+    rw [hPixels, Option.bind_some]
+    rw [hTransform, Option.bind_some]
+    simp [hValid]
+  have hBppChain :
+      ((pngBytesPerPixelForColorTypeAndBitDepth? header.colorType header.bitDepth).bind
+        fun bpp ↦
+          (normalizeRawByInterlace? inflatedRaw header bpp).bind fun raw ↦
+            if raw.size = bitmap.size.height * (bitmap.size.width * bpp + 1) then
+              if u8 header.colorType = u8 6 then
+                (if u8 16 = u8 8 then
+                  decodeRowsLoopDown16ToRGBA8WithTransparency (some trns) header.colorType
+                    raw bitmap.size.width bitmap.size.height bpp
+                    (bitmap.size.width * bpp) 0 0 ByteArray.empty
+                    { data := Array.replicate
+                        (bitmap.size.width * bitmap.size.height *
+                          Pixel.bytesPerPixel (α := px)) 0 }
+                else
+                  decodeRowsLoopRGBA16WithTransparency (some trns) header.colorType
+                    raw bitmap.size.width bitmap.size.height bpp
+                    (bitmap.size.width * bpp) 0 0 ByteArray.empty
+                    { data := Array.replicate
+                        (bitmap.size.width * bitmap.size.height *
+                          Pixel.bytesPerPixel (α := px)) 0 }).bind fun y ↦
+                  (applyPngColorSpaceTransform
+                      { PngMetadata.empty with
+                          transparency := some trns, background := some bg }
+                      header.colorType (u8 header.colorType)
+                      (u8 16) y).bind fun pixels ↦
+                    if h : pixels.size = bitmap.size.width * bitmap.size.height *
+                        Pixel.bytesPerPixel (α := px) then
+                      some ({ bitmap := { size := { width := bitmap.size.width,
+                                                     height := bitmap.size.height },
+                                           data := pixels, valid := h },
+                              metadata := { PngMetadata.empty with
+                                              transparency := some trns
+                                              background := some bg } } : PngDecodeResult px)
+                    else none
+              else if u8 header.colorType = u8 2 then
+                (if u8 16 = u8 8 then
+                  decodeRowsLoopDown16TrnsOverBackgroundRGB8 trns bg header.colorType
+                    raw bitmap.size.width bitmap.size.height bpp
+                    (bitmap.size.width * bpp) 0 0 ByteArray.empty
+                    { data := Array.replicate
+                        (bitmap.size.width * bitmap.size.height *
+                          Pixel.bytesPerPixel (α := px)) 0 }
+                else
+                  decodeRowsLoopTrnsOverBackground16 trns bg header.colorType
+                    raw bitmap.size.width bitmap.size.height bpp
+                    (bitmap.size.width * bpp) 0 0 ByteArray.empty
+                    { data := Array.replicate
+                        (bitmap.size.width * bitmap.size.height *
+                          Pixel.bytesPerPixel (α := px)) 0 }).bind fun y ↦
+                  (applyPngColorSpaceTransform
+                      { PngMetadata.empty with
+                          transparency := some trns, background := some bg }
+                      header.colorType (u8 header.colorType)
+                      (u8 16) y).bind fun pixels ↦
+                    if h : pixels.size = bitmap.size.width * bitmap.size.height *
+                        Pixel.bytesPerPixel (α := px) then
+                      some ({ bitmap := { size := { width := bitmap.size.width,
+                                                     height := bitmap.size.height },
+                                           data := pixels, valid := h },
+                              metadata := { PngMetadata.empty with
+                                              transparency := some trns
+                                              background := some bg } } : PngDecodeResult px)
+                    else none
+              else none
+            else none) =
+        some ({ bitmap := bitmap
+                metadata := { PngMetadata.empty with
+                                transparency := some trns
+                                background := some bg } } : PngDecodeResult px) := by
+    rw [hBppLookup]
+    simp only [Option.bind_some]
+    rw [hRawNorm, Option.bind_some]
+    rw [if_pos hRawSize]
+    have hNotSix : ¬ u8 header.colorType = u8 6 := by
+      intro h
+      have : u8 2 = u8 6 := hPxIsU8_2 ▸ h
+      exact hU8_2_ne_6 this
+    rw [if_neg hNotSix, if_pos hPxIsU8_2, if_neg hU16NeU8]
+    rw [show (u8 header.colorType) = PngPixel.colorType (α := px) from hPxColorType.symm]
+    rw [show (u8 16 : UInt8) = PngPixel.bitDepth (α := px) from hTargetBitDepth.symm]
+    exact hRowsChain
+  unfold Png.decodeBitmapWithMetadata Png.decodeParsedBitmapWithMetadata
+  simp only [hSize, dite_true, hParse, Option.bind_eq_bind, Option.bind_some]
+  rcases hInflated with hStored | ⟨hStoredNone, hZlib⟩
+  · simpa [hctbdHdr, hSourceBitDepth, hTargetBitDepth, hbitDepthCompatible,
+      hSourceNot1, hSourceIs16, hTargetNot8, hTargetIs16, hTargetIs2,
+      hTargetNot6, hTargetNot0, hTargetNot4, hChrmGrayInactive,
+      hWidth, hHeight, hInterlace, hIdatMin, hStored, PngMetadata.empty,
+      hPxColorType] using
+      (And.intro hctbdHdr (And.intro hCtCases (And.intro hbdMatchImpl hBppChain)))
+  · simpa [hctbdHdr, hSourceBitDepth, hTargetBitDepth, hbitDepthCompatible,
+      hSourceNot1, hSourceIs16, hTargetNot8, hTargetIs16, hTargetIs2,
+      hTargetNot6, hTargetNot0, hTargetNot4, hChrmGrayInactive,
+      hWidth, hHeight, hInterlace, hIdatMin, hStoredNone, hZlib,
+      PngMetadata.empty, hPxColorType] using
+      (And.intro hctbdHdr (And.intro hCtCases (And.intro hbdMatchImpl hBppChain)))
+
+set_option maxHeartbeats 16000000 in
+set_option maxRecDepth 4096 in
+/-- tRNS forward-decode for 16→8 RGB downsample (source = 16-bit RGB,
+target = u8 8 RGB with tRNS + bg). Routes through
+`decodeRowsLoopDown16TrnsOverBackgroundRGB8`. -/
+theorem decodeBitmapWithMetadata_correct_of_witnesses_trnsRgb16To8
+    {px : Type u} [Pixel px] [PngPixel px]
+    {bitmap : Bitmap px}
+    {header : PngHeader} {idat : ByteArray}
+    {trns : PngTransparency} {bg : PngBackground}
+    {inflatedRaw : ByteArray}
+    {bytes : ByteArray} (hSize : 8 ≤ bytes.size)
+    (hSourceBitDepth : header.bitDepth = 16)
+    (hTargetBitDepth : PngPixel.bitDepth (α := px) = u8 8)
+    (hSourceColorType : header.colorType = 0 ∨ header.colorType = 2 ∨
+      header.colorType = 4 ∨ header.colorType = 6)
+    (hTargetColorType : PngPixel.colorType (α := px) = u8 2)
+    (hWidth : header.width = bitmap.size.width)
+    (hHeight : header.height = bitmap.size.height)
+    (hInterlace : header.interlace = 0)
+    (hPxColorType : PngPixel.colorType (α := px) = u8 header.colorType)
+    {sourceBpp : Nat}
+    (hBppLookup : pngBytesPerPixelForColorTypeAndBitDepth?
+      header.colorType 16 = some sourceBpp)
+    (hParse : parsePngWithMetadata bytes hSize =
+      some { header := header, idat := idat,
+             metadata := { PngMetadata.empty with
+                             transparency := some trns
+                             background := some bg } })
+    (hIdatMin : 2 ≤ idat.size)
+    (hInflated :
+      zlibDecompressStored idat hIdatMin = some inflatedRaw ∨
+      (zlibDecompressStored idat hIdatMin = none ∧
+       zlibDecompress idat hIdatMin = some inflatedRaw))
+    (hRawSize :
+      inflatedRaw.size = bitmap.size.height *
+        (bitmap.size.width * sourceBpp + 1))
+    (hPixels :
+      decodeRowsLoopDown16TrnsOverBackgroundRGB8 trns bg header.colorType
+          inflatedRaw bitmap.size.width bitmap.size.height
+          sourceBpp (bitmap.size.width * sourceBpp)
+          0 0 ByteArray.empty
+          { data := Array.replicate
+              (bitmap.size.width * bitmap.size.height *
+                Pixel.bytesPerPixel (α := px)) 0 } =
+        some bitmap.data) :
+    Png.decodeBitmapWithMetadata bytes =
+      some { bitmap := bitmap
+             metadata := { PngMetadata.empty with
+                             transparency := some trns
+                             background := some bg } } := by
+  have hbdNoReject : pngBitDepthSupported header.bitDepth = true := by
+    rw [hSourceBitDepth]; decide
+  have hctbdHdr :
+      pngColorTypeBitDepthSupported header.colorType header.bitDepth = true := by
+    rw [hSourceBitDepth]
+    rcases hSourceColorType with h | h | h | h <;> rw [h] <;> decide
+  have hbitDepthCompatible :
+      (header.bitDepth == (PngPixel.bitDepth (α := px)).toNat ||
+        (header.bitDepth == 16 && PngPixel.bitDepth (α := px) == u8 8) ||
+        (header.bitDepth == 1 &&
+          (PngPixel.bitDepth (α := px) == u8 8 ||
+            PngPixel.bitDepth (α := px) == u8 16))) = true := by
+    rw [hSourceBitDepth, hTargetBitDepth]; decide
+  have hCtCases :
+      ¬ header.colorType = 0 → ¬ header.colorType = 2 →
+        ¬ header.colorType = 4 → header.colorType = 6 := by
+    intro h0 h2 h4
+    rcases hSourceColorType with hc | hc | hc | hc
+    · exact absurd hc h0
+    · exact absurd hc h2
+    · exact absurd hc h4
+    · exact hc
+  have hSourceNot1 : (header.bitDepth == 1) = false := by rw [hSourceBitDepth]; decide
+  have hSourceIs16 : (header.bitDepth == 16) = true := by rw [hSourceBitDepth]; decide
+  have hTargetIs8 : (PngPixel.bitDepth (α := px) == u8 8) = true := by
+    rw [hTargetBitDepth]; decide
+  have hTargetNot16 : (PngPixel.bitDepth (α := px) == u8 16) = false := by
+    rw [hTargetBitDepth]; decide
+  have hTargetIs2 : (PngPixel.colorType (α := px) == u8 2) = true := by
+    rw [hTargetColorType]; decide
+  have hTargetNot6 : (PngPixel.colorType (α := px) == u8 6) = false := by
+    rw [hTargetColorType]; decide
+  have hTargetNot4 : (PngPixel.colorType (α := px) == u8 4) = false := by
+    rw [hTargetColorType]; decide
+  have hTargetNot0 : (PngPixel.colorType (α := px) == u8 0) = false := by
+    rw [hTargetColorType]; decide
+  have hChrmGrayInactive :
+      ({ PngMetadata.empty with
+           transparency := some trns
+           background := some bg : PngMetadata }.srgb.isNone &&
+        { PngMetadata.empty with
+            transparency := some trns
+            background := some bg : PngMetadata }.chromaticities.isSome &&
+        (header.colorType == 2 || header.colorType == 6) &&
+        (PngPixel.colorType (α := px) == u8 0 ||
+          PngPixel.colorType (α := px) == u8 4)) = false := by
+    simp [PngMetadata.empty]
+  have hRawNorm :
+      normalizeRawByInterlace? inflatedRaw header sourceBpp = some inflatedRaw := by
+    unfold normalizeRawByInterlace?; rw [hInterlace]; rfl
+  have hTransform :
+      applyPngColorSpaceTransform
+        { PngMetadata.empty with
+            transparency := some trns, background := some bg }
+        header.colorType (PngPixel.colorType (α := px))
+        (PngPixel.bitDepth (α := px)) bitmap.data = some bitmap.data := by
+    unfold applyPngColorSpaceTransform; rfl
+  have hValid : bitmap.data.size =
+      bitmap.size.width * bitmap.size.height *
+        Pixel.bytesPerPixel (α := px) := by simpa using bitmap.valid
+  have hPxIsU8_2 : u8 header.colorType = u8 2 := by
+    rw [← hPxColorType, hTargetColorType]
+  have hU8_2_ne_6 : ¬ (u8 2 : UInt8) = u8 6 := by decide
+  have hRowsChain :
+      ((decodeRowsLoopDown16TrnsOverBackgroundRGB8 trns bg header.colorType
+            inflatedRaw bitmap.size.width bitmap.size.height
+            sourceBpp (bitmap.size.width * sourceBpp)
+            0 0 ByteArray.empty
+            { data := Array.replicate
+                (bitmap.size.width * bitmap.size.height *
+                  Pixel.bytesPerPixel (α := px)) 0 }).bind fun y ↦
+        (applyPngColorSpaceTransform
+            { PngMetadata.empty with
+                transparency := some trns, background := some bg }
+            header.colorType (PngPixel.colorType (α := px))
+            (PngPixel.bitDepth (α := px)) y).bind fun pixels ↦
+          if h : pixels.size = bitmap.size.width * bitmap.size.height *
+              Pixel.bytesPerPixel (α := px) then
+            some ({ bitmap := { size := { width := bitmap.size.width,
+                                            height := bitmap.size.height },
+                                  data := pixels, valid := h },
+                    metadata := { PngMetadata.empty with
+                                    transparency := some trns
+                                    background := some bg } } : PngDecodeResult px)
+          else none) =
+      some ({ bitmap := bitmap
+              metadata := { PngMetadata.empty with
+                              transparency := some trns
+                              background := some bg } } : PngDecodeResult px) := by
+    rw [hPixels, Option.bind_some]
+    rw [hTransform, Option.bind_some]
+    simp [hValid]
+  have hbdMatchImpl : ¬ 16 = (u8 8).toNat → u8 8 = u8 8 := fun _ => rfl
+  have hBppChain :
+      ((pngBytesPerPixelForColorTypeAndBitDepth? header.colorType header.bitDepth).bind
+        fun bpp ↦
+          (normalizeRawByInterlace? inflatedRaw header bpp).bind fun raw ↦
+            if raw.size = bitmap.size.height * (bitmap.size.width * bpp + 1) then
+              if u8 header.colorType = u8 6 then
+                (if u8 8 = u8 8 then
+                  decodeRowsLoopDown16ToRGBA8WithTransparency (some trns) header.colorType
+                    raw bitmap.size.width bitmap.size.height bpp
+                    (bitmap.size.width * bpp) 0 0 ByteArray.empty
+                    { data := Array.replicate
+                        (bitmap.size.width * bitmap.size.height *
+                          Pixel.bytesPerPixel (α := px)) 0 }
+                else
+                  decodeRowsLoopRGBA16WithTransparency (some trns) header.colorType
+                    raw bitmap.size.width bitmap.size.height bpp
+                    (bitmap.size.width * bpp) 0 0 ByteArray.empty
+                    { data := Array.replicate
+                        (bitmap.size.width * bitmap.size.height *
+                          Pixel.bytesPerPixel (α := px)) 0 }).bind fun y ↦
+                  (applyPngColorSpaceTransform
+                      { PngMetadata.empty with
+                          transparency := some trns, background := some bg }
+                      header.colorType (u8 header.colorType)
+                      (u8 8) y).bind fun pixels ↦
+                    if h : pixels.size = bitmap.size.width * bitmap.size.height *
+                        Pixel.bytesPerPixel (α := px) then
+                      some ({ bitmap := { size := { width := bitmap.size.width,
+                                                     height := bitmap.size.height },
+                                           data := pixels, valid := h },
+                              metadata := { PngMetadata.empty with
+                                              transparency := some trns
+                                              background := some bg } } : PngDecodeResult px)
+                    else none
+              else if u8 header.colorType = u8 2 then
+                (if u8 8 = u8 8 then
+                  decodeRowsLoopDown16TrnsOverBackgroundRGB8 trns bg header.colorType
+                    raw bitmap.size.width bitmap.size.height bpp
+                    (bitmap.size.width * bpp) 0 0 ByteArray.empty
+                    { data := Array.replicate
+                        (bitmap.size.width * bitmap.size.height *
+                          Pixel.bytesPerPixel (α := px)) 0 }
+                else
+                  decodeRowsLoopTrnsOverBackground16 trns bg header.colorType
+                    raw bitmap.size.width bitmap.size.height bpp
+                    (bitmap.size.width * bpp) 0 0 ByteArray.empty
+                    { data := Array.replicate
+                        (bitmap.size.width * bitmap.size.height *
+                          Pixel.bytesPerPixel (α := px)) 0 }).bind fun y ↦
+                  (applyPngColorSpaceTransform
+                      { PngMetadata.empty with
+                          transparency := some trns, background := some bg }
+                      header.colorType (u8 header.colorType)
+                      (u8 8) y).bind fun pixels ↦
+                    if h : pixels.size = bitmap.size.width * bitmap.size.height *
+                        Pixel.bytesPerPixel (α := px) then
+                      some ({ bitmap := { size := { width := bitmap.size.width,
+                                                     height := bitmap.size.height },
+                                           data := pixels, valid := h },
+                              metadata := { PngMetadata.empty with
+                                              transparency := some trns
+                                              background := some bg } } : PngDecodeResult px)
+                    else none
+              else none
+            else none) =
+        some ({ bitmap := bitmap
+                metadata := { PngMetadata.empty with
+                                transparency := some trns
+                                background := some bg } } : PngDecodeResult px) := by
+    rw [hSourceBitDepth, hBppLookup]
+    simp only [Option.bind_some]
+    rw [hRawNorm, Option.bind_some]
+    rw [if_pos hRawSize]
+    have hNotSix : ¬ u8 header.colorType = u8 6 := by
+      intro h
+      have : u8 2 = u8 6 := hPxIsU8_2 ▸ h
+      exact hU8_2_ne_6 this
+    rw [if_neg hNotSix, if_pos hPxIsU8_2]
+    simp only [if_true]
+    rw [show (u8 header.colorType) = PngPixel.colorType (α := px) from hPxColorType.symm]
+    rw [show (u8 8 : UInt8) = PngPixel.bitDepth (α := px) from hTargetBitDepth.symm]
+    exact hRowsChain
+  unfold Png.decodeBitmapWithMetadata Png.decodeParsedBitmapWithMetadata
+  simp only [hSize, dite_true, hParse, Option.bind_eq_bind, Option.bind_some]
+  rcases hInflated with hStored | ⟨hStoredNone, hZlib⟩
+  · simpa [hctbdHdr, hSourceBitDepth, hTargetBitDepth, hbitDepthCompatible,
+      hSourceNot1, hSourceIs16, hTargetIs8, hTargetNot16, hTargetIs2,
+      hTargetNot6, hTargetNot0, hTargetNot4, hChrmGrayInactive,
+      hWidth, hHeight, hInterlace, hIdatMin, hStored, PngMetadata.empty,
+      hPxColorType] using
+      (And.intro hctbdHdr (And.intro hCtCases (And.intro hbdMatchImpl hBppChain)))
+  · simpa [hctbdHdr, hSourceBitDepth, hTargetBitDepth, hbitDepthCompatible,
+      hSourceNot1, hSourceIs16, hTargetIs8, hTargetNot16, hTargetIs2,
+      hTargetNot6, hTargetNot0, hTargetNot4, hChrmGrayInactive,
+      hWidth, hHeight, hInterlace, hIdatMin, hStoredNone, hZlib,
+      PngMetadata.empty, hPxColorType] using
+      (And.intro hctbdHdr (And.intro hCtCases (And.intro hbdMatchImpl hBppChain)))
+
 /-- The rejection core: any byte stream whose parsed metadata has
 `transparency.isSome = true` is rejected by `decodeBitmap`. This is
 the end-to-end story for `tRNS`: combined with a container-layer
