@@ -76,7 +76,7 @@ structure MultiIdatGenericPreChunkContainerSpec where
       header.colorType = 4 ∨ header.colorType = 6
   hCtBdSupported :
     pngColorTypeBitDepthSupported header.colorType header.bitDepth = true
-  hInterlace : header.interlace = 0
+  hInterlace : header.interlace = 0 ∨ header.interlace = 1
   hWidth : header.width < 2 ^ 32
   hHeight : header.height < 2 ^ 32
   /-- Optional pre-IDAT ancillary chunk. -/
