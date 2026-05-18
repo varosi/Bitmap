@@ -54,10 +54,12 @@ structure MultiIdatBkgdContainerSpec where
   idatChunks : List ByteArray
   hChunkSize : ∀ c, c ∈ idatChunks → c.size < 2 ^ 32
   hNonempty : idatChunks ≠ []
-  hBitDepth : header.bitDepth = 8 ∨ header.bitDepth = 16
+  hBitDepth : header.bitDepth = 1 ∨ header.bitDepth = 8 ∨ header.bitDepth = 16
   hColorType :
     header.colorType = 0 ∨ header.colorType = 2 ∨
       header.colorType = 4 ∨ header.colorType = 6
+  hCtBdSupported :
+    pngColorTypeBitDepthSupported header.colorType header.bitDepth = true
   hInterlace : header.interlace = 0
   hWidth : header.width < 2 ^ 32
   hHeight : header.height < 2 ^ 32
@@ -75,6 +77,7 @@ def toGeneric : MultiIdatGenericPreChunkContainerSpec where
   hNonempty := s.hNonempty
   hBitDepth := s.hBitDepth
   hColorType := s.hColorType
+  hCtBdSupported := s.hCtBdSupported
   hInterlace := s.hInterlace
   hWidth := s.hWidth
   hHeight := s.hHeight

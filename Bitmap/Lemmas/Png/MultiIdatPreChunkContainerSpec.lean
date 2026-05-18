@@ -70,10 +70,12 @@ structure MultiIdatGenericPreChunkContainerSpec where
   idatChunks : List ByteArray
   hChunkSize : ∀ c, c ∈ idatChunks → c.size < 2 ^ 32
   hNonempty : idatChunks ≠ []
-  hBitDepth : header.bitDepth = 8 ∨ header.bitDepth = 16
+  hBitDepth : header.bitDepth = 1 ∨ header.bitDepth = 8 ∨ header.bitDepth = 16
   hColorType :
     header.colorType = 0 ∨ header.colorType = 2 ∨
       header.colorType = 4 ∨ header.colorType = 6
+  hCtBdSupported :
+    pngColorTypeBitDepthSupported header.colorType header.bitDepth = true
   hInterlace : header.interlace = 0
   hWidth : header.width < 2 ^ 32
   hHeight : header.height < 2 ^ 32
@@ -92,6 +94,7 @@ def toMulti : MultiIdatContainerSpec where
   hNonempty := s.hNonempty
   hBitDepth := s.hBitDepth
   hColorType := s.hColorType
+  hCtBdSupported := s.hCtBdSupported
   hInterlace := s.hInterlace
   hWidth := s.hWidth
   hHeight := s.hHeight
@@ -686,8 +689,10 @@ lemma walk_ihdr_step {w : PreIdatChunk s.header} (hw : s.preChunk = some w) (fue
   have hIhdrSize : (encodeIHDRData s.header).size = 13 := encodeIHDRData_size s.header
   have hCT256 : s.header.colorType < 256 := by
     rcases s.hColorType with h | h | h | h <;> rw [h] <;> decide
-  have hParseHdr := parseIHDRData_encodeIHDRData_8or16 s.header
-    s.hWidth s.hHeight s.hBitDepth s.hInterlace hCT256
+  have hBDlt : s.header.bitDepth < 256 := by
+    rcases s.hBitDepth with h | h | h <;> rw [h] <;> decide
+  have hParseHdr := parseIHDRData_encodeIHDRData_lt256 s.header
+    s.hWidth s.hHeight hBDlt s.hInterlace hCT256
   conv => lhs; unfold parsePngLoopFuelWithMetadata
   have hReadU32Len : readU32BE s.bytes 8 hLen = 13 := by
     have hExtractLen : s.bytes.extract 8 (8 + 4) = u32be 13 := by
@@ -780,11 +785,13 @@ theorem parsePngForDecode_correct_of_some
     have hRead2 := s.readChunk_g_preChunk hw hLen2'
     have hCT256 : s.header.colorType < 256 := by
       rcases s.hColorType with h | h | h | h <;> rw [h] <;> decide
-    have hParseHdr := parseIHDRData_encodeIHDRData_8or16 s.header
-      s.hWidth s.hHeight s.hBitDepth s.hInterlace hCT256
+    have hBDlt : s.header.bitDepth < 256 := by
+      rcases s.hBitDepth with h | h | h <;> rw [h] <;> decide
+    have hParseHdr := parseIHDRData_encodeIHDRData_lt256 s.header
+      s.hWidth s.hHeight hBDlt s.hInterlace hCT256
     have hCtBdOk :
         pngColorTypeBitDepthSupported s.header.colorType s.header.bitDepth = true :=
-      pngColorTypeBitDepthSupported_of_subset s.hBitDepth s.hColorType
+      s.hCtBdSupported
     have hCTProp :
         ¬s.header.colorType = 0 → ¬s.header.colorType = 2 →
           ¬s.header.colorType = 4 → s.header.colorType = 6 := by

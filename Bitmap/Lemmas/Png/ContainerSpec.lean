@@ -42,12 +42,19 @@ is constrained to the supported subset (`bitDepth ∈ {8, 16}` and
 structure SimpleContainerSpec where
   header : PngHeader
   idatData : ByteArray
-  /-- Bit depth is 8 or 16 (the supported subset values for this proof
-  scope; the runtime decoder accepts both with `colorType ∈ {0,2,4,6}`). -/
-  hBitDepth : header.bitDepth = 8 ∨ header.bitDepth = 16
+  /-- Bit depth is 1, 8, or 16 (the supported subset values for this
+  proof scope). The runtime decoder accepts:
+    * 1-bit only with `colorType = 0` (grayscale);
+    * 8-bit and 16-bit with `colorType ∈ {0, 2, 4, 6}`.
+  Joint validity is captured by `hCtBdSupported`. -/
+  hBitDepth : header.bitDepth = 1 ∨ header.bitDepth = 8 ∨ header.bitDepth = 16
   hColorType :
     header.colorType = 0 ∨ header.colorType = 2 ∨
       header.colorType = 4 ∨ header.colorType = 6
+  /-- The PNG runtime's joint color-type × bit-depth validity check.
+  Rules out 1-bit non-grayscale combinations. -/
+  hCtBdSupported :
+    pngColorTypeBitDepthSupported header.colorType header.bitDepth = true
   hInterlace : header.interlace = 0
   hWidth : header.width < 2 ^ 32
   hHeight : header.height < 2 ^ 32
@@ -93,9 +100,10 @@ lemma mkChunkBytes_size (typBytes data : ByteArray) (hType : typBytes.size = 4) 
   simp [ByteArray.size_append, u32be_size, hType]
   omega
 
-/-- Discharge `pngColorTypeBitDepthSupported` for the supported subset
-(bit depth ∈ {8, 16}, color type ∈ {0, 2, 4, 6}). Shared by every
-container-spec forward-correctness proof. -/
+/-- Discharge `pngColorTypeBitDepthSupported` for the {8, 16} subset
+of bit depths × {0, 2, 4, 6} color types. The 1-bit case (which only
+admits color type 0) is handled directly via `s.hCtBdSupported` in the
+spec. -/
 lemma pngColorTypeBitDepthSupported_of_subset
     {ct bd : Nat}
     (hBitDepth : bd = 8 ∨ bd = 16)
@@ -104,12 +112,11 @@ lemma pngColorTypeBitDepthSupported_of_subset
   rcases hBitDepth with h | h <;> rw [h] <;>
     rcases hColorType with h | h | h | h <;> rw [h] <;> decide
 
-/-- IHDR round-trip generalised to bit depth 8 OR 16. The 16-bit case
-mirrors the 8-bit one — `parseIHDRData` reads each field generically
-once we route through `ihdrTailDepth`. -/
-lemma parseIHDRData_encodeIHDRData_8or16 (h : PngHeader)
+/-- IHDR round-trip generalised to any bit depth < 256. The lemma
+`parseIHDRData_encodeIHDRData_8or16` is the specialisation to {8, 16}. -/
+lemma parseIHDRData_encodeIHDRData_lt256 (h : PngHeader)
     (hWidth : h.width < 2 ^ 32) (hHeight : h.height < 2 ^ 32)
-    (hBitDepth : h.bitDepth = 8 ∨ h.bitDepth = 16)
+    (hBitDepth : h.bitDepth < 256)
     (hInterlace : h.interlace = 0) (hColorType : h.colorType < 256) :
     parseIHDRData (encodeIHDRData h) = some h := by
   rw [encodeIHDRData_eq_via_ihdrTailDepth h]
@@ -130,15 +137,24 @@ lemma parseIHDRData_encodeIHDRData_8or16 (h : PngHeader)
   have hCT_ofNat : (u8 h.colorType).toNat = h.colorType := by
     simp [u8, Nat.mod_eq_of_lt hColorType]
   have hBD_ofNat : (u8 h.bitDepth).toNat = h.bitDepth := by
-    rcases hBitDepth with h8 | h16
-    · rw [h8]; decide
-    · rw [h16]; decide
+    simp [u8, Nat.mod_eq_of_lt hBitDepth]
   have hZero_ofNat : (u8 0).toNat = 0 := by decide
   simp [hSize, hWidthRead, hHeightRead, hTailExtract, hCT_ofNat, hBD_ofNat, hZero_ofNat]
   obtain ⟨w, ht, ct, bd, interlace⟩ := h
   simp at hInterlace
   cases hInterlace
   rfl
+
+/-- IHDR round-trip restated for bit depth ∈ {8, 16}. Thin wrapper
+around `parseIHDRData_encodeIHDRData_lt256`. -/
+lemma parseIHDRData_encodeIHDRData_8or16 (h : PngHeader)
+    (hWidth : h.width < 2 ^ 32) (hHeight : h.height < 2 ^ 32)
+    (hBitDepth : h.bitDepth = 8 ∨ h.bitDepth = 16)
+    (hInterlace : h.interlace = 0) (hColorType : h.colorType < 256) :
+    parseIHDRData (encodeIHDRData h) = some h :=
+  parseIHDRData_encodeIHDRData_lt256 h hWidth hHeight
+    (by rcases hBitDepth with hbd | hbd <;> rw [hbd] <;> decide)
+    hInterlace hColorType
 
 /-- The total byte size of a simple-container's on-the-wire bytes: 8 (signature)
 + 25 (IHDR chunk: 13-byte payload + 12 bytes overhead) + (12 + idatData.size)
@@ -627,8 +643,10 @@ theorem parsePngSimple_simpleContainerSpec_correct (s : SimpleContainerSpec)
     · rw [h4]; decide
     · rw [h6]; decide
   -- IHDR data round-trip parses to the original header.
+  have hBDlt : s.header.bitDepth < 256 := by
+    rcases s.hBitDepth with h | h | h <;> rw [h] <;> decide
   have hParseHdr :=
-    parseIHDRData_encodeIHDRData_8or16 s.header s.hWidth s.hHeight s.hBitDepth s.hInterlace hCT256
+    parseIHDRData_encodeIHDRData_lt256 s.header s.hWidth s.hHeight hBDlt s.hInterlace hCT256
   -- Color type IS in {0, 2, 6}, so the bad-color-type check fails.
   have hCTok :
       (s.header.colorType != 0 && s.header.colorType != 2 &&
@@ -641,10 +659,9 @@ theorem parsePngSimple_simpleContainerSpec_correct (s : SimpleContainerSpec)
     rcases hrest with h4 | h6
     · rw [h4]; decide
     · rw [h6]; decide
-  -- Color type ∈ {0, 2, 4, 6} and bit depth ∈ {8,16} ⇒ the joint check passes.
   have hCtBdOk :
       pngColorTypeBitDepthSupported s.header.colorType s.header.bitDepth = true :=
-    pngColorTypeBitDepthSupported_of_subset s.hBitDepth s.hColorType
+    s.hCtBdSupported
   -- IEND data is empty, so the non-empty-IEND check fails.
   have hEmpty : (ByteArray.empty.size != 0) = false := by decide
   -- Final position (57 + s.idatData.size) equals s.bytes.size, so the
