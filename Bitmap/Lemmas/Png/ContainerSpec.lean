@@ -30,10 +30,10 @@ correctness through `parsePngLoopFuel` and the existing
   byte  9     : color type
   byte  10    : compression method (always 0)
   byte  11    : filter method (always 0)
-  byte  12    : interlace method (always 0) -/
+  byte  12    : interlace method (0 = none, 1 = Adam7) -/
 def encodeIHDRData (h : PngHeader) : ByteArray :=
   u32be h.width ++ u32be h.height
-    ++ ByteArray.mk #[u8 h.bitDepth, u8 h.colorType, u8 0, u8 0, u8 0]
+    ++ ByteArray.mk #[u8 h.bitDepth, u8 h.colorType, u8 0, u8 0, u8 h.interlace]
 
 /-- The simple-shape container spec: 8-byte signature, one IHDR, one
 IDAT carrying `idatData` payload bytes, and one empty IEND. The header
@@ -55,7 +55,8 @@ structure SimpleContainerSpec where
   Rules out 1-bit non-grayscale combinations. -/
   hCtBdSupported :
     pngColorTypeBitDepthSupported header.colorType header.bitDepth = true
-  hInterlace : header.interlace = 0
+  /-- Interlace method: 0 (none) or 1 (Adam7). -/
+  hInterlace : header.interlace = 0 ∨ header.interlace = 1
   hWidth : header.width < 2 ^ 32
   hHeight : header.height < 2 ^ 32
 
@@ -81,15 +82,16 @@ lemma SimpleContainerSpec.bytes_size_ge_8 (s : SimpleContainerSpec) :
 (bit depth + color type + compression + filter + interlace). -/
 lemma encodeIHDRData_size (h : PngHeader) : (encodeIHDRData h).size = 13 := by
   unfold encodeIHDRData
-  have hTail : (ByteArray.mk #[u8 h.bitDepth, u8 h.colorType, u8 0, u8 0, u8 0]).size = 5 := rfl
+  have hTail : (ByteArray.mk
+      #[u8 h.bitDepth, u8 h.colorType, u8 0, u8 0, u8 h.interlace]).size = 5 := rfl
   simp [u32be_size, ByteArray.size_append, hTail]
 
 /-- `encodeIHDRData` factors through
-`ihdrTailDepth (u8 h.bitDepth) (u8 h.colorType)` — the bridge to the
-IHDR machinery in `EncodeDecodeBase.lean`. -/
+`ihdrTailDepth (u8 h.bitDepth) (u8 h.colorType) (u8 h.interlace)` — the
+bridge to the IHDR machinery in `EncodeDecodeBase.lean`. -/
 lemma encodeIHDRData_eq_via_ihdrTailDepth (h : PngHeader) :
     encodeIHDRData h = u32be h.width ++ u32be h.height ++
-      ihdrTailDepth (u8 h.bitDepth) (u8 h.colorType) := by
+      ihdrTailDepth (u8 h.bitDepth) (u8 h.colorType) (u8 h.interlace) := by
   rfl
 
 /-- The on-the-wire size of a chunk built by `mkChunkBytes`: 12-byte
@@ -112,38 +114,46 @@ lemma pngColorTypeBitDepthSupported_of_subset
   rcases hBitDepth with h | h <;> rw [h] <;>
     rcases hColorType with h | h | h | h <;> rw [h] <;> decide
 
-/-- IHDR round-trip generalised to any bit depth < 256. The lemma
-`parseIHDRData_encodeIHDRData_8or16` is the specialisation to {8, 16}. -/
+/-- IHDR round-trip generalised to any bit depth < 256 and interlace
+∈ {0, 1}. The lemma `parseIHDRData_encodeIHDRData_8or16` is the
+specialisation to interlace = 0 and bit depth ∈ {8, 16}. -/
 lemma parseIHDRData_encodeIHDRData_lt256 (h : PngHeader)
     (hWidth : h.width < 2 ^ 32) (hHeight : h.height < 2 ^ 32)
     (hBitDepth : h.bitDepth < 256)
-    (hInterlace : h.interlace = 0) (hColorType : h.colorType < 256) :
+    (hInterlace : h.interlace = 0 ∨ h.interlace = 1)
+    (hColorType : h.colorType < 256) :
     parseIHDRData (encodeIHDRData h) = some h := by
+  have hIL_lt : h.interlace < 256 := by
+    rcases hInterlace with h | h <;> rw [h] <;> decide
   rw [encodeIHDRData_eq_via_ihdrTailDepth h]
   unfold parseIHDRData
   have hSize :
       (u32be h.width ++ u32be h.height ++
-        ihdrTailDepth (u8 h.bitDepth) (u8 h.colorType)).size = 13 :=
+        ihdrTailDepth (u8 h.bitDepth) (u8 h.colorType) (u8 h.interlace)).size = 13 :=
     ihdr_payload_size_depth h.width h.height (u8 h.bitDepth) (u8 h.colorType)
+      (u8 h.interlace)
   have hWidthRead :=
     readU32BE_ihdr_width_depth h.width h.height
-      (u8 h.bitDepth) (u8 h.colorType) hWidth
+      (u8 h.bitDepth) (u8 h.colorType) (u8 h.interlace) hWidth
   have hHeightRead :=
     readU32BE_ihdr_height_depth h.width h.height
-      (u8 h.bitDepth) (u8 h.colorType) hHeight
+      (u8 h.bitDepth) (u8 h.colorType) (u8 h.interlace) hHeight
   have hTailExtract :=
     ihdr_payload_extract_tail_depth h.width h.height
-      (u8 h.bitDepth) (u8 h.colorType)
+      (u8 h.bitDepth) (u8 h.colorType) (u8 h.interlace)
   have hCT_ofNat : (u8 h.colorType).toNat = h.colorType := by
     simp [u8, Nat.mod_eq_of_lt hColorType]
   have hBD_ofNat : (u8 h.bitDepth).toNat = h.bitDepth := by
     simp [u8, Nat.mod_eq_of_lt hBitDepth]
+  have hIL_ofNat : (u8 h.interlace).toNat = h.interlace := by
+    simp [u8, Nat.mod_eq_of_lt hIL_lt]
   have hZero_ofNat : (u8 0).toNat = 0 := by decide
-  simp [hSize, hWidthRead, hHeightRead, hTailExtract, hCT_ofNat, hBD_ofNat, hZero_ofNat]
-  obtain ⟨w, ht, ct, bd, interlace⟩ := h
-  simp at hInterlace
-  cases hInterlace
-  rfl
+  simp [hSize, hWidthRead, hHeightRead, hTailExtract, hCT_ofNat, hBD_ofNat,
+    hIL_ofNat, hZero_ofNat]
+  intro h0
+  rcases hInterlace with h | h
+  · exact absurd h h0
+  · exact h
 
 /-- IHDR round-trip restated for bit depth ∈ {8, 16}. Thin wrapper
 around `parseIHDRData_encodeIHDRData_lt256`. -/
@@ -154,7 +164,7 @@ lemma parseIHDRData_encodeIHDRData_8or16 (h : PngHeader)
     parseIHDRData (encodeIHDRData h) = some h :=
   parseIHDRData_encodeIHDRData_lt256 h hWidth hHeight
     (by rcases hBitDepth with hbd | hbd <;> rw [hbd] <;> decide)
-    hInterlace hColorType
+    (Or.inl hInterlace) hColorType
 
 /-- The total byte size of a simple-container's on-the-wire bytes: 8 (signature)
 + 25 (IHDR chunk: 13-byte payload + 12 bytes overhead) + (12 + idatData.size)
@@ -646,7 +656,8 @@ theorem parsePngSimple_simpleContainerSpec_correct (s : SimpleContainerSpec)
   have hBDlt : s.header.bitDepth < 256 := by
     rcases s.hBitDepth with h | h | h <;> rw [h] <;> decide
   have hParseHdr :=
-    parseIHDRData_encodeIHDRData_lt256 s.header s.hWidth s.hHeight hBDlt s.hInterlace hCT256
+    parseIHDRData_encodeIHDRData_lt256 s.header s.hWidth s.hHeight hBDlt
+      s.hInterlace hCT256
   -- Color type IS in {0, 2, 6}, so the bad-color-type check fails.
   have hCTok :
       (s.header.colorType != 0 && s.header.colorType != 2 &&
