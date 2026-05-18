@@ -244,6 +244,214 @@ theorem decodeBitmap_correct_of_witnesses
 
 set_option maxHeartbeats 16000000 in
 set_option maxRecDepth 4096 in
+/-- The Adam7 interlaced decode core (match-depth path). Accepts a
+byte stream with `header.interlace = 1` and `bitDepth ∈ {8, 16}`
+matching the target pixel type. The witness chain mirrors the
+match-depth core, but `inflatedRaw` is the *interlaced* byte stream
+and the new `flatRaw` witness is the result of running
+`decodeAdam7ToFlatRaw?` to produce the row-major sample raw consumed
+by the standard per-pixel decode loop. -/
+theorem decodeBitmap_correct_of_witnesses_adam7
+    {px : Type u} [Pixel px] [PngPixel px]
+    {bitmap : Bitmap px}
+    {header : PngHeader} {idat : ByteArray} {metadata : PngMetadata}
+    {inflatedRaw flatRaw preTransformPixels : ByteArray}
+    {bytes : ByteArray} (hSize : 8 ≤ bytes.size)
+    (hBitDepthMatch : header.bitDepth = (PngPixel.bitDepth (α := px)).toNat)
+    (hTargetBitDepth : PngPixel.bitDepth (α := px) = u8 8 ∨
+                       PngPixel.bitDepth (α := px) = u8 16)
+    (hColorType : header.colorType = 0 ∨ header.colorType = 2 ∨
+      header.colorType = 4 ∨ header.colorType = 6)
+    (hWidth : header.width = bitmap.size.width)
+    (hHeight : header.height = bitmap.size.height)
+    (hInterlace1 : header.interlace = 1)
+    (hPxColorType : PngPixel.colorType (α := px) = u8 header.colorType)
+    (hBppLookup : pngBytesPerPixelForColorTypeAndBitDepth?
+      header.colorType header.bitDepth = some (Pixel.bytesPerPixel (α := px)))
+    (hMetaTransparency : metadata.transparency = none)
+    (hChrmGrayInactive :
+      ¬ (((metadata.pixelOnlyColorSpace.srgb = none ∧
+            metadata.pixelOnlyColorSpace.chromaticities.isSome = true) ∧
+          (header.colorType = 2 ∨ header.colorType = 6)) ∧
+        (PngPixel.colorType (α := px) = u8 0 ∨ PngPixel.colorType (α := px) = u8 4)))
+    (hParse : parsePngForDecode bytes hSize =
+      some { header := header, idat := idat, metadata := metadata })
+    (hIdatMin : 2 ≤ idat.size)
+    (hInflated :
+      zlibDecompressStored idat hIdatMin = some inflatedRaw ∨
+      (zlibDecompressStored idat hIdatMin = none ∧
+       zlibDecompress idat hIdatMin = some inflatedRaw))
+    -- The Adam7 deinterlace witness: `decodeAdam7ToFlatRaw?` on the
+    -- inflated byte stream produces the row-major sample-raw bytes.
+    (hAdam7 :
+      decodeAdam7ToFlatRaw? inflatedRaw bitmap.size.width bitmap.size.height
+        (Pixel.bytesPerPixel (α := px)) = some flatRaw)
+    (hRawSize :
+      flatRaw.size = bitmap.size.height *
+        (bitmap.size.width * Pixel.bytesPerPixel (α := px) + 1))
+    (hPixels :
+      PngPixel.decodeRowsLoop (α := px) flatRaw bitmap.size.width
+          bitmap.size.height (Pixel.bytesPerPixel (α := px))
+          (bitmap.size.width * Pixel.bytesPerPixel (α := px))
+          0 0 ByteArray.empty
+          { data := Array.replicate
+              (bitmap.size.width * bitmap.size.height *
+                Pixel.bytesPerPixel (α := px)) 0 } =
+        some preTransformPixels)
+    (hTransform :
+      applyPngColorSpaceTransform (PngMetadata.pixelOnlyColorSpace metadata)
+        header.colorType (PngPixel.colorType (α := px))
+        (PngPixel.bitDepth (α := px)) preTransformPixels = some bitmap.data) :
+    Png.decodeBitmap bytes = some bitmap := by
+  let ct := (PngPixel.colorType (α := px)).toNat
+  let bd := (PngPixel.bitDepth (α := px)).toNat
+  let bpp := Pixel.bytesPerPixel (α := px)
+  have hbd_in : bd = 8 ∨ bd = 16 := by
+    show (PngPixel.bitDepth (α := px)).toNat = 8 ∨
+         (PngPixel.bitDepth (α := px)).toNat = 16
+    rcases hTargetBitDepth with h | h
+    · left; rw [h]; decide
+    · right; rw [h]; decide
+  have hBdNot1' : ¬ bd = 1 := by rcases hbd_in with h | h <;> rw [h] <;> decide
+  have hbdNoReject : pngBitDepthSupported bd = true := by
+    rcases hbd_in with h | h <;> rw [h] <;> decide
+  have hbitDepthEq :
+      ((PngPixel.bitDepth (α := px)).toNat != bd) = false := by simp [bd]
+  have hnoDownsample :
+      ¬((PngPixel.bitDepth (α := px)).toNat = 16 ∧
+        PngPixel.bitDepth (α := px) = u8 8) := by
+    rintro ⟨h16, h8⟩
+    rcases hTargetBitDepth with h | h <;> rw [h] at h8
+    · rw [h] at h16; revert h16; decide
+    · revert h8; decide
+  have hct'eq : ct = header.colorType := by
+    show (PngPixel.colorType (α := px)).toNat = header.colorType
+    rw [hPxColorType]
+    rcases hColorType with h | h | h | h <;> rw [h] <;> decide
+  have hCt4Reject :
+      header.colorType = 4 → ¬ PngPixel.colorType (α := px) = u8 4 →
+        PngPixel.colorType (α := px) = u8 6 := by
+    intro h4 hne
+    have : PngPixel.colorType (α := px) = u8 4 := by rw [hPxColorType, h4]
+    exact absurd this hne
+  have hctbd' : pngColorTypeBitDepthSupported ct bd = true := by
+    rw [hct'eq]
+    rcases hbd_in with hb | hb <;> rw [hb] <;>
+      rcases hColorType with h | h | h | h <;> rw [h] <;> decide
+  have hpngBpp' : pngBytesPerPixelForColorTypeAndBitDepth? ct bd = some bpp := by
+    rw [hct'eq, show bd = header.bitDepth from hBitDepthMatch.symm]
+    exact hBppLookup
+  have hCtCases :
+      ¬ header.colorType = 0 → ¬ header.colorType = 2 →
+        ¬ header.colorType = 4 → header.colorType = 6 := by
+    intro h0 h2 h4
+    rcases hColorType with hc | hc | hc | hc
+    · exact absurd hc h0
+    · exact absurd hc h2
+    · exact absurd hc h4
+    · exact hc
+  have hctbdHdr_match :
+      pngColorTypeBitDepthSupported header.colorType
+        (PngPixel.bitDepth (α := px)).toNat = true := by
+    rcases hbd_in with hb | hb <;>
+      (show pngColorTypeBitDepthSupported header.colorType bd = true) <;>
+      rw [hb] <;>
+      rcases hColorType with h | h | h | h <;> rw [h] <;> decide
+  have hbdMatchEq :
+      (PngPixel.bitDepth (α := px)).toNat = (PngPixel.bitDepth (α := px)).toNat := rfl
+  -- Adam7 normalization rewrites to `decodeAdam7ToFlatRaw?` result.
+  have hRawNorm :
+      normalizeRawByInterlace? inflatedRaw header bpp = some flatRaw := by
+    unfold normalizeRawByInterlace?
+    rw [hInterlace1]
+    simp
+    rw [hWidth, hHeight]
+    exact hAdam7
+  have hrowsEq :
+      ((PngPixel.decodeRowsLoop (α := px) flatRaw bitmap.size.width
+            bitmap.size.height bpp (bitmap.size.width * bpp) 0 0 ByteArray.empty
+            { data := Array.replicate
+                (bitmap.size.width * bitmap.size.height * Pixel.bytesPerPixel (α := px))
+                0 }).bind
+        fun decodedPixels ↦
+          (applyPngColorSpaceTransform
+              (PngMetadata.pixelOnlyColorSpace metadata)
+              header.colorType
+              (PngPixel.colorType (α := px))
+              (PngPixel.bitDepth (α := px)) decodedPixels).bind
+            fun pixels ↦
+              if h : pixels.size = bitmap.size.width * bitmap.size.height *
+                  Pixel.bytesPerPixel (α := px) then
+                some { size := { width := bitmap.size.width,
+                                 height := bitmap.size.height },
+                       data := pixels, valid := h }
+              else none) =
+      some bitmap := by
+    rw [hPixels, Option.bind_some]
+    rw [hTransform, Option.bind_some]
+    have hvalid :
+        bitmap.data.size = bitmap.size.width * bitmap.size.height * bpp := by
+      simpa [bpp] using bitmap.valid
+    simp [hvalid, bpp]
+  have hBppChain :
+      ((pngBytesPerPixelForColorTypeAndBitDepth? header.colorType
+            (PngPixel.bitDepth (α := px)).toNat).bind
+        fun bpp ↦
+          (normalizeRawByInterlace? inflatedRaw header bpp).bind fun rawN =>
+            if rawN.size = bitmap.size.height * (bitmap.size.width * bpp + 1) then
+              (PngPixel.decodeRowsLoop (α := px) rawN bitmap.size.width
+                    bitmap.size.height bpp (bitmap.size.width * bpp) 0 0 ByteArray.empty
+                    { data := Array.replicate
+                        (bitmap.size.width * bitmap.size.height *
+                          Pixel.bytesPerPixel (α := px)) 0 }).bind
+                fun y ↦
+                  (applyPngColorSpaceTransform
+                      (PngMetadata.pixelOnlyColorSpace metadata)
+                      header.colorType (PngPixel.colorType (α := px))
+                      (PngPixel.bitDepth (α := px)) y).bind
+                    fun pixels ↦
+                      if h : pixels.size = bitmap.size.width * bitmap.size.height *
+                          Pixel.bytesPerPixel (α := px) then
+                        some { size := { width := bitmap.size.width,
+                                         height := bitmap.size.height },
+                               data := pixels, valid := h }
+                      else none
+            else none) = some bitmap := by
+    have hBpp_match : pngBytesPerPixelForColorTypeAndBitDepth?
+        header.colorType (PngPixel.bitDepth (α := px)).toNat =
+          some (Pixel.bytesPerPixel (α := px)) := by
+      rw [show (PngPixel.bitDepth (α := px)).toNat = header.bitDepth from hBitDepthMatch.symm]
+      exact hBppLookup
+    rw [hBpp_match]
+    simp only [Option.bind_some]
+    rw [hRawNorm, Option.bind_some]
+    rw [if_pos hRawSize]
+    exact hrowsEq
+  unfold Png.decodeBitmap
+  rcases hInflated with hStored | ⟨hStoredNone, hZlib⟩
+  · simpa [hSize, hParse, hStored,
+      ct, bd, hbdNoReject, hbitDepthEq, hnoDownsample, hpngBpp',
+      hctbd', hBdNot1', hInterlace1,
+      hIdatMin, hWidth, hHeight, hBitDepthMatch,
+      hChrmGrayInactive] using
+      (And.intro hMetaTransparency
+        (And.intro hctbdHdr_match
+          (And.intro hCtCases
+            (And.intro hbdMatchEq
+              (And.intro hCt4Reject hBppChain)))))
+  · simpa [hSize, hParse, hStoredNone, hZlib,
+      ct, bd, hbdNoReject, hbitDepthEq, hnoDownsample, hpngBpp',
+      hctbd', hBdNot1', hInterlace1,
+      hIdatMin, hWidth, hHeight, hBitDepthMatch,
+      hChrmGrayInactive] using
+      (And.intro hMetaTransparency
+        (And.intro hctbdHdr_match
+          (And.intro hCtCases
+            (And.intro hbdMatchEq
+              (And.intro hCt4Reject hBppChain)))))
+
+set_option maxHeartbeats 16000000 in
+set_option maxRecDepth 4096 in
 /-- The 16→8 downsampling decode core: `decodeBitmap` accepts a byte
 stream whose container declares `bitDepth = 16` while the target pixel
 type is 8-bit. The runtime takes the `decodeRowsLoopDown16To8` branch
