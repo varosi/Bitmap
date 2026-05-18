@@ -354,6 +354,7 @@ private lemma dynamicPayloadTrace_dynamicStream_spec (raw : ByteArray) :
     simpa [payloadBits] using (fixedLitBitsEob_len_ge (data := raw.data) (i := 0))
   have hlen_le : payloadBits.2 ≤ payloadReaderStart.data.size * 8 := by
     have hlen_le_bitcount : payloadBits.2 ≤ streamWriter.bitCount := by
+      set_option linter.unnecessarySimpa false in
       have h := Nat.le_add_left payloadBits.2 bwTables.bitCount
       simpa [streamWriter, bitCount_writeBits, Nat.add_comm] using h
     have hbitcount_le : streamWriter.bitCount ≤ streamWriter.flush.size * 8 := by

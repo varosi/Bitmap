@@ -343,21 +343,21 @@ lemma fixedLitLenHuffman_decode_readerAt_writeBits_len9_core
         (bitsTot % 2 ^ 7) hcode7 = none := by
     have hrow7'' := hrow7
     rw [show fixedLitLenRow7[bitsTot % 2 ^ 7]? =
-        some (fixedLitLenRow7[bitsTot % 2 ^ 7]'hcode7) by simp [hcode7]] at hrow7''
+        some (fixedLitLenRow7[bitsTot % 2 ^ 7]'hcode7) by simp] at hrow7''
     exact Option.some.inj hrow7''
   have hrow8' :
       Array.getInternal (Array.getInternal fixedLitLenHuffman.table 8 htable8)
         (bitsTot % 2 ^ 8) hcode8 = none := by
     have hrow8'' := hrow8
     rw [show fixedLitLenRow8[bitsTot % 2 ^ 8]? =
-        some (fixedLitLenRow8[bitsTot % 2 ^ 8]'hcode8) by simp [hcode8]] at hrow8''
+        some (fixedLitLenRow8[bitsTot % 2 ^ 8]'hcode8) by simp] at hrow8''
     exact Option.some.inj hrow8''
   have hrow9' :
       Array.getInternal (Array.getInternal fixedLitLenHuffman.table 9 htable9)
         (bitsTot % 2 ^ 9) hcode9 = some sym := by
     have hrow9'' := hrow9
     rw [show fixedLitLenRow9[bitsTot % 2 ^ 9]? =
-        some (fixedLitLenRow9[bitsTot % 2 ^ 9]'hcode9) by simp [hcode9]] at hrow9''
+        some (fixedLitLenRow9[bitsTot % 2 ^ 9]'hcode9) by simp] at hrow9''
     exact Option.some.inj hrow9''
   have hbr0 : br0.bytePos < br0.data.size := by
     exact bytePos_lt_of_bitIndex_lt_dataBits br0 (by omega)

@@ -117,31 +117,6 @@ theorem zlibInflate_multiIdatSrgb_external {α : Type} (s : ExternalPngMultiIdat
 
 /-! ### Discharging lemmas -/
 
-lemma pngColorTypeBitDepthSupported_multiIdatSrgb_external
-    (s : ExternalPngMultiIdatSrgbSpec px) :
-    pngColorTypeBitDepthSupported s.container.header.colorType 8 = true := by
-  rcases s.container.hColorType with h | h | h | h <;> rw [h] <;> decide
-
-lemma colorTypeCases_multiIdatSrgb_external (s : ExternalPngMultiIdatSrgbSpec px) :
-    ¬ s.container.header.colorType = 0 →
-    ¬ s.container.header.colorType = 2 →
-    ¬ s.container.header.colorType = 4 →
-    s.container.header.colorType = 6 := by
-  intro h0 h2 h4
-  rcases s.container.hColorType with hc | hc | hc | hc
-  · exact absurd hc h0
-  · exact absurd hc h2
-  · exact absurd hc h4
-  · exact hc
-
-lemma ct4_noReject_multiIdatSrgb_external (s : ExternalPngMultiIdatSrgbSpec px) :
-    s.container.header.colorType = 4 →
-    ¬ PngPixel.colorType (α := px) = u8 4 →
-    PngPixel.colorType (α := px) = u8 6 := by
-  intro h4 hne
-  have : PngPixel.colorType (α := px) = u8 4 := by rw [s.hPxColorType, h4]
-  exact absurd this hne
-
 /-! ### End-to-end forward correctness -/
 
 theorem decodeBitmap_external_multiIdatSrgb_correct (s : ExternalPngMultiIdatSrgbSpec px) :

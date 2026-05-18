@@ -166,37 +166,6 @@ theorem zlibInflate_external {α : Type} (s : ExternalPngSpec px)
   · simp [hStored]
   · simp [hStoredNone, hZlib]
 
-/-! ### Concrete-form discharging lemmas
-
-These lemmas restate the spec's witnesses in the exact form
-`decodeBitmap`'s simp normalisation produces (with `bitDepth = 8`,
-`colorType` as the raw nat, and `Pixel.bytesPerPixel` unfolded), so
-simp can consume them directly during the end-to-end proof. -/
-
-lemma pngColorTypeBitDepthSupported_external (s : ExternalPngSpec px) :
-    pngColorTypeBitDepthSupported s.container.header.colorType 8 = true := by
-  rcases s.container.hColorType with h | h | h | h <;> rw [h] <;> decide
-
-lemma colorTypeCases_external (s : ExternalPngSpec px) :
-    ¬ s.container.header.colorType = 0 →
-    ¬ s.container.header.colorType = 2 →
-    ¬ s.container.header.colorType = 4 →
-    s.container.header.colorType = 6 := by
-  intro h0 h2 h4
-  rcases s.container.hColorType with hc | hc | hc | hc
-  · exact absurd hc h0
-  · exact absurd hc h2
-  · exact absurd hc h4
-  · exact hc
-
-lemma ct4_noReject_external (s : ExternalPngSpec px) :
-    s.container.header.colorType = 4 →
-    ¬ PngPixel.colorType (α := px) = u8 4 →
-    PngPixel.colorType (α := px) = u8 6 := by
-  intro h4 hne
-  have : PngPixel.colorType (α := px) = u8 4 := by rw [s.hPxColorType, h4]
-  exact absurd this hne
-
 /-! ### End-to-end forward correctness -/
 
 /-- Phase 5 closure: any `ExternalPngSpec` is accepted by `decodeBitmap`

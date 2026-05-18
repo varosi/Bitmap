@@ -321,14 +321,14 @@ lemma fixedLitLenHuffman_decode_readerAt_writeBits_len8_core
         (bitsTot % 2 ^ 7) hcode7 = none := by
     have hrow7'' := hrow7
     rw [show fixedLitLenRow7[bitsTot % 2 ^ 7]? =
-        some (fixedLitLenRow7[bitsTot % 2 ^ 7]'hcode7) by simp [hcode7]] at hrow7''
+        some (fixedLitLenRow7[bitsTot % 2 ^ 7]'hcode7) by simp] at hrow7''
     exact Option.some.inj hrow7''
   have hrow8' :
       Array.getInternal (Array.getInternal fixedLitLenHuffman.table 8 htable8)
         (bitsTot % 2 ^ 8) hcode8 = some sym := by
     have hrow8'' := hrow8
     rw [show fixedLitLenRow8[bitsTot % 2 ^ 8]? =
-        some (fixedLitLenRow8[bitsTot % 2 ^ 8]'hcode8) by simp [hcode8]] at hrow8''
+        some (fixedLitLenRow8[bitsTot % 2 ^ 8]'hcode8) by simp] at hrow8''
     exact Option.some.inj hrow8''
   have hprefix2 :
       bitsTot % 2 ||| (((bitsTot >>> 1) % 2) <<< 1) = bitsTot % 2 ^ 2 := by
