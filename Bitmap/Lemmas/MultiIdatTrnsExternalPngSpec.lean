@@ -305,6 +305,100 @@ theorem decodeBitmapWithMetadata_external_correct
 
 end ExternalPngMultiIdatTrnsRgba16To8Spec
 
+/-! ## Adam7 (interlaced) variant -/
+
+/-- The Adam7 interlaced counterpart of `ExternalPngMultiIdatTrnsRgba8Spec`:
+`header.interlace = 1`. The decoder deinterlaces via
+`decodeAdam7ToFlatRaw?` before applying the tRNS row-decoder. -/
+structure ExternalPngMultiIdatTrnsRgba8Adam7Spec (px : Type u) [Pixel px] [PngPixel px] where
+  bitmap : Bitmap px
+  container : MultiIdatTrnsContainerSpec
+  trnsWitness : TrnsChunkWitness container.header
+  hTrns : container.tRNS = some trnsWitness
+  hSourceBitDepth : container.header.bitDepth = 8
+  hTargetBitDepth : PngPixel.bitDepth (α := px) = u8 8
+  hTargetColorType : PngPixel.colorType (α := px) = u8 6
+  hWidth : container.header.width = bitmap.size.width
+  hHeight : container.header.height = bitmap.size.height
+  /-- Narrows the container's {0, 1} interlace disjunction to = 1. -/
+  hInterlace1 : container.header.interlace = 1
+  hPxColorType : PngPixel.colorType (α := px) = u8 container.header.colorType
+  hBppLookup :
+    pngBytesPerPixelForColorTypeAndBitDepth?
+      container.header.colorType container.header.bitDepth =
+        some (Pixel.bytesPerPixel (α := px))
+  hIdatMin : 2 ≤ container.idatData.size
+  inflatedRaw : ByteArray
+  hInflated :
+    zlibDecompressStored container.idatData hIdatMin = some inflatedRaw ∨
+    (zlibDecompressStored container.idatData hIdatMin = none ∧
+     zlibDecompress container.idatData hIdatMin = some inflatedRaw)
+  /-- Deinterlaced row-major flat raw, produced by `decodeAdam7ToFlatRaw?`. -/
+  flatRaw : ByteArray
+  hAdam7 :
+    decodeAdam7ToFlatRaw? inflatedRaw bitmap.size.width bitmap.size.height
+      (Pixel.bytesPerPixel (α := px)) = some flatRaw
+  hRawSize :
+    flatRaw.size =
+      bitmap.size.height *
+        (bitmap.size.width * Pixel.bytesPerPixel (α := px) + 1)
+  hPixels :
+    decodeRowsLoopRGBAWithTransparency (some trnsWitness.trns) flatRaw
+        bitmap.size.width bitmap.size.height (Pixel.bytesPerPixel (α := px))
+        (bitmap.size.width * Pixel.bytesPerPixel (α := px))
+        0 0 ByteArray.empty
+        { data := Array.replicate
+            (bitmap.size.width * bitmap.size.height *
+              Pixel.bytesPerPixel (α := px)) 0 } =
+      some bitmap.data
+
+namespace ExternalPngMultiIdatTrnsRgba8Adam7Spec
+
+variable {px : Type u} [Pixel px] [PngPixel px]
+
+theorem parsePngWithMetadata_external (s : ExternalPngMultiIdatTrnsRgba8Adam7Spec px) :
+    parsePngWithMetadata s.container.bytes s.container.bytes_size_ge_8 =
+      some
+        { header := s.container.header
+          idat := s.container.idatData
+          metadata := s.container.expectedMetadata } := by
+  rw [← parsePngForDecode_eq_parsePngWithMetadata]
+  exact s.container.parsePngForDecode_multiIdatTrnsContainerSpec_correct
+
+lemma expectedMetadata_eq_trns (s : ExternalPngMultiIdatTrnsRgba8Adam7Spec px) :
+    s.container.expectedMetadata =
+      { PngMetadata.empty with transparency := some s.trnsWitness.trns } := by
+  unfold MultiIdatTrnsContainerSpec.expectedMetadata
+    MultiIdatGenericPreChunkContainerSpec.expectedMetadata
+    MultiIdatTrnsContainerSpec.toGeneric
+  rw [s.hTrns]
+  rfl
+
+lemma hSourceColorType (s : ExternalPngMultiIdatTrnsRgba8Adam7Spec px) :
+    s.container.header.colorType = 0 ∨ s.container.header.colorType = 2 ∨
+      s.container.header.colorType = 4 ∨ s.container.header.colorType = 6 :=
+  s.container.hColorType
+
+theorem decodeBitmapWithMetadata_external_correct
+    (s : ExternalPngMultiIdatTrnsRgba8Adam7Spec px) :
+    Png.decodeBitmapWithMetadata s.container.bytes =
+      some { bitmap := s.bitmap
+             metadata :=
+               { PngMetadata.empty with transparency := some s.trnsWitness.trns } } := by
+  have hParse :
+      parsePngWithMetadata s.container.bytes s.container.bytes_size_ge_8 =
+        some { header := s.container.header
+               idat := s.container.idatData
+               metadata := { PngMetadata.empty with transparency := some s.trnsWitness.trns } } := by
+    rw [s.parsePngWithMetadata_external, s.expectedMetadata_eq_trns]
+  exact decodeBitmapWithMetadata_correct_of_witnesses_trnsRgba8_adam7
+    s.container.bytes_size_ge_8 s.hSourceBitDepth s.hTargetBitDepth
+    s.hSourceColorType s.hTargetColorType s.hWidth s.hHeight
+    s.hInterlace1 s.hPxColorType s.hBppLookup hParse
+    s.hIdatMin s.hInflated s.hAdam7 s.hRawSize s.hPixels
+
+end ExternalPngMultiIdatTrnsRgba8Adam7Spec
+
 end Lemmas
 
 end Bitmaps
