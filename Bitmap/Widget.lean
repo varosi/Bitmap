@@ -1,4 +1,5 @@
-import Bitmap
+import Bitmap.Basic
+import Bitmap.Png
 import Lean
 
 open Lean Widget

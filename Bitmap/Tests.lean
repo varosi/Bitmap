@@ -1839,53 +1839,86 @@ private def perfFillRead (w h : Nat) : IO (Nat × Nat) := do
   let t1 <- IO.monoNanosNow
   return (t1 - t0, checksum)
 
--- Encode a blank bitmap to PNG and decode it back.
+private def perfContentByte (x y channel : Nat) : UInt8 :=
+  let tileX := x / 16
+  let tileY := y / 8
+  let blockValue := (tileX * 37 + tileY * 19 + (x / 256) * 11 + (y / 128) * 7) % 256
+  if x % 64 < 48 then
+    Png.u8 blockValue
+  else
+    Png.u8 <|
+      match channel with
+      | 0 => (x * 17 + y * 5 + blockValue) % 256
+      | 1 => (x * 3 + y * 29 + blockValue * 2) % 256
+      | _ => (x * 11 + y * 13 + blockValue * 3) % 256
+
+private def perfContentBitmap (w h : Nat) : BitmapRGB8 :=
+  let bpp := bytesPerPixelRGB
+  let data := ByteArray.mk <| Array.ofFn (fun i : Fin (w * h * bpp) =>
+    let pixel := i.val / bpp
+    let channel := i.val % bpp
+    let x := pixel % w
+    let y := pixel / w
+    perfContentByte x y channel)
+  have hvalid : data.size = w * h * Pixel.bytesPerPixel (α := PixelRGB8) := by
+    have hsize : data.size = w * h * bpp := by
+      simp [data, ByteArray.size]
+    simpa [bpp, bytesPerPixelRGB, instPixelRGB8] using hsize
+  { size := { width := w, height := h }, data, valid := hvalid }
+
+-- Encode a deterministic content bitmap to PNG and decode it back.
 -- Returns elapsed time in nanoseconds and whether the round-trip was exact.
 private def perfPngRoundTrip (w h : Nat) : IO (Nat × Bool) := do
   let t0 <- IO.monoNanosNow
-  let bmp := mkBlankBitmap w h { r := 0, g := 0, b := 0 }
+  let bmp := perfContentBitmap w h
   let bytes ←
     match Png.encodeBitmapChecked (px := PixelRGB8) bmp .fixed with
     | Except.ok bytes => pure bytes
-    | Except.error err => throw (IO.userError err)
-  let ok :=
-    match Png.decodeBitmap bytes with
-    | some bmp' => decide (bmp' = bmp)
-    | none => false
+    | Except.error err => throw (IO.userError s!"png perf round-trip encode failed: {err}")
+  match Png.decodeBitmap (px := PixelRGB8) bytes with
+  | some bmp' =>
+      if bmp' != bmp then
+        throw (IO.userError "png perf round-trip exact bitmap mismatch")
+  | none =>
+      throw (IO.userError "png perf round-trip decode failed")
   let t1 <- IO.monoNanosNow
-  return (t1 - t0, ok)
+  return (t1 - t0, true)
 
--- Encode a blank bitmap using dynamic deflate blocks and decode it back.
+-- Encode a deterministic content bitmap using dynamic deflate blocks and decode it back.
 -- Returns elapsed time in nanoseconds and whether the round-trip was exact.
 private def perfPngRoundTripDynamic (w h : Nat) : IO (Nat × Bool) := do
   let t0 <- IO.monoNanosNow
-  let bmp := mkBlankBitmap w h { r := 0, g := 0, b := 0 }
+  let bmp := perfContentBitmap w h
   let bytes ←
     match Png.encodeBitmapChecked (px := PixelRGB8) bmp .dynamic with
     | Except.ok bytes => pure bytes
-    | Except.error err => throw (IO.userError err)
-  let ok :=
-    match Png.decodeBitmap bytes with
-    | some bmp' => decide (bmp' = bmp)
-    | none => false
+    | Except.error err => throw (IO.userError s!"png perf dynamic round-trip encode failed: {err}")
+  match Png.decodeBitmap (px := PixelRGB8) bytes with
+  | some bmp' =>
+      if bmp' != bmp then
+        throw (IO.userError "png perf dynamic round-trip exact bitmap mismatch")
+  | none =>
+      throw (IO.userError "png perf dynamic round-trip decode failed")
   let t1 <- IO.monoNanosNow
-  return (t1 - t0, ok)
+  return (t1 - t0, true)
 
--- Encode a blank bitmap using stored deflate blocks and decode it back.
+-- Encode a deterministic content bitmap using stored deflate blocks and decode it back.
 -- Returns elapsed time in nanoseconds and whether the round-trip was exact.
 private def perfPngRoundTripStored (w h : Nat) : IO (Nat × Bool) := do
   let t0 <- IO.monoNanosNow
-  let bmp := mkBlankBitmap w h { r := 0, g := 0, b := 0 }
+  let bmp := perfContentBitmap w h
   let bytes ←
     match Png.encodeBitmapChecked (px := PixelRGB8) bmp .stored with
     | Except.ok bytes => pure bytes
-    | Except.error err => throw (IO.userError err)
-  let ok :=
-    match Png.decodeBitmap bytes with
-    | some bmp' => decide (bmp' = bmp)
-    | none => false
+    | Except.error err => throw (IO.userError s!"png perf stored round-trip encode failed: {err}")
+  match Png.decodeBitmap (px := PixelRGB8) bytes with
+  | some bmp' =>
+      if bmp' != bmp then
+        throw (IO.userError "png perf stored round-trip exact bitmap mismatch")
+  | none =>
+      throw (IO.userError "png perf stored round-trip decode failed")
   let t1 <- IO.monoNanosNow
-  return (t1 - t0, ok)
+  return (t1 - t0, true)
 
 -- Fixed-size performance test for putPixel/getPixel on this machine.
 -- Shared with the PNG perf checks so all runtime comparisons use the same image size.
