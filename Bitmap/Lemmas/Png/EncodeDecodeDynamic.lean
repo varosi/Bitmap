@@ -55,7 +55,7 @@ lemma zlibDecompress_deflateDynamicFast (raw : ByteArray) :
             Nat.add_left_comm, Nat.add_comm] using this
         omega) = some raw := by
   classical
-  let payloadBits := fixedLitBitsEob raw.data 0
+  let payloadBits := dynamicStreamPayloadBits raw
   let hdr0 := BitWriter.empty
   let hdrHeader := BitWriter.writeBits hdr0 5 3
   let bwTables := BitWriter.writeBits hdrHeader dynamicHeaderTableBits dynamicHeaderTableLen
@@ -247,7 +247,7 @@ set_option maxHeartbeats 6000000 in
 the stored-only inflater rejects it immediately. -/
 lemma inflateStored_deflateDynamicFast_none (raw : ByteArray) :
     inflateStored (deflateDynamicFast raw) = none := by
-  let payloadBits := fixedLitBitsEob raw.data 0
+  let payloadBits := dynamicStreamPayloadBits raw
   let hdr0 := BitWriter.empty
   let hdrHeader := BitWriter.writeBits hdr0 5 3
   let streamBits := dynamicHeaderReadBits payloadBits.1

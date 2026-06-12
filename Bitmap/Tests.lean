@@ -1921,11 +1921,18 @@ private def perfPngRoundTripStored (w h : Nat) : IO (Nat × Bool) := do
   return (t1 - t0, true)
 
 -- Fixed-size performance test for putPixel/getPixel on this machine.
--- Shared with the PNG perf checks so all runtime comparisons use the same image size.
--- Calibrated so the full benchmark section lands near 30 seconds here.
 private def perfResolution : Nat := 3200
 
 private def perfIters : Nat := 10
+
+-- PNG round-trips run the full public encode/decode path. Keep the input
+-- large enough that stored deflate emits more than one block, but small enough
+-- that generic dynamic-Huffman decoding does not dominate the whole test suite.
+private def perfPngResolution : Nat := 512
+
+private def perfPngIters : Nat := 1
+
+private def perfDynamicRatioLimit : Nat := 8
 
 -- Fixed-size performance test for putPixel/getPixel on this machine.
 private def runPerfTest : IO Unit := do
@@ -1945,10 +1952,10 @@ private def runPerfTest : IO Unit := do
   IO.println s!"perf put/get: {w}x{h} pixels, avg {avgMs} ms over {iters} runs, checksum {totalChecksum}, heartbeats {hb1 - hb0}"
 
 -- Fixed-size performance test for PNG encode/decode on this machine.
-private def runPngPerfTest : IO Unit := do
-  let w : Nat := perfResolution
-  let h : Nat := perfResolution
-  let iters : Nat := perfIters
+private def runPngPerfTest : IO Nat := do
+  let w : Nat := perfPngResolution
+  let h : Nat := perfPngResolution
+  let iters : Nat := perfPngIters
   let hb0 <- IO.getNumHeartbeats
   let mut totalNs : Nat := 0
   for _ in [0:iters] do
@@ -1960,12 +1967,13 @@ private def runPngPerfTest : IO Unit := do
   let avgNs := totalNs / iters
   let avgMs := avgNs / 1_000_000
   IO.println s!"perf png round-trip: {w}x{h} pixels, avg {avgMs} ms over {iters} runs, heartbeats {hb1 - hb0}"
+  return avgNs
 
 -- Fixed-size performance test for PNG encode/decode via dynamic blocks.
-private def runPngPerfTestDynamic : IO Unit := do
-  let w : Nat := perfResolution
-  let h : Nat := perfResolution
-  let iters : Nat := perfIters
+private def runPngPerfTestDynamic (fixedAvgNs : Nat) : IO Nat := do
+  let w : Nat := perfPngResolution
+  let h : Nat := perfPngResolution
+  let iters : Nat := perfPngIters
   let hb0 <- IO.getNumHeartbeats
   let mut totalNs : Nat := 0
   for _ in [0:iters] do
@@ -1976,13 +1984,18 @@ private def runPngPerfTestDynamic : IO Unit := do
   let hb1 <- IO.getNumHeartbeats
   let avgNs := totalNs / iters
   let avgMs := avgNs / 1_000_000
-  IO.println s!"perf png dynamic round-trip: {w}x{h} pixels, avg {avgMs} ms over {iters} runs, heartbeats {hb1 - hb0}"
+  let ratioTimes100 := if fixedAvgNs == 0 then 0 else (avgNs * 100) / fixedAvgNs
+  IO.println s!"perf png dynamic round-trip: {w}x{h} pixels, avg {avgMs} ms over {iters} runs, ratio {ratioTimes100 / 100}.{ratioTimes100 % 100}x fixed, heartbeats {hb1 - hb0}"
+  if avgNs > fixedAvgNs * perfDynamicRatioLimit then
+    throw (IO.userError
+      s!"png perf dynamic round-trip too slow: avg {avgMs} ms exceeds {perfDynamicRatioLimit}x fixed")
+  return avgNs
 
 -- Fixed-size performance test for PNG encode/decode via stored blocks.
 private def runPngPerfTestStored : IO Unit := do
-  let w : Nat := perfResolution
-  let h : Nat := perfResolution
-  let iters : Nat := perfIters
+  let w : Nat := perfPngResolution
+  let h : Nat := perfPngResolution
+  let iters : Nat := perfPngIters
   let hb0 <- IO.getNumHeartbeats
   let mut totalNs : Nat := 0
   for _ in [0:iters] do
@@ -2022,8 +2035,8 @@ def run : IO Unit := do
   validateMalformedDynamicFixtures
   validateCopyDistanceFast
   runPerfTest
-  runPngPerfTest
-  runPngPerfTestDynamic
+  let fixedAvgNs <- runPngPerfTest
+  let _dynamicAvgNs <- runPngPerfTestDynamic fixedAvgNs
   runPngPerfTestStored
 
 end Bitmap.Tests

@@ -8,6 +8,9 @@ namespace Lemmas
 
 open Png
 
+def dynamicStreamPayloadBits (raw : ByteArray) : Nat × Nat :=
+  fixedLitBitsEob raw.data 0
+
 set_option maxRecDepth 200000 in
 /-- Exposes the first three block-header bits of the dynamic stream as one writer/readback step. -/
 lemma dynamicHeaderRead_writeBits_prefix
@@ -65,13 +68,13 @@ lemma dynamicHeaderRead_writeBits_eq
 set_option maxRecDepth 200000 in
 /-- Collapses the dynamic encoder output into a single stream writer used by the loop proof. -/
 lemma deflateDynamicFast_eq_streamWriter (raw : ByteArray) :
-    let payloadBits := fixedLitBitsEob raw.data 0
+    let payloadBits := dynamicStreamPayloadBits raw
     let hdr0 := BitWriter.empty
     let hdrHeader := BitWriter.writeBits hdr0 5 3
     let streamBits := dynamicHeaderReadBits payloadBits.1
     let streamLen := dynamicHeaderReadLen payloadBits.2
     deflateDynamicFast raw = (BitWriter.writeBits hdrHeader streamBits streamLen).flush := by
-  let payloadBits := fixedLitBitsEob raw.data 0
+  let payloadBits := dynamicStreamPayloadBits raw
   let hdr0 := BitWriter.empty
   let hdrHeader := BitWriter.writeBits hdr0 5 3
   let streamBits := dynamicHeaderReadBits payloadBits.1
@@ -141,12 +144,12 @@ lemma dynamicTablesReaderAt_eq_payloadReader
 set_option maxRecDepth 200000 in
 /-- Splits the full dynamic writer into a header-and-tables prefix followed by the fixed payload writer. -/
 lemma deflateDynamicFast_eq_payloadWriter (raw : ByteArray) :
-    let payloadBits := fixedLitBitsEob raw.data 0
+    let payloadBits := dynamicStreamPayloadBits raw
     let hdr0 := BitWriter.empty
     let hdrHeader := BitWriter.writeBits hdr0 5 3
     let bwTables := BitWriter.writeBits hdrHeader dynamicHeaderTableBits dynamicHeaderTableLen
     deflateDynamicFast raw = (BitWriter.writeBits bwTables payloadBits.1 payloadBits.2).flush := by
-  let payloadBits := fixedLitBitsEob raw.data 0
+  let payloadBits := dynamicStreamPayloadBits raw
   let hdr0 := BitWriter.empty
   let hdrHeader := BitWriter.writeBits hdr0 5 3
   let bwTables := BitWriter.writeBits hdrHeader dynamicHeaderTableBits dynamicHeaderTableLen

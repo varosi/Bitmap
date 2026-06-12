@@ -10,7 +10,7 @@ set_option maxRecDepth 400000 in
 set_option maxHeartbeats 6000000 in
 /-- Evaluates the dynamic stream's second header read and shows it returns the fixed `HDIST` value. -/
 lemma readDynamicTables_hdist_dynamicStream (raw : ByteArray) :
-    let payloadBits := fixedLitBitsEob raw.data 0
+    let payloadBits := dynamicStreamPayloadBits raw
     let hdr0 := BitWriter.empty
     let hdrHeader := BitWriter.writeBits hdr0 5 3
     let bitsTot := dynamicHeaderReadBits payloadBits.1
@@ -109,7 +109,7 @@ lemma readDynamicTables_hdist_dynamicStream (raw : ByteArray) :
             exact hboundSplit
           simpa [br5, bw5] using hboundFull) =
       (31, br10) := by
-  let payloadBits := fixedLitBitsEob raw.data 0
+  let payloadBits := dynamicStreamPayloadBits raw
   let hdr0 := BitWriter.empty
   let hdrHeader := BitWriter.writeBits hdr0 5 3
   let bitsTot := dynamicHeaderReadBits payloadBits.1
