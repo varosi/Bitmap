@@ -10,7 +10,7 @@ set_option maxRecDepth 400000 in
 set_option maxHeartbeats 6000000 in
 /-- Evaluates the dynamic stream's third header read and shows it returns the fixed `HCLEN` value. -/
 lemma readDynamicTables_hclen_dynamicStream (raw : ByteArray) :
-    let payloadBits := fixedLitBitsEob raw.data 0
+    let payloadBits := dynamicStreamPayloadBits raw
     let hdr0 := BitWriter.empty
     let hdrHeader := BitWriter.writeBits hdr0 5 3
     let bitsTot := dynamicHeaderReadBits payloadBits.1
@@ -110,7 +110,7 @@ lemma readDynamicTables_hclen_dynamicStream (raw : ByteArray) :
             exact hboundSplit
           simpa [br10, bw10] using hboundFull) =
       (6, br14) := by
-  let payloadBits := fixedLitBitsEob raw.data 0
+  let payloadBits := dynamicStreamPayloadBits raw
   let hdr0 := BitWriter.empty
   let hdrHeader := BitWriter.writeBits hdr0 5 3
   let bitsTot := dynamicHeaderReadBits payloadBits.1

@@ -10,7 +10,7 @@ set_option maxRecDepth 400000 in
 set_option maxHeartbeats 6000000 in
 /-- Evaluates the dynamic stream's first header read and shows it returns the fixed `HLIT` value. -/
 lemma readDynamicTables_hlit_dynamicStream (raw : ByteArray) :
-    let payloadBits := fixedLitBitsEob raw.data 0
+    let payloadBits := dynamicStreamPayloadBits raw
     let hdr0 := BitWriter.empty
     let hdrHeader := BitWriter.writeBits hdr0 5 3
     let bitsTot := dynamicHeaderReadBits payloadBits.1
@@ -39,7 +39,7 @@ lemma readDynamicTables_hlit_dynamicStream (raw : ByteArray) :
             (readerAt_writeBits_bound
               (bw := hdrHeader) (bits := bitsTot) (len := lenTot) (k := 5) hk hbitHeader)) =
       (31, br5) := by
-  let payloadBits := fixedLitBitsEob raw.data 0
+  let payloadBits := dynamicStreamPayloadBits raw
   let hdr0 := BitWriter.empty
   let hdrHeader := BitWriter.writeBits hdr0 5 3
   let bitsTot := dynamicHeaderReadBits payloadBits.1

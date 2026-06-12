@@ -7,9 +7,6 @@ namespace Lemmas
 
 open Png
 
-def dynamicStreamPayloadBits (raw : ByteArray) : Nat × Nat :=
-  fixedLitBitsEob raw.data 0
-
 def dynamicStreamHdr0 : BitWriter :=
   BitWriter.empty
 

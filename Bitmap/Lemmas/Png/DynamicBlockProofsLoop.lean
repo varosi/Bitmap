@@ -14,7 +14,7 @@ set_option maxHeartbeats 6000000 in
 /-- Reads the first three bits of the concrete dynamic-fast stream, exposing the
 `BFINAL=1` and `BTYPE=2` block header seen by the decoder. -/
 lemma dynamicStreamReader0_readBits3 (raw : ByteArray) :
-    let payloadBits := fixedLitBitsEob raw.data 0
+    let payloadBits := dynamicStreamPayloadBits raw
     let hdr0 := BitWriter.empty
     let hdrHeader := BitWriter.writeBits hdr0 5 3
     let streamBits := dynamicHeaderReadBits payloadBits.1
@@ -41,7 +41,7 @@ lemma dynamicStreamReader0_readBits3 (raw : ByteArray) :
         (readerAt_writeBits_bound (bw := hdr0) (bits := streamBitsFull) (len := streamLenFull)
           (k := 3) (hk := by omega) (hbit := by decide))
     streamReader0.readBits 3 hread0 = (5, streamReaderHeader) := by
-  let payloadBits := fixedLitBitsEob raw.data 0
+  let payloadBits := dynamicStreamPayloadBits raw
   let hdr0 := BitWriter.empty
   let hdrHeader := BitWriter.writeBits hdr0 5 3
   let streamBits := dynamicHeaderReadBits payloadBits.1
@@ -319,7 +319,7 @@ private lemma dynamicPayloadTrace_dynamicStream_spec (raw : ByteArray) :
           raw ∧
         raw.size + 1 ≤ (dynamicStreamPayloadReaderStart raw).data.size * 8 + 1 := by
   obtain ⟨spec, hspec, hlit, hdist⟩ := readDynamicTables_dynamicStream_spec raw
-  let payloadBits := fixedLitBitsEob raw.data 0
+  let payloadBits := dynamicStreamPayloadBits raw
   let hdr0 := BitWriter.empty
   let hdrHeader := BitWriter.writeBits hdr0 5 3
   let bwTables := BitWriter.writeBits hdrHeader dynamicHeaderTableBits dynamicHeaderTableLen
@@ -372,7 +372,7 @@ set_option maxRecDepth 400000 in
 set_option maxHeartbeats 6000000 in
 /-- Closes the raw DEFLATE loop proof once the dynamic header and table sections are decoded. -/
 lemma zlibDecompressLoop_deflateDynamicFast_stream (raw : ByteArray) :
-    let payloadBits := fixedLitBitsEob raw.data 0
+    let payloadBits := dynamicStreamPayloadBits raw
     let hdr0 := BitWriter.empty
     let hdrHeader := BitWriter.writeBits hdr0 5 3
     let bwTables := BitWriter.writeBits hdrHeader dynamicHeaderTableBits dynamicHeaderTableLen
@@ -399,7 +399,7 @@ lemma zlibDecompressLoop_deflateDynamicFast_stream (raw : ByteArray) :
       (bitPos_lt_8_writeBits bwTables payloadBits.1 payloadBits.2 hbitTables)
     zlibDecompressLoop streamReader0 ByteArray.empty = some (streamReaderFinal, raw) := by
   classical
-  let payloadBits := fixedLitBitsEob raw.data 0
+  let payloadBits := dynamicStreamPayloadBits raw
   let hdr0 := BitWriter.empty
   let hdrHeader := BitWriter.writeBits hdr0 5 3
   let bwTables := BitWriter.writeBits hdrHeader dynamicHeaderTableBits dynamicHeaderTableLen
