@@ -19,6 +19,20 @@ token stream expands to the empty byte stream. -/
 lemma deflateTokensExpand_empty :
     Png.deflateTokensExpand #[] = ByteArray.empty := rfl
 
+/-- Extends token-list expansion by one literal. This is the induction step
+needed when a tokenizer branch emits an ordinary byte. -/
+lemma deflateTokensExpand_push_literal (tokens : Array Png.DeflateToken) (b : UInt8) :
+    Png.deflateTokensExpand (tokens.push (Png.DeflateToken.literal b)) =
+      (Png.deflateTokensExpand tokens).push b := by
+  simp [Png.deflateTokensExpand, Png.deflateTokenExpand]
+
+/-- A distance-1 match cannot expand an empty output. This isolates the invalid
+match-prefix case before proving non-empty match expansion. -/
+lemma deflateTokenExpand_matchDist1_empty (len : Nat) :
+    Png.deflateTokenExpand ByteArray.empty (Png.DeflateToken.matchDist1 len) =
+      ByteArray.empty := by
+  simp [Png.deflateTokenExpand]
+
 end Lemmas
 
 end Bitmaps
