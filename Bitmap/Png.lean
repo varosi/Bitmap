@@ -853,6 +853,374 @@ def deflateFixedRunFast (raw : ByteArray) : ByteArray :=
 def deflateFixed (raw : ByteArray) : ByteArray :=
   deflateFixedRunFast raw
 
+private inductive DeflateToken where
+  | literal (b : UInt8)
+  | matchDist1 (len : Nat)
+deriving Repr, DecidableEq
+
+private def deflateMatchDist1Chunks (tokens : Array DeflateToken) (remaining : Nat) :
+    Array DeflateToken :=
+  if _h : 3 ≤ remaining then
+    let chunk := chooseFixedMatchChunkLen remaining
+    deflateMatchDist1Chunks (tokens.push (.matchDist1 chunk)) (remaining - chunk)
+  else
+    tokens
+termination_by remaining
+decreasing_by
+  by_cases hgt : remaining > 258
+  · by_cases hr1 : (remaining % 258 == 1)
+    · have hchunk : chooseFixedMatchChunkLen remaining = 256 := by
+        simp [chooseFixedMatchChunkLen, hgt, hr1]
+      omega
+    · by_cases hr2 : (remaining % 258 == 2)
+      · have hchunk : chooseFixedMatchChunkLen remaining = 257 := by
+          simp [chooseFixedMatchChunkLen, hgt, hr1, hr2]
+        omega
+      · have hchunk : chooseFixedMatchChunkLen remaining = 258 := by
+          simp [chooseFixedMatchChunkLen, hgt, hr1, hr2]
+        omega
+  · have hchunk : chooseFixedMatchChunkLen remaining = remaining := by
+      simp [chooseFixedMatchChunkLen, hgt]
+    omega
+
+private def deflateTokensDist1Aux (data : Array UInt8) (i : Nat) (tokens : Array DeflateToken) :
+    Array DeflateToken :=
+  if h : i < data.size then
+    let b := data[i]
+    let j := sameByteRunEndFast data b (i + 1)
+    let runLen := j - i
+    let tokens :=
+      if _h4 : 4 ≤ runLen then
+        deflateMatchDist1Chunks (tokens.push (.literal b)) (runLen - 1)
+      else
+        Id.run do
+          let mut out := tokens
+          for _ in [0:runLen] do
+            out := out.push (.literal b)
+          return out
+    deflateTokensDist1Aux data j tokens
+  else
+    tokens
+termination_by data.size - i
+decreasing_by
+  ·
+    have hlt : i < data.size := h
+    let j := sameByteRunEndFast data data[i] (i + 1)
+    have hge : i + 1 ≤ j := by
+      dsimp [j]
+      have hk :
+          ∀ k, ∀ j0, data.size - j0 = k →
+            j0 ≤ sameByteRunEndFast data data[i] j0 := by
+        intro k
+        induction k with
+        | zero =>
+            intro j0 hk
+            have hle : data.size ≤ j0 := Nat.le_of_sub_eq_zero hk
+            have hlt0 : ¬ j0 < data.size := not_lt_of_ge hle
+            simp [sameByteRunEndFast, hlt0]
+        | succ k ih =>
+            intro j0 hk
+            rw [sameByteRunEndFast.eq_def]
+            by_cases hlt0 : j0 < data.size
+            · by_cases heq : data[j0]'hlt0 = data[i]
+              · simp [hlt0, heq]
+                have hk' : data.size - (j0 + 1) = k := by omega
+                have hrec := ih (j0 + 1) hk'
+                omega
+              · simp [hlt0, heq]
+            · simp [hlt0]
+      have hrun := hk (data.size - (i + 1)) (i + 1) rfl
+      simpa [j] using hrun
+    have hle : j ≤ data.size := by
+      dsimp [j]
+      have hk :
+          ∀ k, ∀ j0, data.size - j0 = k →
+            j0 ≤ data.size →
+            sameByteRunEndFast data data[i] j0 ≤ data.size := by
+        intro k
+        induction k with
+        | zero =>
+            intro j0 hk hj0
+            have hle0 : data.size ≤ j0 := Nat.le_of_sub_eq_zero hk
+            have hlt0 : ¬ j0 < data.size := not_lt_of_ge hle0
+            simpa [sameByteRunEndFast, hlt0] using hj0
+        | succ k ih =>
+            intro j0 hk hj0
+            rw [sameByteRunEndFast.eq_def]
+            by_cases hlt0 : j0 < data.size
+            · by_cases heq : data[j0]'hlt0 = data[i]
+              · simp [hlt0, heq]
+                have hk' : data.size - (j0 + 1) = k := by omega
+                exact ih (j0 + 1) hk' (Nat.succ_le_of_lt hlt0)
+              · simp [hlt0, heq]
+                omega
+            · simp [hlt0]
+              exact hj0
+      have hrun := hk (data.size - (i + 1)) (i + 1) rfl (Nat.succ_le_of_lt hlt)
+      simpa [j] using hrun
+    omega
+
+private def deflateTokensDist1 (raw : ByteArray) : Array DeflateToken :=
+  deflateTokensDist1Aux raw.data 0 #[]
+
+private def deflateTokenExpand (out : ByteArray) : DeflateToken → ByteArray
+  | .literal b => out.push b
+  | .matchDist1 len =>
+      if out.size == 0 then
+        out
+      else
+        let b := out.get! (out.size - 1)
+        Id.run do
+          let mut out := out
+          for _ in [0:len] do
+            out := out.push b
+          return out
+
+private def deflateTokensExpand (tokens : Array DeflateToken) : ByteArray :=
+  tokens.foldl deflateTokenExpand ByteArray.empty
+
+private def incrementNatAt (arr : Array Nat) (idx : Nat) : Array Nat :=
+  arr.set! idx (arr[idx]! + 1)
+
+private def litLenSymbolFreqs (tokens : Array DeflateToken) : Array Nat :=
+  Id.run do
+    let mut freqs : Array Nat := Array.replicate 286 0
+    for token in tokens do
+      match token with
+      | .literal b =>
+          freqs := incrementNatAt freqs b.toNat
+      | .matchDist1 len =>
+          let (sym, _, _) := fixedLenMatchInfo len
+          freqs := incrementNatAt freqs sym
+    freqs := incrementNatAt freqs 256
+    return freqs
+
+private def distSymbolFreqs (tokens : Array DeflateToken) : Array Nat :=
+  Id.run do
+    let mut freqs : Array Nat := Array.replicate 30 0
+    for token in tokens do
+      match token with
+      | .literal _ => pure ()
+      | .matchDist1 _ =>
+          freqs := incrementNatAt freqs 0
+    return freqs
+
+private def nonzeroRank (freqs : Array Nat) (idx : Nat) : Nat :=
+  Id.run do
+    let freq := freqs[idx]!
+    let mut rank := 0
+    for j in [0:freqs.size] do
+      let other := freqs[j]!
+      if other > freq || (other == freq && j < idx) then
+        rank := rank + 1
+    return rank
+
+private def rankedDynamicCodeLen (rank : Nat) : Nat :=
+  if rank == 0 then 2
+  else if rank < 3 then 4
+  else if rank < 7 then 5
+  else if rank < 15 then 6
+  else 15
+
+private def generatedDynamicLitLenLengths (freqs : Array Nat) : Array Nat :=
+  Id.run do
+    let mut lengths : Array Nat := Array.replicate freqs.size 0
+    for i in [0:freqs.size] do
+      if freqs[i]! > 0 then
+        lengths := lengths.set! i (rankedDynamicCodeLen (nonzeroRank freqs i))
+    return lengths
+
+private def generatedDynamicDistLengths (freqs : Array Nat) : Array Nat :=
+  Id.run do
+    let mut lengths : Array Nat := Array.replicate freqs.size 0
+    if freqs[0]! > 0 then
+      lengths := lengths.set! 0 1
+    return lengths
+
+private def lastNonZeroIndex (arr : Array Nat) (minIdx : Nat) : Nat :=
+  Id.run do
+    let mut last := minIdx
+    for i in [0:arr.size] do
+      if arr[i]! > 0 then
+        last := i
+    return last
+
+private def canonicalRevCodesFromLengths (lengths : Array Nat) : Array (Nat × Nat) :=
+  Id.run do
+    let mut maxLen := 0
+    for len in lengths do
+      if len > maxLen then
+        maxLen := len
+    let mut count : Array Nat := Array.replicate (maxLen + 1) 0
+    for len in lengths do
+      if len > 0 then
+        count := count.set! len (count[len]! + 1)
+    let mut nextCode : Array Nat := Array.replicate (maxLen + 1) 0
+    let mut code := 0
+    for bits in [1:maxLen + 1] do
+      code := (code + count[bits - 1]!) <<< 1
+      nextCode := nextCode.set! bits code
+    let mut revCodes : Array (Nat × Nat) := Array.replicate lengths.size (0, 0)
+    for idx in [0:lengths.size] do
+      let len := lengths[idx]!
+      if len > 0 then
+        let codeVal := nextCode[len]!
+        nextCode := nextCode.set! len (codeVal + 1)
+        revCodes := revCodes.set! idx (reverseBits codeVal len, len)
+    return revCodes
+
+private def codeLenCodeLengths : Array Nat :=
+  Array.replicate 19 5
+
+private def codeLenOrder : Array Nat :=
+  #[16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
+
+@[inline] private def BitWriter.writeRevCode (bw : BitWriter) (codes : Array (Nat × Nat)) (sym : Nat) :
+    BitWriter :=
+  let (bits, len) := codes[sym]!
+  bw.writeBitsFast bits len
+
+private def BitWriter.writeCodeLenSymbol (bw : BitWriter) (codeLenCodes : Array (Nat × Nat))
+    (sym : Nat) : BitWriter :=
+  bw.writeRevCode codeLenCodes sym
+
+private def BitWriter.writeCodeLenRepeat (bw : BitWriter) (codeLenCodes : Array (Nat × Nat))
+    (sym extra extraLen : Nat) : BitWriter :=
+  let bw := bw.writeCodeLenSymbol codeLenCodes sym
+  bw.writeBitsFast extra extraLen
+
+private def BitWriter.writeZeroCodeLenRun (bw : BitWriter) (codeLenCodes : Array (Nat × Nat))
+    (runLen : Nat) : BitWriter :=
+  if _h18 : 11 ≤ runLen then
+    let chunk := Nat.min 138 runLen
+    let bw := bw.writeCodeLenRepeat codeLenCodes 18 (chunk - 11) 7
+    bw.writeZeroCodeLenRun codeLenCodes (runLen - chunk)
+  else if _h17 : 3 ≤ runLen then
+    let chunk := Nat.min 10 runLen
+    let bw := bw.writeCodeLenRepeat codeLenCodes 17 (chunk - 3) 3
+    bw.writeZeroCodeLenRun codeLenCodes (runLen - chunk)
+  else
+    Id.run do
+      let mut bw := bw
+      for _ in [0:runLen] do
+        bw := bw.writeCodeLenSymbol codeLenCodes 0
+      return bw
+termination_by runLen
+decreasing_by
+  · have hpos : 0 < Nat.min 138 runLen := by
+      rw [Nat.lt_min]
+      exact ⟨by decide, by omega⟩
+    have hle : Nat.min 138 runLen ≤ runLen := Nat.min_le_right 138 runLen
+    exact Nat.sub_lt_self hpos hle
+  · have hpos : 0 < Nat.min 10 runLen := by
+      rw [Nat.lt_min]
+      exact ⟨by decide, by omega⟩
+    have hle : Nat.min 10 runLen ≤ runLen := Nat.min_le_right 10 runLen
+    exact Nat.sub_lt_self hpos hle
+
+private def BitWriter.writeNonzeroCodeLenRun (bw : BitWriter) (codeLenCodes : Array (Nat × Nat))
+    (len runLen : Nat) : BitWriter :=
+  if h16 : 4 ≤ runLen then
+    let bw := bw.writeCodeLenSymbol codeLenCodes len
+    let repeatCount := Nat.min 6 (runLen - 1)
+    let bw := bw.writeCodeLenRepeat codeLenCodes 16 (repeatCount - 3) 2
+    bw.writeNonzeroCodeLenRun codeLenCodes len (runLen - (1 + repeatCount))
+  else
+    Id.run do
+      let mut bw := bw
+      for _ in [0:runLen] do
+        bw := bw.writeCodeLenSymbol codeLenCodes len
+      return bw
+termination_by runLen
+decreasing_by
+  have hrepPos : 0 < Nat.min 6 (runLen - 1) := by
+    rw [Nat.lt_min]
+    exact ⟨by decide, by omega⟩
+  have hrepLe : Nat.min 6 (runLen - 1) ≤ runLen - 1 := Nat.min_le_right 6 (runLen - 1)
+  have : 1 + Nat.min 6 (runLen - 1) ≤ runLen := by omega
+  omega
+
+private def codeLenRunEnd (lengths : Array Nat) (i : Nat) : Nat :=
+  if h : i < lengths.size then
+    Id.run do
+      let len := lengths[i]
+      let mut j := i + 1
+      let mut running := true
+      while running do
+        if hj : j < lengths.size then
+          if lengths[j] == len then
+            j := j + 1
+          else
+            running := false
+        else
+          running := false
+      return j
+  else
+    i
+
+private def BitWriter.writeDynamicCodeLengths (bw : BitWriter) (lengths : Array Nat)
+    (codeLenCodes : Array (Nat × Nat)) : BitWriter :=
+  Id.run do
+    let mut bw := bw
+    let mut i := 0
+    while i < lengths.size do
+      let j := codeLenRunEnd lengths i
+      let len := lengths[i]!
+      let runLen := j - i
+      if len == 0 then
+        bw := bw.writeZeroCodeLenRun codeLenCodes runLen
+      else
+        bw := bw.writeNonzeroCodeLenRun codeLenCodes len runLen
+      i := j
+    return bw
+
+private def writeGeneratedDynamicHeader (bw : BitWriter)
+    (litLenLengths distLengths : Array Nat) : BitWriter :=
+  let litLenLast := lastNonZeroIndex litLenLengths 256
+  let litLenCount := Nat.min 286 (Nat.max 257 (litLenLast + 1))
+  let distLast := lastNonZeroIndex distLengths 0
+  let distCount := Nat.min 30 (Nat.max 1 (distLast + 1))
+  let codeLenCodes := canonicalRevCodesFromLengths codeLenCodeLengths
+  Id.run do
+    let mut bw := bw
+    bw := bw.writeBitsFast (litLenCount - 257) 5
+    bw := bw.writeBitsFast (distCount - 1) 5
+    bw := bw.writeBitsFast 15 4
+    for i in [0:codeLenOrder.size] do
+      bw := bw.writeBitsFast codeLenCodeLengths[codeLenOrder[i]!]! 3
+    let lengths := (litLenLengths.extract 0 litLenCount) ++ (distLengths.extract 0 distCount)
+    bw := bw.writeDynamicCodeLengths lengths codeLenCodes
+    return bw
+
+private def writeDynamicPayload (bw : BitWriter) (tokens : Array DeflateToken)
+    (litLenCodes distCodes : Array (Nat × Nat)) : BitWriter :=
+  Id.run do
+    let mut bw := bw
+    for token in tokens do
+      match token with
+      | .literal b =>
+          bw := bw.writeRevCode litLenCodes b.toNat
+      | .matchDist1 len =>
+          let (sym, extraBits, extraLen) := fixedLenMatchInfo len
+          bw := bw.writeRevCode litLenCodes sym
+          bw := bw.writeBitsFast extraBits extraLen
+          bw := bw.writeRevCode distCodes 0
+    bw := bw.writeRevCode litLenCodes 256
+    return bw
+
+private def deflateDynamicFullFast (raw : ByteArray) : ByteArray :=
+  let tokens := deflateTokensDist1 raw
+  let litLenLengths := generatedDynamicLitLenLengths (litLenSymbolFreqs tokens)
+  let distLengths := generatedDynamicDistLengths (distSymbolFreqs tokens)
+  let litLenCodes := canonicalRevCodesFromLengths litLenLengths
+  let distCodes := canonicalRevCodesFromLengths distLengths
+  let bw0 := BitWriter.empty
+  let bw1 := bw0.writeBits 1 1
+  let bw2 := bw1.writeBits 2 2
+  let bw3 := writeGeneratedDynamicHeader bw2 litLenLengths distLengths
+  let bw4 := writeDynamicPayload bw3 tokens litLenCodes distCodes
+  bw4.flush
+
 @[inline] def writeDynamicFixedTables (bw : BitWriter) : BitWriter :=
   Id.run do
     let mut bw := bw
