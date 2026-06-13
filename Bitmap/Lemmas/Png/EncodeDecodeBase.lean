@@ -556,36 +556,42 @@ lemma deflateStoredFastAux_correct (raw out : ByteArray) :
         by_cases hzero : raw.size = 0
         · simp [deflateStoredFastAux, deflateStored, hzero]
         · have hpos_raw : 0 < raw.size := Nat.pos_of_ne_zero hzero
-          let blockLen := if 65535 < raw.size then 65535 else raw.size
+          let blockLen := Nat.min uint16MaxValue raw.size
           let payload := raw.extract 0 blockLen
           let block := storedBlock payload (blockLen == raw.size)
           by_cases hfinal' : blockLen == raw.size
           ·
+            have hfinalEq : Nat.min uint16MaxValue raw.size = raw.size := by
+              simpa [blockLen] using hfinal'
             have hblock : block = storedBlock (raw.extract 0 blockLen) true := by
               simp [block, payload, hfinal']
             have hfast :
                 deflateStoredFastAux raw out =
                   out ++ storedBlock (raw.extract 0 blockLen) true := by
               rw [deflateStoredFastAux.eq_1]
-              simp [hzero, blockLen, hfinal']
+              simp [hzero, blockLen, hfinalEq]
             have hslow :
                 deflateStored raw = storedBlock (raw.extract 0 blockLen) true := by
               rw [deflateStored.eq_1]
-              simp [hzero, blockLen, hfinal']
+              simp [hzero, blockLen, hfinalEq]
             have hfast' : deflateStoredFastAux raw out = out ++ block := by
               simpa [hblock] using hfast
             have hslow' : deflateStored raw = block := by
               simpa [hblock] using hslow
             simp [hfast', hslow']
           · have hle : blockLen ≤ raw.size := by
-              by_cases hlarge : 65535 < raw.size
-              · have : (65535 : Nat) ≤ raw.size := Nat.le_of_lt hlarge
-                simpa [blockLen, hlarge] using this
-              · simp [blockLen, hlarge]
+              simpa [blockLen] using Nat.min_le_right uint16MaxValue raw.size
+            have hfinalNe : Nat.min uint16MaxValue raw.size ≠ raw.size := by
+              intro hEq
+              apply hfinal'
+              simp [blockLen, hEq]
+            have hfinalBeq : (Nat.min uint16MaxValue raw.size == raw.size) = false :=
+              beq_false_of_ne hfinalNe
             have hpos : 0 < blockLen := by
-              by_cases hlarge : 65535 < raw.size
-              · simp [blockLen, hlarge]
-              · simp [blockLen, hlarge, hpos_raw]
+              have hpos_max : 0 < uint16MaxValue := by
+                simp [uint16MaxValue, UInt16.size]
+              rw [Nat.lt_min]
+              exact ⟨hpos_max, hpos_raw⟩
             have hrest_size :
                 (raw.extract blockLen raw.size).size < raw.size := by
               have hrest_size' :
@@ -603,13 +609,13 @@ lemma deflateStoredFastAux_correct (raw out : ByteArray) :
                   deflateStoredFastAux (raw.extract blockLen raw.size)
                     (out ++ storedBlock (raw.extract 0 blockLen) false) := by
               rw [deflateStoredFastAux.eq_1]
-              simp [hzero, blockLen, hfinal']
+              simp [hzero, blockLen, hfinalBeq]
             have hslow :
                 deflateStored raw =
                   storedBlock (raw.extract 0 blockLen) false ++
                     deflateStored (raw.extract blockLen raw.size) := by
               rw [deflateStored.eq_1]
-              simp [hzero, blockLen, hfinal']
+              simp [hzero, blockLen, hfinalBeq]
             have hblock : block = storedBlock (raw.extract 0 blockLen) false := by
               simp [block, payload, hfinal']
             have hfast' :
@@ -642,9 +648,9 @@ lemma deflateStored_pos (raw : ByteArray) : 0 < (deflateStored raw).size := by
   · rw [deflateStored.eq_1]
     simp [hzero, storedBlock_size]
   · rw [deflateStored.eq_1]
-    by_cases hfinal : ((if raw.size > 65535 then 65535 else raw.size) == raw.size) = true
-    · simp [hzero, hfinal, storedBlock_size, -beq_iff_eq]
-    · simp [hzero, hfinal, ByteArray.size_append, storedBlock_size, -beq_iff_eq]
+    by_cases hfinal : Nat.min uint16MaxValue raw.size = raw.size
+    · simp [hzero, hfinal, storedBlock_size]
+    · simp [hzero, hfinal, ByteArray.size_append, storedBlock_size]
       omega
 
 -- The LEN field of a stored block encodes the payload size.
@@ -655,51 +661,51 @@ lemma storedBlock_extract_len (payload : ByteArray) (final : Bool) :
   have hheader : header.size = 1 := by rfl
   have hshift :
       (storedBlock payload final).extract 1 3 =
-        (u16le len ++ u16le (0xFFFF - len) ++ payload).extract 0 2 := by
+        (u16le len ++ u16le (uint16MaxValue - len) ++ payload).extract 0 2 := by
     simpa [storedBlock, header, hheader, ByteArray.append_assoc] using
       (ByteArray.extract_append_size_add
         (a := header)
-        (b := u16le len ++ u16le (0xFFFF - len) ++ payload)
+        (b := u16le len ++ u16le (uint16MaxValue - len) ++ payload)
         (i := 0) (j := 2))
   have hprefix :
-      (u16le len ++ u16le (0xFFFF - len) ++ payload).extract 0 2 = u16le len := by
+      (u16le len ++ u16le (uint16MaxValue - len) ++ payload).extract 0 2 = u16le len := by
     have h :=
       (ByteArray.extract_append_eq_left
         (a := u16le len)
-        (b := u16le (0xFFFF - len) ++ payload)
+        (b := u16le (uint16MaxValue - len) ++ payload)
         (i := (u16le len).size) rfl)
     simpa [u16le_size] using h
   simp [hshift, hprefix, len]
 
 -- The NLEN field of a stored block is the ones-complement of LEN.
 lemma storedBlock_extract_nlen (payload : ByteArray) (final : Bool) :
-    (storedBlock payload final).extract 3 5 = u16le (0xFFFF - payload.size) := by
+    (storedBlock payload final).extract 3 5 = u16le (uint16MaxValue - payload.size) := by
   let len := payload.size
   let header : ByteArray := ByteArray.mk #[if final then u8 0x01 else u8 0x00]
   have hheader : header.size = 1 := by rfl
   have hshift :
       (storedBlock payload final).extract 3 5 =
-        (u16le len ++ u16le (0xFFFF - len) ++ payload).extract 2 4 := by
+        (u16le len ++ u16le (uint16MaxValue - len) ++ payload).extract 2 4 := by
     simpa [storedBlock, header, hheader, ByteArray.append_assoc] using
       (ByteArray.extract_append_size_add
         (a := header)
-        (b := u16le len ++ u16le (0xFFFF - len) ++ payload)
+        (b := u16le len ++ u16le (uint16MaxValue - len) ++ payload)
         (i := 2) (j := 4))
   have hshift' :
-      (u16le len ++ u16le (0xFFFF - len) ++ payload).extract 2 4 =
-        (u16le (0xFFFF - len) ++ payload).extract 0 2 := by
+      (u16le len ++ u16le (uint16MaxValue - len) ++ payload).extract 2 4 =
+        (u16le (uint16MaxValue - len) ++ payload).extract 0 2 := by
     simpa [ByteArray.append_assoc] using
       (ByteArray.extract_append_size_add
         (a := u16le len)
-        (b := u16le (0xFFFF - len) ++ payload)
+        (b := u16le (uint16MaxValue - len) ++ payload)
         (i := 0) (j := 2))
   have hprefix :
-      (u16le (0xFFFF - len) ++ payload).extract 0 2 = u16le (0xFFFF - len) := by
+      (u16le (uint16MaxValue - len) ++ payload).extract 0 2 = u16le (uint16MaxValue - len) := by
     have h :=
       (ByteArray.extract_append_eq_left
-        (a := u16le (0xFFFF - len))
+        (a := u16le (uint16MaxValue - len))
         (b := payload)
-        (i := (u16le (0xFFFF - len)).size) rfl)
+        (i := (u16le (uint16MaxValue - len)).size) rfl)
     simpa [u16le_size] using h
   simp [hshift, hshift', hprefix, len]
 
@@ -709,7 +715,7 @@ lemma storedBlock_extract_payload (payload : ByteArray) (final : Bool) :
   let len := payload.size
   let header : ByteArray := ByteArray.mk #[if final then u8 0x01 else u8 0x00]
   have hheader : header.size = 1 := by rfl
-  let blockPrefix : ByteArray := header ++ u16le len ++ u16le (0xFFFF - len)
+  let blockPrefix : ByteArray := header ++ u16le len ++ u16le (uint16MaxValue - len)
   have hprefix : blockPrefix.size = 5 := by
     simp [blockPrefix, ByteArray.size_append, u16le_size, hheader]
   have hprefix' : 5 = blockPrefix.size := hprefix.symm
@@ -765,7 +771,7 @@ lemma storedBlock_get0_append (payload rest : ByteArray) (final : Bool)
     have hget :=
       ByteArray.get_append_left
         (a := ByteArray.mk #[if final then u8 0x01 else u8 0x00])
-        (b := u16le payload.size ++ u16le (0xFFFF - payload.size) ++ payload)
+        (b := u16le payload.size ++ u16le (uint16MaxValue - payload.size) ++ payload)
         (i := 0) hheaderPos
     have hget' :
         (storedBlock payload final)[0]'h0 =
@@ -783,7 +789,7 @@ lemma storedBlock_get0_append (payload rest : ByteArray) (final : Bool)
 -- Inflating a stored block recovers its payload and any remaining bytes.
 set_option maxHeartbeats 5000000 in
 lemma inflateStoredAux_storedBlock (payload rest : ByteArray) (final : Bool)
-    (hlen : payload.size ≤ 0xFFFF)
+    (hlen : payload.size ≤ uint16MaxValue)
     (hdataPos : 0 < (storedBlock payload final ++ rest).size) :
     inflateStoredAux (storedBlock payload final ++ rest) hdataPos =
       if final then some (payload, rest) else
@@ -823,7 +829,7 @@ lemma inflateStoredAux_storedBlock (payload rest : ByteArray) (final : Bool)
       data.extract 1 3 = (storedBlock payload final).extract 1 3 := hleft
       _ = u16le payload.size := storedBlock_extract_len payload final
   have hnlen_extract :
-      data.extract 3 5 = u16le (0xFFFF - payload.size) := by
+      data.extract 3 5 = u16le (uint16MaxValue - payload.size) := by
     have hleft :
         data.extract 3 5 = (storedBlock payload final).extract 3 5 := by
       apply byteArray_extract_append_left (a := storedBlock payload final) (b := rest) (i := 3) (j := 5)
@@ -831,7 +837,7 @@ lemma inflateStoredAux_storedBlock (payload rest : ByteArray) (final : Bool)
       · exact hsize5
     calc
       data.extract 3 5 = (storedBlock payload final).extract 3 5 := hleft
-      _ = u16le (0xFFFF - payload.size) := storedBlock_extract_nlen payload final
+      _ = u16le (uint16MaxValue - payload.size) := storedBlock_extract_nlen payload final
   have hpayload_extract :
       data.extract 5 (5 + payload.size) = payload := by
     have hleft :
@@ -855,17 +861,17 @@ lemma inflateStoredAux_storedBlock (payload rest : ByteArray) (final : Bool)
     simpa [data, hblockSize, ByteArray.size_append, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using h
   have hlen_read : readU16LE data 1 (by omega) = payload.size := by
     have hlt : payload.size < 2 ^ 16 := by
-      have hlt' : (0xFFFF : Nat) < 2 ^ 16 := by decide
+      have hlt' : (uint16MaxValue : Nat) < 2 ^ 16 := by decide
       exact lt_of_le_of_lt hlen hlt'
     exact readU16LE_of_extract_eq (bytes := data) (pos := 1) (n := payload.size)
       (h := by omega) hlen_extract hlt
-  have hnlen_read : readU16LE data 3 (by omega) = 0xFFFF - payload.size := by
-    have hlt : 0xFFFF - payload.size < 2 ^ 16 := by
-      have hlt' : (0xFFFF : Nat) < 2 ^ 16 := by decide
+  have hnlen_read : readU16LE data 3 (by omega) = uint16MaxValue - payload.size := by
+    have hlt : uint16MaxValue - payload.size < 2 ^ 16 := by
+      have hlt' : (uint16MaxValue : Nat) < 2 ^ 16 := by decide
       exact lt_of_le_of_lt (Nat.sub_le _ _) hlt'
-    exact readU16LE_of_extract_eq (bytes := data) (pos := 3) (n := 0xFFFF - payload.size)
+    exact readU16LE_of_extract_eq (bytes := data) (pos := 3) (n := uint16MaxValue - payload.size)
       (h := by omega) hnlen_extract hlt
-  have hsum : payload.size + (0xFFFF - payload.size) = 0xFFFF := by
+  have hsum : payload.size + (uint16MaxValue - payload.size) = uint16MaxValue := by
     exact Nat.add_sub_of_le hlen
   have hbad : ¬ 5 + payload.size > data.size := by
     have hle : 5 + payload.size ≤ data.size := by
@@ -899,14 +905,14 @@ lemma inflateStoredAux_storedBlock (payload rest : ByteArray) (final : Bool)
       simpa [data] using hlen_read
     simpa [readU16LE_proof_irrel] using hlen_read''
   have hnlen_read' :
-      readU16LE (storedBlock payload final ++ rest) 3 hlenPos3 = 0xFFFF - payload.size := by
+      readU16LE (storedBlock payload final ++ rest) 3 hlenPos3 = uint16MaxValue - payload.size := by
     have hnlen_read'' :
-        readU16LE (storedBlock payload final ++ rest) 3 (by omega) = 0xFFFF - payload.size := by
+        readU16LE (storedBlock payload final ++ rest) 3 (by omega) = uint16MaxValue - payload.size := by
       simpa [data] using hnlen_read
     simpa [readU16LE_proof_irrel] using hnlen_read''
   have hsum' :
       readU16LE (storedBlock payload final ++ rest) 1 hlenPos1 +
-        readU16LE (storedBlock payload final ++ rest) 3 hlenPos3 = 0xFFFF := by
+        readU16LE (storedBlock payload final ++ rest) 3 hlenPos3 = uint16MaxValue := by
     simpa [hlen_read', hnlen_read'] using hsum
   have hbad' :
       ¬ 5 + readU16LE (storedBlock payload final ++ rest) 1 hlenPos1 >
@@ -988,44 +994,47 @@ lemma inflateStoredAux_deflateStored (raw : ByteArray) :
                   (data2 := storedBlock ByteArray.empty true) hdef (deflateStored_pos raw))
         _ = some (ByteArray.empty, ByteArray.empty) := haux
     simpa [hraw] using hdone
-  · let blockLen := if raw.size > 65535 then 65535 else raw.size
+  · let blockLen := Nat.min uint16MaxValue raw.size
     let final := blockLen == raw.size
     let payload := raw.extract 0 blockLen
     let restRaw := raw.extract blockLen raw.size
     let block := storedBlock payload final
     have hblockLen_le : blockLen ≤ raw.size := by
-      by_cases hlarge : raw.size > 65535
-      · have : (65535 : Nat) ≤ raw.size := Nat.le_of_lt hlarge
-        simpa [blockLen, hlarge] using this
-      · simp [blockLen, hlarge]
+      simpa [blockLen] using Nat.min_le_right uint16MaxValue raw.size
     have hpayload_size : payload.size = blockLen := by
       simp [payload, ByteArray.size_extract, Nat.min_eq_left hblockLen_le]
-    have hpayload_le : payload.size ≤ 65535 := by
-      by_cases hlarge : raw.size > 65535
-      · have hlen : blockLen = 65535 := by simp [blockLen, hlarge]
-        simp [hpayload_size, hlen]
-      · have hle : raw.size ≤ 65535 := Nat.le_of_not_lt hlarge
-        have hlen : blockLen = raw.size := by simp [blockLen, hlarge]
-        simpa [hpayload_size, hlen] using hle
-    by_cases hlarge : raw.size > 65535
+    have hpayload_le : payload.size ≤ uint16MaxValue := by
+      simpa [hpayload_size] using Nat.min_le_left uint16MaxValue raw.size
+    by_cases hlarge : uint16MaxValue < raw.size
     · have hfinal : final = false := by
-        have hlen : blockLen = 65535 := by simp [blockLen, hlarge]
-        have hneq : (65535 : Nat) ≠ raw.size := by
-          exact (ne_comm).mp (ne_of_gt hlarge)
+        have hlen : blockLen = uint16MaxValue := by
+          simpa [blockLen] using Nat.min_eq_left (Nat.le_of_lt hlarge)
+        have hneq : uint16MaxValue ≠ raw.size := by
+          exact ne_of_lt hlarge
         simp [final, hlen, hneq]
-      have hneq : (65535 : Nat) ≠ raw.size := by
-        exact (ne_comm).mp (ne_of_gt hlarge)
-      have hbeq : (65535 == raw.size) = false := by
-        exact beq_false_of_ne hneq
+      have hneq : uint16MaxValue ≠ raw.size := by
+        exact ne_of_lt hlarge
+      have hfinalNe : Nat.min uint16MaxValue raw.size ≠ raw.size := by
+        intro hEq
+        have hleMin : Nat.min uint16MaxValue raw.size ≤ uint16MaxValue :=
+          Nat.min_le_left uint16MaxValue raw.size
+        have hle : raw.size ≤ uint16MaxValue := by
+          simpa [hEq] using hleMin
+        exact (Nat.not_lt_of_ge hle) hlarge
+      have hfinalBeq : (Nat.min uint16MaxValue raw.size == raw.size) = false :=
+        beq_false_of_ne hfinalNe
       have hdef :
           deflateStored raw = block ++ deflateStored restRaw := by
         rw [deflateStored.eq_1]
-        simp [hzero, blockLen, hlarge, final, hfinal, block, payload, restRaw, hbeq]
+        simp [hzero, blockLen, hfinalBeq, final, block, payload, restRaw]
       have hrest_size : restRaw.size = raw.size - blockLen := by
         simp [restRaw, ByteArray.size_extract]
       have hrest_lt : restRaw.size < raw.size := by
         have hpos : 0 < blockLen := by
-          simp [blockLen, hlarge]
+          have hpos_max : 0 < uint16MaxValue := by
+            simp [uint16MaxValue, UInt16.size]
+          rw [Nat.lt_min]
+          exact ⟨hpos_max, Nat.lt_trans hpos_max hlarge⟩
         have hlt : raw.size - blockLen < raw.size := Nat.sub_lt_self hpos hblockLen_le
         simpa [hrest_size] using hlt
       have ih' :
@@ -1053,13 +1062,17 @@ lemma inflateStoredAux_deflateStored (raw : ByteArray) :
         _ = some (raw, ByteArray.empty) := by
               simp [hsplit]
     · have hfinal : final = true := by
-        have hlen : blockLen = raw.size := by simp [blockLen, hlarge]
+        have hlen : blockLen = raw.size := by
+          simpa [blockLen] using Nat.min_eq_right (Nat.le_of_not_gt hlarge)
         simp [final, hlen]
+      have hfinalEq : Nat.min uint16MaxValue raw.size = raw.size :=
+        Nat.min_eq_right (Nat.le_of_not_gt hlarge)
       have hdef : deflateStored raw = block := by
         rw [deflateStored.eq_1]
-        simp [hzero, blockLen, hlarge, final, hfinal, block, payload]
+        simp [hzero, blockLen, hfinalEq, final, hfinal, block, payload]
       have hpayload_eq : payload = raw := by
-        have hlen : blockLen = raw.size := by simp [blockLen, hlarge]
+        have hlen : blockLen = raw.size := by
+          simpa [blockLen] using Nat.min_eq_right (Nat.le_of_not_gt hlarge)
         simp [payload, hlen, ByteArray.extract_zero_size]
       have hdef' : deflateStored raw = storedBlock payload true := by
         simpa [block, hfinal] using hdef

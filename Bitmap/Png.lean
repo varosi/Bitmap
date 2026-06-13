@@ -54,12 +54,12 @@ def crc32Table : Array UInt32 :=
     return table
 
 def crc32Update (c : UInt32) (bytes : ByteArray) : UInt32 :=
-  Id.run do
-    let mut c : UInt32 := c
-    for b in bytes do
+  ByteArray.foldl
+    (fun c b =>
       let idx : Nat := ((c ^^^ (UInt32.ofNat b.toNat)) &&& (0xFF : UInt32)).toNat
-      c := crc32Table[idx]! ^^^ (c >>> 8)
-    return c
+      crc32Table[idx]! ^^^ (c >>> 8))
+    c
+    bytes
 
 def crc32 (bytes : ByteArray) : UInt32 :=
   (crc32Update 0xFFFFFFFF bytes) ^^^ 0xFFFFFFFF
@@ -189,8 +189,8 @@ structure PngPhysicalPixelDimensions where
 deriving Repr, DecidableEq
 
 def PngPhysicalPixelDimensions.valid (physical : PngPhysicalPixelDimensions) : Bool :=
-  decide (physical.xPixelsPerUnit < 2 ^ 32) &&
-  decide (physical.yPixelsPerUnit < 2 ^ 32)
+  decide (physical.xPixelsPerUnit < UInt32.size) &&
+  decide (physical.yPixelsPerUnit < UInt32.size)
 
 def dpiToPixelsPerMeterRounded (dpi : Nat) : Nat :=
   (dpi * 10000 + 127) / 254
@@ -257,13 +257,13 @@ def mkChunk (typ : String) (data : ByteArray) : ByteArray :=
 def storedBlock (payload : ByteArray) (final : Bool) : ByteArray :=
   let len := payload.size
   ByteArray.mk #[if final then u8 0x01 else u8 0x00]
-    ++ u16le len ++ u16le (0xFFFF - len) ++ payload
+    ++ u16le len ++ u16le (uint16MaxValue - len) ++ payload
 
 def deflateStoredFastAux (raw : ByteArray) (out : ByteArray) : ByteArray :=
   if _hzero : raw.size = 0 then
     out ++ storedBlock ByteArray.empty true
   else
-    let blockLen := if uint16MaxValue < raw.size then uint16MaxValue else raw.size
+    let blockLen := Nat.min uint16MaxValue raw.size
     let final := blockLen == raw.size
     let payload := raw.extract 0 blockLen
     let block := storedBlock payload final
@@ -274,18 +274,13 @@ def deflateStoredFastAux (raw : ByteArray) (out : ByteArray) : ByteArray :=
 termination_by raw.size
 decreasing_by
   have hle : blockLen ≤ raw.size := by
-    by_cases hlarge : uint16MaxValue < raw.size
-    · have : (uint16MaxValue : Nat) ≤ raw.size := Nat.le_of_lt hlarge
-      simpa [blockLen, hlarge] using this
-    · simp [blockLen, hlarge]
+    simpa [blockLen] using Nat.min_le_right uint16MaxValue raw.size
   have hpos : 0 < blockLen := by
     have hpos_raw : 0 < raw.size := Nat.pos_of_ne_zero _hzero
-    by_cases hlarge : uint16MaxValue < raw.size
-    · have hblock : blockLen = uint16MaxValue := by
-        simp [blockLen, hlarge]
-      rw [hblock]
+    have hpos_max : 0 < uint16MaxValue := by
       simp [uint16MaxValue, UInt16.size]
-    · simp [blockLen, hlarge, hpos_raw]
+    rw [Nat.lt_min]
+    exact ⟨hpos_max, hpos_raw⟩
   simp [ByteArray.size_extract]
   exact Nat.sub_lt_self hpos hle
 
@@ -293,7 +288,7 @@ def deflateStored (raw : ByteArray) : ByteArray :=
   if _hzero : raw.size = 0 then
     storedBlock ByteArray.empty true
   else
-    let blockLen := if uint16MaxValue < raw.size then uint16MaxValue else raw.size
+    let blockLen := Nat.min uint16MaxValue raw.size
     let final := blockLen == raw.size
     let payload := raw.extract 0 blockLen
     let block := storedBlock payload final
@@ -304,18 +299,13 @@ def deflateStored (raw : ByteArray) : ByteArray :=
 termination_by raw.size
 decreasing_by
   have hle : blockLen ≤ raw.size := by
-    by_cases hlarge : uint16MaxValue < raw.size
-    · have : (uint16MaxValue : Nat) ≤ raw.size := Nat.le_of_lt hlarge
-      simpa [blockLen, hlarge] using this
-    · simp [blockLen, hlarge]
+    simpa [blockLen] using Nat.min_le_right uint16MaxValue raw.size
   have hpos : 0 < blockLen := by
     have hpos_raw : 0 < raw.size := Nat.pos_of_ne_zero _hzero
-    by_cases hlarge : uint16MaxValue < raw.size
-    · have hblock : blockLen = uint16MaxValue := by
-        simp [blockLen, hlarge]
-      rw [hblock]
+    have hpos_max : 0 < uint16MaxValue := by
       simp [uint16MaxValue, UInt16.size]
-    · simp [blockLen, hlarge, hpos_raw]
+    rw [Nat.lt_min]
+    exact ⟨hpos_max, hpos_raw⟩
   simp [ByteArray.size_extract]
   exact Nat.sub_lt_self hpos hle
 
@@ -945,19 +935,9 @@ structure BitReader where
   hbit : bitPos < 8
 deriving Repr
 
--- Precomputed `2^n` for `n ≤ 8`.
+-- Small power of two for bit-window masks.
 def lowPowNat (n : Nat) : Nat :=
-  match n with
-  | 0 => 1
-  | 1 => 2
-  | 2 => 4
-  | 3 => 8
-  | 4 => 16
-  | 5 => 32
-  | 6 => 64
-  | 7 => 128
-  | 8 => 256
-  | _ => 1
+  1 <<< n
 
 def BitReader.bitIndex (br : BitReader) : Nat :=
   br.bytePos * 8 + br.bitPos
@@ -1171,7 +1151,7 @@ def mkHuffman (lengths : Array Nat) : Option Huffman := do
 
 /-- Detects the dynamic-table special case where every advertised code length is zero. -/
 def allZeroCodeLengths (lengths : Array Nat) : Bool :=
-  lengths.toList.all (fun len => len == 0)
+  lengths.all (fun len => len == 0)
 
 /-- Builds the dynamic distance table at the parser boundary, including literal-only blocks. -/
 def buildDynamicDistTable (distLengths : Array Nat) : Option Huffman :=
@@ -1727,7 +1707,7 @@ def zlibDecompressLoopFuel (fuel : Nat) (br : BitReader) (out : ByteArray) :
         if h : br.bytePos + 3 < br.data.size then
           let len := readU16LE br.data br.bytePos (by omega)
           let nlen := readU16LE br.data (br.bytePos + 2) (by omega)
-          if len + nlen != 0xFFFF then
+          if len + nlen != uint16MaxValue then
             none
           let start := br.bytePos + 4
           if hlen : start + len > br.data.size then
@@ -1809,7 +1789,7 @@ def inflateStoredAux (data : ByteArray) (h : 0 < data.size) : Option (ByteArray 
   if hlen : 1 + 3 < data.size then
     let len := readU16LE data 1 (by omega)
     let nlen := readU16LE data 3 (by omega)
-    if len + nlen != 0xFFFF then
+    if len + nlen != uint16MaxValue then
       none
     let start := 5
     if hbad : start + len > data.size then
@@ -4615,7 +4595,7 @@ def decodeBitmapGray1 (bytes : ByteArray) : Option BitmapGray1 := do
     |>.map (fun decoded => decoded.bitmap)
 
 def encodeBitmapGray1 (bmp : BitmapGray1)
-    (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (hw : bmp.size.width < UInt32.size) (hh : bmp.size.height < UInt32.size)
     (mode : PngEncodeMode := .fixed) : ByteArray :=
   have _ := hw
   have _ := hh
@@ -4638,7 +4618,7 @@ def encodeBitmapGray1 (bmp : BitmapGray1)
     out ++ pngSignature ++ ihdrChunk ++ idatChunk ++ iendChunk
 
 def encodeBitmapGray1WithOptions (bmp : BitmapGray1)
-    (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (hw : bmp.size.width < UInt32.size) (hh : bmp.size.height < UInt32.size)
     (options : PngEncodeOptions := {}) : Option ByteArray :=
   have _ := hw
   have _ := hh
@@ -4650,8 +4630,8 @@ def encodeBitmapGray1WithOptions (bmp : BitmapGray1)
 
 def encodeBitmapGray1Checked (bmp : BitmapGray1)
     (mode : PngEncodeMode := .fixed) : Except String ByteArray :=
-  if hw : bmp.size.width < 2 ^ 32 then
-    if hh : bmp.size.height < 2 ^ 32 then
+  if hw : bmp.size.width < UInt32.size then
+    if hh : bmp.size.height < UInt32.size then
       Except.ok (encodeBitmapGray1 bmp hw hh mode)
     else
       Except.error "bitmap height exceeds PNG limit (2^32)"
@@ -4660,8 +4640,8 @@ def encodeBitmapGray1Checked (bmp : BitmapGray1)
 
 def encodeBitmapGray1WithOptionsChecked (bmp : BitmapGray1)
     (options : PngEncodeOptions := {}) : Except String ByteArray :=
-  if hw : bmp.size.width < 2 ^ 32 then
-    if hh : bmp.size.height < 2 ^ 32 then
+  if hw : bmp.size.width < UInt32.size then
+    if hh : bmp.size.height < UInt32.size then
       match encodeBitmapGray1WithOptions bmp hw hh options with
       | some bytes => Except.ok bytes
       | none => Except.error "invalid PNG ancillary encode options"
@@ -4671,7 +4651,7 @@ def encodeBitmapGray1WithOptionsChecked (bmp : BitmapGray1)
     Except.error "bitmap width exceeds PNG limit (2^32)"
 
 def encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
-    (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (hw : bmp.size.width < UInt32.size) (hh : bmp.size.height < UInt32.size)
     (mode : PngEncodeMode := .fixed) : ByteArray :=
   have _ := hw
   have _ := hh
@@ -4694,7 +4674,7 @@ def encodeBitmap {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
     out ++ pngSignature ++ ihdrChunk ++ idatChunk ++ iendChunk
 
 def encodeBitmapWithOptions {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
-    (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32)
+    (hw : bmp.size.width < UInt32.size) (hh : bmp.size.height < UInt32.size)
     (options : PngEncodeOptions := {}) : Option ByteArray :=
   have _ := hw
   have _ := hh
@@ -4711,14 +4691,14 @@ def encodeBitmapWithOptions {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap
 
 -- Encode a bitmap using fixed-Huffman deflate blocks.
 def encodeBitmapFixed {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
-    (hw : bmp.size.width < 2 ^ 32) (hh : bmp.size.height < 2 ^ 32) : ByteArray :=
+    (hw : bmp.size.width < UInt32.size) (hh : bmp.size.height < UInt32.size) : ByteArray :=
   encodeBitmap bmp hw hh .fixed
 
 -- Encode a bitmap, returning an error if dimensions exceed PNG limits.
 def encodeBitmapChecked {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
     (mode : PngEncodeMode := .fixed) : Except String ByteArray :=
-  if hw : bmp.size.width < 2 ^ 32 then
-    if hh : bmp.size.height < 2 ^ 32 then
+  if hw : bmp.size.width < UInt32.size then
+    if hh : bmp.size.height < UInt32.size then
       Except.ok (encodeBitmap bmp hw hh mode)
     else
       Except.error "bitmap height exceeds PNG limit (2^32)"
@@ -4727,8 +4707,8 @@ def encodeBitmapChecked {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
 
 def encodeBitmapWithOptionsChecked {px : Type u} [Pixel px] [PngPixel px] (bmp : Bitmap px)
     (options : PngEncodeOptions := {}) : Except String ByteArray :=
-  if hw : bmp.size.width < 2 ^ 32 then
-    if hh : bmp.size.height < 2 ^ 32 then
+  if hw : bmp.size.width < UInt32.size then
+    if hh : bmp.size.height < UInt32.size then
       match encodeBitmapWithOptions bmp hw hh options with
       | some bytes => Except.ok bytes
       | none => Except.error "invalid PNG ancillary encode options"
