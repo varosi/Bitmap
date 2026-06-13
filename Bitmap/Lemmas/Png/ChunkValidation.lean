@@ -439,7 +439,7 @@ lemma encodeChrmData?_valid_size :
 This prevents non-32-bit values from being serialized into `cHRM`. -/
 lemma encodeChrmData?_rejects_out_of_range :
     encodeChrmData?
-      { PngChromaticities.srgb with white := { x := 2147483648, y := 32900 } } =
+      { PngChromaticities.srgb with white := { x := Int32.maxValue.toInt + 1, y := 32900 } } =
         none := by
   native_decide
 

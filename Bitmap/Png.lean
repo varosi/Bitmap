@@ -12,6 +12,8 @@ namespace Bitmaps
 
 namespace Png
 
+def uint16MaxValue : Nat := UInt16.size - 1
+
 def u8 (n : Nat) : UInt8 :=
   UInt8.ofNat n
 
@@ -147,7 +149,7 @@ def pngTimeDaysInMonth (year month : Nat) : Nat :=
     0
 
 def PngTime.valid (time : PngTime) : Bool :=
-  decide (time.year ≤ 65535) &&
+  decide (time.year ≤ uint16MaxValue) &&
   decide (1 ≤ time.month) && decide (time.month ≤ 12) &&
   decide (1 ≤ time.day) && decide (time.day ≤ pngTimeDaysInMonth time.year time.month) &&
   decide (time.hour < 24) &&
@@ -209,25 +211,12 @@ def PngPhysicalPixelDimensions.dpi? (physical : PngPhysicalPixelDimensions) :
       some (pixelsPerMeterToDpiRounded physical.xPixelsPerUnit,
         pixelsPerMeterToDpiRounded physical.yPixelsPerUnit)
 
-def int32Min : Int := -2147483648
-
-def int32Max : Int := 2147483647
-
-def signed32FromU32 (n : Nat) : Int :=
-  if n < 2147483648 then
-    Int.ofNat n
-  else
-    Int.ofNat n - Int.ofNat 4294967296
-
 def signed32InRange (n : Int) : Bool :=
-  decide (int32Min ≤ n) && decide (n ≤ int32Max)
+  decide (Int32.minValue.toInt ≤ n ∧ n ≤ Int32.maxValue.toInt)
 
 def signed32ToU32? (n : Int) : Option Nat :=
   if signed32InRange n then
-    if n < 0 then
-      some (n + Int.ofNat 4294967296).toNat
-    else
-      some n.toNat
+    some (Int32.ofInt n).toUInt32.toNat
   else
     none
 
@@ -274,7 +263,7 @@ def deflateStoredFastAux (raw : ByteArray) (out : ByteArray) : ByteArray :=
   if _hzero : raw.size = 0 then
     out ++ storedBlock ByteArray.empty true
   else
-    let blockLen := if raw.size > 65535 then 65535 else raw.size
+    let blockLen := if uint16MaxValue < raw.size then uint16MaxValue else raw.size
     let final := blockLen == raw.size
     let payload := raw.extract 0 blockLen
     let block := storedBlock payload final
@@ -285,14 +274,17 @@ def deflateStoredFastAux (raw : ByteArray) (out : ByteArray) : ByteArray :=
 termination_by raw.size
 decreasing_by
   have hle : blockLen ≤ raw.size := by
-    by_cases hlarge : raw.size > 65535
-    · have : (65535 : Nat) ≤ raw.size := Nat.le_of_lt hlarge
+    by_cases hlarge : uint16MaxValue < raw.size
+    · have : (uint16MaxValue : Nat) ≤ raw.size := Nat.le_of_lt hlarge
       simpa [blockLen, hlarge] using this
     · simp [blockLen, hlarge]
   have hpos : 0 < blockLen := by
     have hpos_raw : 0 < raw.size := Nat.pos_of_ne_zero _hzero
-    by_cases hlarge : raw.size > 65535
-    · simp [blockLen, hlarge]
+    by_cases hlarge : uint16MaxValue < raw.size
+    · have hblock : blockLen = uint16MaxValue := by
+        simp [blockLen, hlarge]
+      rw [hblock]
+      simp [uint16MaxValue, UInt16.size]
     · simp [blockLen, hlarge, hpos_raw]
   simp [ByteArray.size_extract]
   exact Nat.sub_lt_self hpos hle
@@ -301,7 +293,7 @@ def deflateStored (raw : ByteArray) : ByteArray :=
   if _hzero : raw.size = 0 then
     storedBlock ByteArray.empty true
   else
-    let blockLen := if raw.size > 65535 then 65535 else raw.size
+    let blockLen := if uint16MaxValue < raw.size then uint16MaxValue else raw.size
     let final := blockLen == raw.size
     let payload := raw.extract 0 blockLen
     let block := storedBlock payload final
@@ -312,14 +304,17 @@ def deflateStored (raw : ByteArray) : ByteArray :=
 termination_by raw.size
 decreasing_by
   have hle : blockLen ≤ raw.size := by
-    by_cases hlarge : raw.size > 65535
-    · have : (65535 : Nat) ≤ raw.size := Nat.le_of_lt hlarge
+    by_cases hlarge : uint16MaxValue < raw.size
+    · have : (uint16MaxValue : Nat) ≤ raw.size := Nat.le_of_lt hlarge
       simpa [blockLen, hlarge] using this
     · simp [blockLen, hlarge]
   have hpos : 0 < blockLen := by
     have hpos_raw : 0 < raw.size := Nat.pos_of_ne_zero _hzero
-    by_cases hlarge : raw.size > 65535
-    · simp [blockLen, hlarge]
+    by_cases hlarge : uint16MaxValue < raw.size
+    · have hblock : blockLen = uint16MaxValue := by
+        simp [blockLen, hlarge]
+      rw [hblock]
+      simp [uint16MaxValue, UInt16.size]
     · simp [blockLen, hlarge, hpos_raw]
   simp [ByteArray.size_extract]
   exact Nat.sub_lt_self hpos hle
@@ -1948,7 +1943,7 @@ def readU16BEUInt16! (bytes : ByteArray) (pos : Nat) : UInt16 :=
   UInt16.ofNat (readU16BE! bytes pos)
 
 def readI32BE (bytes : ByteArray) (pos : Nat) (h : pos + 3 < bytes.size) : Int :=
-  signed32FromU32 (readU32BE bytes pos h)
+  (UInt32.ofNat (readU32BE bytes pos h)).toInt32.toInt
 
 def parseGammaData (data : ByteArray) : Option Nat := do
   if hlen : data.size = 4 then
@@ -2970,7 +2965,7 @@ def u8ToUInt16Full (x : UInt8) : UInt16 :=
 def backgroundToRGB16 (background : PngBackground) : UInt16 × UInt16 × UInt16 :=
   match background with
   | .gray1 gray =>
-      let gray16 := if gray then UInt16.ofNat 65535 else UInt16.ofNat 0
+      let gray16 := if gray then UInt16.ofNat uint16MaxValue else UInt16.ofNat 0
       (gray16, gray16, gray16)
   | .gray8 gray =>
       let gray16 := u8ToUInt16Full gray
@@ -2981,7 +2976,7 @@ def backgroundToRGB16 (background : PngBackground) : UInt16 × UInt16 × UInt16 
 
 def backgroundToGray16 (background : PngBackground) : UInt16 :=
   match background with
-  | .gray1 gray => if gray then UInt16.ofNat 65535 else UInt16.ofNat 0
+  | .gray1 gray => if gray then UInt16.ofNat uint16MaxValue else UInt16.ofNat 0
   | .gray8 gray => u8ToUInt16Full gray
   | .rgb8 r g b => UInt16.ofNat ((r.toNat * 257 + g.toNat * 257 + b.toNat * 257) / 3)
   | .gray16 gray => gray
@@ -2991,7 +2986,7 @@ def alphaCompositeByte (src bg alpha : UInt8) : UInt8 :=
   u8 ((src.toNat * alpha.toNat + bg.toNat * (255 - alpha.toNat)) / 255)
 
 def alphaComposite16 (src bg alpha : UInt16) : UInt16 :=
-  UInt16.ofNat ((src.toNat * alpha.toNat + bg.toNat * (65535 - alpha.toNat)) / 65535)
+  UInt16.ofNat ((src.toNat * alpha.toNat + bg.toNat * (uint16MaxValue - alpha.toNat)) / uint16MaxValue)
 
 def alphaComposite16ToByte (src bg alpha : UInt16) : UInt8 :=
   u8 ((alphaComposite16 src bg alpha).toNat / 256)
@@ -3017,22 +3012,22 @@ def transparencyAlpha (trns : Option PngTransparency) (r g b : UInt8) : UInt8 :=
 def transparencyAlpha16 (trns : Option PngTransparency) (r g b : UInt16) : UInt16 :=
   match trns with
   | some (.gray1 gray) =>
-      let gray16 := if gray then UInt16.ofNat 65535 else UInt16.ofNat 0
-      if r == gray16 && g == gray16 && b == gray16 then UInt16.ofNat 0 else UInt16.ofNat 65535
+      let gray16 := if gray then UInt16.ofNat uint16MaxValue else UInt16.ofNat 0
+      if r == gray16 && g == gray16 && b == gray16 then UInt16.ofNat 0 else UInt16.ofNat uint16MaxValue
   | some (.gray8 gray) =>
       let gray16 := u8ToUInt16Full gray
-      if r == gray16 && g == gray16 && b == gray16 then UInt16.ofNat 0 else UInt16.ofNat 65535
+      if r == gray16 && g == gray16 && b == gray16 then UInt16.ofNat 0 else UInt16.ofNat uint16MaxValue
   | some (.rgb8 tr tg tb) =>
       if r == u8ToUInt16Full tr && g == u8ToUInt16Full tg && b == u8ToUInt16Full tb then
         UInt16.ofNat 0
       else
-        UInt16.ofNat 65535
+        UInt16.ofNat uint16MaxValue
   | some (.gray16 gray) =>
-      if r == gray && g == gray && b == gray then UInt16.ofNat 0 else UInt16.ofNat 65535
+      if r == gray && g == gray && b == gray then UInt16.ofNat 0 else UInt16.ofNat uint16MaxValue
   | some (.rgb16 tr tg tb) =>
-      if r == tr && g == tg && b == tb then UInt16.ofNat 0 else UInt16.ofNat 65535
+      if r == tr && g == tg && b == tb then UInt16.ofNat 0 else UInt16.ofNat uint16MaxValue
   | none =>
-      UInt16.ofNat 65535
+      UInt16.ofNat uint16MaxValue
 
 def decodeRowTrnsOverBackground
     (trns : PngTransparency) (background : PngBackground)
@@ -3319,7 +3314,7 @@ def decodeRowGrayAlpha16 (row : ByteArray) (w y bpp : Nat) (pixels : ByteArray) 
         else if bpp == 8 then
           rowU16Nat row (base + 6)
         else
-          65535
+          uint16MaxValue
       let pixBase := (y * w + x) * bytesPerPixelGrayAlpha16
       pixels := setU16Nat! pixels pixBase gray
       pixels := setU16Nat! pixels (pixBase + 2) alpha
@@ -3424,7 +3419,7 @@ def decodeRowAlphaOverBackground16
         else if sourceColorType == 6 then
           UInt16.ofNat (rowU16Nat row (base + 6))
         else
-          UInt16.ofNat 65535
+          UInt16.ofNat uint16MaxValue
       let pixBase := (y * w + x) * bytesPerPixelRGB16
       pixels := setU16Nat! pixels pixBase (alphaComposite16 r br a).toNat
       pixels := setU16Nat! pixels (pixBase + 2) (alphaComposite16 g bg a).toNat
@@ -3458,7 +3453,7 @@ def decodeRowGrayAlphaOverBackground16
         else if sourceColorType == 6 then
           UInt16.ofNat (rowU16Nat row (base + 6))
         else
-          UInt16.ofNat 65535
+          UInt16.ofNat uint16MaxValue
       let pixBase := (y * w + x) * bytesPerPixelGray16
       pixels := setU16Nat! pixels pixBase (alphaComposite16 gray bg alpha).toNat
     return pixels
@@ -3551,7 +3546,7 @@ def decodeRowDown16AlphaOverBackgroundRGB8
         else if sourceColorType == 6 then
           UInt16.ofNat (rowU16Nat row (base + 6))
         else
-          UInt16.ofNat 65535
+          UInt16.ofNat uint16MaxValue
       let pixBase := (y * w + x) * bytesPerPixelRGB
       pixels := pixels.set! pixBase (alphaComposite16ToByte r br a)
       pixels := pixels.set! (pixBase + 1) (alphaComposite16ToByte g bg a)
@@ -3585,7 +3580,7 @@ def decodeRowDown16GrayAlphaOverBackgroundGray8
         else if sourceColorType == 6 then
           UInt16.ofNat (rowU16Nat row (base + 6))
         else
-          UInt16.ofNat 65535
+          UInt16.ofNat uint16MaxValue
       let pixBase := (y * w + x) * bytesPerPixelGray
       pixels := pixels.set! pixBase (alphaComposite16ToByte gray bg alpha)
     return pixels
@@ -3743,7 +3738,7 @@ def gammaToSrgb16Lut (gammaScaled : Nat) : Array UInt16 :=
   Id.run do
     let mut lut : Array UInt16 := Array.empty
     for n in [0:65536] do
-      lut := lut.push (UInt16.ofNat (gammaSampleToSrgbNat gammaScaled n 65535))
+      lut := lut.push (UInt16.ofNat (gammaSampleToSrgbNat gammaScaled n uint16MaxValue))
     return lut
 
 def applyGamma8ToPixels (gammaScaled : Nat) (colorType : UInt8)
@@ -3972,7 +3967,7 @@ def applyChrm16ToPixels (matrix : PngMatrix3) (gamma : Option Nat) (colorType : 
           let base := i * stride
           let (r, g, b) := chrmRgbToSrgbNat matrix gamma
             (rowU16Nat pixels base) (rowU16Nat pixels (base + 2))
-            (rowU16Nat pixels (base + 4)) 65535
+            (rowU16Nat pixels (base + 4)) uint16MaxValue
           out := setU16Nat! out base r
           out := setU16Nat! out (base + 2) g
           out := setU16Nat! out (base + 4) b
@@ -4056,7 +4051,7 @@ def decodeRowChrmToGray16 (matrix : PngMatrix3) (gamma : Option Nat)
       let base := x * bpp
       let gray := chrmRgbToGrayNat matrix gamma
         (rowU16Nat row base) (rowU16Nat row (base + 2))
-        (rowU16Nat row (base + 4)) 65535
+        (rowU16Nat row (base + 4)) uint16MaxValue
       let pixBase := (y * w + x) * bytesPerPixelGray16
       pixels := setU16Nat! pixels pixBase gray
     return pixels
@@ -4070,8 +4065,8 @@ def decodeRowChrmToGrayAlpha16 (matrix : PngMatrix3) (gamma : Option Nat)
       let base := x * bpp
       let gray := chrmRgbToGrayNat matrix gamma
         (rowU16Nat row base) (rowU16Nat row (base + 2))
-        (rowU16Nat row (base + 4)) 65535
-      let alpha := if sourceColorType == 6 then rowU16Nat row (base + 6) else 65535
+        (rowU16Nat row (base + 4)) uint16MaxValue
+      let alpha := if sourceColorType == 6 then rowU16Nat row (base + 6) else uint16MaxValue
       let pixBase := (y * w + x) * bytesPerPixelGrayAlpha16
       pixels := setU16Nat! pixels pixBase gray
       pixels := setU16Nat! pixels (pixBase + 2) alpha
@@ -4086,7 +4081,7 @@ def decodeRowChrmDown16ToGray8 (matrix : PngMatrix3) (gamma : Option Nat)
       let base := x * bpp
       let gray := chrmRgbToGrayNat matrix gamma
         (rowU16Nat row base) (rowU16Nat row (base + 2))
-        (rowU16Nat row (base + 4)) 65535
+        (rowU16Nat row (base + 4)) uint16MaxValue
       let pixBase := (y * w + x) * bytesPerPixelGray
       pixels := pixels.set! pixBase (u8 (gray / 256))
     return pixels
@@ -4100,7 +4095,7 @@ def decodeRowChrmDown16ToGrayAlpha8 (matrix : PngMatrix3) (gamma : Option Nat)
       let base := x * bpp
       let gray := chrmRgbToGrayNat matrix gamma
         (rowU16Nat row base) (rowU16Nat row (base + 2))
-        (rowU16Nat row (base + 4)) 65535
+        (rowU16Nat row (base + 4)) uint16MaxValue
       let alpha := if sourceColorType == 6 then rowU16High row (base + 6) else u8 255
       let pixBase := (y * w + x) * bytesPerPixelGrayAlpha
       pixels := pixels.set! pixBase (u8 (gray / 256))
