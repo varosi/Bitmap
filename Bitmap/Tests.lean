@@ -40,6 +40,32 @@ private def zlibDecompressFixture (bytes : ByteArray) : Option ByteArray :=
   else
     none
 
+private def bitReaderOfBytes (bytes : ByteArray) : Png.BitReader :=
+  { data := bytes
+    bytePos := 0
+    bitPos := 0
+    hpos := by exact Nat.zero_le _
+    hend := by intro _; rfl
+    hbit := by decide }
+
+private def dynamicTablesFromDeflate? (deflated : ByteArray) :
+    Option (Png.Huffman × Png.Huffman) := do
+  let br0 := bitReaderOfBytes deflated
+  let (hdr, br1) ←
+    if h : br0.bitIndex + 3 <= br0.data.size * 8 then
+      some (br0.readBits 3 h)
+    else
+      none
+  let btype := (hdr >>> 1) % 4
+  if btype != 2 then
+    none
+  let (litLen, dist, _) ← Png.readDynamicTables br1
+  some (litLen, dist)
+
+private def zlibWrapDeflated (deflated raw : ByteArray) : ByteArray :=
+  let header := ByteArray.mk #[Png.u8 0x78, Png.u8 0x01]
+  header ++ deflated ++ Png.u32be (Png.adler32 raw).toNat
+
 private def inflatedPngRaw? (bytes : ByteArray) : Option ByteArray := do
   let parsed ←
     if h : 8 ≤ bytes.size then
@@ -315,6 +341,28 @@ private def validateDynamicTableValidationBoundary : IO Unit := do
   | none =>
       throw (IO.userError "buildDynamicDistTable rejected a valid non-empty distance alphabet")
   validateDynamicRepeatEncodings
+
+private def validateGeneratedDynamicEncoder : IO Unit := do
+  let raw := repeatBytes (byteArrayOfNats [65]) 600
+  let tokens := Png.deflateTokensDist1 raw
+  if Png.deflateTokensExpand tokens != raw then
+    throw (IO.userError "generated dynamic encoder token expansion did not reconstruct raw bytes")
+  let deflated := Png.deflateDynamicFullFast raw
+  match dynamicTablesFromDeflate? deflated with
+  | some (litLen, dist) =>
+      if litLen == Png.fixedLitLenHuffman then
+        throw (IO.userError "generated dynamic encoder reused the fixed literal/length table")
+      if dist.maxLen == 0 then
+        throw (IO.userError "generated dynamic encoder emitted no distance table for repeated data")
+  | none =>
+      throw (IO.userError "generated dynamic encoder tables failed to parse")
+  let zlibBytes := zlibWrapDeflated deflated raw
+  match zlibDecompressFixture zlibBytes with
+  | some raw' =>
+      if raw' != raw then
+        throw (IO.userError "generated dynamic encoder zlib round-trip mismatch")
+  | none =>
+      throw (IO.userError "generated dynamic encoder zlib round-trip failed")
 
 -- Decode PNG fixtures that use fixed-Huffman deflate blocks.
 private def pngDecodeFixedHuffmanFixtures : IO Unit := do
@@ -2031,6 +2079,7 @@ def run : IO Unit := do
   pngAncillaryChunkFixtures
   IO.println "png ancillary-chunk fixtures: ok"
   validateDynamicTableValidationBoundary
+  validateGeneratedDynamicEncoder
   validateDynamicZlibFixtures
   validateMalformedDynamicFixtures
   validateCopyDistanceFast

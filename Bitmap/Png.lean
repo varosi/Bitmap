@@ -853,12 +853,12 @@ def deflateFixedRunFast (raw : ByteArray) : ByteArray :=
 def deflateFixed (raw : ByteArray) : ByteArray :=
   deflateFixedRunFast raw
 
-private inductive DeflateToken where
+inductive DeflateToken where
   | literal (b : UInt8)
   | matchDist1 (len : Nat)
 deriving Repr, DecidableEq
 
-private def deflateMatchDist1Chunks (tokens : Array DeflateToken) (remaining : Nat) :
+def deflateMatchDist1Chunks (tokens : Array DeflateToken) (remaining : Nat) :
     Array DeflateToken :=
   if _h : 3 ≤ remaining then
     let chunk := chooseFixedMatchChunkLen remaining
@@ -883,7 +883,7 @@ decreasing_by
       simp [chooseFixedMatchChunkLen, hgt]
     omega
 
-private def deflateTokensDist1Aux (data : Array UInt8) (i : Nat) (tokens : Array DeflateToken) :
+def deflateTokensDist1Aux (data : Array UInt8) (i : Nat) (tokens : Array DeflateToken) :
     Array DeflateToken :=
   if h : i < data.size then
     let b := data[i]
@@ -960,10 +960,10 @@ decreasing_by
       simpa [j] using hrun
     omega
 
-private def deflateTokensDist1 (raw : ByteArray) : Array DeflateToken :=
+def deflateTokensDist1 (raw : ByteArray) : Array DeflateToken :=
   deflateTokensDist1Aux raw.data 0 #[]
 
-private def deflateTokenExpand (out : ByteArray) : DeflateToken → ByteArray
+def deflateTokenExpand (out : ByteArray) : DeflateToken → ByteArray
   | .literal b => out.push b
   | .matchDist1 len =>
       if out.size == 0 then
@@ -976,13 +976,13 @@ private def deflateTokenExpand (out : ByteArray) : DeflateToken → ByteArray
             out := out.push b
           return out
 
-private def deflateTokensExpand (tokens : Array DeflateToken) : ByteArray :=
+def deflateTokensExpand (tokens : Array DeflateToken) : ByteArray :=
   tokens.foldl deflateTokenExpand ByteArray.empty
 
-private def incrementNatAt (arr : Array Nat) (idx : Nat) : Array Nat :=
+def incrementNatAt (arr : Array Nat) (idx : Nat) : Array Nat :=
   arr.set! idx (arr[idx]! + 1)
 
-private def litLenSymbolFreqs (tokens : Array DeflateToken) : Array Nat :=
+def litLenSymbolFreqs (tokens : Array DeflateToken) : Array Nat :=
   Id.run do
     let mut freqs : Array Nat := Array.replicate 286 0
     for token in tokens do
@@ -995,7 +995,7 @@ private def litLenSymbolFreqs (tokens : Array DeflateToken) : Array Nat :=
     freqs := incrementNatAt freqs 256
     return freqs
 
-private def distSymbolFreqs (tokens : Array DeflateToken) : Array Nat :=
+def distSymbolFreqs (tokens : Array DeflateToken) : Array Nat :=
   Id.run do
     let mut freqs : Array Nat := Array.replicate 30 0
     for token in tokens do
@@ -1005,7 +1005,7 @@ private def distSymbolFreqs (tokens : Array DeflateToken) : Array Nat :=
           freqs := incrementNatAt freqs 0
     return freqs
 
-private def nonzeroRank (freqs : Array Nat) (idx : Nat) : Nat :=
+def nonzeroRank (freqs : Array Nat) (idx : Nat) : Nat :=
   Id.run do
     let freq := freqs[idx]!
     let mut rank := 0
@@ -1015,14 +1015,14 @@ private def nonzeroRank (freqs : Array Nat) (idx : Nat) : Nat :=
         rank := rank + 1
     return rank
 
-private def rankedDynamicCodeLen (rank : Nat) : Nat :=
+def rankedDynamicCodeLen (rank : Nat) : Nat :=
   if rank == 0 then 2
   else if rank < 3 then 4
   else if rank < 7 then 5
   else if rank < 15 then 6
   else 15
 
-private def generatedDynamicLitLenLengths (freqs : Array Nat) : Array Nat :=
+def generatedDynamicLitLenLengths (freqs : Array Nat) : Array Nat :=
   Id.run do
     let mut lengths : Array Nat := Array.replicate freqs.size 0
     for i in [0:freqs.size] do
@@ -1030,14 +1030,14 @@ private def generatedDynamicLitLenLengths (freqs : Array Nat) : Array Nat :=
         lengths := lengths.set! i (rankedDynamicCodeLen (nonzeroRank freqs i))
     return lengths
 
-private def generatedDynamicDistLengths (freqs : Array Nat) : Array Nat :=
+def generatedDynamicDistLengths (freqs : Array Nat) : Array Nat :=
   Id.run do
     let mut lengths : Array Nat := Array.replicate freqs.size 0
     if freqs[0]! > 0 then
       lengths := lengths.set! 0 1
     return lengths
 
-private def lastNonZeroIndex (arr : Array Nat) (minIdx : Nat) : Nat :=
+def lastNonZeroIndex (arr : Array Nat) (minIdx : Nat) : Nat :=
   Id.run do
     let mut last := minIdx
     for i in [0:arr.size] do
@@ -1045,7 +1045,7 @@ private def lastNonZeroIndex (arr : Array Nat) (minIdx : Nat) : Nat :=
         last := i
     return last
 
-private def canonicalRevCodesFromLengths (lengths : Array Nat) : Array (Nat × Nat) :=
+def canonicalRevCodesFromLengths (lengths : Array Nat) : Array (Nat × Nat) :=
   Id.run do
     let mut maxLen := 0
     for len in lengths do
@@ -1069,27 +1069,27 @@ private def canonicalRevCodesFromLengths (lengths : Array Nat) : Array (Nat × N
         revCodes := revCodes.set! idx (reverseBits codeVal len, len)
     return revCodes
 
-private def codeLenCodeLengths : Array Nat :=
+def codeLenCodeLengths : Array Nat :=
   Array.replicate 19 5
 
-private def codeLenOrder : Array Nat :=
+def codeLenOrder : Array Nat :=
   #[16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
 
-@[inline] private def BitWriter.writeRevCode (bw : BitWriter) (codes : Array (Nat × Nat)) (sym : Nat) :
+@[inline] def BitWriter.writeRevCode (bw : BitWriter) (codes : Array (Nat × Nat)) (sym : Nat) :
     BitWriter :=
   let (bits, len) := codes[sym]!
   bw.writeBitsFast bits len
 
-private def BitWriter.writeCodeLenSymbol (bw : BitWriter) (codeLenCodes : Array (Nat × Nat))
+def BitWriter.writeCodeLenSymbol (bw : BitWriter) (codeLenCodes : Array (Nat × Nat))
     (sym : Nat) : BitWriter :=
   bw.writeRevCode codeLenCodes sym
 
-private def BitWriter.writeCodeLenRepeat (bw : BitWriter) (codeLenCodes : Array (Nat × Nat))
+def BitWriter.writeCodeLenRepeat (bw : BitWriter) (codeLenCodes : Array (Nat × Nat))
     (sym extra extraLen : Nat) : BitWriter :=
   let bw := bw.writeCodeLenSymbol codeLenCodes sym
   bw.writeBitsFast extra extraLen
 
-private def BitWriter.writeZeroCodeLenRun (bw : BitWriter) (codeLenCodes : Array (Nat × Nat))
+def BitWriter.writeZeroCodeLenRun (bw : BitWriter) (codeLenCodes : Array (Nat × Nat))
     (runLen : Nat) : BitWriter :=
   if _h18 : 11 ≤ runLen then
     let chunk := Nat.min 138 runLen
@@ -1118,7 +1118,7 @@ decreasing_by
     have hle : Nat.min 10 runLen ≤ runLen := Nat.min_le_right 10 runLen
     exact Nat.sub_lt_self hpos hle
 
-private def BitWriter.writeNonzeroCodeLenRun (bw : BitWriter) (codeLenCodes : Array (Nat × Nat))
+def BitWriter.writeNonzeroCodeLenRun (bw : BitWriter) (codeLenCodes : Array (Nat × Nat))
     (len runLen : Nat) : BitWriter :=
   if h16 : 4 ≤ runLen then
     let bw := bw.writeCodeLenSymbol codeLenCodes len
@@ -1140,7 +1140,7 @@ decreasing_by
   have : 1 + Nat.min 6 (runLen - 1) ≤ runLen := by omega
   omega
 
-private def codeLenRunEnd (lengths : Array Nat) (i : Nat) : Nat :=
+def codeLenRunEnd (lengths : Array Nat) (i : Nat) : Nat :=
   if h : i < lengths.size then
     Id.run do
       let len := lengths[i]
@@ -1158,7 +1158,7 @@ private def codeLenRunEnd (lengths : Array Nat) (i : Nat) : Nat :=
   else
     i
 
-private def BitWriter.writeDynamicCodeLengths (bw : BitWriter) (lengths : Array Nat)
+def BitWriter.writeDynamicCodeLengths (bw : BitWriter) (lengths : Array Nat)
     (codeLenCodes : Array (Nat × Nat)) : BitWriter :=
   Id.run do
     let mut bw := bw
@@ -1174,7 +1174,7 @@ private def BitWriter.writeDynamicCodeLengths (bw : BitWriter) (lengths : Array 
       i := j
     return bw
 
-private def writeGeneratedDynamicHeader (bw : BitWriter)
+def writeGeneratedDynamicHeader (bw : BitWriter)
     (litLenLengths distLengths : Array Nat) : BitWriter :=
   let litLenLast := lastNonZeroIndex litLenLengths 256
   let litLenCount := Nat.min 286 (Nat.max 257 (litLenLast + 1))
@@ -1192,7 +1192,7 @@ private def writeGeneratedDynamicHeader (bw : BitWriter)
     bw := bw.writeDynamicCodeLengths lengths codeLenCodes
     return bw
 
-private def writeDynamicPayload (bw : BitWriter) (tokens : Array DeflateToken)
+def writeDynamicPayload (bw : BitWriter) (tokens : Array DeflateToken)
     (litLenCodes distCodes : Array (Nat × Nat)) : BitWriter :=
   Id.run do
     let mut bw := bw
@@ -1208,7 +1208,7 @@ private def writeDynamicPayload (bw : BitWriter) (tokens : Array DeflateToken)
     bw := bw.writeRevCode litLenCodes 256
     return bw
 
-private def deflateDynamicFullFast (raw : ByteArray) : ByteArray :=
+def deflateDynamicFullFast (raw : ByteArray) : ByteArray :=
   let tokens := deflateTokensDist1 raw
   let litLenLengths := generatedDynamicLitLenLengths (litLenSymbolFreqs tokens)
   let distLengths := generatedDynamicDistLengths (distSymbolFreqs tokens)
