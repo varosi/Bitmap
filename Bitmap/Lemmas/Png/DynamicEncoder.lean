@@ -658,6 +658,91 @@ lemma generatedDynamicDistLengths_zero_pos_of_hasMatch
     generatedDynamicDistLengthAt_zero_pos_of_freq freqs hfreq
   simpa [Png.generatedDynamicDistLengths, freqs] using hpos
 
+/-- With a positive distance-1 frequency, generated distance lengths have the
+single-symbol shape accepted by DEFLATE distance tables. -/
+lemma generatedDynamicDistLengths_eq_matchShape
+    (freqs : Array Nat)
+    (hsize : freqs.size = 30)
+    (hfreq : 0 < freqs[0]!) :
+    Png.generatedDynamicDistLengths freqs =
+      Array.ofFn (fun idx : Fin 30 => if idx.val == 0 then 1 else 0) := by
+  apply Array.ext
+  · simp [Png.generatedDynamicDistLengths, hsize]
+  · intro i hleft hright
+    simp [Png.generatedDynamicDistLengths, Png.generatedDynamicDistLengthAt, hfreq]
+
+/-- With no distance-1 frequency, generated distance lengths are all zero. This
+is the literal-only dynamic-block case accepted by the parser. -/
+lemma generatedDynamicDistLengths_eq_zeroShape
+    (freqs : Array Nat)
+    (hfreq : ¬ 0 < freqs[0]!) :
+    Png.generatedDynamicDistLengths freqs =
+      Array.replicate freqs.size 0 := by
+  apply Array.ext
+  · simp [Png.generatedDynamicDistLengths]
+  · intro i hleft hright
+    simp [Png.generatedDynamicDistLengths, Png.generatedDynamicDistLengthAt, hfreq]
+
+/-- The concrete generated distance table for streams with matches is accepted
+by the runtime distance-table builder. -/
+lemma buildDynamicDistTable_generatedDistMatchShape_isSome :
+    (Png.buildDynamicDistTable
+      (Array.ofFn (fun idx : Fin 30 => if idx.val == 0 then 1 else 0))).isSome =
+        true := by
+  native_decide
+
+/-- Generated distance lengths are always accepted by `buildDynamicDistTable`.
+This covers both match-bearing blocks and literal-only dynamic blocks. -/
+lemma buildDynamicDistTable_generatedDynamicDistLengths_isSome
+    (tokens : Array Png.DeflateToken) :
+    (Png.buildDynamicDistTable
+      (Png.generatedDynamicDistLengths
+        (Png.distSymbolFreqs tokens))).isSome = true := by
+  let freqs := Png.distSymbolFreqs tokens
+  by_cases hfreq : 0 < freqs[0]!
+  · have hshape :
+        Png.generatedDynamicDistLengths freqs =
+          Array.ofFn (fun idx : Fin 30 => if idx.val == 0 then 1 else 0) :=
+      generatedDynamicDistLengths_eq_matchShape freqs
+        (by simpa [freqs] using distSymbolFreqs_size tokens) hfreq
+    simpa [freqs, hshape] using buildDynamicDistTable_generatedDistMatchShape_isSome
+  · have hshape :
+        Png.generatedDynamicDistLengths freqs =
+          Array.replicate freqs.size 0 :=
+      generatedDynamicDistLengths_eq_zeroShape freqs hfreq
+    have hall :
+        Png.allZeroCodeLengths (Png.generatedDynamicDistLengths freqs) = true := by
+      rw [hshape]
+      rw [Png.allZeroCodeLengths]
+      exact (Array.all_eq_true).2 (by
+        intro i hi
+        simp)
+    unfold Png.buildDynamicDistTable
+    cases hmk : Png.mkHuffman (Png.generatedDynamicDistLengths freqs) with
+    | none =>
+        simp [freqs, hall]
+    | some table =>
+        simp
+
+/-- Packages generated distance-table validity as an existential table, which
+is the form later header/parser proofs need. -/
+lemma buildDynamicDistTable_generatedDynamicDistLengths_exists
+    (tokens : Array Png.DeflateToken) :
+    ∃ distTable,
+      Png.buildDynamicDistTable
+        (Png.generatedDynamicDistLengths
+          (Png.distSymbolFreqs tokens)) = some distTable := by
+  have hsome :=
+    buildDynamicDistTable_generatedDynamicDistLengths_isSome tokens
+  cases h :
+      Png.buildDynamicDistTable
+        (Png.generatedDynamicDistLengths
+          (Png.distSymbolFreqs tokens)) with
+  | none =>
+      simp [h] at hsome
+  | some distTable =>
+      exact ⟨distTable, rfl⟩
+
 /-- Counting generated code lengths preserves the count table shape. This is
 the canonical-code proof analogue of the frequency-table size lemmas. -/
 lemma countCodeLengthsAux_size
