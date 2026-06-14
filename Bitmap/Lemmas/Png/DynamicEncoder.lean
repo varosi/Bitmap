@@ -177,6 +177,55 @@ lemma deflateTokensExpand_deflateMatchDist1Chunks_eq_dist1ChunkLoopOut
       · rw [deflateMatchDist1Chunks_of_lt3 tokens remaining hrem]
         rw [Png.dist1ChunkLoopOut_of_lt3 (Png.deflateTokensExpand tokens) remaining hrem]
 
+/-- A generated dynamic long-run token sequence expands to the original repeated
+bytes. This bridges literal-plus-distance tokens back to byte-stream semantics. -/
+lemma deflateTokensExpand_longRun_eq_pushRepeat
+    (tokens : Array Png.DeflateToken) (b : UInt8) (runLen : Nat)
+    (h4 : 4 ≤ runLen) :
+    Png.deflateTokensExpand
+        (Png.deflateMatchDist1Chunks
+          (tokens.push (Png.DeflateToken.literal b)) (runLen - 1)) =
+      Png.pushRepeat (Png.deflateTokensExpand tokens) b runLen := by
+  let out := Png.deflateTokensExpand tokens
+  have hremGe : 3 ≤ runLen - 1 := by omega
+  have houtLit :
+      0 <
+        (Png.deflateTokensExpand
+          (tokens.push (Png.DeflateToken.literal b))).size := by
+    simp [deflateTokensExpand_push_literal]
+  have hbridge :=
+    deflateTokensExpand_deflateMatchDist1Chunks_eq_dist1ChunkLoopOut
+      (tokens.push (Png.DeflateToken.literal b)) (runLen - 1) houtLit
+  have hloop :
+      Png.dist1ChunkLoopOut (out.push b) (runLen - 1) =
+        Png.pushRepeat (out.push b) b (runLen - 1) := by
+    calc
+      Png.dist1ChunkLoopOut (out.push b) (runLen - 1) =
+          Png.pushRepeat (out.push b)
+            ((out.push b).get! ((out.push b).size - 1))
+            ((runLen - 1) - Png.dist1ChunkLoopRem (runLen - 1)) := by
+              exact Png.dist1ChunkLoopOut_eq_pushRepeat (out.push b) (runLen - 1)
+                (by simp [ByteArray.size_push])
+      _ = Png.pushRepeat (out.push b) b (runLen - 1) := by
+            have hlast : (out.push b).get! out.size = b := by
+              simpa [ByteArray.size_push] using Png.get!_last_push out b
+            have hrem0 : Png.dist1ChunkLoopRem (runLen - 1) = 0 :=
+              Png.dist1ChunkLoopRem_eq_zero_of_ge3 (runLen - 1) hremGe
+            simp [ByteArray.size_push, hlast, hrem0]
+  calc
+    Png.deflateTokensExpand
+        (Png.deflateMatchDist1Chunks
+          (tokens.push (Png.DeflateToken.literal b)) (runLen - 1)) =
+      Png.dist1ChunkLoopOut
+        (Png.deflateTokensExpand (tokens.push (Png.DeflateToken.literal b)))
+        (runLen - 1) := hbridge
+    _ = Png.dist1ChunkLoopOut (out.push b) (runLen - 1) := by
+          simp [deflateTokensExpand_push_literal, out]
+    _ = Png.pushRepeat (out.push b) b (runLen - 1) := hloop
+    _ = Png.pushRepeat out b runLen := by
+          have hrun : (runLen - 1) + 1 = runLen := by omega
+          simpa [hrun] using Png.pushRepeat_push_eq out b (runLen - 1)
+
 end Lemmas
 
 end Bitmaps
