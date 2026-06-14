@@ -363,15 +363,50 @@ lemma incrementNatAt_get!_pos (arr : Array Nat) (idx : Nat)
     0 < (Png.incrementNatAt arr idx)[idx]! := by
   simp [Png.incrementNatAt, hidx]
 
+/-- A positive `get!` result proves the index is in bounds. This turns
+availability facts into ordinary bounded array facts. -/
+lemma get!_pos_implies_inBounds (arr : Array Nat) (idx : Nat)
+    (hpos : 0 < arr[idx]!) :
+    idx < arr.size := by
+  by_cases hidx : idx < arr.size
+  · exact hidx
+  · simp [hidx] at hpos
+
+/-- Incrementing any frequency slot preserves an already-positive slot. This is
+the scanner invariant used by generated payload-availability proofs. -/
+lemma incrementNatAt_get!_pos_of_pos
+    (arr : Array Nat) (idx sym : Nat)
+    (hpos : 0 < arr[sym]!) :
+    0 < (Png.incrementNatAt arr idx)[sym]! := by
+  have hsym : sym < arr.size := get!_pos_implies_inBounds arr sym hpos
+  have hposElem : 0 < arr[sym] := by
+    simpa [getElem!_pos arr sym hsym] using hpos
+  unfold Png.incrementNatAt
+  unfold Array.set!
+  by_cases hidx : idx < arr.size
+  · simp [Array.setIfInBounds, hidx]
+    let arr' := arr.set idx (arr[idx] + 1) hidx
+    have hsym' : sym < arr'.size := by simp [arr', hsym]
+    have hget :
+        arr'[sym] = if idx = sym then arr[idx] + 1 else arr[sym] := by
+      simpa [arr'] using
+        Array.getElem_set (xs := arr) (i := idx) hidx
+          (v := arr[idx] + 1) (j := sym) hsym'
+    change 0 < arr'[sym]!
+    rw [getElem!_pos arr' sym hsym']
+    by_cases heq : idx = sym
+    · subst heq
+      simp [hget]
+    · simp [hget, heq]
+      exact hposElem
+  · simp [Array.setIfInBounds, hidx, hpos]
+
 /-- A positive first array slot implies the first slot is in bounds. This lets
 frequency-preservation proofs reuse in-bounds increment lemmas. -/
 lemma get!_zero_pos_implies_size_pos (arr : Array Nat)
     (hpos : 0 < arr[0]!) :
     0 < arr.size := by
-  by_cases hsize : 0 < arr.size
-  · exact hsize
-  · have hzero : arr.size = 0 := Nat.eq_zero_of_not_pos hsize
-    simp [hzero] at hpos
+  exact get!_pos_implies_inBounds arr 0 hpos
 
 /-- Literal/length frequency accumulation preserves whatever table shape it is
 given. The final table-size theorem instantiates this with the DEFLATE size. -/
@@ -402,6 +437,76 @@ This is needed before proving generated `HLIT` and literal payload lookup. -/
 lemma litLenSymbolFreqs_size (tokens : Array Png.DeflateToken) :
     (Png.litLenSymbolFreqs tokens).size = 286 := by
   simp [Png.litLenSymbolFreqs, litLenSymbolFreqsAux_size]
+
+/-- Once a literal/length frequency is positive, the rest of the scan preserves
+that fact. Later payload proofs use this across preceding tokens. -/
+lemma litLenSymbolFreqsAux_pos_of_pos
+    (tokens : Array Png.DeflateToken) (i : Nat) (freqs : Array Nat) (sym : Nat)
+    (hpos : 0 < freqs[sym]!) :
+    0 < (Png.litLenSymbolFreqsAux tokens i freqs)[sym]! := by
+  rw [Png.litLenSymbolFreqsAux.eq_1]
+  by_cases h : i < tokens.size
+  · cases ht : tokens[i]'h with
+    | literal b =>
+        have hinc :
+            0 < (Png.incrementNatAt freqs b.toNat)[sym]! :=
+          incrementNatAt_get!_pos_of_pos freqs b.toNat sym hpos
+        have hrec :=
+          litLenSymbolFreqsAux_pos_of_pos tokens (i + 1)
+            (Png.incrementNatAt freqs b.toNat) sym hinc
+        simpa [h, ht] using hrec
+    | matchDist1 len =>
+        let matchSym := (Png.fixedLenMatchInfo len).1
+        have hinc :
+            0 < (Png.incrementNatAt freqs matchSym)[sym]! :=
+          incrementNatAt_get!_pos_of_pos freqs matchSym sym hpos
+        have hrec :=
+          litLenSymbolFreqsAux_pos_of_pos tokens (i + 1)
+            (Png.incrementNatAt freqs matchSym) sym hinc
+        simpa [h, ht, matchSym] using hrec
+  · simp [h, hpos]
+termination_by tokens.size - i
+decreasing_by
+  all_goals
+    have hlt : i < tokens.size := h
+    exact Nat.sub_lt_sub_left (k := i) (m := tokens.size) (n := i + 1)
+      hlt (Nat.lt_succ_self i)
+
+/-- If the current token is a literal, scanning from that token gives its
+literal/length symbol a positive frequency. -/
+lemma litLenSymbolFreqsAux_literal_pos_of_current
+    (tokens : Array Png.DeflateToken) (i : Nat) (freqs : Array Nat) (b : UInt8)
+    (h : i < tokens.size)
+    (ht : tokens[i]'h = Png.DeflateToken.literal b)
+    (hidx : b.toNat < freqs.size) :
+    0 < (Png.litLenSymbolFreqsAux tokens i freqs)[b.toNat]! := by
+  rw [Png.litLenSymbolFreqsAux.eq_1]
+  have hinc :
+      0 < (Png.incrementNatAt freqs b.toNat)[b.toNat]! :=
+    incrementNatAt_get!_pos freqs b.toNat hidx
+  have hrec :=
+    litLenSymbolFreqsAux_pos_of_pos tokens (i + 1)
+      (Png.incrementNatAt freqs b.toNat) b.toNat hinc
+  simpa [h, ht] using hrec
+
+/-- If the current token is a distance-1 match, scanning from that token gives
+its literal/length match symbol a positive frequency. -/
+lemma litLenSymbolFreqsAux_match_pos_of_current
+    (tokens : Array Png.DeflateToken) (i : Nat) (freqs : Array Nat) (len : Nat)
+    (h : i < tokens.size)
+    (ht : tokens[i]'h = Png.DeflateToken.matchDist1 len)
+    (hidx : (Png.fixedLenMatchInfo len).1 < freqs.size) :
+    0 <
+      (Png.litLenSymbolFreqsAux tokens i freqs)[(Png.fixedLenMatchInfo len).1]! := by
+  rw [Png.litLenSymbolFreqsAux.eq_1]
+  let matchSym := (Png.fixedLenMatchInfo len).1
+  have hinc :
+      0 < (Png.incrementNatAt freqs matchSym)[matchSym]! :=
+    incrementNatAt_get!_pos freqs matchSym hidx
+  have hrec :=
+    litLenSymbolFreqsAux_pos_of_pos tokens (i + 1)
+      (Png.incrementNatAt freqs matchSym) matchSym hinc
+  simpa [h, ht, matchSym] using hrec
 
 /-- Literal/length frequency collection always assigns a positive count to EOB.
 The generated dynamic encoder must be able to terminate every block. -/
