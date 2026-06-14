@@ -413,37 +413,59 @@ lemma distSymbolFreqs_size (tokens : Array Png.DeflateToken) :
     (Png.distSymbolFreqs tokens).size = 30 := by
   simp [Png.distSymbolFreqs, distSymbolFreqsAux_size]
 
-/-- Literal/length code-length generation preserves whatever table shape it is
-given. This isolates the recursive loop used by generated table proofs. -/
-lemma generatedDynamicLitLenLengthsAux_size
-    (freqs : Array Nat) (i : Nat) (lengths : Array Nat) :
-    (Png.generatedDynamicLitLenLengthsAux freqs i lengths).size = lengths.size := by
-  rw [Png.generatedDynamicLitLenLengthsAux.eq_1]
-  by_cases h : i < freqs.size
-  · by_cases hfreq : 0 < freqs[i]
-    · have hrec :=
-        generatedDynamicLitLenLengthsAux_size freqs (i + 1)
-          (lengths.set! i (Png.rankedDynamicCodeLen (Png.nonzeroRank freqs i)))
-      simp [h, hfreq]
-      calc
-        (Png.generatedDynamicLitLenLengthsAux freqs (i + 1)
-            (lengths.set! i (Png.rankedDynamicCodeLen (Png.nonzeroRank freqs i)))).size =
-          (lengths.set! i (Png.rankedDynamicCodeLen (Png.nonzeroRank freqs i))).size := hrec
-        _ = lengths.size := by simp
-    · have hrec := generatedDynamicLitLenLengthsAux_size freqs (i + 1) lengths
-      simp [h, hfreq, hrec]
+/-- Ranked dynamic literal/length code lengths are never zero. This records the
+nonzero branch used when a symbol has positive frequency. -/
+lemma rankedDynamicCodeLen_pos (rank : Nat) :
+    0 < Png.rankedDynamicCodeLen rank := by
+  unfold Png.rankedDynamicCodeLen
+  by_cases h0 : rank == 0
+  · simp [h0]
+  · by_cases h3 : rank < 3
+    · simp [h0, h3]
+    · by_cases h7 : rank < 7
+      · simp [h0, h3, h7]
+      · by_cases h15 : rank < 15
+        · simp [h0, h3, h7, h15]
+        · simp [h0, h3, h7, h15]
+
+/-- Ranked dynamic literal/length code lengths fit in DEFLATE's 15-bit limit.
+This is the value bound used by generated table validity proofs. -/
+lemma rankedDynamicCodeLen_le_15 (rank : Nat) :
+    Png.rankedDynamicCodeLen rank ≤ 15 := by
+  unfold Png.rankedDynamicCodeLen
+  by_cases h0 : rank == 0
+  · simp [h0]
+  · by_cases h3 : rank < 3
+    · simp [h0, h3]
+    · by_cases h7 : rank < 7
+      · simp [h0, h3, h7]
+      · by_cases h15 : rank < 15
+        · simp [h0, h3, h7, h15]
+        · simp [h0, h3, h7, h15]
+
+/-- A generated literal/length code-length entry is always a valid DEFLATE code
+length. This follows directly from the by-index generator. -/
+lemma generatedDynamicLitLenLengthAt_le_15 (freqs : Array Nat) (idx : Nat) :
+    Png.generatedDynamicLitLenLengthAt freqs idx ≤ 15 := by
+  unfold Png.generatedDynamicLitLenLengthAt
+  by_cases h : freqs[idx]! > 0
+  · simp [h, rankedDynamicCodeLen_le_15]
   · simp [h]
-termination_by freqs.size - i
-decreasing_by
-  all_goals
-    have hlt : i < freqs.size := h
-    exact Nat.sub_lt_sub_left (k := i) (m := freqs.size) (n := i + 1) hlt (Nat.lt_succ_self i)
 
 /-- Generated literal/length code lengths preserve the input frequency table
 size, so later header proofs can reason about table bounds. -/
 lemma generatedDynamicLitLenLengths_size (freqs : Array Nat) :
     (Png.generatedDynamicLitLenLengths freqs).size = freqs.size := by
-  simp [Png.generatedDynamicLitLenLengths, generatedDynamicLitLenLengthsAux_size]
+  simp [Png.generatedDynamicLitLenLengths]
+
+/-- Every in-bounds generated literal/length code-length entry satisfies
+DEFLATE's 15-bit limit. This is the table-level validity shape for `HLIT`. -/
+lemma generatedDynamicLitLenLengths_getElem_le_15
+    (freqs : Array Nat) (idx : Nat)
+    (hidx : idx < (Png.generatedDynamicLitLenLengths freqs).size) :
+    (Png.generatedDynamicLitLenLengths freqs)[idx] ≤ 15 := by
+  simpa [Png.generatedDynamicLitLenLengths] using
+    generatedDynamicLitLenLengthAt_le_15 freqs idx
 
 /-- Generated distance code lengths preserve the input frequency table size,
 including the single-symbol distance-1 case. -/

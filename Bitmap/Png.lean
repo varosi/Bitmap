@@ -1037,24 +1037,14 @@ def rankedDynamicCodeLen (rank : Nat) : Nat :=
   else if rank < 15 then 6
   else 15
 
-def generatedDynamicLitLenLengthsAux (freqs : Array Nat) (i : Nat)
-    (lengths : Array Nat) : Array Nat :=
-  if _h : i < freqs.size then
-    let lengths :=
-      if freqs[i]! > 0 then
-        lengths.set! i (rankedDynamicCodeLen (nonzeroRank freqs i))
-      else
-        lengths
-    generatedDynamicLitLenLengthsAux freqs (i + 1) lengths
+def generatedDynamicLitLenLengthAt (freqs : Array Nat) (idx : Nat) : Nat :=
+  if freqs[idx]! > 0 then
+    rankedDynamicCodeLen (nonzeroRank freqs idx)
   else
-    lengths
-termination_by freqs.size - i
-decreasing_by
-  have hlt : i < freqs.size := _h
-  exact Nat.sub_lt_sub_left (k := i) (m := freqs.size) (n := i + 1) hlt (Nat.lt_succ_self i)
+    0
 
 def generatedDynamicLitLenLengths (freqs : Array Nat) : Array Nat :=
-  generatedDynamicLitLenLengthsAux freqs 0 (Array.replicate freqs.size 0)
+  Array.ofFn (fun idx : Fin freqs.size => generatedDynamicLitLenLengthAt freqs idx.val)
 
 def generatedDynamicDistLengths (freqs : Array Nat) : Array Nat :=
   Id.run do
