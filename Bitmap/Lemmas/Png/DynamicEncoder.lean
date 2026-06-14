@@ -363,6 +363,16 @@ lemma incrementNatAt_get!_pos (arr : Array Nat) (idx : Nat)
     0 < (Png.incrementNatAt arr idx)[idx]! := by
   simp [Png.incrementNatAt, hidx]
 
+/-- A positive first array slot implies the first slot is in bounds. This lets
+frequency-preservation proofs reuse in-bounds increment lemmas. -/
+lemma get!_zero_pos_implies_size_pos (arr : Array Nat)
+    (hpos : 0 < arr[0]!) :
+    0 < arr.size := by
+  by_cases hsize : 0 < arr.size
+  · exact hsize
+  · have hzero : arr.size = 0 := Nat.eq_zero_of_not_pos hsize
+    simp [hzero] at hpos
+
 /-- Literal/length frequency accumulation preserves whatever table shape it is
 given. The final table-size theorem instantiates this with the DEFLATE size. -/
 lemma litLenSymbolFreqsAux_size
@@ -434,6 +444,77 @@ needed before proving generated `HDIST` and distance-1 payload lookup. -/
 lemma distSymbolFreqs_size (tokens : Array Png.DeflateToken) :
     (Png.distSymbolFreqs tokens).size = 30 := by
   simp [Png.distSymbolFreqs, distSymbolFreqsAux_size]
+
+/-- Once the distance-0 frequency is positive, the remaining frequency scan
+preserves that availability fact. -/
+lemma distSymbolFreqsAux_zero_pos_of_pos
+    (tokens : Array Png.DeflateToken) (i : Nat) (freqs : Array Nat)
+    (hpos : 0 < freqs[0]!) :
+    0 < (Png.distSymbolFreqsAux tokens i freqs)[0]! := by
+  rw [Png.distSymbolFreqsAux.eq_1]
+  by_cases h : i < tokens.size
+  · cases ht : tokens[i]'h with
+    | literal b =>
+        have hrec := distSymbolFreqsAux_zero_pos_of_pos tokens (i + 1) freqs hpos
+        simpa [h, ht] using hrec
+    | matchDist1 len =>
+        have hsize : 0 < freqs.size := get!_zero_pos_implies_size_pos freqs hpos
+        have hinc : 0 < (Png.incrementNatAt freqs 0)[0]! :=
+          incrementNatAt_get!_pos freqs 0 hsize
+        have hrec :=
+          distSymbolFreqsAux_zero_pos_of_pos tokens (i + 1)
+            (Png.incrementNatAt freqs 0) hinc
+        simpa [h, ht] using hrec
+  · simp [h, hpos]
+termination_by tokens.size - i
+decreasing_by
+  all_goals
+    have hlt : i < tokens.size := h
+    exact Nat.sub_lt_sub_left (k := i) (m := tokens.size) (n := i + 1)
+      hlt (Nat.lt_succ_self i)
+
+/-- If the token scanner finds a distance-1 match, distance symbol `0` receives
+a positive frequency by the end of distance frequency collection. -/
+lemma distSymbolFreqsAux_zero_pos_of_hasMatch
+    (tokens : Array Png.DeflateToken) (i : Nat) (freqs : Array Nat)
+    (hsize : 0 < freqs.size)
+    (hmatch : Png.deflateTokensHasMatchDist1Aux tokens i = true) :
+    0 < (Png.distSymbolFreqsAux tokens i freqs)[0]! := by
+  rw [Png.deflateTokensHasMatchDist1Aux.eq_1] at hmatch
+  rw [Png.distSymbolFreqsAux.eq_1]
+  by_cases h : i < tokens.size
+  · cases ht : tokens[i]'h with
+    | literal b =>
+        have hnext : Png.deflateTokensHasMatchDist1Aux tokens (i + 1) = true := by
+          simpa [h, ht] using hmatch
+        have hrec :=
+          distSymbolFreqsAux_zero_pos_of_hasMatch tokens (i + 1) freqs hsize hnext
+        simpa [h, ht] using hrec
+    | matchDist1 len =>
+        have hinc : 0 < (Png.incrementNatAt freqs 0)[0]! :=
+          incrementNatAt_get!_pos freqs 0 hsize
+        have hrec :=
+          distSymbolFreqsAux_zero_pos_of_pos tokens (i + 1)
+            (Png.incrementNatAt freqs 0) hinc
+        simpa [h, ht] using hrec
+  · simp [h] at hmatch
+termination_by tokens.size - i
+decreasing_by
+  all_goals
+    have hlt : i < tokens.size := h
+    exact Nat.sub_lt_sub_left (k := i) (m := tokens.size) (n := i + 1)
+      hlt (Nat.lt_succ_self i)
+
+/-- A token stream containing a distance-1 match gives generated distance
+symbol `0` a positive frequency. -/
+lemma distSymbolFreqs_zero_pos_of_hasMatch
+    (tokens : Array Png.DeflateToken)
+    (hmatch : Png.deflateTokensHasMatchDist1 tokens = true) :
+    0 < (Png.distSymbolFreqs tokens)[0]! := by
+  unfold Png.deflateTokensHasMatchDist1 at hmatch
+  unfold Png.distSymbolFreqs
+  exact distSymbolFreqsAux_zero_pos_of_hasMatch tokens 0
+    (Array.replicate 30 0) (by decide) hmatch
 
 /-- Ranked dynamic literal/length code lengths are never zero. This records the
 nonzero branch used when a symbol has positive frequency. -/
@@ -534,6 +615,15 @@ lemma generatedDynamicDistLengthAt_le_15 (freqs : Array Nat) (idx : Nat) :
   unfold Png.generatedDynamicDistLengthAt
   by_cases h : idx == 0 && freqs[0]! > 0 <;> simp [h]
 
+/-- A positive distance-symbol-0 frequency produces a positive generated
+distance code length at index zero. -/
+lemma generatedDynamicDistLengthAt_zero_pos_of_freq
+    (freqs : Array Nat)
+    (hfreq : 0 < freqs[0]!) :
+    0 < Png.generatedDynamicDistLengthAt freqs 0 := by
+  unfold Png.generatedDynamicDistLengthAt
+  simp [hfreq]
+
 /-- Every in-bounds generated distance code-length entry satisfies DEFLATE's
 15-bit limit. This is the table-level validity shape for `HDIST`. -/
 lemma generatedDynamicDistLengths_getElem_le_15
@@ -542,6 +632,31 @@ lemma generatedDynamicDistLengths_getElem_le_15
     (Png.generatedDynamicDistLengths freqs)[idx] ≤ 15 := by
   simpa [Png.generatedDynamicDistLengths] using
     generatedDynamicDistLengthAt_le_15 freqs idx
+
+/-- The generated distance length table keeps distance symbol `0` in bounds.
+The table has the fixed DEFLATE distance-table shape. -/
+lemma generatedDynamicDistLengths_zero_inBounds
+    (tokens : Array Png.DeflateToken) :
+    0 <
+      (Png.generatedDynamicDistLengths
+        (Png.distSymbolFreqs tokens)).size := by
+  simp [generatedDynamicDistLengths_size, distSymbolFreqs_size]
+
+/-- If generated tokens contain a distance-1 match, their generated distance
+length table contains a positive length for distance symbol `0`. -/
+lemma generatedDynamicDistLengths_zero_pos_of_hasMatch
+    (tokens : Array Png.DeflateToken)
+    (hmatch : Png.deflateTokensHasMatchDist1 tokens = true) :
+    0 <
+      (Png.generatedDynamicDistLengths
+        (Png.distSymbolFreqs tokens))[0]'
+          (generatedDynamicDistLengths_zero_inBounds tokens) := by
+  let freqs := Png.distSymbolFreqs tokens
+  have hfreq : 0 < freqs[0]! := by
+    simpa [freqs] using distSymbolFreqs_zero_pos_of_hasMatch tokens hmatch
+  have hpos : 0 < Png.generatedDynamicDistLengthAt freqs 0 :=
+    generatedDynamicDistLengthAt_zero_pos_of_freq freqs hfreq
+  simpa [Png.generatedDynamicDistLengths, freqs] using hpos
 
 /-- Counting generated code lengths preserves the count table shape. This is
 the canonical-code proof analogue of the frequency-table size lemmas. -/
@@ -652,6 +767,19 @@ lemma generatedDynamicDistCodes_size (tokens : Array Png.DeflateToken) :
 This records the concrete table shape used by the header writer. -/
 lemma codeLenCodeLengths_size : Png.codeLenCodeLengths.size = 19 := by
   simp [Png.codeLenCodeLengths]
+
+/-- Every generated code-length-code length is valid for DEFLATE. This is the
+value-bound side of the generated header's helper Huffman table. -/
+lemma codeLenCodeLengths_getElem_le_15
+    (idx : Nat) (hidx : idx < Png.codeLenCodeLengths.size) :
+    Png.codeLenCodeLengths[idx] ≤ 15 := by
+  simp [Png.codeLenCodeLengths]
+
+/-- The generated header's code-length-code table is accepted by the generic
+Huffman table builder. This is the first concrete generated-table validity fact. -/
+lemma mkHuffman_codeLenCodeLengths_isSome :
+    (Png.mkHuffman Png.codeLenCodeLengths).isSome = true := by
+  native_decide
 
 /-- The generated code-length-code Huffman table preserves the 19-symbol
 alphabet shape used by the dynamic header. -/

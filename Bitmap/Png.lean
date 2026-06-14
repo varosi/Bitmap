@@ -979,6 +979,21 @@ def deflateTokenExpand (out : ByteArray) : DeflateToken → ByteArray
 def deflateTokensExpand (tokens : Array DeflateToken) : ByteArray :=
   tokens.foldl deflateTokenExpand ByteArray.empty
 
+def deflateTokensHasMatchDist1Aux (tokens : Array DeflateToken) (i : Nat) : Bool :=
+  if h : i < tokens.size then
+    match tokens[i] with
+    | .literal _ => deflateTokensHasMatchDist1Aux tokens (i + 1)
+    | .matchDist1 _ => true
+  else
+    false
+termination_by tokens.size - i
+decreasing_by
+  have hlt : i < tokens.size := h
+  exact Nat.sub_lt_sub_left (k := i) (m := tokens.size) (n := i + 1) hlt (Nat.lt_succ_self i)
+
+def deflateTokensHasMatchDist1 (tokens : Array DeflateToken) : Bool :=
+  deflateTokensHasMatchDist1Aux tokens 0
+
 def incrementNatAt (arr : Array Nat) (idx : Nat) : Array Nat :=
   arr.set! idx (arr[idx]! + 1)
 
