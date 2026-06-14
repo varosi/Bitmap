@@ -451,6 +451,95 @@ lemma generatedDynamicDistLengths_size (freqs : Array Nat) :
     (Png.generatedDynamicDistLengths freqs).size = freqs.size := by
   by_cases h : freqs[0]! > 0 <;> simp [Png.generatedDynamicDistLengths, h]
 
+/-- Counting generated code lengths preserves the count table shape. This is
+the canonical-code proof analogue of the frequency-table size lemmas. -/
+lemma countCodeLengthsAux_size
+    (lengths : Array Nat) (i : Nat) (count : Array Nat) :
+    (Png.countCodeLengthsAux lengths i count).size = count.size := by
+  rw [Png.countCodeLengthsAux.eq_1]
+  by_cases h : i < lengths.size
+  · by_cases hlen : 0 < lengths[i]
+    · have hrec :=
+        countCodeLengthsAux_size lengths (i + 1) (Png.incrementNatAt count lengths[i])
+      simp [h, hlen]
+      calc
+        (Png.countCodeLengthsAux lengths (i + 1)
+            (Png.incrementNatAt count lengths[i])).size =
+          (Png.incrementNatAt count lengths[i]).size := hrec
+        _ = count.size := by simp
+    · have hrec := countCodeLengthsAux_size lengths (i + 1) count
+      simp [h, hlen, hrec]
+  · simp [h]
+termination_by lengths.size - i
+decreasing_by
+  all_goals
+    have hlt : i < lengths.size := h
+    exact Nat.sub_lt_sub_left (k := i) (m := lengths.size) (n := i + 1)
+      hlt (Nat.lt_succ_self i)
+
+/-- Computing canonical next-code values preserves the next-code table shape.
+Later generated-payload proofs use this before indexing emitted symbols. -/
+lemma nextCodesAux_size
+    (count : Array Nat) (maxLen bits code : Nat) (nextCode : Array Nat) :
+    (Png.nextCodesAux count maxLen bits code nextCode).2.size = nextCode.size := by
+  rw [Png.nextCodesAux.eq_1]
+  by_cases h : bits < maxLen + 1
+  · let code' := (code + count[bits - 1]!) <<< 1
+    have hrec :=
+      nextCodesAux_size count maxLen (bits + 1) code'
+        (nextCode.set! bits code')
+    simp [h]
+    calc
+      (Png.nextCodesAux count maxLen (bits + 1) code'
+          (nextCode.set! bits code')).2.size =
+        (nextCode.set! bits code').size := hrec
+      _ = nextCode.size := by simp
+  · simp [h]
+termination_by maxLen + 1 - bits
+decreasing_by
+  all_goals
+    have hlt : bits < maxLen + 1 := h
+    exact Nat.sub_lt_sub_left (k := bits) (m := maxLen + 1) (n := bits + 1)
+      hlt (Nat.lt_succ_self bits)
+
+/-- Filling canonical reversed codes preserves the output code table shape.
+This isolates the final recursive loop used by generated dynamic payloads. -/
+lemma fillCanonicalRevCodesAux_size
+    (lengths : Array Nat) (i : Nat) (nextCode : Array Nat)
+    (revCodes : Array (Nat × Nat)) :
+    (Png.fillCanonicalRevCodesAux lengths i nextCode revCodes).size =
+      revCodes.size := by
+  rw [Png.fillCanonicalRevCodesAux.eq_1]
+  by_cases h : i < lengths.size
+  · by_cases hlen : 0 < lengths[i]
+    · let codeVal := nextCode[lengths[i]]!
+      have hrec :=
+        fillCanonicalRevCodesAux_size lengths (i + 1)
+          (nextCode.set! lengths[i] (codeVal + 1))
+          (revCodes.set! i (Png.reverseBits codeVal lengths[i], lengths[i]))
+      simp [h, hlen]
+      calc
+        (Png.fillCanonicalRevCodesAux lengths (i + 1)
+            (nextCode.set! lengths[i] (codeVal + 1))
+            (revCodes.set! i (Png.reverseBits codeVal lengths[i], lengths[i]))).size =
+          (revCodes.set! i (Png.reverseBits codeVal lengths[i], lengths[i])).size := hrec
+        _ = revCodes.size := by simp
+    · have hrec := fillCanonicalRevCodesAux_size lengths (i + 1) nextCode revCodes
+      simp [h, hlen, hrec]
+  · simp [h]
+termination_by lengths.size - i
+decreasing_by
+  all_goals
+    have hlt : i < lengths.size := h
+    exact Nat.sub_lt_sub_left (k := i) (m := lengths.size) (n := i + 1)
+      hlt (Nat.lt_succ_self i)
+
+/-- Canonical reversed-code generation preserves the code-length table shape.
+This is the top-level shape invariant for generated dynamic Huffman payloads. -/
+lemma canonicalRevCodesFromLengths_size (lengths : Array Nat) :
+    (Png.canonicalRevCodesFromLengths lengths).size = lengths.size := by
+  simp [Png.canonicalRevCodesFromLengths, fillCanonicalRevCodesAux_size]
+
 end Lemmas
 
 end Bitmaps

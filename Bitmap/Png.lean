@@ -1071,29 +1071,76 @@ def lastNonZeroIndex (arr : Array Nat) (minIdx : Nat) : Nat :=
         last := i
     return last
 
-def canonicalRevCodesFromLengths (lengths : Array Nat) : Array (Nat × Nat) :=
-  Id.run do
-    let mut maxLen := 0
-    for len in lengths do
-      if len > maxLen then
-        maxLen := len
-    let mut count : Array Nat := Array.replicate (maxLen + 1) 0
-    for len in lengths do
+def maxCodeLenAux (lengths : Array Nat) (i maxLen : Nat) : Nat :=
+  if h : i < lengths.size then
+    let len := lengths[i]
+    let maxLen := if len > maxLen then len else maxLen
+    maxCodeLenAux lengths (i + 1) maxLen
+  else
+    maxLen
+termination_by lengths.size - i
+decreasing_by
+  have hlt : i < lengths.size := h
+  exact Nat.sub_lt_sub_left (k := i) (m := lengths.size) (n := i + 1) hlt (Nat.lt_succ_self i)
+
+def countCodeLengthsAux (lengths : Array Nat) (i : Nat) (count : Array Nat) :
+    Array Nat :=
+  if h : i < lengths.size then
+    let len := lengths[i]
+    let count :=
       if len > 0 then
-        count := count.set! len (count[len]! + 1)
-    let mut nextCode : Array Nat := Array.replicate (maxLen + 1) 0
-    let mut code := 0
-    for bits in [1:maxLen + 1] do
-      code := (code + count[bits - 1]!) <<< 1
-      nextCode := nextCode.set! bits code
-    let mut revCodes : Array (Nat × Nat) := Array.replicate lengths.size (0, 0)
-    for idx in [0:lengths.size] do
-      let len := lengths[idx]!
+        incrementNatAt count len
+      else
+        count
+    countCodeLengthsAux lengths (i + 1) count
+  else
+    count
+termination_by lengths.size - i
+decreasing_by
+  have hlt : i < lengths.size := h
+  exact Nat.sub_lt_sub_left (k := i) (m := lengths.size) (n := i + 1) hlt (Nat.lt_succ_self i)
+
+def nextCodesAux (count : Array Nat) (maxLen bits code : Nat) (nextCode : Array Nat) :
+    Nat × Array Nat :=
+  if h : bits < maxLen + 1 then
+    let code := (code + count[bits - 1]!) <<< 1
+    let nextCode := nextCode.set! bits code
+    nextCodesAux count maxLen (bits + 1) code nextCode
+  else
+    (code, nextCode)
+termination_by maxLen + 1 - bits
+decreasing_by
+  have hlt : bits < maxLen + 1 := h
+  exact Nat.sub_lt_sub_left (k := bits) (m := maxLen + 1) (n := bits + 1)
+    hlt (Nat.lt_succ_self bits)
+
+def fillCanonicalRevCodesAux (lengths : Array Nat) (i : Nat)
+    (nextCode : Array Nat) (revCodes : Array (Nat × Nat)) : Array (Nat × Nat) :=
+  if h : i < lengths.size then
+    let len := lengths[i]
+    let (nextCode, revCodes) :=
       if len > 0 then
         let codeVal := nextCode[len]!
-        nextCode := nextCode.set! len (codeVal + 1)
-        revCodes := revCodes.set! idx (reverseBits codeVal len, len)
-    return revCodes
+        let nextCode := nextCode.set! len (codeVal + 1)
+        let revCodes := revCodes.set! i (reverseBits codeVal len, len)
+        (nextCode, revCodes)
+      else
+        (nextCode, revCodes)
+    fillCanonicalRevCodesAux lengths (i + 1) nextCode revCodes
+  else
+    revCodes
+termination_by lengths.size - i
+decreasing_by
+  have hlt : i < lengths.size := h
+  exact Nat.sub_lt_sub_left (k := i) (m := lengths.size) (n := i + 1) hlt (Nat.lt_succ_self i)
+
+def canonicalRevCodesFromLengths (lengths : Array Nat) : Array (Nat × Nat) :=
+  let maxLen := maxCodeLenAux lengths 0 0
+  let count := countCodeLengthsAux lengths 0 (Array.replicate (maxLen + 1) 0)
+  let nextCode0 : Array Nat := Array.replicate (maxLen + 1) 0
+  let (_, nextCode) := nextCodesAux count maxLen 1 0 nextCode0
+  let revCodes : Array (Nat × Nat) := Array.replicate lengths.size (0, 0)
+  fillCanonicalRevCodesAux lengths 0 nextCode revCodes
 
 def codeLenCodeLengths : Array Nat :=
   Array.replicate 19 5
