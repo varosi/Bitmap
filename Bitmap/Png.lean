@@ -1046,12 +1046,14 @@ def generatedDynamicLitLenLengthAt (freqs : Array Nat) (idx : Nat) : Nat :=
 def generatedDynamicLitLenLengths (freqs : Array Nat) : Array Nat :=
   Array.ofFn (fun idx : Fin freqs.size => generatedDynamicLitLenLengthAt freqs idx.val)
 
+def generatedDynamicDistLengthAt (freqs : Array Nat) (idx : Nat) : Nat :=
+  if idx == 0 && freqs[0]! > 0 then
+    1
+  else
+    0
+
 def generatedDynamicDistLengths (freqs : Array Nat) : Array Nat :=
-  Id.run do
-    let mut lengths : Array Nat := Array.replicate freqs.size 0
-    if freqs[0]! > 0 then
-      lengths := lengths.set! 0 1
-    return lengths
+  Array.ofFn (fun idx : Fin freqs.size => generatedDynamicDistLengthAt freqs idx.val)
 
 def lastNonZeroIndex (arr : Array Nat) (minIdx : Nat) : Nat :=
   Id.run do

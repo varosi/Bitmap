@@ -471,7 +471,23 @@ lemma generatedDynamicLitLenLengths_getElem_le_15
 including the single-symbol distance-1 case. -/
 lemma generatedDynamicDistLengths_size (freqs : Array Nat) :
     (Png.generatedDynamicDistLengths freqs).size = freqs.size := by
-  by_cases h : freqs[0]! > 0 <;> simp [Png.generatedDynamicDistLengths, h]
+  simp [Png.generatedDynamicDistLengths]
+
+/-- A generated distance code-length entry is always valid for DEFLATE. The
+current generated encoder only emits the distance-1 alphabet entry. -/
+lemma generatedDynamicDistLengthAt_le_15 (freqs : Array Nat) (idx : Nat) :
+    Png.generatedDynamicDistLengthAt freqs idx ≤ 15 := by
+  unfold Png.generatedDynamicDistLengthAt
+  by_cases h : idx == 0 && freqs[0]! > 0 <;> simp [h]
+
+/-- Every in-bounds generated distance code-length entry satisfies DEFLATE's
+15-bit limit. This is the table-level validity shape for `HDIST`. -/
+lemma generatedDynamicDistLengths_getElem_le_15
+    (freqs : Array Nat) (idx : Nat)
+    (hidx : idx < (Png.generatedDynamicDistLengths freqs).size) :
+    (Png.generatedDynamicDistLengths freqs)[idx] ≤ 15 := by
+  simpa [Png.generatedDynamicDistLengths] using
+    generatedDynamicDistLengthAt_le_15 freqs idx
 
 /-- Counting generated code lengths preserves the count table shape. This is
 the canonical-code proof analogue of the frequency-table size lemmas. -/
