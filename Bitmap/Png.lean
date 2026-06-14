@@ -982,28 +982,43 @@ def deflateTokensExpand (tokens : Array DeflateToken) : ByteArray :=
 def incrementNatAt (arr : Array Nat) (idx : Nat) : Array Nat :=
   arr.set! idx (arr[idx]! + 1)
 
-def litLenSymbolFreqs (tokens : Array DeflateToken) : Array Nat :=
-  Id.run do
-    let mut freqs : Array Nat := Array.replicate 286 0
-    for token in tokens do
-      match token with
-      | .literal b =>
-          freqs := incrementNatAt freqs b.toNat
+def litLenSymbolFreqsAux (tokens : Array DeflateToken) (i : Nat)
+    (freqs : Array Nat) : Array Nat :=
+  if h : i < tokens.size then
+    let freqs :=
+      match tokens[i] with
+      | .literal b => incrementNatAt freqs b.toNat
       | .matchDist1 len =>
           let (sym, _, _) := fixedLenMatchInfo len
-          freqs := incrementNatAt freqs sym
-    freqs := incrementNatAt freqs 256
-    return freqs
+          incrementNatAt freqs sym
+    litLenSymbolFreqsAux tokens (i + 1) freqs
+  else
+    freqs
+termination_by tokens.size - i
+decreasing_by
+  have hlt : i < tokens.size := h
+  exact Nat.sub_lt_sub_left (k := i) (m := tokens.size) (n := i + 1) hlt (Nat.lt_succ_self i)
+
+def litLenSymbolFreqs (tokens : Array DeflateToken) : Array Nat :=
+  incrementNatAt (litLenSymbolFreqsAux tokens 0 (Array.replicate 286 0)) 256
+
+def distSymbolFreqsAux (tokens : Array DeflateToken) (i : Nat)
+    (freqs : Array Nat) : Array Nat :=
+  if h : i < tokens.size then
+    let freqs :=
+      match tokens[i] with
+      | .literal _ => freqs
+      | .matchDist1 _ => incrementNatAt freqs 0
+    distSymbolFreqsAux tokens (i + 1) freqs
+  else
+    freqs
+termination_by tokens.size - i
+decreasing_by
+  have hlt : i < tokens.size := h
+  exact Nat.sub_lt_sub_left (k := i) (m := tokens.size) (n := i + 1) hlt (Nat.lt_succ_self i)
 
 def distSymbolFreqs (tokens : Array DeflateToken) : Array Nat :=
-  Id.run do
-    let mut freqs : Array Nat := Array.replicate 30 0
-    for token in tokens do
-      match token with
-      | .literal _ => pure ()
-      | .matchDist1 _ =>
-          freqs := incrementNatAt freqs 0
-    return freqs
+  distSymbolFreqsAux tokens 0 (Array.replicate 30 0)
 
 def nonzeroRank (freqs : Array Nat) (idx : Nat) : Nat :=
   Id.run do
@@ -1022,13 +1037,24 @@ def rankedDynamicCodeLen (rank : Nat) : Nat :=
   else if rank < 15 then 6
   else 15
 
-def generatedDynamicLitLenLengths (freqs : Array Nat) : Array Nat :=
-  Id.run do
-    let mut lengths : Array Nat := Array.replicate freqs.size 0
-    for i in [0:freqs.size] do
+def generatedDynamicLitLenLengthsAux (freqs : Array Nat) (i : Nat)
+    (lengths : Array Nat) : Array Nat :=
+  if _h : i < freqs.size then
+    let lengths :=
       if freqs[i]! > 0 then
-        lengths := lengths.set! i (rankedDynamicCodeLen (nonzeroRank freqs i))
-    return lengths
+        lengths.set! i (rankedDynamicCodeLen (nonzeroRank freqs i))
+      else
+        lengths
+    generatedDynamicLitLenLengthsAux freqs (i + 1) lengths
+  else
+    lengths
+termination_by freqs.size - i
+decreasing_by
+  have hlt : i < freqs.size := _h
+  exact Nat.sub_lt_sub_left (k := i) (m := freqs.size) (n := i + 1) hlt (Nat.lt_succ_self i)
+
+def generatedDynamicLitLenLengths (freqs : Array Nat) : Array Nat :=
+  generatedDynamicLitLenLengthsAux freqs 0 (Array.replicate freqs.size 0)
 
 def generatedDynamicDistLengths (freqs : Array Nat) : Array Nat :=
   Id.run do

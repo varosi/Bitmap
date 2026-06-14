@@ -350,6 +350,107 @@ lemma deflateTokensExpand_deflateTokensDist1 (raw : ByteArray) :
     _ = raw := by
           simpa using Png.byteArrayFromArray_empty (data := raw.data)
 
+/-- Incrementing one frequency slot preserves the table shape. This is the base
+size invariant for generated dynamic Huffman frequency tables. -/
+@[simp] lemma incrementNatAt_size (arr : Array Nat) (idx : Nat) :
+    (Png.incrementNatAt arr idx).size = arr.size := by
+  simp [Png.incrementNatAt]
+
+/-- Literal/length frequency accumulation preserves whatever table shape it is
+given. The final table-size theorem instantiates this with the DEFLATE size. -/
+lemma litLenSymbolFreqsAux_size
+    (tokens : Array Png.DeflateToken) (i : Nat) (freqs : Array Nat) :
+    (Png.litLenSymbolFreqsAux tokens i freqs).size = freqs.size := by
+  rw [Png.litLenSymbolFreqsAux.eq_1]
+  by_cases h : i < tokens.size
+  · cases ht : tokens[i]'h with
+    | literal b =>
+        have hrec :=
+          litLenSymbolFreqsAux_size tokens (i + 1) (Png.incrementNatAt freqs b.toNat)
+        simp [h, ht, hrec]
+    | matchDist1 len =>
+        let sym := (Png.fixedLenMatchInfo len).1
+        have hrec :=
+          litLenSymbolFreqsAux_size tokens (i + 1) (Png.incrementNatAt freqs sym)
+        simpa [h, ht, sym] using hrec
+  · simp [h]
+termination_by tokens.size - i
+decreasing_by
+  all_goals
+    have hlt : i < tokens.size := h
+    exact Nat.sub_lt_sub_left (k := i) (m := tokens.size) (n := i + 1) hlt (Nat.lt_succ_self i)
+
+/-- Literal/length frequency collection keeps the DEFLATE literal table size.
+This is needed before proving generated `HLIT` and literal payload lookup. -/
+lemma litLenSymbolFreqs_size (tokens : Array Png.DeflateToken) :
+    (Png.litLenSymbolFreqs tokens).size = 286 := by
+  simp [Png.litLenSymbolFreqs, litLenSymbolFreqsAux_size]
+
+/-- Distance frequency accumulation preserves whatever table shape it is given.
+The final table-size theorem instantiates this with the DEFLATE distance size. -/
+lemma distSymbolFreqsAux_size
+    (tokens : Array Png.DeflateToken) (i : Nat) (freqs : Array Nat) :
+    (Png.distSymbolFreqsAux tokens i freqs).size = freqs.size := by
+  rw [Png.distSymbolFreqsAux.eq_1]
+  by_cases h : i < tokens.size
+  · cases ht : tokens[i]'h with
+    | literal b =>
+        have hrec := distSymbolFreqsAux_size tokens (i + 1) freqs
+        simp [h, ht, hrec]
+    | matchDist1 len =>
+        have hrec := distSymbolFreqsAux_size tokens (i + 1) (Png.incrementNatAt freqs 0)
+        simp [h, ht, hrec]
+  · simp [h]
+termination_by tokens.size - i
+decreasing_by
+  all_goals
+    have hlt : i < tokens.size := h
+    exact Nat.sub_lt_sub_left (k := i) (m := tokens.size) (n := i + 1) hlt (Nat.lt_succ_self i)
+
+/-- Distance frequency collection keeps the DEFLATE distance table size. This is
+needed before proving generated `HDIST` and distance-1 payload lookup. -/
+lemma distSymbolFreqs_size (tokens : Array Png.DeflateToken) :
+    (Png.distSymbolFreqs tokens).size = 30 := by
+  simp [Png.distSymbolFreqs, distSymbolFreqsAux_size]
+
+/-- Literal/length code-length generation preserves whatever table shape it is
+given. This isolates the recursive loop used by generated table proofs. -/
+lemma generatedDynamicLitLenLengthsAux_size
+    (freqs : Array Nat) (i : Nat) (lengths : Array Nat) :
+    (Png.generatedDynamicLitLenLengthsAux freqs i lengths).size = lengths.size := by
+  rw [Png.generatedDynamicLitLenLengthsAux.eq_1]
+  by_cases h : i < freqs.size
+  · by_cases hfreq : 0 < freqs[i]
+    · have hrec :=
+        generatedDynamicLitLenLengthsAux_size freqs (i + 1)
+          (lengths.set! i (Png.rankedDynamicCodeLen (Png.nonzeroRank freqs i)))
+      simp [h, hfreq]
+      calc
+        (Png.generatedDynamicLitLenLengthsAux freqs (i + 1)
+            (lengths.set! i (Png.rankedDynamicCodeLen (Png.nonzeroRank freqs i)))).size =
+          (lengths.set! i (Png.rankedDynamicCodeLen (Png.nonzeroRank freqs i))).size := hrec
+        _ = lengths.size := by simp
+    · have hrec := generatedDynamicLitLenLengthsAux_size freqs (i + 1) lengths
+      simp [h, hfreq, hrec]
+  · simp [h]
+termination_by freqs.size - i
+decreasing_by
+  all_goals
+    have hlt : i < freqs.size := h
+    exact Nat.sub_lt_sub_left (k := i) (m := freqs.size) (n := i + 1) hlt (Nat.lt_succ_self i)
+
+/-- Generated literal/length code lengths preserve the input frequency table
+size, so later header proofs can reason about table bounds. -/
+lemma generatedDynamicLitLenLengths_size (freqs : Array Nat) :
+    (Png.generatedDynamicLitLenLengths freqs).size = freqs.size := by
+  simp [Png.generatedDynamicLitLenLengths, generatedDynamicLitLenLengthsAux_size]
+
+/-- Generated distance code lengths preserve the input frequency table size,
+including the single-symbol distance-1 case. -/
+lemma generatedDynamicDistLengths_size (freqs : Array Nat) :
+    (Png.generatedDynamicDistLengths freqs).size = freqs.size := by
+  by_cases h : freqs[0]! > 0 <;> simp [Png.generatedDynamicDistLengths, h]
+
 end Lemmas
 
 end Bitmaps
