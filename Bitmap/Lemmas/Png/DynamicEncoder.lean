@@ -540,6 +540,38 @@ lemma canonicalRevCodesFromLengths_size (lengths : Array Nat) :
     (Png.canonicalRevCodesFromLengths lengths).size = lengths.size := by
   simp [Png.canonicalRevCodesFromLengths, fillCanonicalRevCodesAux_size]
 
+/-- The generated literal/length code table has the DEFLATE literal/length
+shape. This feeds later payload lookup proofs for literals, matches, and EOB. -/
+lemma generatedDynamicLitLenCodes_size (tokens : Array Png.DeflateToken) :
+    (Png.canonicalRevCodesFromLengths
+      (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens))).size = 286 := by
+  simp [canonicalRevCodesFromLengths_size, generatedDynamicLitLenLengths_size,
+    litLenSymbolFreqs_size]
+
+/-- The generated distance code table has the DEFLATE distance shape. This
+feeds later payload lookup proofs for distance-1 match tokens. -/
+lemma generatedDynamicDistCodes_size (tokens : Array Png.DeflateToken) :
+    (Png.canonicalRevCodesFromLengths
+      (Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens))).size = 30 := by
+  simp [canonicalRevCodesFromLengths_size, generatedDynamicDistLengths_size,
+    distSymbolFreqs_size]
+
+/-- The generated dynamic header advertises all 19 code-length-code entries.
+This records the concrete table shape used by the header writer. -/
+lemma codeLenCodeLengths_size : Png.codeLenCodeLengths.size = 19 := by
+  simp [Png.codeLenCodeLengths]
+
+/-- The generated code-length-code Huffman table preserves the 19-symbol
+alphabet shape used by the dynamic header. -/
+lemma generatedCodeLenCodes_size :
+    (Png.canonicalRevCodesFromLengths Png.codeLenCodeLengths).size = 19 := by
+  simp [canonicalRevCodesFromLengths_size, codeLenCodeLengths_size]
+
+/-- The DEFLATE code-length alphabet write order has all 19 entries. This is
+the header-side shape fact for generated dynamic tables. -/
+lemma codeLenOrder_size : Png.codeLenOrder.size = 19 := by
+  decide
+
 end Lemmas
 
 end Bitmaps
