@@ -101,6 +101,41 @@ lemma deflateMatchDist1Chunks_of_ge3 (tokens : Array Png.DeflateToken)
   rw [Png.deflateMatchDist1Chunks.eq_1]
   simp [h]
 
+/-- Zero literal repeats leave the token stream unchanged. This is the base case
+for proving short-run token expansion. -/
+@[simp] lemma pushLiteralRepeat_zero (tokens : Array Png.DeflateToken) (b : UInt8) :
+    Png.pushLiteralRepeat tokens b 0 = tokens := rfl
+
+/-- A successor literal repeat appends one literal token and continues. This
+exposes the structural step used in short-run expansion proofs. -/
+@[simp] lemma pushLiteralRepeat_succ
+    (tokens : Array Png.DeflateToken) (b : UInt8) (n : Nat) :
+    Png.pushLiteralRepeat tokens b (n + 1) =
+      Png.pushLiteralRepeat (tokens.push (Png.DeflateToken.literal b)) b n := rfl
+
+/-- A repeated-literal token sequence expands to the same byte repetition used
+by existing fixed-block byte-stream proofs. -/
+lemma deflateTokensExpand_pushLiteralRepeat_eq_pushRepeat
+    (tokens : Array Png.DeflateToken) (b : UInt8) (n : Nat) :
+    Png.deflateTokensExpand (Png.pushLiteralRepeat tokens b n) =
+      Png.pushRepeat (Png.deflateTokensExpand tokens) b n := by
+  induction n generalizing tokens with
+  | zero =>
+      simp [Png.pushLiteralRepeat, Png.pushRepeat]
+  | succ n ih =>
+      calc
+        Png.deflateTokensExpand (Png.pushLiteralRepeat tokens b (n + 1)) =
+          Png.deflateTokensExpand
+            (Png.pushLiteralRepeat (tokens.push (Png.DeflateToken.literal b)) b n) := by
+              rfl
+        _ = Png.pushRepeat
+              (Png.deflateTokensExpand (tokens.push (Png.DeflateToken.literal b))) b n := by
+              exact ih (tokens.push (Png.DeflateToken.literal b))
+        _ = Png.pushRepeat ((Png.deflateTokensExpand tokens).push b) b n := by
+              simp [deflateTokensExpand_push_literal]
+        _ = Png.pushRepeat (Png.deflateTokensExpand tokens) b (n + 1) := by
+              exact Png.pushRepeat_push_eq (Png.deflateTokensExpand tokens) b n
+
 /-- A distance-1 match cannot expand an empty output. This isolates the invalid
 match-prefix case before proving non-empty match expansion. -/
 lemma deflateTokenExpand_matchDist1_empty (len : Nat) :

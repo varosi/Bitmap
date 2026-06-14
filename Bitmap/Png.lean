@@ -883,6 +883,10 @@ decreasing_by
       simp [chooseFixedMatchChunkLen, hgt]
     omega
 
+def pushLiteralRepeat (tokens : Array DeflateToken) (b : UInt8) : Nat → Array DeflateToken
+  | 0 => tokens
+  | n + 1 => pushLiteralRepeat (tokens.push (.literal b)) b n
+
 def deflateTokensDist1Aux (data : Array UInt8) (i : Nat) (tokens : Array DeflateToken) :
     Array DeflateToken :=
   if h : i < data.size then
@@ -893,11 +897,7 @@ def deflateTokensDist1Aux (data : Array UInt8) (i : Nat) (tokens : Array Deflate
       if _h4 : 4 ≤ runLen then
         deflateMatchDist1Chunks (tokens.push (.literal b)) (runLen - 1)
       else
-        Id.run do
-          let mut out := tokens
-          for _ in [0:runLen] do
-            out := out.push (.literal b)
-          return out
+        pushLiteralRepeat tokens b runLen
     deflateTokensDist1Aux data j tokens
   else
     tokens
