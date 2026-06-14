@@ -508,6 +508,150 @@ lemma litLenSymbolFreqsAux_match_pos_of_current
       (Png.incrementNatAt freqs matchSym) matchSym hinc
   simpa [h, ht, matchSym] using hrec
 
+/-- If a literal appears at or after the current scan position, the completed
+scan gives that literal symbol a positive frequency. -/
+lemma litLenSymbolFreqsAux_literal_pos_at
+    (tokens : Array Png.DeflateToken) (i target : Nat)
+    (freqs : Array Nat) (b : UInt8)
+    (hle : i ≤ target)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.literal b)
+    (hidx : b.toNat < freqs.size) :
+    0 < (Png.litLenSymbolFreqsAux tokens i freqs)[b.toNat]! := by
+  by_cases heq : i = target
+  · subst target
+    exact litLenSymbolFreqsAux_literal_pos_of_current tokens i freqs b htarget ht hidx
+  · have hltTarget : i < target := Nat.lt_of_le_of_ne hle heq
+    rw [Png.litLenSymbolFreqsAux.eq_1]
+    have hi : i < tokens.size := Nat.lt_trans hltTarget htarget
+    cases htcur : tokens[i]'hi with
+    | literal b0 =>
+        have hidx' : b.toNat < (Png.incrementNatAt freqs b0.toNat).size := by
+          simpa using hidx
+        have hrec :=
+          litLenSymbolFreqsAux_literal_pos_at tokens (i + 1) target
+            (Png.incrementNatAt freqs b0.toNat) b
+            (Nat.succ_le_of_lt hltTarget) htarget ht hidx'
+        simpa [hi, htcur] using hrec
+    | matchDist1 len =>
+        let matchSym := (Png.fixedLenMatchInfo len).1
+        have hidx' : b.toNat < (Png.incrementNatAt freqs matchSym).size := by
+          simpa using hidx
+        have hrec :=
+          litLenSymbolFreqsAux_literal_pos_at tokens (i + 1) target
+            (Png.incrementNatAt freqs matchSym) b
+            (Nat.succ_le_of_lt hltTarget) htarget ht hidx'
+        simpa [hi, htcur, matchSym] using hrec
+termination_by target - i
+decreasing_by
+  all_goals
+    have hlt : i < target := hltTarget
+    exact Nat.sub_lt_sub_left (k := i) (m := target) (n := i + 1)
+      hlt (Nat.lt_succ_self i)
+
+/-- If a match appears at or after the current scan position, the completed
+scan gives that match's literal/length symbol a positive frequency. -/
+lemma litLenSymbolFreqsAux_match_pos_at
+    (tokens : Array Png.DeflateToken) (i target : Nat)
+    (freqs : Array Nat) (len : Nat)
+    (hle : i ≤ target)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.matchDist1 len)
+    (hidx : (Png.fixedLenMatchInfo len).1 < freqs.size) :
+    0 <
+      (Png.litLenSymbolFreqsAux tokens i freqs)[(Png.fixedLenMatchInfo len).1]! := by
+  by_cases heq : i = target
+  · subst target
+    exact litLenSymbolFreqsAux_match_pos_of_current tokens i freqs len htarget ht hidx
+  · have hltTarget : i < target := Nat.lt_of_le_of_ne hle heq
+    rw [Png.litLenSymbolFreqsAux.eq_1]
+    have hi : i < tokens.size := Nat.lt_trans hltTarget htarget
+    cases htcur : tokens[i]'hi with
+    | literal b0 =>
+        have hidx' :
+            (Png.fixedLenMatchInfo len).1 <
+              (Png.incrementNatAt freqs b0.toNat).size := by
+          simpa using hidx
+        have hrec :=
+          litLenSymbolFreqsAux_match_pos_at tokens (i + 1) target
+            (Png.incrementNatAt freqs b0.toNat) len
+            (Nat.succ_le_of_lt hltTarget) htarget ht hidx'
+        simpa [hi, htcur] using hrec
+    | matchDist1 currentLen =>
+        let matchSym := (Png.fixedLenMatchInfo currentLen).1
+        have hidx' :
+            (Png.fixedLenMatchInfo len).1 <
+              (Png.incrementNatAt freqs matchSym).size := by
+          simpa using hidx
+        have hrec :=
+          litLenSymbolFreqsAux_match_pos_at tokens (i + 1) target
+            (Png.incrementNatAt freqs matchSym) len
+            (Nat.succ_le_of_lt hltTarget) htarget ht hidx'
+        simpa [hi, htcur, matchSym] using hrec
+termination_by target - i
+decreasing_by
+  all_goals
+    have hlt : i < target := hltTarget
+    exact Nat.sub_lt_sub_left (k := i) (m := target) (n := i + 1)
+      hlt (Nat.lt_succ_self i)
+
+/-- A literal token contributes a positive final literal/length frequency for
+its byte symbol after the EOB increment is also applied. -/
+lemma litLenSymbolFreqs_literal_pos_at
+    (tokens : Array Png.DeflateToken) (target : Nat) (b : UInt8)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.literal b) :
+    0 < (Png.litLenSymbolFreqs tokens)[b.toNat]! := by
+  unfold Png.litLenSymbolFreqs
+  have hidx : b.toNat < (Array.replicate 286 0).size := by
+    have hb : b.toNat < 256 := UInt8.toNat_lt b
+    simpa using (by omega : b.toNat < 286)
+  have hpos :
+      0 <
+        (Png.litLenSymbolFreqsAux tokens 0
+          (Array.replicate 286 0))[b.toNat]! :=
+    litLenSymbolFreqsAux_literal_pos_at tokens 0 target
+      (Array.replicate 286 0) b (Nat.zero_le target) htarget ht hidx
+  exact incrementNatAt_get!_pos_of_pos
+    (Png.litLenSymbolFreqsAux tokens 0 (Array.replicate 286 0)) 256
+    b.toNat hpos
+
+/-- Valid DEFLATE match lengths map to literal/length symbols inside the
+generated literal/length table. -/
+lemma fixedLenMatchInfo_sym_lt_286
+    (len : Nat) (hlen : 3 ≤ len ∧ len ≤ 258) :
+    (Png.fixedLenMatchInfo len).1 < 286 := by
+  have hinfo := Png.fixedLenMatchInfo_spec_get! len hlen.1 hlen.2
+  rcases hfixed : Png.fixedLenMatchInfo len with ⟨sym, extraBits, extraLen⟩
+  have hspec :
+      257 ≤ sym ∧ sym ≤ 285 ∧
+        extraLen = Png.lengthExtra[sym - 257]! ∧
+        Png.lengthBases[sym - 257]! + extraBits = len ∧
+        extraBits < 2 ^ extraLen := by
+    simpa [hfixed] using hinfo
+  simpa [hfixed] using (by omega : sym < 286)
+
+/-- A valid match token contributes a positive final literal/length frequency
+for its match-length symbol after the EOB increment is also applied. -/
+lemma litLenSymbolFreqs_match_pos_at
+    (tokens : Array Png.DeflateToken) (target len : Nat)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.matchDist1 len)
+    (hlen : 3 ≤ len ∧ len ≤ 258) :
+    0 < (Png.litLenSymbolFreqs tokens)[(Png.fixedLenMatchInfo len).1]! := by
+  unfold Png.litLenSymbolFreqs
+  have hidx : (Png.fixedLenMatchInfo len).1 < (Array.replicate 286 0).size := by
+    simpa using fixedLenMatchInfo_sym_lt_286 len hlen
+  have hpos :
+      0 <
+        (Png.litLenSymbolFreqsAux tokens 0
+          (Array.replicate 286 0))[(Png.fixedLenMatchInfo len).1]! :=
+    litLenSymbolFreqsAux_match_pos_at tokens 0 target
+      (Array.replicate 286 0) len (Nat.zero_le target) htarget ht hidx
+  exact incrementNatAt_get!_pos_of_pos
+    (Png.litLenSymbolFreqsAux tokens 0 (Array.replicate 286 0)) 256
+    (Png.fixedLenMatchInfo len).1 hpos
+
 /-- Literal/length frequency collection always assigns a positive count to EOB.
 The generated dynamic encoder must be able to terminate every block. -/
 lemma litLenSymbolFreqs_eob_pos (tokens : Array Png.DeflateToken) :
@@ -621,6 +765,47 @@ lemma distSymbolFreqs_zero_pos_of_hasMatch
   exact distSymbolFreqsAux_zero_pos_of_hasMatch tokens 0
     (Array.replicate 30 0) (by decide) hmatch
 
+/-- A match token at or after the current scanner position makes the match
+detector return true. This connects indexed payload tokens to distance tables. -/
+lemma deflateTokensHasMatchDist1Aux_true_of_match_at
+    (tokens : Array Png.DeflateToken) (i target len : Nat)
+    (hle : i ≤ target)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.matchDist1 len) :
+    Png.deflateTokensHasMatchDist1Aux tokens i = true := by
+  by_cases heq : i = target
+  · subst target
+    rw [Png.deflateTokensHasMatchDist1Aux.eq_1]
+    simp [htarget, ht]
+  · have hltTarget : i < target := Nat.lt_of_le_of_ne hle heq
+    rw [Png.deflateTokensHasMatchDist1Aux.eq_1]
+    have hi : i < tokens.size := Nat.lt_trans hltTarget htarget
+    cases htcur : tokens[i]'hi with
+    | literal b =>
+        have hrec :=
+          deflateTokensHasMatchDist1Aux_true_of_match_at tokens (i + 1)
+            target len (Nat.succ_le_of_lt hltTarget) htarget ht
+        simpa [hi, htcur] using hrec
+    | matchDist1 currentLen =>
+        simp [hi, htcur]
+termination_by target - i
+decreasing_by
+  all_goals
+    have hlt : i < target := hltTarget
+    exact Nat.sub_lt_sub_left (k := i) (m := target) (n := i + 1)
+      hlt (Nat.lt_succ_self i)
+
+/-- A match token anywhere in the token stream makes the top-level match
+detector return true. -/
+lemma deflateTokensHasMatchDist1_true_of_match_at
+    (tokens : Array Png.DeflateToken) (target len : Nat)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.matchDist1 len) :
+    Png.deflateTokensHasMatchDist1 tokens = true := by
+  unfold Png.deflateTokensHasMatchDist1
+  exact deflateTokensHasMatchDist1Aux_true_of_match_at tokens 0 target len
+    (Nat.zero_le target) htarget ht
+
 /-- Ranked dynamic literal/length code lengths are never zero. This records the
 nonzero branch used when a symbol has positive frequency. -/
 lemma rankedDynamicCodeLen_pos (rank : Nat) :
@@ -707,6 +892,64 @@ lemma generatedDynamicLitLenLengths_eob_pos (tokens : Array Png.DeflateToken) :
     generatedDynamicLitLenLengthAt_pos_of_freq freqs 256 hfreq
   simpa [Png.generatedDynamicLitLenLengths, freqs] using hpos
 
+/-- Literal tokens receive positive generated literal/length code lengths. This
+connects token frequency collection to later payload-code lookup. -/
+lemma generatedDynamicLitLenLengths_literal_pos_at
+    (tokens : Array Png.DeflateToken) (target : Nat) (b : UInt8)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.literal b) :
+    0 <
+      (Png.generatedDynamicLitLenLengths
+        (Png.litLenSymbolFreqs tokens))[b.toNat]! := by
+  let freqs := Png.litLenSymbolFreqs tokens
+  have hfreq : 0 < freqs[b.toNat]! := by
+    simpa [freqs] using litLenSymbolFreqs_literal_pos_at tokens target b htarget ht
+  have hpos :
+      0 < Png.generatedDynamicLitLenLengthAt freqs b.toNat :=
+    generatedDynamicLitLenLengthAt_pos_of_freq freqs b.toNat hfreq
+  have hidx :
+      b.toNat < (Png.generatedDynamicLitLenLengths freqs).size := by
+    have hb : b.toNat < 256 := UInt8.toNat_lt b
+    have hsize :
+        (Png.generatedDynamicLitLenLengths freqs).size = 286 := by
+      simp [generatedDynamicLitLenLengths_size, freqs, litLenSymbolFreqs_size]
+    omega
+  change 0 < (Png.generatedDynamicLitLenLengths freqs)[b.toNat]!
+  rw [getElem!_pos (Png.generatedDynamicLitLenLengths freqs) b.toNat hidx]
+  simpa [Png.generatedDynamicLitLenLengths, freqs] using hpos
+
+/-- Valid match tokens receive positive generated literal/length code lengths.
+This is the match-symbol counterpart of literal payload availability. -/
+lemma generatedDynamicLitLenLengths_match_pos_at
+    (tokens : Array Png.DeflateToken) (target len : Nat)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.matchDist1 len)
+    (hlen : 3 ≤ len ∧ len ≤ 258) :
+    0 <
+      (Png.generatedDynamicLitLenLengths
+        (Png.litLenSymbolFreqs tokens))[(Png.fixedLenMatchInfo len).1]! := by
+  let freqs := Png.litLenSymbolFreqs tokens
+  have hfreq : 0 < freqs[(Png.fixedLenMatchInfo len).1]! := by
+    simpa [freqs] using
+      litLenSymbolFreqs_match_pos_at tokens target len htarget ht hlen
+  have hpos :
+      0 < Png.generatedDynamicLitLenLengthAt freqs (Png.fixedLenMatchInfo len).1 :=
+    generatedDynamicLitLenLengthAt_pos_of_freq freqs (Png.fixedLenMatchInfo len).1 hfreq
+  have hidx :
+      (Png.fixedLenMatchInfo len).1 <
+        (Png.generatedDynamicLitLenLengths freqs).size := by
+    have hsym := fixedLenMatchInfo_sym_lt_286 len hlen
+    have hsize :
+        (Png.generatedDynamicLitLenLengths freqs).size = 286 := by
+      simp [generatedDynamicLitLenLengths_size, freqs, litLenSymbolFreqs_size]
+    omega
+  change
+    0 <
+      (Png.generatedDynamicLitLenLengths freqs)[(Png.fixedLenMatchInfo len).1]!
+  rw [getElem!_pos (Png.generatedDynamicLitLenLengths freqs)
+    (Png.fixedLenMatchInfo len).1 hidx]
+  simpa [Png.generatedDynamicLitLenLengths, freqs] using hpos
+
 /-- Generated distance code lengths preserve the input frequency table size,
 including the single-symbol distance-1 case. -/
 lemma generatedDynamicDistLengths_size (freqs : Array Nat) :
@@ -762,6 +1005,38 @@ lemma generatedDynamicDistLengths_zero_pos_of_hasMatch
   have hpos : 0 < Png.generatedDynamicDistLengthAt freqs 0 :=
     generatedDynamicDistLengthAt_zero_pos_of_freq freqs hfreq
   simpa [Png.generatedDynamicDistLengths, freqs] using hpos
+
+/-- A match token anywhere in the token stream gives distance symbol `0` a
+positive generated code length. -/
+lemma generatedDynamicDistLengths_zero_pos_of_match_at
+    (tokens : Array Png.DeflateToken) (target len : Nat)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.matchDist1 len) :
+    0 <
+      (Png.generatedDynamicDistLengths
+        (Png.distSymbolFreqs tokens))[0]'
+          (generatedDynamicDistLengths_zero_inBounds tokens) := by
+  exact generatedDynamicDistLengths_zero_pos_of_hasMatch tokens
+    (deflateTokensHasMatchDist1_true_of_match_at tokens target len htarget ht)
+
+/-- Match tokens make the generated distance code length at symbol `0` positive
+in the `get!` form used by payload code-table lookup. -/
+lemma generatedDynamicDistLengths_zero_get!_pos_of_match_at
+    (tokens : Array Png.DeflateToken) (target len : Nat)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.matchDist1 len) :
+    0 <
+      (Png.generatedDynamicDistLengths
+        (Png.distSymbolFreqs tokens))[0]! := by
+  let lengths := Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)
+  have hidx : 0 < lengths.size := by
+    simpa [lengths] using generatedDynamicDistLengths_zero_inBounds tokens
+  have hpos : 0 < lengths[0]'hidx := by
+    simpa [lengths] using
+      generatedDynamicDistLengths_zero_pos_of_match_at tokens target len htarget ht
+  change 0 < lengths[0]!
+  rw [getElem!_pos lengths 0 hidx]
+  exact hpos
 
 /-- With a positive distance-1 frequency, generated distance lengths have the
 single-symbol shape accepted by DEFLATE distance tables. -/
