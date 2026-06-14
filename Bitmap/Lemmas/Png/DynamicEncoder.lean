@@ -572,6 +572,34 @@ the header-side shape fact for generated dynamic tables. -/
 lemma codeLenOrder_size : Png.codeLenOrder.size = 19 := by
   decide
 
+/-- The generated dynamic literal/length count always satisfies the DEFLATE
+minimum. This justifies encoding `HLIT = count - 257`. -/
+lemma generatedDynamicLitLenCount_ge (litLenLengths : Array Nat) :
+    257 ≤ Png.generatedDynamicLitLenCount litLenLengths := by
+  unfold Png.generatedDynamicLitLenCount
+  exact le_min (by decide) (Nat.le_max_left 257 _)
+
+/-- The generated dynamic literal/length count never exceeds the DEFLATE table
+size. This bounds the generated `HLIT` field. -/
+lemma generatedDynamicLitLenCount_le (litLenLengths : Array Nat) :
+    Png.generatedDynamicLitLenCount litLenLengths ≤ 286 := by
+  unfold Png.generatedDynamicLitLenCount
+  exact Nat.min_le_left _ _
+
+/-- The generated dynamic distance count always satisfies the DEFLATE minimum.
+This justifies encoding `HDIST = count - 1`. -/
+lemma generatedDynamicDistCount_ge (distLengths : Array Nat) :
+    1 ≤ Png.generatedDynamicDistCount distLengths := by
+  unfold Png.generatedDynamicDistCount
+  exact le_min (by decide) (Nat.le_max_left 1 _)
+
+/-- The generated dynamic distance count never exceeds the DEFLATE distance
+table size. This bounds the generated `HDIST` field. -/
+lemma generatedDynamicDistCount_le (distLengths : Array Nat) :
+    Png.generatedDynamicDistCount distLengths ≤ 30 := by
+  unfold Png.generatedDynamicDistCount
+  exact Nat.min_le_left _ _
+
 end Lemmas
 
 end Bitmaps

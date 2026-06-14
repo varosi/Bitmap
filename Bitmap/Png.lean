@@ -1247,12 +1247,18 @@ def BitWriter.writeDynamicCodeLengths (bw : BitWriter) (lengths : Array Nat)
       i := j
     return bw
 
+def generatedDynamicLitLenCount (litLenLengths : Array Nat) : Nat :=
+  let litLenLast := lastNonZeroIndex litLenLengths 256
+  Nat.min 286 (Nat.max 257 (litLenLast + 1))
+
+def generatedDynamicDistCount (distLengths : Array Nat) : Nat :=
+  let distLast := lastNonZeroIndex distLengths 0
+  Nat.min 30 (Nat.max 1 (distLast + 1))
+
 def writeGeneratedDynamicHeader (bw : BitWriter)
     (litLenLengths distLengths : Array Nat) : BitWriter :=
-  let litLenLast := lastNonZeroIndex litLenLengths 256
-  let litLenCount := Nat.min 286 (Nat.max 257 (litLenLast + 1))
-  let distLast := lastNonZeroIndex distLengths 0
-  let distCount := Nat.min 30 (Nat.max 1 (distLast + 1))
+  let litLenCount := generatedDynamicLitLenCount litLenLengths
+  let distCount := generatedDynamicDistCount distLengths
   let codeLenCodes := canonicalRevCodesFromLengths codeLenCodeLengths
   Id.run do
     let mut bw := bw
