@@ -1,4 +1,4 @@
-import Bitmap.Lemmas.Png.FixedBlockProofsCommon
+import Bitmap.Lemmas.Png.FixedBlockProofsRunEncode
 
 namespace Bitmaps
 
@@ -260,6 +260,95 @@ lemma deflateTokensExpand_longRun_eq_pushRepeat
     _ = Png.pushRepeat out b runLen := by
           have hrun : (runLen - 1) + 1 = runLen := by omega
           simpa [hrun] using Png.pushRepeat_push_eq out b (runLen - 1)
+
+/-- Expanding the full generated dynamic tokenizer reconstructs the input bytes
+from the current array index. This is the tokenizer-level correctness bridge. -/
+lemma deflateTokensExpand_deflateTokensDist1Aux_eq_byteArrayFromArray
+    (data : Array UInt8) (i : Nat) (tokens : Array Png.DeflateToken) :
+    Png.deflateTokensExpand (Png.deflateTokensDist1Aux data i tokens) =
+      Png.byteArrayFromArray data i (Png.deflateTokensExpand tokens) := by
+  classical
+  by_cases hlt : i < data.size
+  · let b := data[i]
+    let j := Png.sameByteRunEndFast data b (i + 1)
+    let runLen := j - i
+    let out := Png.deflateTokensExpand tokens
+    let tokens' :=
+      if 4 ≤ runLen then
+        Png.deflateMatchDist1Chunks (tokens.push (Png.DeflateToken.literal b)) (runLen - 1)
+      else
+        Png.pushLiteralRepeat tokens b runLen
+    have hsame : j = Png.sameByteRunEnd data b (i + 1) := by
+      simpa [j] using sameByteRunEndFast_eq_sameByteRunEnd data b (i + 1)
+    have hscan0 : Png.sameByteRunEnd data b i = Png.sameByteRunEnd data b (i + 1) := by
+      rw [Png.sameByteRunEnd.eq_def]
+      simp [hlt, b]
+    have hrunScan : Png.sameByteRunEnd data b i - i = runLen := by
+      calc
+        Png.sameByteRunEnd data b i - i =
+            Png.sameByteRunEnd data b (i + 1) - i := by simp [hscan0]
+        _ = j - i := by simp [hsame]
+        _ = runLen := by simp [runLen]
+    have hbaRun :
+        Png.byteArrayFromArray data i out =
+          Png.byteArrayFromArray data j (Png.pushRepeat out b runLen) := by
+      have htmp := Png.byteArrayFromArray_sameByteRunEnd_pushRepeat data b i out
+      calc
+        Png.byteArrayFromArray data i out =
+            Png.byteArrayFromArray data (Png.sameByteRunEnd data b i)
+              (Png.pushRepeat out b (Png.sameByteRunEnd data b i - i)) := htmp
+        _ = Png.byteArrayFromArray data (Png.sameByteRunEnd data b (i + 1))
+              (Png.pushRepeat out b (Png.sameByteRunEnd data b i - i)) := by
+                simp [hscan0]
+        _ = Png.byteArrayFromArray data j
+              (Png.pushRepeat out b (Png.sameByteRunEnd data b i - i)) := by
+                simp [hsame]
+        _ = Png.byteArrayFromArray data j (Png.pushRepeat out b runLen) := by
+              simp [hrunScan]
+    have hacc :
+        Png.deflateTokensExpand tokens' = Png.pushRepeat out b runLen := by
+      by_cases h4 : 4 ≤ runLen
+      · simp [tokens', h4, out, deflateTokensExpand_longRun_eq_pushRepeat]
+      · simp [tokens', h4, out, deflateTokensExpand_pushLiteralRepeat_eq_pushRepeat]
+    have hih :
+        Png.deflateTokensExpand (Png.deflateTokensDist1Aux data j tokens') =
+          Png.byteArrayFromArray data j (Png.deflateTokensExpand tokens') :=
+      deflateTokensExpand_deflateTokensDist1Aux_eq_byteArrayFromArray data j tokens'
+    have hstep :
+        Png.deflateTokensExpand (Png.deflateTokensDist1Aux data i tokens) =
+          Png.deflateTokensExpand (Png.deflateTokensDist1Aux data j tokens') := by
+      rw [Png.deflateTokensDist1Aux.eq_1]
+      simp [hlt, b, j, runLen, tokens']
+    calc
+      Png.deflateTokensExpand (Png.deflateTokensDist1Aux data i tokens) =
+          Png.deflateTokensExpand (Png.deflateTokensDist1Aux data j tokens') := hstep
+      _ = Png.byteArrayFromArray data j (Png.deflateTokensExpand tokens') := hih
+      _ = Png.byteArrayFromArray data j (Png.pushRepeat out b runLen) := by simp [hacc]
+      _ = Png.byteArrayFromArray data i out := hbaRun.symm
+      _ = Png.byteArrayFromArray data i (Png.deflateTokensExpand tokens) := by simp [out]
+  · rw [Png.deflateTokensDist1Aux.eq_1]
+    rw [Png.byteArrayFromArray_unfold]
+    simp [hlt]
+termination_by data.size - i
+decreasing_by
+  have hgt : i < Png.sameByteRunEndFast data data[i] (i + 1) := by
+    exact sameByteRunEndFast_gt_prev data i hlt
+  have hle : Png.sameByteRunEndFast data data[i] (i + 1) ≤ data.size := by
+    exact sameByteRunEndFast_le_size data data[i] (i + 1) (Nat.succ_le_of_lt hlt)
+  exact (by omega :
+    data.size - Png.sameByteRunEndFast data data[i] (i + 1) < data.size - i)
+
+/-- The public generated dynamic tokenizer expands exactly to its source bytes.
+This is the top-level tokenizer correctness statement for the new encoder. -/
+lemma deflateTokensExpand_deflateTokensDist1 (raw : ByteArray) :
+    Png.deflateTokensExpand (Png.deflateTokensDist1 raw) = raw := by
+  calc
+    Png.deflateTokensExpand (Png.deflateTokensDist1 raw) =
+        Png.byteArrayFromArray raw.data 0 ByteArray.empty := by
+          simpa [Png.deflateTokensDist1, deflateTokensExpand_empty] using
+            deflateTokensExpand_deflateTokensDist1Aux_eq_byteArrayFromArray raw.data 0 #[]
+    _ = raw := by
+          simpa using Png.byteArrayFromArray_empty (data := raw.data)
 
 end Lemmas
 
