@@ -26,12 +26,44 @@ lemma deflateTokensExpand_push_literal (tokens : Array Png.DeflateToken) (b : UI
       (Png.deflateTokensExpand tokens).push b := by
   simp [Png.deflateTokensExpand, Png.deflateTokenExpand]
 
+/-- Zero repeats leave the byte stream unchanged. This is the base case for
+distance-1 match expansion in the generated dynamic encoder. -/
+@[simp] lemma pushByteRepeat_zero (out : ByteArray) (b : UInt8) :
+    Png.pushByteRepeat out b 0 = out := rfl
+
+/-- A successor repeat pushes one byte and continues. This exposes the recursive
+shape used to prove distance-1 match expansion. -/
+@[simp] lemma pushByteRepeat_succ (out : ByteArray) (b : UInt8) (n : Nat) :
+    Png.pushByteRepeat out b (n + 1) =
+      Png.pushByteRepeat (out.push b) b n := rfl
+
 /-- A distance-1 match cannot expand an empty output. This isolates the invalid
 match-prefix case before proving non-empty match expansion. -/
 lemma deflateTokenExpand_matchDist1_empty (len : Nat) :
     Png.deflateTokenExpand ByteArray.empty (Png.DeflateToken.matchDist1 len) =
       ByteArray.empty := by
   simp [Png.deflateTokenExpand]
+
+/-- A distance-1 match expands by repeating the previous byte. This is the local
+payload-expansion fact needed before proving full token-stream expansion. -/
+lemma deflateTokenExpand_matchDist1_of_pos (out : ByteArray) (len : Nat)
+    (hout : 0 < out.size) :
+    Png.deflateTokenExpand out (Png.DeflateToken.matchDist1 len) =
+      Png.pushByteRepeat out (out.get! (out.size - 1)) len := by
+  have hne : out.size ≠ 0 := Nat.ne_of_gt hout
+  simp [Png.deflateTokenExpand, hne]
+
+/-- Extends token-list expansion by one valid distance-1 match. The result
+repeats the last expanded byte, matching the DEFLATE distance-1 semantics. -/
+lemma deflateTokensExpand_push_matchDist1_of_pos
+    (tokens : Array Png.DeflateToken) (len : Nat)
+    (hout : 0 < (Png.deflateTokensExpand tokens).size) :
+    Png.deflateTokensExpand (tokens.push (Png.DeflateToken.matchDist1 len)) =
+      Png.pushByteRepeat (Png.deflateTokensExpand tokens)
+        ((Png.deflateTokensExpand tokens).get!
+          ((Png.deflateTokensExpand tokens).size - 1)) len := by
+  simp only [Png.deflateTokensExpand, Array.foldl_push]
+  exact deflateTokenExpand_matchDist1_of_pos _ _ hout
 
 end Lemmas
 

@@ -963,6 +963,10 @@ decreasing_by
 def deflateTokensDist1 (raw : ByteArray) : Array DeflateToken :=
   deflateTokensDist1Aux raw.data 0 #[]
 
+def pushByteRepeat (out : ByteArray) (b : UInt8) : Nat → ByteArray
+  | 0 => out
+  | n + 1 => pushByteRepeat (out.push b) b n
+
 def deflateTokenExpand (out : ByteArray) : DeflateToken → ByteArray
   | .literal b => out.push b
   | .matchDist1 len =>
@@ -970,11 +974,7 @@ def deflateTokenExpand (out : ByteArray) : DeflateToken → ByteArray
         out
       else
         let b := out.get! (out.size - 1)
-        Id.run do
-          let mut out := out
-          for _ in [0:len] do
-            out := out.push b
-          return out
+        pushByteRepeat out b len
 
 def deflateTokensExpand (tokens : Array DeflateToken) : ByteArray :=
   tokens.foldl deflateTokenExpand ByteArray.empty
