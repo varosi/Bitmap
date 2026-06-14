@@ -356,6 +356,13 @@ size invariant for generated dynamic Huffman frequency tables. -/
     (Png.incrementNatAt arr idx).size = arr.size := by
   simp [Png.incrementNatAt]
 
+/-- Incrementing an in-bounds frequency slot makes that slot positive. This is
+used to show generated tables contain required symbols such as EOB. -/
+lemma incrementNatAt_get!_pos (arr : Array Nat) (idx : Nat)
+    (hidx : idx < arr.size) :
+    0 < (Png.incrementNatAt arr idx)[idx]! := by
+  simp [Png.incrementNatAt, hidx]
+
 /-- Literal/length frequency accumulation preserves whatever table shape it is
 given. The final table-size theorem instantiates this with the DEFLATE size. -/
 lemma litLenSymbolFreqsAux_size
@@ -385,6 +392,21 @@ This is needed before proving generated `HLIT` and literal payload lookup. -/
 lemma litLenSymbolFreqs_size (tokens : Array Png.DeflateToken) :
     (Png.litLenSymbolFreqs tokens).size = 286 := by
   simp [Png.litLenSymbolFreqs, litLenSymbolFreqsAux_size]
+
+/-- Literal/length frequency collection always assigns a positive count to EOB.
+The generated dynamic encoder must be able to terminate every block. -/
+lemma litLenSymbolFreqs_eob_pos (tokens : Array Png.DeflateToken) :
+    0 < (Png.litLenSymbolFreqs tokens)[256]! := by
+  unfold Png.litLenSymbolFreqs
+  have hsize :
+      (Png.litLenSymbolFreqsAux tokens 0 (Array.replicate 286 0)).size = 286 := by
+    simpa using
+      (litLenSymbolFreqsAux_size tokens 0 (Array.replicate 286 0))
+  have hidx :
+      256 < (Png.litLenSymbolFreqsAux tokens 0 (Array.replicate 286 0)).size := by
+    omega
+  exact incrementNatAt_get!_pos
+    (Png.litLenSymbolFreqsAux tokens 0 (Array.replicate 286 0)) 256 hidx
 
 /-- Distance frequency accumulation preserves whatever table shape it is given.
 The final table-size theorem instantiates this with the DEFLATE distance size. -/
@@ -452,6 +474,15 @@ lemma generatedDynamicLitLenLengthAt_le_15 (freqs : Array Nat) (idx : Nat) :
   · simp [h, rankedDynamicCodeLen_le_15]
   · simp [h]
 
+/-- A positive literal/length frequency produces a positive generated code
+length. This bridges frequency availability to generated table availability. -/
+lemma generatedDynamicLitLenLengthAt_pos_of_freq
+    (freqs : Array Nat) (idx : Nat)
+    (hfreq : 0 < freqs[idx]!) :
+    0 < Png.generatedDynamicLitLenLengthAt freqs idx := by
+  unfold Png.generatedDynamicLitLenLengthAt
+  simp [hfreq, rankedDynamicCodeLen_pos]
+
 /-- Generated literal/length code lengths preserve the input frequency table
 size, so later header proofs can reason about table bounds. -/
 lemma generatedDynamicLitLenLengths_size (freqs : Array Nat) :
@@ -466,6 +497,29 @@ lemma generatedDynamicLitLenLengths_getElem_le_15
     (Png.generatedDynamicLitLenLengths freqs)[idx] ≤ 15 := by
   simpa [Png.generatedDynamicLitLenLengths] using
     generatedDynamicLitLenLengthAt_le_15 freqs idx
+
+/-- The generated literal/length length table always contains EOB in bounds.
+This packages the fixed table-size facts for later payload proofs. -/
+lemma generatedDynamicLitLenLengths_eob_inBounds
+    (tokens : Array Png.DeflateToken) :
+    256 <
+      (Png.generatedDynamicLitLenLengths
+        (Png.litLenSymbolFreqs tokens)).size := by
+  simp [generatedDynamicLitLenLengths_size, litLenSymbolFreqs_size]
+
+/-- Generated literal/length lengths always contain a positive EOB entry. This
+is the table availability fact needed before proving generated block payloads. -/
+lemma generatedDynamicLitLenLengths_eob_pos (tokens : Array Png.DeflateToken) :
+    0 <
+      (Png.generatedDynamicLitLenLengths
+        (Png.litLenSymbolFreqs tokens))[256]'
+          (generatedDynamicLitLenLengths_eob_inBounds tokens) := by
+  let freqs := Png.litLenSymbolFreqs tokens
+  have hfreq : 0 < freqs[256]! := by
+    simpa [freqs] using litLenSymbolFreqs_eob_pos tokens
+  have hpos : 0 < Png.generatedDynamicLitLenLengthAt freqs 256 :=
+    generatedDynamicLitLenLengthAt_pos_of_freq freqs 256 hfreq
+  simpa [Png.generatedDynamicLitLenLengths, freqs] using hpos
 
 /-- Generated distance code lengths preserve the input frequency table size,
 including the single-symbol distance-1 case. -/
