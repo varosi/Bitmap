@@ -81,6 +81,26 @@ lemma pushByteRepeat_last_get!
   simpa [pushByteRepeat_eq_pushRepeat] using
     (Png.pushRepeat_last_get! out b last n hout hlast)
 
+/-- Below three bytes, the dynamic token chunker emits no distance token. This
+records the terminating branch used in run-expansion proofs. -/
+lemma deflateMatchDist1Chunks_of_lt3 (tokens : Array Png.DeflateToken)
+    (remaining : Nat) (h : ¬ 3 ≤ remaining) :
+    Png.deflateMatchDist1Chunks tokens remaining = tokens := by
+  rw [Png.deflateMatchDist1Chunks.eq_1]
+  simp [h]
+
+/-- At three or more bytes, the dynamic token chunker emits one distance-1
+match chunk and recurses on the remaining length. -/
+lemma deflateMatchDist1Chunks_of_ge3 (tokens : Array Png.DeflateToken)
+    (remaining : Nat) (h : 3 ≤ remaining) :
+    Png.deflateMatchDist1Chunks tokens remaining =
+      Png.deflateMatchDist1Chunks
+        (tokens.push (Png.DeflateToken.matchDist1
+          (Png.chooseFixedMatchChunkLen remaining)))
+        (remaining - Png.chooseFixedMatchChunkLen remaining) := by
+  rw [Png.deflateMatchDist1Chunks.eq_1]
+  simp [h]
+
 /-- A distance-1 match cannot expand an empty output. This isolates the invalid
 match-prefix case before proving non-empty match expansion. -/
 lemma deflateTokenExpand_matchDist1_empty (len : Nat) :
@@ -108,6 +128,54 @@ lemma deflateTokensExpand_push_matchDist1_of_pos
           ((Png.deflateTokensExpand tokens).size - 1)) len := by
   simp only [Png.deflateTokensExpand, Array.foldl_push]
   exact deflateTokenExpand_matchDist1_of_pos _ _ hout
+
+/-- The generated dynamic run chunker expands to the same byte-stream model used
+by the fixed-block distance-1 proofs. -/
+lemma deflateTokensExpand_deflateMatchDist1Chunks_eq_dist1ChunkLoopOut
+    (tokens : Array Png.DeflateToken) (remaining : Nat)
+    (hout : 0 < (Png.deflateTokensExpand tokens).size) :
+    Png.deflateTokensExpand (Png.deflateMatchDist1Chunks tokens remaining) =
+      Png.dist1ChunkLoopOut (Png.deflateTokensExpand tokens) remaining := by
+  induction remaining using Nat.strong_induction_on generalizing tokens with
+  | h remaining ih =>
+      by_cases hrem : 3 ≤ remaining
+      · let chunk := Png.chooseFixedMatchChunkLen remaining
+        have hstep :
+            Png.deflateTokensExpand
+                (tokens.push (Png.DeflateToken.matchDist1 chunk)) =
+              Png.pushRepeat (Png.deflateTokensExpand tokens)
+                ((Png.deflateTokensExpand tokens).get!
+                  ((Png.deflateTokensExpand tokens).size - 1)) chunk := by
+          calc
+            Png.deflateTokensExpand
+                (tokens.push (Png.DeflateToken.matchDist1 chunk)) =
+              Png.pushByteRepeat (Png.deflateTokensExpand tokens)
+                ((Png.deflateTokensExpand tokens).get!
+                  ((Png.deflateTokensExpand tokens).size - 1)) chunk := by
+                exact deflateTokensExpand_push_matchDist1_of_pos tokens chunk hout
+            _ =
+              Png.pushRepeat (Png.deflateTokensExpand tokens)
+                ((Png.deflateTokensExpand tokens).get!
+                  ((Png.deflateTokensExpand tokens).size - 1)) chunk := by
+                rw [pushByteRepeat_eq_pushRepeat]
+        have hout' :
+            0 <
+              (Png.deflateTokensExpand
+                (tokens.push (Png.DeflateToken.matchDist1 chunk))).size := by
+          rw [hstep]
+          exact Png.pushRepeat_pos (Png.deflateTokensExpand tokens)
+            ((Png.deflateTokensExpand tokens).get!
+              ((Png.deflateTokensExpand tokens).size - 1)) chunk hout
+        have hlt : remaining - chunk < remaining := by
+          simpa [chunk] using Png.chooseFixedMatchChunkLen_sub_lt remaining hrem
+        have hih :=
+          ih (remaining - chunk) hlt
+            (tokens.push (Png.DeflateToken.matchDist1 chunk)) hout'
+        rw [deflateMatchDist1Chunks_of_ge3 tokens remaining hrem]
+        rw [Png.dist1ChunkLoopOut_of_ge3 (Png.deflateTokensExpand tokens) remaining hrem]
+        simpa [chunk, hstep] using hih
+      · rw [deflateMatchDist1Chunks_of_lt3 tokens remaining hrem]
+        rw [Png.dist1ChunkLoopOut_of_lt3 (Png.deflateTokensExpand tokens) remaining hrem]
 
 end Lemmas
 
