@@ -1,4 +1,4 @@
-import Bitmap.Png
+import Bitmap.Lemmas.Png.FixedBlockProofsCommon
 
 namespace Bitmaps
 
@@ -36,6 +36,50 @@ shape used to prove distance-1 match expansion. -/
 @[simp] lemma pushByteRepeat_succ (out : ByteArray) (b : UInt8) (n : Nat) :
     Png.pushByteRepeat out b (n + 1) =
       Png.pushByteRepeat (out.push b) b n := rfl
+
+/-- Relates the generated dynamic encoder's repeat helper to the established
+fixed-block proof helper, letting later proofs share repeat algebra. -/
+lemma pushByteRepeat_eq_pushRepeat (out : ByteArray) (b : UInt8) (n : Nat) :
+    Png.pushByteRepeat out b n = Png.pushRepeat out b n := by
+  induction n generalizing out with
+  | zero =>
+      simp [Png.pushByteRepeat, Png.pushRepeat]
+  | succ n ih =>
+      simp [Png.pushByteRepeat, Png.pushRepeat, ih]
+
+/-- Repeating a byte grows the stream by exactly the repeat count. This supports
+token-expansion proofs that track output positions. -/
+@[simp] lemma pushByteRepeat_size (out : ByteArray) (b : UInt8) (n : Nat) :
+    (Png.pushByteRepeat out b n).size = out.size + n := by
+  rw [pushByteRepeat_eq_pushRepeat]
+  exact Png.pushRepeat_size out b n
+
+/-- A repeated-byte expansion preserves nonemptiness of a nonempty prefix. This
+is the condition needed for chained distance-1 match tokens. -/
+lemma pushByteRepeat_pos (out : ByteArray) (b : UInt8) (n : Nat)
+    (hout : 0 < out.size) :
+    0 < (Png.pushByteRepeat out b n).size := by
+  rw [pushByteRepeat_eq_pushRepeat]
+  exact Png.pushRepeat_pos out b n hout
+
+/-- Consecutive repeats of the same byte can be fused. This is the algebraic
+step for proving expansion of chunked distance-1 runs. -/
+lemma pushByteRepeat_append (out : ByteArray) (b : UInt8) (n m : Nat) :
+    Png.pushByteRepeat (Png.pushByteRepeat out b n) b m =
+      Png.pushByteRepeat out b (n + m) := by
+  simp [pushByteRepeat_eq_pushRepeat, Png.pushRepeat_append]
+
+/-- After a repeat, the last byte is the old last byte for zero repeats and the
+repeated byte otherwise. This supports chained match expansion proofs. -/
+lemma pushByteRepeat_last_get!
+    (out : ByteArray) (b last : UInt8) (n : Nat)
+    (hout : 0 < out.size)
+    (hlast : out.get! (out.size - 1) = last) :
+    (Png.pushByteRepeat out b n).get!
+        ((Png.pushByteRepeat out b n).size - 1) =
+      (if n = 0 then last else b) := by
+  simpa [pushByteRepeat_eq_pushRepeat] using
+    (Png.pushRepeat_last_get! out b last n hout hlast)
 
 /-- A distance-1 match cannot expand an empty output. This isolates the invalid
 match-prefix case before proving non-empty match expansion. -/
