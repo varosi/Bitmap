@@ -101,6 +101,101 @@ lemma deflateMatchDist1Chunks_of_ge3 (tokens : Array Png.DeflateToken)
   rw [Png.deflateMatchDist1Chunks.eq_1]
   simp [h]
 
+/-- Match-token validity predicate for the generated dynamic encoder. It keeps
+the token IR connected to DEFLATE's legal match-length interval. -/
+def DeflateTokensMatchLengthsValid (tokens : Array Png.DeflateToken) : Prop :=
+  ∀ target len (htarget : target < tokens.size),
+    tokens[target]'htarget = Png.DeflateToken.matchDist1 len →
+      3 ≤ len ∧ len ≤ 258
+
+/-- The empty token stream has no invalid match lengths. This is the top-level
+base case for tokenizer validity. -/
+lemma deflateTokensMatchLengthsValid_empty :
+    DeflateTokensMatchLengthsValid #[] := by
+  intro target len htarget _
+  simp at htarget
+
+/-- Adding a literal token preserves validity of all existing match lengths.
+This isolates the literal branch of the tokenizer. -/
+lemma deflateTokensMatchLengthsValid_push_literal
+    (tokens : Array Png.DeflateToken) (b : UInt8)
+    (hvalid : DeflateTokensMatchLengthsValid tokens) :
+    DeflateTokensMatchLengthsValid
+      (tokens.push (Png.DeflateToken.literal b)) := by
+  intro target len htarget ht
+  by_cases hlt : target < tokens.size
+  · have hget :
+        (tokens.push (Png.DeflateToken.literal b))[target] = tokens[target] := by
+      exact Array.getElem_push_lt hlt
+    exact hvalid target len hlt (by simpa [hget] using ht)
+  · have heq : target = tokens.size := by
+      have hsize := Array.size_push (xs := tokens) (v := Png.DeflateToken.literal b)
+      omega
+    subst target
+    have hget :
+        (tokens.push (Png.DeflateToken.literal b))[tokens.size] =
+          Png.DeflateToken.literal b :=
+      Array.getElem_push_eq
+    simp [hget] at ht
+
+/-- Adding one legal distance-1 match preserves token validity. This packages
+the array-push split used by generated chunk proofs. -/
+lemma deflateTokensMatchLengthsValid_push_matchDist1
+    (tokens : Array Png.DeflateToken) (chunk : Nat)
+    (hchunk : 3 ≤ chunk ∧ chunk ≤ 258)
+    (hvalid : DeflateTokensMatchLengthsValid tokens) :
+    DeflateTokensMatchLengthsValid
+      (tokens.push (Png.DeflateToken.matchDist1 chunk)) := by
+  intro target len htarget ht
+  by_cases hlt : target < tokens.size
+  · have hget :
+        (tokens.push (Png.DeflateToken.matchDist1 chunk))[target] =
+          tokens[target] := by
+      exact Array.getElem_push_lt hlt
+    exact hvalid target len hlt (by simpa [hget] using ht)
+  · have heq : target = tokens.size := by
+      have hsize := Array.size_push (xs := tokens) (v := Png.DeflateToken.matchDist1 chunk)
+      omega
+    subst target
+    have hget :
+        (tokens.push (Png.DeflateToken.matchDist1 chunk))[tokens.size] =
+          Png.DeflateToken.matchDist1 chunk :=
+      Array.getElem_push_eq
+    have hmatch :
+        Png.DeflateToken.matchDist1 chunk =
+          Png.DeflateToken.matchDist1 len := by
+      simpa [hget] using ht
+    cases hmatch
+    exact hchunk
+
+/-- The match chunker only appends legal DEFLATE match lengths. This lets later
+payload proofs reuse the existing fixed-block chunk bounds. -/
+lemma deflateMatchDist1Chunks_matchLengthsValid
+    (tokens : Array Png.DeflateToken) (remaining : Nat)
+    (hvalid : DeflateTokensMatchLengthsValid tokens) :
+    DeflateTokensMatchLengthsValid
+      (Png.deflateMatchDist1Chunks tokens remaining) := by
+  induction remaining using Nat.strong_induction_on generalizing tokens with
+  | h remaining ih =>
+      by_cases hrem : 3 ≤ remaining
+      · let chunk := Png.chooseFixedMatchChunkLen remaining
+        have hchunk : 3 ≤ chunk ∧ chunk ≤ 258 := by
+          have hbounds := Png.chooseFixedMatchChunkLen_bounds remaining hrem
+          exact ⟨hbounds.1, hbounds.2.1⟩
+        have hnext :
+            DeflateTokensMatchLengthsValid
+              (tokens.push (Png.DeflateToken.matchDist1 chunk)) :=
+          deflateTokensMatchLengthsValid_push_matchDist1 tokens chunk hchunk hvalid
+        have hlt : remaining - chunk < remaining := by
+          simpa [chunk] using Png.chooseFixedMatchChunkLen_sub_lt remaining hrem
+        have hih :=
+          ih (remaining - chunk) hlt
+            (tokens.push (Png.DeflateToken.matchDist1 chunk)) hnext
+        rw [deflateMatchDist1Chunks_of_ge3 tokens remaining hrem]
+        simpa [chunk] using hih
+      · rw [deflateMatchDist1Chunks_of_lt3 tokens remaining hrem]
+        exact hvalid
+
 /-- Zero literal repeats leave the token stream unchanged. This is the base case
 for proving short-run token expansion. -/
 @[simp] lemma pushLiteralRepeat_zero (tokens : Array Png.DeflateToken) (b : UInt8) :
@@ -112,6 +207,19 @@ exposes the structural step used in short-run expansion proofs. -/
     (tokens : Array Png.DeflateToken) (b : UInt8) (n : Nat) :
     Png.pushLiteralRepeat tokens b (n + 1) =
       Png.pushLiteralRepeat (tokens.push (Png.DeflateToken.literal b)) b n := rfl
+
+/-- Repeating literals preserves match-length validity because it appends no
+match tokens. This covers the tokenizer's short-run branch. -/
+lemma pushLiteralRepeat_matchLengthsValid
+    (tokens : Array Png.DeflateToken) (b : UInt8) (n : Nat)
+    (hvalid : DeflateTokensMatchLengthsValid tokens) :
+    DeflateTokensMatchLengthsValid (Png.pushLiteralRepeat tokens b n) := by
+  induction n generalizing tokens with
+  | zero =>
+      simpa using hvalid
+  | succ n ih =>
+      exact ih (tokens.push (Png.DeflateToken.literal b))
+        (deflateTokensMatchLengthsValid_push_literal tokens b hvalid)
 
 /-- A repeated-literal token sequence expands to the same byte repetition used
 by existing fixed-block byte-stream proofs. -/
@@ -349,6 +457,67 @@ lemma deflateTokensExpand_deflateTokensDist1 (raw : ByteArray) :
             deflateTokensExpand_deflateTokensDist1Aux_eq_byteArrayFromArray raw.data 0 #[]
     _ = raw := by
           simpa using Png.byteArrayFromArray_empty (data := raw.data)
+
+/-- The generated tokenizer preserves legal match lengths from any valid token
+prefix. This is the recursive bridge from byte scanning to payload safety. -/
+lemma deflateTokensDist1Aux_matchLengthsValid
+    (data : Array UInt8) (i : Nat) (tokens : Array Png.DeflateToken)
+    (hvalid : DeflateTokensMatchLengthsValid tokens) :
+    DeflateTokensMatchLengthsValid
+      (Png.deflateTokensDist1Aux data i tokens) := by
+  rw [Png.deflateTokensDist1Aux.eq_1]
+  by_cases hlt : i < data.size
+  · let b := data[i]
+    let j := Png.sameByteRunEndFast data b (i + 1)
+    let runLen := j - i
+    let tokens' :=
+      if 4 ≤ runLen then
+        Png.deflateMatchDist1Chunks (tokens.push (Png.DeflateToken.literal b)) (runLen - 1)
+      else
+        Png.pushLiteralRepeat tokens b runLen
+    have htokens' : DeflateTokensMatchLengthsValid tokens' := by
+      by_cases h4 : 4 ≤ runLen
+      · have hpush :
+            DeflateTokensMatchLengthsValid
+              (tokens.push (Png.DeflateToken.literal b)) :=
+          deflateTokensMatchLengthsValid_push_literal tokens b hvalid
+        have hchunks :=
+          deflateMatchDist1Chunks_matchLengthsValid
+            (tokens.push (Png.DeflateToken.literal b)) (runLen - 1) hpush
+        simpa [tokens', h4] using hchunks
+      · have hlits :=
+          pushLiteralRepeat_matchLengthsValid tokens b runLen hvalid
+        simpa [tokens', h4] using hlits
+    have hrec :=
+      deflateTokensDist1Aux_matchLengthsValid data j tokens' htokens'
+    simpa [hlt, b, j, runLen, tokens'] using hrec
+  · simp [hlt, hvalid]
+termination_by data.size - i
+decreasing_by
+  have hgt : i < Png.sameByteRunEndFast data data[i] (i + 1) := by
+    exact sameByteRunEndFast_gt_prev data i hlt
+  have hle : Png.sameByteRunEndFast data data[i] (i + 1) ≤ data.size := by
+    exact sameByteRunEndFast_le_size data data[i] (i + 1) (Nat.succ_le_of_lt hlt)
+  exact (by omega :
+    data.size - Png.sameByteRunEndFast data data[i] (i + 1) < data.size - i)
+
+/-- Every match token emitted by the public generated dynamic tokenizer has a
+DEFLATE-valid match length. This prepares generated payload decode proofs. -/
+lemma deflateTokensDist1_matchLengthsValid (raw : ByteArray) :
+    DeflateTokensMatchLengthsValid (Png.deflateTokensDist1 raw) := by
+  simpa [Png.deflateTokensDist1] using
+    deflateTokensDist1Aux_matchLengthsValid raw.data 0 #[]
+      deflateTokensMatchLengthsValid_empty
+
+/-- Indexed match tokens from the public generated tokenizer have legal DEFLATE
+lengths. This is the convenient payload-proof form of tokenizer validity. -/
+lemma deflateTokensDist1_match_len_bounds_at
+    (raw : ByteArray) (target len : Nat)
+    (htarget : target < (Png.deflateTokensDist1 raw).size)
+    (ht : (Png.deflateTokensDist1 raw)[target]'htarget =
+      Png.DeflateToken.matchDist1 len) :
+    3 ≤ len ∧ len ≤ 258 :=
+  deflateTokensDist1_matchLengthsValid raw target len htarget ht
 
 /-- Incrementing one frequency slot preserves the table shape. This is the base
 size invariant for generated dynamic Huffman frequency tables. -/
@@ -973,6 +1142,21 @@ lemma generatedDynamicLitLenLengths_match_pos_at
   rw [getElem!_pos (Png.generatedDynamicLitLenLengths freqs)
     (Png.fixedLenMatchInfo len).1 hidx]
   simpa [Png.generatedDynamicLitLenLengths, freqs] using hpos
+
+/-- Match tokens from the public generated tokenizer receive positive generated
+literal/length entries without needing a separate length assumption. -/
+lemma generatedDynamicLitLenLengths_match_pos_at_deflateTokensDist1
+    (raw : ByteArray) (target len : Nat)
+    (htarget : target < (Png.deflateTokensDist1 raw).size)
+    (ht : (Png.deflateTokensDist1 raw)[target]'htarget =
+      Png.DeflateToken.matchDist1 len) :
+    0 <
+      (Png.generatedDynamicLitLenLengths
+        (Png.litLenSymbolFreqs
+          (Png.deflateTokensDist1 raw)))[(Png.fixedLenMatchInfo len).1]! := by
+  have hlen := deflateTokensDist1_match_len_bounds_at raw target len htarget ht
+  exact generatedDynamicLitLenLengths_match_pos_at
+    (Png.deflateTokensDist1 raw) target len htarget ht hlen
 
 /-- Generated distance code lengths preserve the input frequency table size,
 including the single-symbol distance-1 case. -/
