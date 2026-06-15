@@ -1730,6 +1730,17 @@ the header-side shape fact for generated dynamic tables. -/
 lemma codeLenOrder_size : Png.codeLenOrder.size = 19 := by
   decide
 
+/-- Every generated header code-length-order entry is a valid code-length
+alphabet index. This justifies indexing `codeLenCodeLengths` while writing. -/
+lemma codeLenOrder_get!_lt_codeLenCodeLengths_size
+    (idx : Nat) (hidx : idx < Png.codeLenOrder.size) :
+    Png.codeLenOrder[idx]! < Png.codeLenCodeLengths.size := by
+  have hall :
+      ∀ idx : Fin Png.codeLenOrder.size,
+        Png.codeLenOrder[idx.val]! < Png.codeLenCodeLengths.size := by
+    native_decide
+  exact hall ⟨idx, hidx⟩
+
 /-- The generated dynamic literal/length count always satisfies the DEFLATE
 minimum. This justifies encoding `HLIT = count - 257`. -/
 lemma generatedDynamicLitLenCount_ge (litLenLengths : Array Nat) :
@@ -1744,6 +1755,32 @@ lemma generatedDynamicLitLenCount_le (litLenLengths : Array Nat) :
   unfold Png.generatedDynamicLitLenCount
   exact Nat.min_le_left _ _
 
+/-- For generated literal/length tables, the advertised `HLIT` count is inside
+the actual generated table. This supports header extraction proofs. -/
+lemma generatedDynamicLitLenCount_le_generated_size
+    (tokens : Array Png.DeflateToken) :
+    Png.generatedDynamicLitLenCount
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)) ≤
+      (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)).size := by
+  have hle :=
+    generatedDynamicLitLenCount_le
+      (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens))
+  have hsize :
+      (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)).size = 286 := by
+    simp [generatedDynamicLitLenLengths_size, litLenSymbolFreqs_size]
+  omega
+
+/-- The literal/length header field fits in DEFLATE's 5-bit `HLIT` field for
+generated tables. -/
+lemma generatedDynamicLitLenCount_sub_le_31
+    (tokens : Array Png.DeflateToken) :
+    Png.generatedDynamicLitLenCount
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)) - 257 ≤ 31 := by
+  have hle :=
+    generatedDynamicLitLenCount_le
+      (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens))
+  omega
+
 /-- The generated dynamic distance count always satisfies the DEFLATE minimum.
 This justifies encoding `HDIST = count - 1`. -/
 lemma generatedDynamicDistCount_ge (distLengths : Array Nat) :
@@ -1757,6 +1794,54 @@ lemma generatedDynamicDistCount_le (distLengths : Array Nat) :
     Png.generatedDynamicDistCount distLengths ≤ 30 := by
   unfold Png.generatedDynamicDistCount
   exact Nat.min_le_left _ _
+
+/-- For generated distance tables, the advertised `HDIST` count is inside the
+actual generated table. This supports header extraction proofs. -/
+lemma generatedDynamicDistCount_le_generated_size
+    (tokens : Array Png.DeflateToken) :
+    Png.generatedDynamicDistCount
+        (Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)) ≤
+      (Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)).size := by
+  have hle :=
+    generatedDynamicDistCount_le
+      (Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens))
+  have hsize :
+      (Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)).size = 30 := by
+    simp [generatedDynamicDistLengths_size, distSymbolFreqs_size]
+  omega
+
+/-- The distance header field fits in DEFLATE's 5-bit `HDIST` field for
+generated tables. -/
+lemma generatedDynamicDistCount_sub_le_31
+    (tokens : Array Png.DeflateToken) :
+    Png.generatedDynamicDistCount
+        (Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)) - 1 ≤ 31 := by
+  have hle :=
+    generatedDynamicDistCount_le
+      (Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens))
+  omega
+
+/-- The generated dynamic header writes exactly the advertised number of
+literal/length and distance code-length entries. -/
+lemma generatedDynamicHeaderLengths_size
+    (tokens : Array Png.DeflateToken) :
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    let distLengths :=
+      Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)
+    let litLenCount := Png.generatedDynamicLitLenCount litLenLengths
+    let distCount := Png.generatedDynamicDistCount distLengths
+    ((litLenLengths.extract 0 litLenCount) ++
+        (distLengths.extract 0 distCount)).size =
+      litLenCount + distCount := by
+  intro litLenLengths distLengths litLenCount distCount
+  have hlit : litLenCount ≤ litLenLengths.size := by
+    simpa [litLenLengths, litLenCount] using
+      generatedDynamicLitLenCount_le_generated_size tokens
+  have hdist : distCount ≤ distLengths.size := by
+    simpa [distLengths, distCount] using
+      generatedDynamicDistCount_le_generated_size tokens
+  simp [Array.size_append, Array.size_extract, hlit, hdist]
 
 end Lemmas
 
