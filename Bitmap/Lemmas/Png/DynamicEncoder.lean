@@ -1410,6 +1410,64 @@ decreasing_by
     exact Nat.sub_lt_sub_left (k := i) (m := lengths.size) (n := i + 1)
       hltLen (Nat.lt_succ_self i)
 
+/-- The incoming maximum is a lower bound for `maxCodeLenAux`. This exposes the
+monotonic part of the max scan used by canonical-table proofs. -/
+lemma maxLen_le_maxCodeLenAux
+    (lengths : Array Nat) (i maxLen : Nat) :
+    maxLen ≤ Png.maxCodeLenAux lengths i maxLen := by
+  rw [Png.maxCodeLenAux.eq_1]
+  by_cases hi : i < lengths.size
+  · by_cases hgt : lengths[i] > maxLen
+    · have hrec := maxLen_le_maxCodeLenAux lengths (i + 1) lengths[i]
+      have hle : maxLen ≤ lengths[i] := by omega
+      simp [hi, hgt]
+      exact le_trans hle hrec
+    · have hrec := maxLen_le_maxCodeLenAux lengths (i + 1) maxLen
+      simpa [hi, hgt] using hrec
+  · simp [hi]
+termination_by lengths.size - i
+decreasing_by
+  all_goals
+    have hlt : i < lengths.size := hi
+    exact Nat.sub_lt_sub_left (k := i) (m := lengths.size) (n := i + 1)
+      hlt (Nat.lt_succ_self i)
+
+/-- Any entry in the scanned suffix is bounded by the final `maxCodeLenAux`
+result. This is the lower-bound counterpart to the generated max upper bound. -/
+lemma getElem_le_maxCodeLenAux
+    (lengths : Array Nat) (i maxLen target : Nat)
+    (hle : i ≤ target)
+    (htarget : target < lengths.size) :
+    lengths[target] ≤ Png.maxCodeLenAux lengths i maxLen := by
+  rw [Png.maxCodeLenAux.eq_1]
+  have hi : i < lengths.size := lt_of_le_of_lt hle htarget
+  by_cases hgt : lengths[i] > maxLen
+  · by_cases heq : i = target
+    · subst target
+      have hrec := maxLen_le_maxCodeLenAux lengths (i + 1) lengths[i]
+      simpa [hi, hgt] using hrec
+    · have hrec :=
+        getElem_le_maxCodeLenAux lengths (i + 1) lengths[i] target
+          (by omega) htarget
+      simpa [hi, hgt] using hrec
+  · by_cases heq : i = target
+    · subst target
+      have hleCur : lengths[i] ≤ maxLen := by omega
+      have hrec := maxLen_le_maxCodeLenAux lengths (i + 1) maxLen
+      have hleResult : lengths[i] ≤ Png.maxCodeLenAux lengths (i + 1) maxLen :=
+        le_trans hleCur hrec
+      simpa [hi, hgt] using hleResult
+    · have hrec :=
+        getElem_le_maxCodeLenAux lengths (i + 1) maxLen target
+          (by omega) htarget
+      simpa [hi, hgt] using hrec
+termination_by lengths.size - i
+decreasing_by
+  all_goals
+    have hltLen : i < lengths.size := hi
+    exact Nat.sub_lt_sub_left (k := i) (m := lengths.size) (n := i + 1)
+      hltLen (Nat.lt_succ_self i)
+
 /-- Generated literal/length tables have a positive scanned maximum because
 EOB is always assigned a positive generated code length. -/
 lemma maxCodeLenAux_generatedDynamicLitLenLengths_pos
@@ -1425,6 +1483,36 @@ lemma maxCodeLenAux_generatedDynamicLitLenLengths_pos
     simpa [lengths] using generatedDynamicLitLenLengths_eob_pos tokens
   simpa [lengths] using
     maxCodeLenAux_pos_of_getElem_pos lengths 0 0 256 (by decide) hidx hpos
+
+/-- Generated literal/length tables scan to exactly the uniform 9-bit code
+length because EOB is present and no entry can exceed that length. -/
+lemma maxCodeLenAux_generatedDynamicLitLenLengths_eq_codeLen
+    (tokens : Array Png.DeflateToken) :
+    Png.maxCodeLenAux
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)) 0 0 =
+      Png.generatedDynamicLitLenCodeLen := by
+  let freqs := Png.litLenSymbolFreqs tokens
+  let lengths := Png.generatedDynamicLitLenLengths freqs
+  have hidx : 256 < lengths.size := by
+    simpa [lengths, freqs] using generatedDynamicLitLenLengths_eob_inBounds tokens
+  have hfreq : 0 < freqs[256]! := by
+    simpa [freqs] using litLenSymbolFreqs_eob_pos tokens
+  have hentry : lengths[256] = Png.generatedDynamicLitLenCodeLen := by
+    have hAt :
+        Png.generatedDynamicLitLenLengthAt freqs 256 =
+          Png.generatedDynamicLitLenCodeLen := by
+      unfold Png.generatedDynamicLitLenLengthAt
+      simp [hfreq]
+    simpa [lengths, Png.generatedDynamicLitLenLengths] using hAt
+  have hle :
+      Png.maxCodeLenAux lengths 0 0 ≤ Png.generatedDynamicLitLenCodeLen := by
+    simpa [lengths] using
+      maxCodeLenAux_generatedDynamicLitLenLengths_le_codeLen freqs 0 0
+        (by simp [Png.generatedDynamicLitLenCodeLen])
+  have hge :
+      Png.generatedDynamicLitLenCodeLen ≤ Png.maxCodeLenAux lengths 0 0 := by
+    simpa [hentry] using getElem_le_maxCodeLenAux lengths 0 0 256 (by decide) hidx
+  exact le_antisymm hle hge
 
 /-- In `get!` form, generated distance entry zero is positive exactly when the
 source distance-symbol-zero frequency is positive. -/
