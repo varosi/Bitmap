@@ -854,6 +854,17 @@ lemma generatedDynamicLitLenLengthAt_pos_of_freq
   unfold Png.generatedDynamicLitLenLengthAt
   simp [hfreq, rankedDynamicCodeLen_pos]
 
+/-- Generated literal/length entries are positive exactly for symbols with a
+positive collected frequency. This is the local availability iff. -/
+lemma generatedDynamicLitLenLengthAt_pos_iff
+    (freqs : Array Nat) (idx : Nat) :
+    0 < Png.generatedDynamicLitLenLengthAt freqs idx ↔
+      0 < freqs[idx]! := by
+  unfold Png.generatedDynamicLitLenLengthAt
+  by_cases hfreq : 0 < freqs[idx]!
+  · simp [hfreq, rankedDynamicCodeLen_pos]
+  · simp [hfreq]
+
 /-- Generated literal/length code lengths preserve the input frequency table
 size, so later header proofs can reason about table bounds. -/
 lemma generatedDynamicLitLenLengths_size (freqs : Array Nat) :
@@ -868,6 +879,19 @@ lemma generatedDynamicLitLenLengths_getElem_le_15
     (Png.generatedDynamicLitLenLengths freqs)[idx] ≤ 15 := by
   simpa [Png.generatedDynamicLitLenLengths] using
     generatedDynamicLitLenLengthAt_le_15 freqs idx
+
+/-- In `get!` form, a generated literal/length table entry is positive exactly
+when its source frequency is positive. This matches payload lookup code. -/
+lemma generatedDynamicLitLenLengths_get!_pos_iff
+    (freqs : Array Nat) (idx : Nat)
+    (hidx : idx < freqs.size) :
+    0 < (Png.generatedDynamicLitLenLengths freqs)[idx]! ↔
+      0 < freqs[idx]! := by
+  have hidxLengths : idx < (Png.generatedDynamicLitLenLengths freqs).size := by
+    simpa [generatedDynamicLitLenLengths_size] using hidx
+  rw [getElem!_pos (Png.generatedDynamicLitLenLengths freqs) idx hidxLengths]
+  simpa [Png.generatedDynamicLitLenLengths] using
+    generatedDynamicLitLenLengthAt_pos_iff freqs idx
 
 /-- The generated literal/length length table always contains EOB in bounds.
 This packages the fixed table-size facts for later payload proofs. -/
@@ -972,6 +996,17 @@ lemma generatedDynamicDistLengthAt_zero_pos_of_freq
   unfold Png.generatedDynamicDistLengthAt
   simp [hfreq]
 
+/-- Generated distance entry zero is positive exactly when distance symbol zero
+has a positive collected frequency. -/
+lemma generatedDynamicDistLengthAt_zero_pos_iff
+    (freqs : Array Nat) :
+    0 < Png.generatedDynamicDistLengthAt freqs 0 ↔
+      0 < freqs[0]! := by
+  unfold Png.generatedDynamicDistLengthAt
+  by_cases hfreq : 0 < freqs[0]!
+  · simp [hfreq]
+  · simp [hfreq]
+
 /-- Every in-bounds generated distance code-length entry satisfies DEFLATE's
 15-bit limit. This is the table-level validity shape for `HDIST`. -/
 lemma generatedDynamicDistLengths_getElem_le_15
@@ -980,6 +1015,19 @@ lemma generatedDynamicDistLengths_getElem_le_15
     (Png.generatedDynamicDistLengths freqs)[idx] ≤ 15 := by
   simpa [Png.generatedDynamicDistLengths] using
     generatedDynamicDistLengthAt_le_15 freqs idx
+
+/-- In `get!` form, generated distance entry zero is positive exactly when the
+source distance-symbol-zero frequency is positive. -/
+lemma generatedDynamicDistLengths_zero_get!_pos_iff
+    (freqs : Array Nat)
+    (hsize : 0 < freqs.size) :
+    0 < (Png.generatedDynamicDistLengths freqs)[0]! ↔
+      0 < freqs[0]! := by
+  have hidxLengths : 0 < (Png.generatedDynamicDistLengths freqs).size := by
+    simpa [generatedDynamicDistLengths_size] using hsize
+  rw [getElem!_pos (Png.generatedDynamicDistLengths freqs) 0 hidxLengths]
+  simpa [Png.generatedDynamicDistLengths] using
+    generatedDynamicDistLengthAt_zero_pos_iff freqs
 
 /-- The generated distance length table keeps distance symbol `0` in bounds.
 The table has the fixed DEFLATE distance-table shape. -/

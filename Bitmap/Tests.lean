@@ -342,27 +342,41 @@ private def validateDynamicTableValidationBoundary : IO Unit := do
       throw (IO.userError "buildDynamicDistTable rejected a valid non-empty distance alphabet")
   validateDynamicRepeatEncodings
 
-private def validateGeneratedDynamicEncoder : IO Unit := do
-  let raw := repeatBytes (byteArrayOfNats [65]) 600
+private def validateGeneratedDynamicEncoderCase
+    (name : String) (raw : ByteArray) (expectDistance : Bool) : IO Unit := do
   let tokens := Png.deflateTokensDist1 raw
   if Png.deflateTokensExpand tokens != raw then
-    throw (IO.userError "generated dynamic encoder token expansion did not reconstruct raw bytes")
+    throw (IO.userError s!"generated dynamic encoder {name}: token expansion mismatch")
+  if Png.deflateTokensHasMatchDist1 tokens != expectDistance then
+    throw (IO.userError s!"generated dynamic encoder {name}: unexpected match-token shape")
   let deflated := Png.deflateDynamicFullFast raw
   match dynamicTablesFromDeflate? deflated with
   | some (litLen, dist) =>
       if litLen == Png.fixedLitLenHuffman then
-        throw (IO.userError "generated dynamic encoder reused the fixed literal/length table")
-      if dist.maxLen == 0 then
-        throw (IO.userError "generated dynamic encoder emitted no distance table for repeated data")
+        throw (IO.userError s!"generated dynamic encoder {name}: reused the fixed literal/length table")
+      if expectDistance && dist.maxLen == 0 then
+        throw (IO.userError s!"generated dynamic encoder {name}: missing distance table")
+      if !expectDistance && dist.maxLen != 0 then
+        throw (IO.userError s!"generated dynamic encoder {name}: unexpected distance table")
   | none =>
-      throw (IO.userError "generated dynamic encoder tables failed to parse")
+      throw (IO.userError s!"generated dynamic encoder {name}: tables failed to parse")
   let zlibBytes := zlibWrapDeflated deflated raw
   match zlibDecompressFixture zlibBytes with
   | some raw' =>
       if raw' != raw then
-        throw (IO.userError "generated dynamic encoder zlib round-trip mismatch")
+        throw (IO.userError s!"generated dynamic encoder {name}: zlib round-trip mismatch")
   | none =>
-      throw (IO.userError "generated dynamic encoder zlib round-trip failed")
+      throw (IO.userError s!"generated dynamic encoder {name}: zlib round-trip failed")
+
+private def validateGeneratedDynamicEncoder : IO Unit := do
+  validateGeneratedDynamicEncoderCase
+    "literal-only" (deterministicPrefix 160) false
+  validateGeneratedDynamicEncoderCase
+    "repeated-byte" (repeatBytes (byteArrayOfNats [65]) 600) true
+  validateGeneratedDynamicEncoderCase
+    "mixed-literals-and-runs"
+    (deterministicPrefix 96 ++ repeatBytes (byteArrayOfNats [90]) 400 ++ deterministicPrefix 96)
+    true
 
 -- Decode PNG fixtures that use fixed-Huffman deflate blocks.
 private def pngDecodeFixedHuffmanFixtures : IO Unit := do
