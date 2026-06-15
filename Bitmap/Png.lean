@@ -1035,26 +1035,14 @@ decreasing_by
 def distSymbolFreqs (tokens : Array DeflateToken) : Array Nat :=
   distSymbolFreqsAux tokens 0 (Array.replicate 30 0)
 
-def nonzeroRank (freqs : Array Nat) (idx : Nat) : Nat :=
-  Id.run do
-    let freq := freqs[idx]!
-    let mut rank := 0
-    for j in [0:freqs.size] do
-      let other := freqs[j]!
-      if other > freq || (other == freq && j < idx) then
-        rank := rank + 1
-    return rank
-
-def rankedDynamicCodeLen (rank : Nat) : Nat :=
-  if rank == 0 then 2
-  else if rank < 3 then 4
-  else if rank < 7 then 5
-  else if rank < 15 then 6
-  else 15
+/-- Uniform code length for generated dynamic literal/length alphabets.
+The literal/length alphabet has at most 286 symbols, so 9 bits leaves room for
+a complete canonical table while still omitting unused symbols. -/
+def generatedDynamicLitLenCodeLen : Nat := 9
 
 def generatedDynamicLitLenLengthAt (freqs : Array Nat) (idx : Nat) : Nat :=
   if freqs[idx]! > 0 then
-    rankedDynamicCodeLen (nonzeroRank freqs idx)
+    generatedDynamicLitLenCodeLen
   else
     0
 
