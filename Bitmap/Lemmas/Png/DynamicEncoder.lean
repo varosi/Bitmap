@@ -1713,6 +1713,14 @@ lemma codeLenCodeLengths_getElem_le_15
     Png.codeLenCodeLengths[idx] ≤ 15 := by
   simp [Png.codeLenCodeLengths]
 
+/-- Every symbol in the generated code-length-code alphabet has a positive
+length. The generated header uses a complete 19-symbol helper alphabet. -/
+lemma codeLenCodeLengths_get!_pos
+    (idx : Nat) (hidx : idx < Png.codeLenCodeLengths.size) :
+    0 < Png.codeLenCodeLengths[idx]! := by
+  rw [getElem!_pos Png.codeLenCodeLengths idx hidx]
+  simp [Png.codeLenCodeLengths]
+
 /-- The generated header's code-length-code table is accepted by the generic
 Huffman table builder. This is the first concrete generated-table validity fact. -/
 lemma mkHuffman_codeLenCodeLengths_isSome :
@@ -1724,6 +1732,15 @@ alphabet shape used by the dynamic header. -/
 lemma generatedCodeLenCodes_size :
     (Png.canonicalRevCodesFromLengths Png.codeLenCodeLengths).size = 19 := by
   simp [canonicalRevCodesFromLengths_size, codeLenCodeLengths_size]
+
+/-- Generated code-length-code lookups have positive bit lengths for every
+code-length alphabet symbol. This supports generated header RLE proofs. -/
+lemma generatedCodeLenCodes_len_pos
+    (sym : Nat) (hsym : sym < Png.codeLenCodeLengths.size) :
+    0 < (Png.canonicalRevCodesFromLengths Png.codeLenCodeLengths)[sym]!.2 := by
+  exact canonicalRevCodesFromLengths_get!_snd_pos_of_pos
+    Png.codeLenCodeLengths sym hsym
+    (codeLenCodeLengths_get!_pos sym hsym)
 
 /-- The DEFLATE code-length alphabet write order has all 19 entries. This is
 the header-side shape fact for generated dynamic tables. -/
@@ -1740,6 +1757,17 @@ lemma codeLenOrder_get!_lt_codeLenCodeLengths_size
         Png.codeLenOrder[idx.val]! < Png.codeLenCodeLengths.size := by
     native_decide
   exact hall ⟨idx, hidx⟩
+
+/-- Every symbol named by the DEFLATE code-length order has a generated helper
+Huffman code. This is the order-indexed form used by the header writer. -/
+lemma generatedCodeLenCodes_order_len_pos
+    (idx : Nat) (hidx : idx < Png.codeLenOrder.size) :
+    0 <
+      (Png.canonicalRevCodesFromLengths
+        Png.codeLenCodeLengths)[Png.codeLenOrder[idx]!]!.2 := by
+  exact generatedCodeLenCodes_len_pos
+    Png.codeLenOrder[idx]!
+    (codeLenOrder_get!_lt_codeLenCodeLengths_size idx hidx)
 
 /-- The generated dynamic literal/length count always satisfies the DEFLATE
 minimum. This justifies encoding `HLIT = count - 257`. -/
