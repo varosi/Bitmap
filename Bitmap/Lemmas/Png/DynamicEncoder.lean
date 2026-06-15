@@ -541,6 +541,35 @@ lemma get!_pos_implies_inBounds (arr : Array Nat) (idx : Nat)
   · exact hidx
   · simp [hidx] at hpos
 
+/-- Reading the index just written by `Array.set!` returns the written value.
+This packages the core `Array.set` lemma for `get!`-based encoder proofs. -/
+lemma getElem!_set!_eq {α : Type} [Inhabited α]
+    (arr : Array α) (idx : Nat) (v : α)
+    (hidx : idx < arr.size) :
+    (arr.set! idx v)[idx]! = v := by
+  unfold Array.set!
+  simp [Array.setIfInBounds, hidx]
+
+/-- Writing a different index with `Array.set!` preserves this `get!` result.
+This keeps later recursive table-filling proofs focused on the target symbol. -/
+lemma getElem!_set!_ne {α : Type} [Inhabited α]
+    (arr : Array α) (idx target : Nat) (v : α)
+    (htarget : target < arr.size)
+    (hne : idx ≠ target) :
+    (arr.set! idx v)[target]! = arr[target]! := by
+  unfold Array.set!
+  by_cases hidx : idx < arr.size
+  · let arr' := arr.set idx v hidx
+    have htarget' : target < arr'.size := by
+      simp [arr', htarget]
+    simp [Array.setIfInBounds, hidx]
+    rw [getElem!_pos arr' target htarget']
+    rw [getElem!_pos arr target htarget]
+    simpa [arr'] using
+      (Array.getElem_set_ne (xs := arr) (i := idx) hidx
+        (v := v) (j := target) htarget hne)
+  · simp [Array.setIfInBounds, hidx]
+
 /-- Incrementing any frequency slot preserves an already-positive slot. This is
 the scanner invariant used by generated payload-availability proofs. -/
 lemma incrementNatAt_get!_pos_of_pos
@@ -1438,11 +1467,145 @@ decreasing_by
     exact Nat.sub_lt_sub_left (k := i) (m := lengths.size) (n := i + 1)
       hlt (Nat.lt_succ_self i)
 
+/-- Filling later canonical-code slots preserves any earlier target entry. This
+is the overwrite-avoidance fact for code-table lookup proofs. -/
+lemma fillCanonicalRevCodesAux_get!_of_lt
+    (lengths : Array Nat) (i : Nat) (nextCode : Array Nat)
+    (revCodes : Array (Nat × Nat)) (target : Nat)
+    (htarget : target < revCodes.size)
+    (hlt : target < i) :
+    (Png.fillCanonicalRevCodesAux lengths i nextCode revCodes)[target]! =
+      revCodes[target]! := by
+  rw [Png.fillCanonicalRevCodesAux.eq_1]
+  by_cases hi : i < lengths.size
+  · by_cases hlen : 0 < lengths[i]
+    · let codeVal := nextCode[lengths[i]]!
+      let revCodes' := revCodes.set! i (Png.reverseBits codeVal lengths[i], lengths[i])
+      have htarget' : target < revCodes'.size := by
+        simp [revCodes', htarget]
+      have hrec :=
+        fillCanonicalRevCodesAux_get!_of_lt lengths (i + 1)
+          (nextCode.set! lengths[i] (codeVal + 1)) revCodes' target htarget'
+          (by omega)
+      have hset : revCodes'[target]! = revCodes[target]! := by
+        have hne : i ≠ target := by omega
+        simpa [revCodes'] using
+          getElem!_set!_ne revCodes i target
+            (Png.reverseBits codeVal lengths[i], lengths[i]) htarget hne
+      simp [hi, hlen]
+      exact hrec.trans hset
+    · have hrec :=
+        fillCanonicalRevCodesAux_get!_of_lt lengths (i + 1)
+          nextCode revCodes target htarget (by omega)
+      simp [hi, hlen]
+      exact hrec
+  · simp [hi]
+termination_by lengths.size - i
+decreasing_by
+  all_goals
+    have hltLen : i < lengths.size := hi
+    exact Nat.sub_lt_sub_left (k := i) (m := lengths.size) (n := i + 1)
+      hltLen (Nat.lt_succ_self i)
+
+/-- A positive length entry is written into the canonical reversed-code table
+with the same length. This is the generic payload-code availability bridge. -/
+lemma fillCanonicalRevCodesAux_get!_snd_of_pos_at
+    (lengths : Array Nat) (i : Nat) (nextCode : Array Nat)
+    (revCodes : Array (Nat × Nat)) (target : Nat)
+    (hle : i ≤ target)
+    (htarget : target < lengths.size)
+    (hrevSize : revCodes.size = lengths.size)
+    (hpos : 0 < lengths[target]!) :
+    (Png.fillCanonicalRevCodesAux lengths i nextCode revCodes)[target]!.2 =
+      lengths[target]! := by
+  rw [Png.fillCanonicalRevCodesAux.eq_1]
+  have hi : i < lengths.size := lt_of_le_of_lt hle htarget
+  by_cases heq : i = target
+  · subst target
+    have hposElem : 0 < lengths[i] := by
+      simpa [getElem!_pos lengths i hi] using hpos
+    let codeVal := nextCode[lengths[i]]!
+    let revCodes' := revCodes.set! i (Png.reverseBits codeVal lengths[i], lengths[i])
+    have htargetRev' : i < revCodes'.size := by
+      simp [revCodes', hrevSize, hi]
+    have hpres :=
+      fillCanonicalRevCodesAux_get!_of_lt lengths (i + 1)
+        (nextCode.set! lengths[i] (codeVal + 1)) revCodes' i htargetRev'
+        (Nat.lt_succ_self i)
+    have hset :
+        revCodes'[i]! =
+          (Png.reverseBits codeVal lengths[i], lengths[i]) := by
+      have hrevIdx : i < revCodes.size := by
+        simpa [hrevSize] using hi
+      simpa [revCodes'] using
+        getElem!_set!_eq revCodes i
+          (Png.reverseBits codeVal lengths[i], lengths[i]) hrevIdx
+    simp [hi, hposElem]
+    calc
+      (Png.fillCanonicalRevCodesAux lengths (i + 1)
+          (nextCode.set! lengths[i] (codeVal + 1)) revCodes')[i]!.2 =
+          revCodes'[i]!.2 := by
+            simpa using congrArg Prod.snd hpres
+      _ = lengths[i] := by
+            simp [hset]
+  · have hltTarget : i < target := Nat.lt_of_le_of_ne hle heq
+    by_cases hposCur : 0 < lengths[i]
+    · let codeVal := nextCode[lengths[i]]!
+      let revCodes' := revCodes.set! i (Png.reverseBits codeVal lengths[i], lengths[i])
+      have hrevSize' : revCodes'.size = lengths.size := by
+        simp [revCodes', hrevSize]
+      have hrec :=
+        fillCanonicalRevCodesAux_get!_snd_of_pos_at lengths (i + 1)
+          (nextCode.set! lengths[i] (codeVal + 1)) revCodes' target
+          (Nat.succ_le_of_lt hltTarget) htarget hrevSize' hpos
+      simp [hi, hposCur]
+      exact hrec
+    · have hrec :=
+        fillCanonicalRevCodesAux_get!_snd_of_pos_at lengths (i + 1)
+          nextCode revCodes target (Nat.succ_le_of_lt hltTarget)
+          htarget hrevSize hpos
+      simp [hi, hposCur]
+      exact hrec
+termination_by target - i
+decreasing_by
+  all_goals
+    have hlt : i < target := hltTarget
+    exact Nat.sub_lt_sub_left (k := i) (m := target) (n := i + 1)
+      hlt (Nat.lt_succ_self i)
+
 /-- Canonical reversed-code generation preserves the code-length table shape.
 This is the top-level shape invariant for generated dynamic Huffman payloads. -/
 lemma canonicalRevCodesFromLengths_size (lengths : Array Nat) :
     (Png.canonicalRevCodesFromLengths lengths).size = lengths.size := by
   simp [Png.canonicalRevCodesFromLengths, fillCanonicalRevCodesAux_size]
+
+/-- Canonical reversed-code generation preserves the advertised length for any
+positive symbol. Payload writers use this after proving symbol availability. -/
+lemma canonicalRevCodesFromLengths_get!_snd_of_pos
+    (lengths : Array Nat) (sym : Nat)
+    (hsym : sym < lengths.size)
+    (hpos : 0 < lengths[sym]!) :
+    (Png.canonicalRevCodesFromLengths lengths)[sym]!.2 =
+      lengths[sym]! := by
+  unfold Png.canonicalRevCodesFromLengths
+  exact fillCanonicalRevCodesAux_get!_snd_of_pos_at lengths 0
+    (Png.nextCodesAux
+      (Png.countCodeLengthsAux lengths 0
+        (Array.replicate (Png.maxCodeLenAux lengths 0 0 + 1) 0))
+      (Png.maxCodeLenAux lengths 0 0) 1 0
+      (Array.replicate (Png.maxCodeLenAux lengths 0 0 + 1) 0)).2
+    (Array.replicate lengths.size (0, 0)) sym (Nat.zero_le sym) hsym
+    (by simp) hpos
+
+/-- Positive code lengths become positive bit lengths in canonical code tables.
+This is the short corollary most generated payload proofs need. -/
+lemma canonicalRevCodesFromLengths_get!_snd_pos_of_pos
+    (lengths : Array Nat) (sym : Nat)
+    (hsym : sym < lengths.size)
+    (hpos : 0 < lengths[sym]!) :
+    0 < (Png.canonicalRevCodesFromLengths lengths)[sym]!.2 := by
+  rw [canonicalRevCodesFromLengths_get!_snd_of_pos lengths sym hsym hpos]
+  exact hpos
 
 /-- The generated literal/length code table has the DEFLATE literal/length
 shape. This feeds later payload lookup proofs for literals, matches, and EOB. -/
@@ -1459,6 +1622,84 @@ lemma generatedDynamicDistCodes_size (tokens : Array Png.DeflateToken) :
       (Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens))).size = 30 := by
   simp [canonicalRevCodesFromLengths_size, generatedDynamicDistLengths_size,
     distSymbolFreqs_size]
+
+/-- Generated literal code lookup has a positive bit length for every literal
+token. This prepares the literal branch of generated payload proofs. -/
+lemma generatedDynamicLitLenCodes_literal_len_pos_at
+    (tokens : Array Png.DeflateToken) (target : Nat) (b : UInt8)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.literal b) :
+    0 <
+      (Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths
+          (Png.litLenSymbolFreqs tokens)))[b.toNat]!.2 := by
+  let lengths := Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+  have hsym : b.toNat < lengths.size := by
+    have hb : b.toNat < 256 := UInt8.toNat_lt b
+    have hsize : lengths.size = 286 := by
+      simp [lengths, generatedDynamicLitLenLengths_size, litLenSymbolFreqs_size]
+    omega
+  have hpos : 0 < lengths[b.toNat]! := by
+    simpa [lengths] using
+      generatedDynamicLitLenLengths_literal_pos_at tokens target b htarget ht
+  exact canonicalRevCodesFromLengths_get!_snd_pos_of_pos lengths b.toNat hsym hpos
+
+/-- Generated match-symbol lookup has a positive bit length for every valid
+match token. This prepares the match branch of generated payload proofs. -/
+lemma generatedDynamicLitLenCodes_match_len_pos_at
+    (tokens : Array Png.DeflateToken) (target len : Nat)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.matchDist1 len)
+    (hlen : 3 ≤ len ∧ len ≤ 258) :
+    0 <
+      (Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths
+          (Png.litLenSymbolFreqs tokens)))[(Png.fixedLenMatchInfo len).1]!.2 := by
+  let lengths := Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+  have hsym : (Png.fixedLenMatchInfo len).1 < lengths.size := by
+    have hfixed := fixedLenMatchInfo_sym_lt_286 len hlen
+    have hsize : lengths.size = 286 := by
+      simp [lengths, generatedDynamicLitLenLengths_size, litLenSymbolFreqs_size]
+    omega
+  have hpos : 0 < lengths[(Png.fixedLenMatchInfo len).1]! := by
+    simpa [lengths] using
+      generatedDynamicLitLenLengths_match_pos_at tokens target len htarget ht hlen
+  exact canonicalRevCodesFromLengths_get!_snd_pos_of_pos
+    lengths (Png.fixedLenMatchInfo len).1 hsym hpos
+
+/-- The generated EOB code lookup has a positive bit length. This prepares the
+block-termination step for generated payload proofs. -/
+lemma generatedDynamicLitLenCodes_eob_len_pos
+    (tokens : Array Png.DeflateToken) :
+    0 <
+      (Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths
+          (Png.litLenSymbolFreqs tokens)))[256]!.2 := by
+  let lengths := Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+  have hsym : 256 < lengths.size := by
+    simpa [lengths] using generatedDynamicLitLenLengths_eob_inBounds tokens
+  have hpos : 0 < lengths[256]! := by
+    rw [getElem!_pos lengths 256 hsym]
+    simpa [lengths] using generatedDynamicLitLenLengths_eob_pos tokens
+  exact canonicalRevCodesFromLengths_get!_snd_pos_of_pos lengths 256 hsym hpos
+
+/-- Generated distance-symbol-zero lookup has a positive bit length when a
+match token exists. This prepares distance-1 payload proofs. -/
+lemma generatedDynamicDistCodes_zero_len_pos_of_match_at
+    (tokens : Array Png.DeflateToken) (target len : Nat)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.matchDist1 len) :
+    0 <
+      (Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicDistLengths
+          (Png.distSymbolFreqs tokens)))[0]!.2 := by
+  let lengths := Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)
+  have hsym : 0 < lengths.size := by
+    simpa [lengths] using generatedDynamicDistLengths_zero_inBounds tokens
+  have hpos : 0 < lengths[0]! := by
+    simpa [lengths] using
+      generatedDynamicDistLengths_zero_get!_pos_of_match_at tokens target len htarget ht
+  exact canonicalRevCodesFromLengths_get!_snd_pos_of_pos lengths 0 hsym hpos
 
 /-- The generated dynamic header advertises all 19 code-length-code entries.
 This records the concrete table shape used by the header writer. -/
