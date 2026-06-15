@@ -1034,6 +1034,26 @@ lemma rankedDynamicCodeLen_le_15 (rank : Nat) :
         · simp [h0, h3, h7, h15]
         · simp [h0, h3, h7, h15]
 
+/-- Ranked generated literal/length code lengths use only the small palette
+chosen by the dynamic encoder. This exposes the generator shape for later
+canonical-table validity proofs. -/
+lemma rankedDynamicCodeLen_eq_2_or_4_or_5_or_6_or_15 (rank : Nat) :
+    Png.rankedDynamicCodeLen rank = 2 ∨
+      Png.rankedDynamicCodeLen rank = 4 ∨
+      Png.rankedDynamicCodeLen rank = 5 ∨
+      Png.rankedDynamicCodeLen rank = 6 ∨
+      Png.rankedDynamicCodeLen rank = 15 := by
+  unfold Png.rankedDynamicCodeLen
+  by_cases h0 : rank == 0
+  · simp [h0]
+  · by_cases h3 : rank < 3
+    · simp [h0, h3]
+    · by_cases h7 : rank < 7
+      · simp [h0, h3, h7]
+      · by_cases h15 : rank < 15
+        · simp [h0, h3, h7, h15]
+        · simp [h0, h3, h7, h15]
+
 /-- A generated literal/length code-length entry is always a valid DEFLATE code
 length. This follows directly from the by-index generator. -/
 lemma generatedDynamicLitLenLengthAt_le_15 (freqs : Array Nat) (idx : Nat) :
@@ -1042,6 +1062,28 @@ lemma generatedDynamicLitLenLengthAt_le_15 (freqs : Array Nat) (idx : Nat) :
   by_cases h : freqs[idx]! > 0
   · simp [h, rankedDynamicCodeLen_le_15]
   · simp [h]
+
+/-- A generated literal/length code-length entry is either zero or one of the
+ranked palette lengths. This is the entry-level shape used by table proofs. -/
+lemma generatedDynamicLitLenLengthAt_eq_0_or_2_or_4_or_5_or_6_or_15
+    (freqs : Array Nat) (idx : Nat) :
+    Png.generatedDynamicLitLenLengthAt freqs idx = 0 ∨
+      Png.generatedDynamicLitLenLengthAt freqs idx = 2 ∨
+      Png.generatedDynamicLitLenLengthAt freqs idx = 4 ∨
+      Png.generatedDynamicLitLenLengthAt freqs idx = 5 ∨
+      Png.generatedDynamicLitLenLengthAt freqs idx = 6 ∨
+      Png.generatedDynamicLitLenLengthAt freqs idx = 15 := by
+  unfold Png.generatedDynamicLitLenLengthAt
+  by_cases hfreq : freqs[idx]! > 0
+  · simp only [hfreq, ↓reduceIte]
+    rcases rankedDynamicCodeLen_eq_2_or_4_or_5_or_6_or_15
+      (Png.nonzeroRank freqs idx) with h2 | h4 | h5 | h6 | h15
+    · exact Or.inr (Or.inl h2)
+    · exact Or.inr (Or.inr (Or.inl h4))
+    · exact Or.inr (Or.inr (Or.inr (Or.inl h5)))
+    · exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inl h6))))
+    · exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr h15))))
+  · simp [hfreq]
 
 /-- A positive literal/length frequency produces a positive generated code
 length. This bridges frequency availability to generated table availability. -/
@@ -1078,6 +1120,20 @@ lemma generatedDynamicLitLenLengths_getElem_le_15
   simpa [Png.generatedDynamicLitLenLengths] using
     generatedDynamicLitLenLengthAt_le_15 freqs idx
 
+/-- In-bounds generated literal/length table entries use only the generator's
+zero-or-ranked palette. This lifts the entry shape to array indexing. -/
+lemma generatedDynamicLitLenLengths_getElem_eq_0_or_2_or_4_or_5_or_6_or_15
+    (freqs : Array Nat) (idx : Nat)
+    (hidx : idx < (Png.generatedDynamicLitLenLengths freqs).size) :
+    (Png.generatedDynamicLitLenLengths freqs)[idx] = 0 ∨
+      (Png.generatedDynamicLitLenLengths freqs)[idx] = 2 ∨
+      (Png.generatedDynamicLitLenLengths freqs)[idx] = 4 ∨
+      (Png.generatedDynamicLitLenLengths freqs)[idx] = 5 ∨
+      (Png.generatedDynamicLitLenLengths freqs)[idx] = 6 ∨
+      (Png.generatedDynamicLitLenLengths freqs)[idx] = 15 := by
+  simpa [Png.generatedDynamicLitLenLengths] using
+    generatedDynamicLitLenLengthAt_eq_0_or_2_or_4_or_5_or_6_or_15 freqs idx
+
 /-- In `get!` form, a generated literal/length table entry is positive exactly
 when its source frequency is positive. This matches payload lookup code. -/
 lemma generatedDynamicLitLenLengths_get!_pos_iff
@@ -1090,6 +1146,21 @@ lemma generatedDynamicLitLenLengths_get!_pos_iff
   rw [getElem!_pos (Png.generatedDynamicLitLenLengths freqs) idx hidxLengths]
   simpa [Png.generatedDynamicLitLenLengths] using
     generatedDynamicLitLenLengthAt_pos_iff freqs idx
+
+/-- In `get!` form, generated literal/length entries still use only the
+zero-or-ranked palette. This matches helper code that indexes with `get!`. -/
+lemma generatedDynamicLitLenLengths_get!_eq_0_or_2_or_4_or_5_or_6_or_15
+    (freqs : Array Nat) (idx : Nat)
+    (hidx : idx < (Png.generatedDynamicLitLenLengths freqs).size) :
+    (Png.generatedDynamicLitLenLengths freqs)[idx]! = 0 ∨
+      (Png.generatedDynamicLitLenLengths freqs)[idx]! = 2 ∨
+      (Png.generatedDynamicLitLenLengths freqs)[idx]! = 4 ∨
+      (Png.generatedDynamicLitLenLengths freqs)[idx]! = 5 ∨
+      (Png.generatedDynamicLitLenLengths freqs)[idx]! = 6 ∨
+      (Png.generatedDynamicLitLenLengths freqs)[idx]! = 15 := by
+  rw [getElem!_pos (Png.generatedDynamicLitLenLengths freqs) idx hidx]
+  exact generatedDynamicLitLenLengths_getElem_eq_0_or_2_or_4_or_5_or_6_or_15
+    freqs idx hidx
 
 /-- The generated literal/length length table always contains EOB in bounds.
 This packages the fixed table-size facts for later payload proofs. -/
@@ -1228,6 +1299,140 @@ lemma generatedDynamicDistLengths_getElem_le_15
     (Png.generatedDynamicDistLengths freqs)[idx] ≤ 15 := by
   simpa [Png.generatedDynamicDistLengths] using
     generatedDynamicDistLengthAt_le_15 freqs idx
+
+/-- If every remaining array entry is bounded, `maxCodeLenAux` stays bounded.
+This isolates the recursive scan needed by generated Huffman-table proofs. -/
+lemma maxCodeLenAux_le_of_getElem_le
+    (lengths : Array Nat) (i maxLen bound : Nat)
+    (hmax : maxLen ≤ bound)
+    (hentries : ∀ j (hj : j < lengths.size), i ≤ j -> lengths[j] ≤ bound) :
+    Png.maxCodeLenAux lengths i maxLen ≤ bound := by
+  rw [Png.maxCodeLenAux.eq_1]
+  by_cases hi : i < lengths.size
+  · have hlen : lengths[i] ≤ bound := hentries i hi le_rfl
+    by_cases hgt : lengths[i] > maxLen
+    · have hrec :
+          Png.maxCodeLenAux lengths (i + 1) lengths[i] ≤ bound :=
+        maxCodeLenAux_le_of_getElem_le lengths (i + 1) lengths[i] bound
+          hlen
+          (by
+            intro j hj hij
+            exact hentries j hj (by omega))
+      simp [hi, hgt]
+      exact hrec
+    · have hrec :
+          Png.maxCodeLenAux lengths (i + 1) maxLen ≤ bound :=
+        maxCodeLenAux_le_of_getElem_le lengths (i + 1) maxLen bound
+          hmax
+          (by
+            intro j hj hij
+            exact hentries j hj (by omega))
+      simp [hi, hgt]
+      exact hrec
+  · simp [hi, hmax]
+termination_by lengths.size - i
+decreasing_by
+  all_goals
+    have hlt : i < lengths.size := hi
+    exact Nat.sub_lt_sub_left (k := i) (m := lengths.size) (n := i + 1)
+      hlt (Nat.lt_succ_self i)
+
+/-- The generated literal/length table's scanned maximum code length is within
+DEFLATE's limit. This prepares the literal/length `mkHuffman` validity proof. -/
+lemma maxCodeLenAux_generatedDynamicLitLenLengths_le_15
+    (freqs : Array Nat) (i maxLen : Nat)
+    (hmax : maxLen ≤ 15) :
+    Png.maxCodeLenAux (Png.generatedDynamicLitLenLengths freqs) i maxLen ≤ 15 := by
+  exact maxCodeLenAux_le_of_getElem_le
+    (Png.generatedDynamicLitLenLengths freqs) i maxLen 15 hmax
+    (by
+      intro j hj _hij
+      exact generatedDynamicLitLenLengths_getElem_le_15 freqs j hj)
+
+/-- The generated distance table's scanned maximum code length is within
+DEFLATE's limit. This is the distance-table counterpart to the lit/len bound. -/
+lemma maxCodeLenAux_generatedDynamicDistLengths_le_15
+    (freqs : Array Nat) (i maxLen : Nat)
+    (hmax : maxLen ≤ 15) :
+    Png.maxCodeLenAux (Png.generatedDynamicDistLengths freqs) i maxLen ≤ 15 := by
+  exact maxCodeLenAux_le_of_getElem_le
+    (Png.generatedDynamicDistLengths freqs) i maxLen 15 hmax
+    (by
+      intro j hj _hij
+      exact generatedDynamicDistLengths_getElem_le_15 freqs j hj)
+
+/-- A positive incoming maximum remains positive after the max-code-length
+scan. This is the base lower-bound helper for generated table validity. -/
+lemma maxCodeLenAux_pos_of_maxLen_pos
+    (lengths : Array Nat) (i maxLen : Nat)
+    (hmax : 0 < maxLen) :
+    0 < Png.maxCodeLenAux lengths i maxLen := by
+  rw [Png.maxCodeLenAux.eq_1]
+  by_cases hi : i < lengths.size
+  · by_cases hgt : lengths[i] > maxLen
+    · have hlen : 0 < lengths[i] := by omega
+      have hrec :=
+        maxCodeLenAux_pos_of_maxLen_pos lengths (i + 1) lengths[i] hlen
+      simpa [hi, hgt] using hrec
+    · have hrec :=
+        maxCodeLenAux_pos_of_maxLen_pos lengths (i + 1) maxLen hmax
+      simpa [hi, hgt] using hrec
+  · simpa [hi] using hmax
+termination_by lengths.size - i
+decreasing_by
+  all_goals
+    have hlt : i < lengths.size := hi
+    exact Nat.sub_lt_sub_left (k := i) (m := lengths.size) (n := i + 1)
+      hlt (Nat.lt_succ_self i)
+
+/-- If the scan range contains a positive entry, `maxCodeLenAux` returns a
+positive maximum. This justifies the nonzero `maxLen` branch for `mkHuffman`. -/
+lemma maxCodeLenAux_pos_of_getElem_pos
+    (lengths : Array Nat) (i maxLen target : Nat)
+    (hle : i ≤ target)
+    (htarget : target < lengths.size)
+    (hpos : 0 < lengths[target]) :
+    0 < Png.maxCodeLenAux lengths i maxLen := by
+  rw [Png.maxCodeLenAux.eq_1]
+  have hi : i < lengths.size := lt_of_le_of_lt hle htarget
+  by_cases hgt : lengths[i] > maxLen
+  · have hlen : 0 < lengths[i] := by omega
+    have hrec :=
+      maxCodeLenAux_pos_of_maxLen_pos lengths (i + 1) lengths[i] hlen
+    simpa [hi, hgt] using hrec
+  · by_cases heq : i = target
+    · subst target
+      have hmaxPos : 0 < maxLen := by omega
+      have hrec :=
+        maxCodeLenAux_pos_of_maxLen_pos lengths (i + 1) maxLen hmaxPos
+      simpa [hi, hgt] using hrec
+    · have hlt : i < target := Nat.lt_of_le_of_ne hle heq
+      have hrec :=
+        maxCodeLenAux_pos_of_getElem_pos lengths (i + 1) maxLen target
+          (by omega) htarget hpos
+      simpa [hi, hgt] using hrec
+termination_by lengths.size - i
+decreasing_by
+  all_goals
+    have hltLen : i < lengths.size := hi
+    exact Nat.sub_lt_sub_left (k := i) (m := lengths.size) (n := i + 1)
+      hltLen (Nat.lt_succ_self i)
+
+/-- Generated literal/length tables have a positive scanned maximum because
+EOB is always assigned a positive generated code length. -/
+lemma maxCodeLenAux_generatedDynamicLitLenLengths_pos
+    (tokens : Array Png.DeflateToken) :
+    0 <
+      Png.maxCodeLenAux
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)) 0 0 := by
+  let lengths :=
+    Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+  have hidx : 256 < lengths.size := by
+    simpa [lengths] using generatedDynamicLitLenLengths_eob_inBounds tokens
+  have hpos : 0 < lengths[256] := by
+    simpa [lengths] using generatedDynamicLitLenLengths_eob_pos tokens
+  simpa [lengths] using
+    maxCodeLenAux_pos_of_getElem_pos lengths 0 0 256 (by decide) hidx hpos
 
 /-- In `get!` form, generated distance entry zero is positive exactly when the
 source distance-symbol-zero frequency is positive. -/
