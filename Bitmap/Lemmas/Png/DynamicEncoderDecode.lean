@@ -33,6 +33,58 @@ def codeLenTokenStreamLen : List Png.CodeLenToken → Nat
   | [] => 0
   | token :: tokens => codeLenTokenBitLen token + codeLenTokenStreamLen tokens
 
+/-- Proof-facing expansion of a list of generated code-length tokens. This is
+the list form needed for stream replay against the runtime table reader. -/
+def codeLenTokensExpandList? : List Png.CodeLenToken → Array Nat → Option (Array Nat)
+  | [], lengths => some lengths
+  | token :: tokens, lengths =>
+      match Png.CodeLenToken.expand lengths token with
+      | none => none
+      | some lengths' => codeLenTokensExpandList? tokens lengths'
+
+/-- Proof-facing output count for a generated code-length token list. This
+tracks how far the dynamic table reader must advance after replaying tokens. -/
+def codeLenTokenListOutputCount : List Png.CodeLenToken → Nat
+  | [] => 0
+  | token :: tokens =>
+      CodeLenTokenOutputCount token + codeLenTokenListOutputCount tokens
+
+/-- Successful list expansion increases the decoded-length array by the sum of
+the token output counts. This is the size invariant for stream replay. -/
+lemma codeLenTokensExpandList_size_of_some
+    {tokens : List Png.CodeLenToken} {lengths lengths' : Array Nat}
+    (h : codeLenTokensExpandList? tokens lengths = some lengths') :
+    lengths'.size = lengths.size + codeLenTokenListOutputCount tokens := by
+  induction tokens generalizing lengths with
+  | nil =>
+      simp [codeLenTokensExpandList?, codeLenTokenListOutputCount] at h
+      simpa [h, codeLenTokenListOutputCount]
+  | cons token tokens ih =>
+      simp [codeLenTokensExpandList?] at h
+      cases hexpand : Png.CodeLenToken.expand lengths token with
+      | none =>
+          simp [hexpand] at h
+      | some lengths1 =>
+          simp [hexpand] at h
+          have htail := ih h
+          have hhead := codeLenToken_expand_size_of_some hexpand
+          simp [codeLenTokenListOutputCount, htail, hhead, Nat.add_assoc]
+
+/-- A nonempty valid token list with successful expansion strictly increases
+the decoded-length array. This supplies the reader progress condition. -/
+lemma codeLenTokensExpandList_size_gt_of_cons_valid
+    {token : Png.CodeLenToken} {tokens : List Png.CodeLenToken}
+    {lengths lengths' : Array Nat}
+    (hvalid : CodeLenTokenValid token)
+    (h : codeLenTokensExpandList? (token :: tokens) lengths = some lengths') :
+    lengths.size < lengths'.size := by
+  have hsize := codeLenTokensExpandList_size_of_some h
+  have hpos : 0 < codeLenTokenListOutputCount (token :: tokens) := by
+    have hhead := codeLenTokenOutputCount_pos hvalid
+    simp [codeLenTokenListOutputCount]
+    omega
+  omega
+
 /-- A valid generated code-length token's packed bits fit inside its advertised
 bit length. This is the code-space bound needed for stream concatenation. -/
 lemma codeLenTokenBits_lt_codeSpace
@@ -88,6 +140,34 @@ lemma codeLenTokenStreamBits_lt_codeSpace
         Nat.or_lt_two_pow hheadWide hshift
       simpa [codeLenTokenStreamBits, codeLenTokenStreamLen, Nat.add_comm,
         Nat.add_left_comm, Nat.add_assoc] using hor
+
+/-- Splits a cons token stream into its first token and the remaining packed
+tail. This normalizes stream arithmetic for the token-stream induction. -/
+lemma codeLenTokenStreamBits_cons_or_rest
+    (token : Png.CodeLenToken) (tokens : List Png.CodeLenToken) (restBits : Nat) :
+    codeLenTokenStreamBits (token :: tokens) |||
+        (restBits <<< codeLenTokenStreamLen (token :: tokens)) =
+      codeLenTokenBits token |||
+        ((codeLenTokenStreamBits tokens |||
+            (restBits <<< codeLenTokenStreamLen tokens)) <<<
+          codeLenTokenBitLen token) := by
+  simp [codeLenTokenStreamBits, codeLenTokenStreamLen, Nat.shiftLeft_or_distrib,
+    Png.shiftLeft_shiftLeft, Nat.or_assoc, Nat.add_comm, Nat.add_left_comm,
+    Nat.add_assoc]
+
+/-- Reassociates a token prefix so the low five bits are the helper Huffman
+code and the following bits start with that token's extra field. -/
+lemma codeLenTokenBits_or_tail_eq_code_extra_tail
+    (token : Png.CodeLenToken) (tailBits : Nat) :
+    let codes := Png.canonicalRevCodesFromLengths Png.codeLenCodeLengths
+    let codeBits := codes[token.symbol]!.1
+    let extraTail := token.extraBits ||| (tailBits <<< token.extraLen)
+    codeLenTokenBits token ||| (tailBits <<< codeLenTokenBitLen token) =
+      codeBits ||| (extraTail <<< 5) := by
+  intro codes codeBits extraTail
+  simp [codeLenTokenBits, codeLenTokenBitLen, extraTail, codeBits, codes,
+    Nat.shiftLeft_or_distrib, Png.shiftLeft_shiftLeft, Nat.or_assoc,
+    Nat.add_comm, Nat.add_left_comm, Nat.add_assoc]
 
 /-- Decodes the generated five-bit code-length helper code from a writer-built
 stream. This is the Huffman-decode bridge needed before replaying dynamic
@@ -1221,6 +1301,226 @@ lemma readDynamicTablesLengthsFuel_step_token_generated
           (bw := bw) (repeatCount := repeatCount) (fuel := fuel) (total := total)
           (restBits := restBits) (restLen := restLen) (lengths := lengths)
           hlo hhi hsize hbit hcur)
+
+/-- Replays a full generated code-length token stream through the dynamic-table
+length reader. This lifts the one-token branch proofs to the generated header. -/
+lemma readDynamicTablesLengthsFuel_codeLenTokenStream_readerAt_writeBits
+    (bw : Png.BitWriter) (tokens : List Png.CodeLenToken)
+    (fuelTail restBits restLen : Nat)
+    (lengths lengths' : Array Nat)
+    (hvalid : ∀ token ∈ tokens, CodeLenTokenValid token)
+    (hexpand : codeLenTokensExpandList? tokens lengths = some lengths')
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let total := lengths.size + codeLenTokenListOutputCount tokens
+    let bitsTot := codeLenTokenStreamBits tokens |||
+      (restBits <<< codeLenTokenStreamLen tokens)
+    let lenTot := codeLenTokenStreamLen tokens + restLen
+    let bw' := Png.BitWriter.writeBits bw bitsTot lenTot
+    let br := Png.BitWriter.readerAt bw bw'.flush
+      (Png.flush_size_writeBits_le bw bitsTot lenTot) hbit
+    Png.readDynamicTablesLengthsFuel (tokens.length + fuelTail) total
+        generatedCodeLenHuffman br lengths =
+      Png.readDynamicTablesLengthsFuel fuelTail total generatedCodeLenHuffman
+        (Png.BitWriter.readerAt
+          (Png.BitWriter.writeBits bw bitsTot (codeLenTokenStreamLen tokens))
+          bw'.flush
+          (by
+            have hk : codeLenTokenStreamLen tokens ≤ lenTot := by omega
+            simpa [lenTot] using
+              (Png.flush_size_writeBits_prefix bw bitsTot
+                (codeLenTokenStreamLen tokens) lenTot hk))
+          (Png.bitPos_lt_8_writeBits bw bitsTot
+            (codeLenTokenStreamLen tokens) hbit))
+        lengths' := by
+  induction tokens generalizing bw fuelTail restBits restLen lengths lengths' with
+  | nil =>
+      simp [codeLenTokensExpandList?, codeLenTokenStreamBits, codeLenTokenStreamLen,
+        codeLenTokenListOutputCount] at hexpand ⊢
+      exact hexpand ▸ rfl
+  | cons token tokens ih =>
+      simp [codeLenTokensExpandList?] at hexpand
+      cases hexpandHead : Png.CodeLenToken.expand lengths token with
+      | none =>
+          simp [hexpandHead] at hexpand
+      | some lengths1 =>
+          simp [hexpandHead] at hexpand
+          let restBits1 := codeLenTokenStreamBits tokens |||
+            (restBits <<< codeLenTokenStreamLen tokens)
+          let restLen1 := codeLenTokenStreamLen tokens + restLen
+          let prefixBits := codeLenTokenBits token
+          let streamBits := prefixBits ||| (restBits1 <<< codeLenTokenBitLen token)
+          let streamLen := codeLenTokenBitLen token + restLen1
+          let total := lengths.size + codeLenTokenListOutputCount (token :: tokens)
+          have hheadValid : CodeLenTokenValid token := hvalid token (by simp)
+          have htailValid : ∀ t ∈ tokens, CodeLenTokenValid t := by
+            intro t ht
+            exact hvalid t (by simp [ht])
+          have hprefixBits : prefixBits < 2 ^ codeLenTokenBitLen token := by
+            simpa [prefixBits] using codeLenTokenBits_lt_codeSpace hheadValid
+          have hsize : lengths.size < total := by
+            have hpos := codeLenTokenOutputCount_pos hheadValid
+            simp [total, codeLenTokenListOutputCount]
+            omega
+          have hheadSize :
+              lengths1.size = lengths.size + CodeLenTokenOutputCount token :=
+            codeLenToken_expand_size_of_some hexpandHead
+          have htotalTail :
+              lengths1.size + codeLenTokenListOutputCount tokens = total := by
+            simp [total, codeLenTokenListOutputCount, hheadSize, Nat.add_assoc,
+              Nat.add_comm, Nat.add_left_comm]
+          have hbitsCons :
+              codeLenTokenStreamBits (token :: tokens) |||
+                  (restBits <<< codeLenTokenStreamLen (token :: tokens)) =
+                streamBits := by
+            simpa [streamBits, prefixBits, restBits1] using
+              codeLenTokenStreamBits_cons_or_rest token tokens restBits
+          have hbitsStep :
+              streamBits =
+                (Png.canonicalRevCodesFromLengths Png.codeLenCodeLengths)[token.symbol]!.1 |||
+                  ((token.extraBits ||| (restBits1 <<< token.extraLen)) <<< 5) := by
+            simpa [streamBits, prefixBits, restBits1] using
+              (codeLenTokenBits_or_tail_eq_code_extra_tail token restBits1)
+          have hlenCons :
+              codeLenTokenStreamLen (token :: tokens) + restLen = streamLen := by
+            simp [streamLen, restLen1, codeLenTokenStreamLen, codeLenTokenBitLen,
+              Nat.add_assoc, Nat.add_comm, Nat.add_left_comm]
+          have hlenStep :
+              streamLen = 5 + (token.extraLen + restLen1) := by
+            simp [streamLen, codeLenTokenBitLen, Nat.add_assoc, Nat.add_comm,
+              Nat.add_left_comm]
+          let bwFull := Png.BitWriter.writeBits bw streamBits streamLen
+          let bwPrefix := Png.BitWriter.writeBits bw streamBits (codeLenTokenBitLen token)
+          let brStart := Png.BitWriter.readerAt bw bwFull.flush
+            (Png.flush_size_writeBits_le bw streamBits streamLen) hbit
+          let brNext := Png.BitWriter.readerAt bwPrefix bwFull.flush
+            (by
+              have hk : codeLenTokenBitLen token ≤ streamLen := by
+                dsimp [streamLen]
+                omega
+              simpa [bwFull] using
+                (Png.flush_size_writeBits_prefix bw streamBits
+                  (codeLenTokenBitLen token) streamLen hk))
+            (Png.bitPos_lt_8_writeBits bw streamBits (codeLenTokenBitLen token) hbit)
+          have hstep :
+              Png.readDynamicTablesLengthsFuel (tokens.length + fuelTail + 1)
+                  total generatedCodeLenHuffman brStart lengths =
+                Png.readDynamicTablesLengthsFuel (tokens.length + fuelTail)
+                  total generatedCodeLenHuffman brNext lengths1 := by
+            have hcore :=
+              readDynamicTablesLengthsFuel_step_token_generated
+                (bw := bw) (token := token)
+                (fuel := tokens.length + fuelTail) (total := total)
+                (restBits := restBits1) (restLen := restLen1)
+                (lengths := lengths) (lengths' := lengths1)
+                hheadValid hexpandHead hsize hbit hcur
+            simpa [hbitsStep, hlenStep, bwFull, bwPrefix, brStart, brNext,
+              codeLenTokenBitLen, Nat.add_assoc] using hcore
+          have hprefixWriter :
+              bwPrefix = Png.BitWriter.writeBits bw prefixBits (codeLenTokenBitLen token) := by
+            simpa [bwPrefix, streamBits] using
+              (Png.writeBits_or_shift_tail
+                (bw := bw) (bits := prefixBits) (tailBits := restBits1)
+                (len := codeLenTokenBitLen token) hprefixBits)
+          have hfullConcat :
+              Png.BitWriter.writeBits bwPrefix restBits1 restLen1 = bwFull := by
+            have hconcat :
+                Png.BitWriter.writeBits bw streamBits streamLen =
+                  Png.BitWriter.writeBits
+                    (Png.BitWriter.writeBits bw prefixBits (codeLenTokenBitLen token))
+                    restBits1 restLen1 := by
+              simpa [streamBits, streamLen] using
+                (Png.writeBits_concat bw prefixBits restBits1
+                  (codeLenTokenBitLen token) restLen1 hprefixBits)
+            simpa [bwFull, hprefixWriter] using hconcat.symm
+          have htail :=
+            ih (bw := bwPrefix) (fuelTail := fuelTail) (restBits := restBits)
+              (restLen := restLen) (lengths := lengths1) (lengths' := lengths')
+              htailValid hexpand
+              (Png.bitPos_lt_8_writeBits bw streamBits (codeLenTokenBitLen token) hbit)
+              (Png.curClearAbove_writeBits bw streamBits (codeLenTokenBitLen token) hbit hcur)
+          have htail' :
+              Png.readDynamicTablesLengthsFuel (tokens.length + fuelTail)
+                  total generatedCodeLenHuffman brNext lengths1 =
+                Png.readDynamicTablesLengthsFuel fuelTail total generatedCodeLenHuffman
+                  (Png.BitWriter.readerAt
+                    (Png.BitWriter.writeBits bw streamBits
+                      (codeLenTokenStreamLen (token :: tokens)))
+                    bwFull.flush
+                    (by
+                      have hk : codeLenTokenStreamLen (token :: tokens) ≤ streamLen := by
+                        dsimp [streamLen, restLen1]
+                        simp [codeLenTokenStreamLen]
+                      simpa [bwFull, hlenCons] using
+                        (Png.flush_size_writeBits_prefix bw streamBits
+                          (codeLenTokenStreamLen (token :: tokens)) streamLen hk))
+                    (Png.bitPos_lt_8_writeBits bw streamBits
+                      (codeLenTokenStreamLen (token :: tokens)) hbit))
+                  lengths' := by
+            have htailFullFlush :
+                (Png.BitWriter.writeBits bwPrefix restBits1 restLen1).flush =
+                  bwFull.flush := by
+              rw [hfullConcat]
+            have hafterWriter :
+                Png.BitWriter.writeBits bwPrefix restBits1
+                    (codeLenTokenStreamLen tokens) =
+                  Png.BitWriter.writeBits bw streamBits
+                    (codeLenTokenStreamLen (token :: tokens)) := by
+              have hconcat :
+                  Png.BitWriter.writeBits bw streamBits
+                      (codeLenTokenBitLen token + codeLenTokenStreamLen tokens) =
+                    Png.BitWriter.writeBits
+                      (Png.BitWriter.writeBits bw prefixBits
+                        (codeLenTokenBitLen token))
+                      restBits1 (codeLenTokenStreamLen tokens) := by
+                simpa [streamBits, Nat.add_assoc] using
+                  (Png.writeBits_concat bw prefixBits restBits1
+                    (codeLenTokenBitLen token) (codeLenTokenStreamLen tokens)
+                    hprefixBits)
+              simpa [hprefixWriter, codeLenTokenStreamLen, Nat.add_assoc] using
+                hconcat.symm
+            have hbrNextEq :
+                Png.BitWriter.readerAt bwPrefix
+                    ((Png.BitWriter.writeBits bwPrefix restBits1 restLen1).flush)
+                    (Png.flush_size_writeBits_le bwPrefix restBits1 restLen1)
+                    (Png.bitPos_lt_8_writeBits bw streamBits
+                      (codeLenTokenBitLen token) hbit) =
+                  brNext := by
+              refine readerAt_eq_of_eqs rfl htailFullFlush _ _ _ _
+            have hbrAfterEq :
+                Png.BitWriter.readerAt
+                    (Png.BitWriter.writeBits bwPrefix restBits1
+                      (codeLenTokenStreamLen tokens))
+                    ((Png.BitWriter.writeBits bwPrefix restBits1 restLen1).flush)
+                    (by
+                      have hk : codeLenTokenStreamLen tokens ≤ restLen1 := by
+                        dsimp [restLen1]
+                        omega
+                      simpa using
+                        (Png.flush_size_writeBits_prefix bwPrefix restBits1
+                          (codeLenTokenStreamLen tokens) restLen1 hk))
+                    (Png.bitPos_lt_8_writeBits bwPrefix restBits1
+                      (codeLenTokenStreamLen tokens)
+                      (Png.bitPos_lt_8_writeBits bw streamBits
+                        (codeLenTokenBitLen token) hbit)) =
+                  Png.BitWriter.readerAt
+                    (Png.BitWriter.writeBits bw streamBits
+                      (codeLenTokenStreamLen (token :: tokens)))
+                    bwFull.flush
+                    (by
+                      have hk : codeLenTokenStreamLen (token :: tokens) ≤ streamLen := by
+                        dsimp [streamLen, restLen1]
+                        simp [codeLenTokenStreamLen]
+                      simpa [bwFull, hlenCons] using
+                        (Png.flush_size_writeBits_prefix bw streamBits
+                          (codeLenTokenStreamLen (token :: tokens)) streamLen hk))
+                    (Png.bitPos_lt_8_writeBits bw streamBits
+                      (codeLenTokenStreamLen (token :: tokens)) hbit) := by
+              refine readerAt_eq_of_eqs hafterWriter htailFullFlush _ _ _ _
+            simpa [total, htotalTail, restBits1, restLen1, brNext, hbrNextEq,
+              hbrAfterEq] using htail
+          have hmain := hstep.trans htail'
+          simpa [total, hbitsCons, hlenCons, bwFull, brStart, Nat.add_assoc,
+            Nat.add_comm, Nat.add_left_comm] using hmain
 
 end Lemmas
 
