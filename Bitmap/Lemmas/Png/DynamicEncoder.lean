@@ -2878,6 +2878,52 @@ lemma generatedCodeLenCodes_order_len_pos
     Png.codeLenOrder[idx]!
     (codeLenOrder_get!_lt_codeLenCodeLengths_size idx hidx)
 
+/-- Every generated header code-length-order entry has the exact five-bit
+helper code width. This is the order-indexed form used by header replay. -/
+lemma generatedCodeLenCodes_order_len_eq_five
+    (idx : Nat) (hidx : idx < Png.codeLenOrder.size) :
+    (Png.canonicalRevCodesFromLengths
+      Png.codeLenCodeLengths)[Png.codeLenOrder[idx]!]!.2 = 5 := by
+  exact generatedCodeLenCodes_len_eq_five
+    Png.codeLenOrder[idx]!
+    (codeLenOrder_get!_lt_codeLenCodeLengths_size idx hidx)
+
+/-- Every generated header code-length-order bit pattern fits in the five-bit
+helper row. This is the order-indexed row-bound used by header replay. -/
+lemma generatedCodeLenCodes_order_bits_lt_codeSpace
+    (idx : Nat) (hidx : idx < Png.codeLenOrder.size) :
+    (Png.canonicalRevCodesFromLengths
+      Png.codeLenCodeLengths)[Png.codeLenOrder[idx]!]!.1 < 2 ^ 5 := by
+  exact generatedCodeLenCodes_bits_lt_codeSpace
+    Png.codeLenOrder[idx]!
+    (codeLenOrder_get!_lt_codeLenCodeLengths_size idx hidx)
+
+/-- Pure reconstruction of the generated code-length-code lengths in DEFLATE
+order. It mirrors the parser loop without involving a bit reader. -/
+def generatedCodeLenLengthsFilled : Array Nat := Id.run do
+  let mut arr : Array Nat := Array.replicate 19 0
+  for i in [0:Png.codeLenOrder.size] do
+    arr := arr.set! Png.codeLenOrder[i]! 5
+  return arr
+
+/-- The generated code-length-code header reconstructs the all-five length
+table. This is the pure array target for the later bit-reader replay proof. -/
+lemma generatedCodeLenLengthsFilled_eq :
+    generatedCodeLenLengthsFilled = Png.codeLenCodeLengths := by
+  native_decide
+
+/-- The pure reconstructed generated code-length-code table has the full
+19-symbol DEFLATE shape. This packages the array size used by `mkHuffman`. -/
+lemma generatedCodeLenLengthsFilled_size :
+    generatedCodeLenLengthsFilled.size = 19 := by
+  rw [generatedCodeLenLengthsFilled_eq, codeLenCodeLengths_size]
+
+/-- Building a Huffman table from the reconstructed generated code-length-code
+header gives the named generated helper table. -/
+lemma mkHuffman_generatedCodeLenLengthsFilled_eq :
+    Png.mkHuffman generatedCodeLenLengthsFilled = some generatedCodeLenHuffman := by
+  rw [generatedCodeLenLengthsFilled_eq, mkHuffman_codeLenCodeLengths_eq]
+
 /-- The generated dynamic literal/length count always satisfies the DEFLATE
 minimum. This justifies encoding `HLIT = count - 257`. -/
 lemma generatedDynamicLitLenCount_ge (litLenLengths : Array Nat) :
@@ -2918,6 +2964,15 @@ lemma generatedDynamicLitLenCount_sub_le_31
       (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens))
   omega
 
+/-- The generated literal/length header field is a valid 5-bit value. This is
+the strict bit-width form used by bit-reader replay. -/
+lemma generatedDynamicLitLenCount_sub_lt_32
+    (tokens : Array Png.DeflateToken) :
+    Png.generatedDynamicLitLenCount
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)) - 257 < 32 := by
+  have hle := generatedDynamicLitLenCount_sub_le_31 tokens
+  omega
+
 /-- The generated dynamic distance count always satisfies the DEFLATE minimum.
 This justifies encoding `HDIST = count - 1`. -/
 lemma generatedDynamicDistCount_ge (distLengths : Array Nat) :
@@ -2955,6 +3010,53 @@ lemma generatedDynamicDistCount_sub_le_31
         (Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)) - 1 ≤ 31 := by
   have hle :=
     generatedDynamicDistCount_le
+      (Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens))
+  omega
+
+/-- The generated distance header field is a valid 5-bit value. This is the
+strict bit-width form used by bit-reader replay. -/
+lemma generatedDynamicDistCount_sub_lt_32
+    (tokens : Array Png.DeflateToken) :
+    Png.generatedDynamicDistCount
+        (Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)) - 1 < 32 := by
+  have hle := generatedDynamicDistCount_sub_le_31 tokens
+  omega
+
+/-- The generated dynamic header advertises all 19 code-length-code entries,
+so `HCLEN` is the valid 4-bit value `15`. -/
+lemma generatedDynamicHclenField_lt_16 : 15 < 2 ^ 4 := by
+  decide
+
+/-- The generated dynamic header advertises at most the DEFLATE maximum number
+of literal/length plus distance code-length entries. -/
+lemma generatedDynamicHeaderTotal_le_316
+    (tokens : Array Png.DeflateToken) :
+    Png.generatedDynamicLitLenCount
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)) +
+      Png.generatedDynamicDistCount
+        (Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)) ≤ 316 := by
+  have hlit :=
+    generatedDynamicLitLenCount_le
+      (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens))
+  have hdist :=
+    generatedDynamicDistCount_le
+      (Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens))
+  omega
+
+/-- The generated dynamic header advertises at least the DEFLATE minimum number
+of literal/length plus distance code-length entries. -/
+lemma generatedDynamicHeaderTotal_ge_258
+    (tokens : Array Png.DeflateToken) :
+    258 ≤
+      Png.generatedDynamicLitLenCount
+          (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)) +
+        Png.generatedDynamicDistCount
+          (Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)) := by
+  have hlit :=
+    generatedDynamicLitLenCount_ge
+      (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens))
+  have hdist :=
+    generatedDynamicDistCount_ge
       (Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens))
   omega
 
