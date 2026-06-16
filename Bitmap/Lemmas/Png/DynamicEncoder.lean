@@ -3299,6 +3299,43 @@ lemma codeLenTokenValid_extraBits_lt_codeSpace
       exact codeLenToken_repeatZeroLong_extraBits_lt_codeSpace
         repeatCount hvalid.1 hvalid.2
 
+/-- A valid code-length token always names an entry in the generated
+code-length-code alphabet. This is the token-level table lookup bound. -/
+lemma codeLenTokenValid_symbol_lt_codeLenCodeLengths_size
+    {token : Png.CodeLenToken} (hvalid : CodeLenTokenValid token) :
+    token.symbol < Png.codeLenCodeLengths.size := by
+  have hsym := codeLenTokenValid_symbol_le_18 hvalid
+  have hsize : Png.codeLenCodeLengths.size = 19 := codeLenCodeLengths_size
+  omega
+
+/-- Valid code-length token symbols use exact five-bit generated helper codes.
+This is the token-level row-width fact for header replay. -/
+lemma generatedCodeLenCodes_token_len_eq_five
+    {token : Png.CodeLenToken} (hvalid : CodeLenTokenValid token) :
+    (Png.canonicalRevCodesFromLengths
+      Png.codeLenCodeLengths)[token.symbol]!.2 = 5 := by
+  exact generatedCodeLenCodes_len_eq_five token.symbol
+    (codeLenTokenValid_symbol_lt_codeLenCodeLengths_size hvalid)
+
+/-- Valid code-length token bit patterns fit the generated five-bit row. This
+is the token-level write/read bit bound for header replay. -/
+lemma generatedCodeLenCodes_token_bits_lt_codeSpace
+    {token : Png.CodeLenToken} (hvalid : CodeLenTokenValid token) :
+    (Png.canonicalRevCodesFromLengths
+      Png.codeLenCodeLengths)[token.symbol]!.1 < 2 ^ 5 := by
+  exact generatedCodeLenCodes_bits_lt_codeSpace token.symbol
+    (codeLenTokenValid_symbol_lt_codeLenCodeLengths_size hvalid)
+
+/-- The generated code-length Huffman table decodes a valid token's generated
+bit pattern back to the token symbol. This is the core token replay fact. -/
+lemma generatedCodeLenHuffman_lookup_token_symbol
+    {token : Png.CodeLenToken} (hvalid : CodeLenTokenValid token) :
+    let codes := Png.canonicalRevCodesFromLengths Png.codeLenCodeLengths
+    generatedCodeLenHuffman.table[codes[token.symbol]!.2]![codes[token.symbol]!.1]! =
+      some token.symbol := by
+  exact generatedCodeLenHuffman_lookup_generated_code token.symbol
+    (codeLenTokenValid_symbol_lt_codeLenCodeLengths_size hvalid)
+
 /-- The empty token array satisfies the code-length token validity invariant.
 This is the base accumulator for generated header tokenization. -/
 lemma codeLenTokensValid_empty : CodeLenTokensValid #[] := by
