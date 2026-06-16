@@ -580,6 +580,18 @@ lemma incrementNatAt_get!_ne
   unfold Png.incrementNatAt
   exact getElem!_set!_ne arr idx target (arr[idx]! + 1) htarget hne
 
+/-- Incrementing one frequency slot can increase any fixed target bucket by at
+most one. This is the local counting bound for canonical table proofs. -/
+lemma incrementNatAt_get!_le_succ
+    (arr : Array Nat) (idx target : Nat)
+    (htarget : target < arr.size) :
+    (Png.incrementNatAt arr idx)[target]! ≤ arr[target]! + 1 := by
+  by_cases heq : idx = target
+  · subst target
+    simp [Png.incrementNatAt, htarget]
+  · rw [incrementNatAt_get!_ne arr idx target htarget heq]
+    omega
+
 /-- Incrementing any frequency slot preserves an already-positive slot. This is
 the scanner invariant used by generated payload-availability proofs. -/
 lemma incrementNatAt_get!_pos_of_pos
@@ -1935,6 +1947,78 @@ lemma countCodeLengthsAux_generatedDynamicLitLenLengths_get!_lt_codeLen
     _ = 0 := by
         rw [getElem!_pos count idx hidx]
         simp [count]
+
+/-- Counting code lengths can increase a bucket by at most the number of
+remaining scanned entries. This bounds generated canonical-code assignment. -/
+lemma countCodeLengthsAux_get!_le_count_add_remaining
+    (lengths : Array Nat) (i idx : Nat) (count : Array Nat)
+    (hidx : idx < count.size) :
+    (Png.countCodeLengthsAux lengths i count)[idx]! ≤
+      count[idx]! + (lengths.size - i) := by
+  rw [Png.countCodeLengthsAux.eq_1]
+  by_cases h : i < lengths.size
+  · by_cases hlen : 0 < lengths[i]
+    · have hidx' : idx < (Png.incrementNatAt count lengths[i]).size := by
+        simpa using hidx
+      have hrec :=
+        countCodeLengthsAux_get!_le_count_add_remaining
+          lengths (i + 1) idx (Png.incrementNatAt count lengths[i]) hidx'
+      have hinc :=
+        incrementNatAt_get!_le_succ count lengths[i] idx hidx
+      simp [h, hlen]
+      omega
+    · have hrec :=
+        countCodeLengthsAux_get!_le_count_add_remaining
+          lengths (i + 1) idx count hidx
+      simp [h, hlen]
+      omega
+  · simp [h]
+termination_by lengths.size - i
+decreasing_by
+  all_goals
+    have hlt : i < lengths.size := h
+    exact Nat.sub_lt_sub_left (k := i) (m := lengths.size) (n := i + 1)
+      hlt (Nat.lt_succ_self i)
+
+/-- The generated 9-bit literal/length bucket contains no more entries than
+the generated literal/length table itself. -/
+lemma countCodeLengthsAux_generatedDynamicLitLenLengths_get!_codeLen_le_size
+    (freqs : Array Nat) :
+    let lengths := Png.generatedDynamicLitLenLengths freqs
+    let count0 := Array.replicate (Png.generatedDynamicLitLenCodeLen + 1) 0
+    let count := Png.countCodeLengthsAux lengths 0 count0
+    count[Png.generatedDynamicLitLenCodeLen]! ≤ lengths.size := by
+  intro lengths count0 count
+  have hidx : Png.generatedDynamicLitLenCodeLen < count0.size := by
+    simp [count0]
+  have hbound :=
+    countCodeLengthsAux_get!_le_count_add_remaining
+      lengths 0 Png.generatedDynamicLitLenCodeLen count0 hidx
+  have hzero : count0[Png.generatedDynamicLitLenCodeLen]! = 0 := by
+    rw [getElem!_pos count0 Png.generatedDynamicLitLenCodeLen hidx]
+    simp [count0]
+  simpa [count, hzero] using hbound
+
+/-- For generated token streams, the number of assigned 9-bit literal/length
+codes fits strictly inside the available 9-bit code space. -/
+lemma countCodeLengthsAux_generatedDynamicLitLenLengths_get!_codeLen_lt_codeSpace
+    (tokens : Array Png.DeflateToken) :
+    let freqs := Png.litLenSymbolFreqs tokens
+    let lengths := Png.generatedDynamicLitLenLengths freqs
+    let count0 := Array.replicate (Png.generatedDynamicLitLenCodeLen + 1) 0
+    let count := Png.countCodeLengthsAux lengths 0 count0
+    count[Png.generatedDynamicLitLenCodeLen]! <
+      2 ^ Png.generatedDynamicLitLenCodeLen := by
+  intro freqs lengths count0 count
+  have hle :
+      count[Png.generatedDynamicLitLenCodeLen]! ≤ lengths.size := by
+    simpa [freqs, lengths, count0, count] using
+      countCodeLengthsAux_generatedDynamicLitLenLengths_get!_codeLen_le_size freqs
+  have hlt :
+      lengths.size < 2 ^ Png.generatedDynamicLitLenCodeLen := by
+    simpa [freqs, lengths] using
+      generatedDynamicLitLenLengths_size_lt_codeSpace tokens
+  omega
 
 /-- Generated literal/length counts make the canonical 9-bit starting code
 zero. This is the next-code side of the generated table validity proof. -/
