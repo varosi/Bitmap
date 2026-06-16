@@ -2020,6 +2020,45 @@ lemma countCodeLengthsAux_generatedDynamicLitLenLengths_get!_codeLen_lt_codeSpac
       generatedDynamicLitLenLengths_size_lt_codeSpace tokens
   omega
 
+/-- Rephrases the generated count-prefix zero fact with the scanned `maxLen`
+that `mkHuffman` computes. This avoids later proof churn around local lets. -/
+lemma countCodeLengthsAux_generatedDynamicLitLenLengths_get!_lt_scannedMax
+    (tokens : Array Png.DeflateToken) (idx : Nat)
+    (hlt :
+      idx <
+        Png.maxCodeLenAux
+          (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)) 0 0) :
+    (Png.countCodeLengthsAux
+      (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)) 0
+      (Array.replicate
+        (Png.maxCodeLenAux
+          (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)) 0 0 + 1)
+        0))[idx]! = 0 := by
+  have hmax := maxCodeLenAux_generatedDynamicLitLenLengths_eq_codeLen tokens
+  have hltCodeLen : idx < Png.generatedDynamicLitLenCodeLen := by
+    simpa [hmax] using hlt
+  simpa [hmax] using
+    countCodeLengthsAux_generatedDynamicLitLenLengths_get!_lt_codeLen
+      (Png.litLenSymbolFreqs tokens) idx hltCodeLen
+
+/-- Rephrases the generated 9-bit count-space bound with the scanned `maxLen`
+used by `mkHuffman`. This is the non-oversubscription arithmetic in mk form. -/
+lemma countCodeLengthsAux_generatedDynamicLitLenLengths_get!_scannedMax_lt_codeSpace
+    (tokens : Array Png.DeflateToken) :
+    let lengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    let maxLen := Png.maxCodeLenAux lengths 0 0
+    let count0 := Array.replicate (maxLen + 1) 0
+    let count := Png.countCodeLengthsAux lengths 0 count0
+    count[maxLen]! < 2 ^ maxLen := by
+  intro lengths maxLen count0 count
+  have hmax :
+      maxLen = Png.generatedDynamicLitLenCodeLen := by
+    simpa [lengths, maxLen] using
+      maxCodeLenAux_generatedDynamicLitLenLengths_eq_codeLen tokens
+  simpa [lengths, maxLen, count0, count, hmax] using
+    countCodeLengthsAux_generatedDynamicLitLenLengths_get!_codeLen_lt_codeSpace tokens
+
 /-- Generated literal/length counts make the canonical 9-bit starting code
 zero. This is the next-code side of the generated table validity proof. -/
 lemma nextCodesAux_generatedDynamicLitLenLengths_get!_codeLen_eq_zero
@@ -2072,6 +2111,27 @@ lemma nextCodesAux_generatedDynamicLitLenLengths_get!_codeLen_eq_zero
   simp [nextCode, nextCode0, Png.nextCodesAux, Png.generatedDynamicLitLenCodeLen,
     Array.set!, Array.setIfInBounds,
     h0, h1, h2, h3, h4, h5, h6, h7, h8]
+
+/-- Rephrases the generated next-code initialization with the scanned `maxLen`
+that `mkHuffman` uses. Positive generated entries therefore start at code zero. -/
+lemma nextCodesAux_generatedDynamicLitLenLengths_get!_scannedMax_eq_zero
+    (tokens : Array Png.DeflateToken) :
+    let lengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    let maxLen := Png.maxCodeLenAux lengths 0 0
+    let count :=
+      Png.countCodeLengthsAux lengths 0 (Array.replicate (maxLen + 1) 0)
+    let nextCode0 := Array.replicate (maxLen + 1) 0
+    let nextCode := (Png.nextCodesAux count maxLen 1 0 nextCode0).2
+    nextCode[maxLen]! = 0 := by
+  intro lengths maxLen count nextCode0 nextCode
+  have hmax :
+      maxLen = Png.generatedDynamicLitLenCodeLen := by
+    simpa [lengths, maxLen] using
+      maxCodeLenAux_generatedDynamicLitLenLengths_eq_codeLen tokens
+  simpa [lengths, maxLen, count, nextCode0, nextCode, hmax] using
+    nextCodesAux_generatedDynamicLitLenLengths_get!_codeLen_eq_zero
+      (Png.litLenSymbolFreqs tokens)
 
 /-- Computing canonical next-code values preserves the next-code table shape.
 Later generated-payload proofs use this before indexing emitted symbols. -/
@@ -2236,6 +2296,77 @@ decreasing_by
     exact Nat.sub_lt_sub_left (k := i) (m := target) (n := i + 1)
       hlt (Nat.lt_succ_self i)
 
+/-- A positive length entry is written with a reversed code that fits in its
+row. This is the generic form of the `rev < row.size` table-builder guard. -/
+lemma fillCanonicalRevCodesAux_get!_fst_lt_pow_of_pos_at
+    (lengths : Array Nat) (i : Nat) (nextCode : Array Nat)
+    (revCodes : Array (Nat × Nat)) (target : Nat)
+    (hle : i ≤ target)
+    (htarget : target < lengths.size)
+    (hrevSize : revCodes.size = lengths.size)
+    (hpos : 0 < lengths[target]!) :
+    (Png.fillCanonicalRevCodesAux lengths i nextCode revCodes)[target]!.1 <
+      2 ^ lengths[target]! := by
+  rw [Png.fillCanonicalRevCodesAux.eq_1]
+  have hi : i < lengths.size := lt_of_le_of_lt hle htarget
+  by_cases heq : i = target
+  · subst target
+    have hposElem : 0 < lengths[i] := by
+      simpa [getElem!_pos lengths i hi] using hpos
+    let codeVal := nextCode[lengths[i]]!
+    let revCodes' := revCodes.set! i (Png.reverseBits codeVal lengths[i], lengths[i])
+    have htargetRev' : i < revCodes'.size := by
+      simp [revCodes', hrevSize, hi]
+    have hpres :=
+      fillCanonicalRevCodesAux_get!_of_lt lengths (i + 1)
+        (nextCode.set! lengths[i] (codeVal + 1)) revCodes' i htargetRev'
+        (Nat.lt_succ_self i)
+    have hset :
+        revCodes'[i]! =
+          (Png.reverseBits codeVal lengths[i], lengths[i]) := by
+      have hrevIdx : i < revCodes.size := by
+        simpa [hrevSize] using hi
+      simpa [revCodes'] using
+        getElem!_set!_eq revCodes i
+          (Png.reverseBits codeVal lengths[i], lengths[i]) hrevIdx
+    simp [hi, hposElem]
+    have hfst :
+        (Png.fillCanonicalRevCodesAux lengths (i + 1)
+          (nextCode.set! lengths[i] (codeVal + 1)) revCodes')[i]!.1 =
+          revCodes'[i]!.1 := by
+      simpa using congrArg Prod.fst hpres
+    calc
+      (Png.fillCanonicalRevCodesAux lengths (i + 1)
+          (nextCode.set! lengths[i] (codeVal + 1)) revCodes')[i]!.1 =
+          revCodes'[i]!.1 := hfst
+      _ = Png.reverseBits codeVal lengths[i] := by
+            simp [hset]
+      _ < 2 ^ lengths[i] := Png.reverseBits_lt codeVal lengths[i]
+  · have hltTarget : i < target := Nat.lt_of_le_of_ne hle heq
+    by_cases hposCur : 0 < lengths[i]
+    · let codeVal := nextCode[lengths[i]]!
+      let revCodes' := revCodes.set! i (Png.reverseBits codeVal lengths[i], lengths[i])
+      have hrevSize' : revCodes'.size = lengths.size := by
+        simp [revCodes', hrevSize]
+      have hrec :=
+        fillCanonicalRevCodesAux_get!_fst_lt_pow_of_pos_at lengths (i + 1)
+          (nextCode.set! lengths[i] (codeVal + 1)) revCodes' target
+          (Nat.succ_le_of_lt hltTarget) htarget hrevSize' hpos
+      simp [hi, hposCur]
+      exact hrec
+    · have hrec :=
+        fillCanonicalRevCodesAux_get!_fst_lt_pow_of_pos_at lengths (i + 1)
+          nextCode revCodes target (Nat.succ_le_of_lt hltTarget)
+          htarget hrevSize hpos
+      simp [hi, hposCur]
+      exact hrec
+termination_by target - i
+decreasing_by
+  all_goals
+    have hlt : i < target := hltTarget
+    exact Nat.sub_lt_sub_left (k := i) (m := target) (n := i + 1)
+      hlt (Nat.lt_succ_self i)
+
 /-- Canonical reversed-code generation preserves the code-length table shape.
 This is the top-level shape invariant for generated dynamic Huffman payloads. -/
 lemma canonicalRevCodesFromLengths_size (lengths : Array Nat) :
@@ -2270,6 +2401,24 @@ lemma canonicalRevCodesFromLengths_get!_snd_pos_of_pos
   rw [canonicalRevCodesFromLengths_get!_snd_of_pos lengths sym hsym hpos]
   exact hpos
 
+/-- Canonical reversed-code generation keeps the bit pattern inside the row
+address space for any positive symbol. This feeds generated `mkHuffman` proofs. -/
+lemma canonicalRevCodesFromLengths_get!_fst_lt_pow_of_pos
+    (lengths : Array Nat) (sym : Nat)
+    (hsym : sym < lengths.size)
+    (hpos : 0 < lengths[sym]!) :
+    (Png.canonicalRevCodesFromLengths lengths)[sym]!.1 <
+      2 ^ lengths[sym]! := by
+  unfold Png.canonicalRevCodesFromLengths
+  exact fillCanonicalRevCodesAux_get!_fst_lt_pow_of_pos_at lengths 0
+    (Png.nextCodesAux
+      (Png.countCodeLengthsAux lengths 0
+        (Array.replicate (Png.maxCodeLenAux lengths 0 0 + 1) 0))
+      (Png.maxCodeLenAux lengths 0 0) 1 0
+      (Array.replicate (Png.maxCodeLenAux lengths 0 0 + 1) 0)).2
+    (Array.replicate lengths.size (0, 0)) sym (Nat.zero_le sym) hsym
+    (by simp) hpos
+
 /-- The generated literal/length code table has the DEFLATE literal/length
 shape. This feeds later payload lookup proofs for literals, matches, and EOB. -/
 lemma generatedDynamicLitLenCodes_size (tokens : Array Png.DeflateToken) :
@@ -2277,6 +2426,37 @@ lemma generatedDynamicLitLenCodes_size (tokens : Array Png.DeflateToken) :
       (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens))).size = 286 := by
   simp [canonicalRevCodesFromLengths_size, generatedDynamicLitLenLengths_size,
     litLenSymbolFreqs_size]
+
+/-- Generated literal/length canonical-code bit patterns fit in the generated
+9-bit row. This is the generated-table form of the `rev < row.size` guard. -/
+lemma generatedDynamicLitLenCodes_bits_lt_codeSpace_of_pos
+    (tokens : Array Png.DeflateToken) (sym : Nat)
+    (hsym :
+      sym <
+        (Png.generatedDynamicLitLenLengths
+          (Png.litLenSymbolFreqs tokens)).size)
+    (hpos :
+      0 <
+        (Png.generatedDynamicLitLenLengths
+          (Png.litLenSymbolFreqs tokens))[sym]!) :
+    (Png.canonicalRevCodesFromLengths
+      (Png.generatedDynamicLitLenLengths
+        (Png.litLenSymbolFreqs tokens)))[sym]!.1 <
+      2 ^ Png.generatedDynamicLitLenCodeLen := by
+  let lengths := Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+  have hbits :
+      (Png.canonicalRevCodesFromLengths lengths)[sym]!.1 <
+        2 ^ lengths[sym]! :=
+    canonicalRevCodesFromLengths_get!_fst_lt_pow_of_pos
+      lengths sym (by simpa [lengths] using hsym) (by simpa [lengths] using hpos)
+  have hlen :
+      lengths[sym]! = Png.generatedDynamicLitLenCodeLen := by
+    have hnine :=
+      (generatedDynamicLitLenLengths_get!_pos_iff_eq_nine
+        (Png.litLenSymbolFreqs tokens) sym (by simpa [lengths] using hsym)).mp
+        (by simpa [lengths] using hpos)
+    simpa [generatedDynamicLitLenCodeLen_eq_nine, lengths] using hnine
+  simpa [lengths, hlen] using hbits
 
 /-- The generated distance code table has the DEFLATE distance shape. This
 feeds later payload lookup proofs for distance-1 match tokens. -/
