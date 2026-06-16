@@ -3392,6 +3392,137 @@ lemma generatedCodeLenHuffman_lookup_token_symbol
   exact generatedCodeLenHuffman_lookup_generated_code token.symbol
     (codeLenTokenValid_symbol_lt_codeLenCodeLengths_size hvalid)
 
+/-- Appending later stream bits after a generated code-length code preserves
+the five low bits. This isolates the packed-stream arithmetic for header replay. -/
+lemma generatedCodeLenToken_bits_mod
+    {token : Png.CodeLenToken} (hvalid : CodeLenTokenValid token) (restBits : Nat) :
+    let codes := Png.canonicalRevCodesFromLengths Png.codeLenCodeLengths
+    (codes[token.symbol]!.1 ||| (restBits <<< 5)) % 2 ^ 5 =
+      codes[token.symbol]!.1 := by
+  intro codes
+  have hbits := generatedCodeLenCodes_token_bits_lt_codeSpace hvalid
+  have h :=
+    Png.mod_two_pow_or_shift
+      (a := codes[token.symbol]!.1) (b := restBits) (k := 5) (len := 5) le_rfl
+  have hmod : codes[token.symbol]!.1 % 2 ^ 5 = codes[token.symbol]!.1 :=
+    Nat.mod_eq_of_lt hbits
+  simpa [hmod] using h
+
+/-- Appending later stream bits after a token's extra-bit field preserves the
+low extra bits. This is the arithmetic side of replaying symbols 16, 17 and 18. -/
+lemma codeLenToken_extraBits_mod
+    {token : Png.CodeLenToken} (hvalid : CodeLenTokenValid token) (restBits : Nat) :
+    (token.extraBits ||| (restBits <<< token.extraLen)) % 2 ^ token.extraLen =
+      token.extraBits := by
+  have hbits := codeLenTokenValid_extraBits_lt_codeSpace hvalid
+  have h :=
+    Png.mod_two_pow_or_shift
+      (a := token.extraBits) (b := restBits) (k := token.extraLen)
+      (len := token.extraLen) le_rfl
+  have hmod : token.extraBits % 2 ^ token.extraLen = token.extraBits :=
+    Nat.mod_eq_of_lt hbits
+  simpa [hmod] using h
+
+/-- Reading a generated code-length token code from a stream built by the
+writer returns the token's generated five-bit code and advances five bits. -/
+lemma readGeneratedCodeLenTokenBits_readerAt_writeBits_prefix
+    (bw : Png.BitWriter) {token : Png.CodeLenToken} (restBits restLen : Nat)
+    (hvalid : CodeLenTokenValid token)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let codes := Png.canonicalRevCodesFromLengths Png.codeLenCodeLengths
+    let bitsTot := codes[token.symbol]!.1 ||| (restBits <<< 5)
+    let lenTot := 5 + restLen
+    let bw' := Png.BitWriter.writeBits bw bitsTot lenTot
+    let br := Png.BitWriter.readerAt bw bw'.flush
+      (Png.flush_size_writeBits_le bw bitsTot lenTot) hbit
+    br.readBits 5
+        (by
+          have hk : 5 ≤ lenTot := by omega
+          simpa [br, bw', lenTot] using
+            (Png.readerAt_writeBits_bound
+              (bw := bw) (bits := bitsTot) (len := lenTot) (k := 5) hk hbit)) =
+      (codes[token.symbol]!.1,
+        Png.BitWriter.readerAt (Png.BitWriter.writeBits bw bitsTot 5) bw'.flush
+          (by
+            have hk : 5 ≤ lenTot := by omega
+            simpa [lenTot] using
+              (Png.flush_size_writeBits_prefix bw bitsTot 5 lenTot hk))
+          (Png.bitPos_lt_8_writeBits bw bitsTot 5 hbit)) := by
+  intro codes bitsTot lenTot bw' br
+  have hread :
+      br.readBits 5
+          (by
+            have hk : 5 ≤ lenTot := by omega
+            simpa [br, bw', lenTot] using
+              (Png.readerAt_writeBits_bound
+                (bw := bw) (bits := bitsTot) (len := lenTot) (k := 5) hk hbit)) =
+        (bitsTot % 2 ^ 5,
+          Png.BitWriter.readerAt (Png.BitWriter.writeBits bw bitsTot 5) bw'.flush
+            (by
+              have hk : 5 ≤ lenTot := by omega
+              simpa [lenTot] using
+                (Png.flush_size_writeBits_prefix bw bitsTot 5 lenTot hk))
+            (Png.bitPos_lt_8_writeBits bw bitsTot 5 hbit)) := by
+    simpa [br, bw', lenTot] using
+      (Png.readBits_readerAt_writeBits_prefix
+        (bw := bw) (bits := bitsTot) (len := lenTot) (k := 5)
+        (hk := by omega) (hbit := hbit) (hcur := hcur))
+  have hmod :
+      bitsTot % 2 ^ 5 = codes[token.symbol]!.1 := by
+    simpa [bitsTot] using generatedCodeLenToken_bits_mod hvalid restBits
+  simpa [hmod] using hread
+
+/-- Reading a token's extra-bit field from a stream built by the writer returns
+the token's extra bits and advances exactly the advertised extra-bit width. -/
+lemma readCodeLenTokenExtraBits_readerAt_writeBits_prefix
+    (bw : Png.BitWriter) {token : Png.CodeLenToken} (restBits restLen : Nat)
+    (hvalid : CodeLenTokenValid token)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let bitsTot := token.extraBits ||| (restBits <<< token.extraLen)
+    let lenTot := token.extraLen + restLen
+    let bw' := Png.BitWriter.writeBits bw bitsTot lenTot
+    let br := Png.BitWriter.readerAt bw bw'.flush
+      (Png.flush_size_writeBits_le bw bitsTot lenTot) hbit
+    br.readBits token.extraLen
+        (by
+          have hk : token.extraLen ≤ lenTot := by omega
+          simpa [br, bw', lenTot] using
+            (Png.readerAt_writeBits_bound
+              (bw := bw) (bits := bitsTot) (len := lenTot)
+              (k := token.extraLen) hk hbit)) =
+      (token.extraBits,
+        Png.BitWriter.readerAt
+          (Png.BitWriter.writeBits bw bitsTot token.extraLen) bw'.flush
+          (by
+            have hk : token.extraLen ≤ lenTot := by omega
+            simpa [lenTot] using
+              (Png.flush_size_writeBits_prefix bw bitsTot token.extraLen lenTot hk))
+          (Png.bitPos_lt_8_writeBits bw bitsTot token.extraLen hbit)) := by
+  intro bitsTot lenTot bw' br
+  have hread :
+      br.readBits token.extraLen
+          (by
+            have hk : token.extraLen ≤ lenTot := by omega
+            simpa [br, bw', lenTot] using
+              (Png.readerAt_writeBits_bound
+                (bw := bw) (bits := bitsTot) (len := lenTot)
+                (k := token.extraLen) hk hbit)) =
+        (bitsTot % 2 ^ token.extraLen,
+          Png.BitWriter.readerAt
+            (Png.BitWriter.writeBits bw bitsTot token.extraLen) bw'.flush
+            (by
+              have hk : token.extraLen ≤ lenTot := by omega
+              simpa [lenTot] using
+                (Png.flush_size_writeBits_prefix bw bitsTot token.extraLen lenTot hk))
+            (Png.bitPos_lt_8_writeBits bw bitsTot token.extraLen hbit)) := by
+    simpa [br, bw', lenTot] using
+      (Png.readBits_readerAt_writeBits_prefix
+        (bw := bw) (bits := bitsTot) (len := lenTot) (k := token.extraLen)
+        (hk := by omega) (hbit := hbit) (hcur := hcur))
+  have hmod : bitsTot % 2 ^ token.extraLen = token.extraBits := by
+    simpa [bitsTot] using codeLenToken_extraBits_mod hvalid restBits
+  simpa [hmod] using hread
+
 /-- The empty token array satisfies the code-length token validity invariant.
 This is the base accumulator for generated header tokenization. -/
 lemma codeLenTokensValid_empty : CodeLenTokensValid #[] := by
