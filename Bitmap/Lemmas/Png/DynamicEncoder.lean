@@ -2077,6 +2077,30 @@ lemma generatedDynamicLitLenCodes_literal_len_pos_at
       generatedDynamicLitLenLengths_literal_pos_at tokens target b htarget ht
   exact canonicalRevCodesFromLengths_get!_snd_pos_of_pos lengths b.toNat hsym hpos
 
+/-- Generated literal code lookup has the concrete 9-bit length for every
+literal token. This links literal payload writes to the generated table shape. -/
+lemma generatedDynamicLitLenCodes_literal_len_eq_nine_at
+    (tokens : Array Png.DeflateToken) (target : Nat) (b : UInt8)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.literal b) :
+    (Png.canonicalRevCodesFromLengths
+      (Png.generatedDynamicLitLenLengths
+        (Png.litLenSymbolFreqs tokens)))[b.toNat]!.2 = 9 := by
+  let lengths := Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+  have hsym : b.toNat < lengths.size := by
+    have hb : b.toNat < 256 := UInt8.toNat_lt b
+    have hsize : lengths.size = 286 := by
+      simp [lengths, generatedDynamicLitLenLengths_size, litLenSymbolFreqs_size]
+    omega
+  have hpos : 0 < lengths[b.toNat]! := by
+    simpa [lengths] using
+      generatedDynamicLitLenLengths_literal_pos_at tokens target b htarget ht
+  have hlen : lengths[b.toNat]! = 9 := by
+    simpa [lengths] using
+      generatedDynamicLitLenLengths_literal_eq_nine_at tokens target b htarget ht
+  rw [canonicalRevCodesFromLengths_get!_snd_of_pos lengths b.toNat hsym hpos]
+  exact hlen
+
 /-- Generated match-symbol lookup has a positive bit length for every valid
 match token. This prepares the match branch of generated payload proofs. -/
 lemma generatedDynamicLitLenCodes_match_len_pos_at
@@ -2100,6 +2124,33 @@ lemma generatedDynamicLitLenCodes_match_len_pos_at
   exact canonicalRevCodesFromLengths_get!_snd_pos_of_pos
     lengths (Png.fixedLenMatchInfo len).1 hsym hpos
 
+/-- Generated match-symbol lookup has the concrete 9-bit length for every
+valid match token. This links match payload writes to the generated table. -/
+lemma generatedDynamicLitLenCodes_match_len_eq_nine_at
+    (tokens : Array Png.DeflateToken) (target len : Nat)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.matchDist1 len)
+    (hlen : 3 ≤ len ∧ len ≤ 258) :
+    (Png.canonicalRevCodesFromLengths
+      (Png.generatedDynamicLitLenLengths
+        (Png.litLenSymbolFreqs tokens)))[(Png.fixedLenMatchInfo len).1]!.2 = 9 := by
+  let lengths := Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+  have hsym : (Png.fixedLenMatchInfo len).1 < lengths.size := by
+    have hfixed := fixedLenMatchInfo_sym_lt_286 len hlen
+    have hsize : lengths.size = 286 := by
+      simp [lengths, generatedDynamicLitLenLengths_size, litLenSymbolFreqs_size]
+    omega
+  have hpos : 0 < lengths[(Png.fixedLenMatchInfo len).1]! := by
+    simpa [lengths] using
+      generatedDynamicLitLenLengths_match_pos_at tokens target len htarget ht hlen
+  have hlenEq : lengths[(Png.fixedLenMatchInfo len).1]! = 9 := by
+    simpa [lengths] using
+      generatedDynamicLitLenLengths_match_eq_nine_at
+        tokens target len htarget ht hlen
+  rw [canonicalRevCodesFromLengths_get!_snd_of_pos
+    lengths (Png.fixedLenMatchInfo len).1 hsym hpos]
+  exact hlenEq
+
 /-- The generated EOB code lookup has a positive bit length. This prepares the
 block-termination step for generated payload proofs. -/
 lemma generatedDynamicLitLenCodes_eob_len_pos
@@ -2115,6 +2166,25 @@ lemma generatedDynamicLitLenCodes_eob_len_pos
     rw [getElem!_pos lengths 256 hsym]
     simpa [lengths] using generatedDynamicLitLenLengths_eob_pos tokens
   exact canonicalRevCodesFromLengths_get!_snd_pos_of_pos lengths 256 hsym hpos
+
+/-- The generated EOB code lookup has the concrete 9-bit length. This is the
+exact table-shape fact for generated block termination. -/
+lemma generatedDynamicLitLenCodes_eob_len_eq_nine
+    (tokens : Array Png.DeflateToken) :
+    (Png.canonicalRevCodesFromLengths
+      (Png.generatedDynamicLitLenLengths
+        (Png.litLenSymbolFreqs tokens)))[256]!.2 = 9 := by
+  let lengths := Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+  have hsym : 256 < lengths.size := by
+    simpa [lengths] using generatedDynamicLitLenLengths_eob_inBounds tokens
+  have hpos : 0 < lengths[256]! := by
+    rw [getElem!_pos lengths 256 hsym]
+    simpa [lengths] using generatedDynamicLitLenLengths_eob_pos tokens
+  have hlen : lengths[256]! = 9 := by
+    rw [getElem!_pos lengths 256 hsym]
+    simpa [lengths] using generatedDynamicLitLenLengths_eob_eq_nine tokens
+  rw [canonicalRevCodesFromLengths_get!_snd_of_pos lengths 256 hsym hpos]
+  exact hlen
 
 /-- Generated distance-symbol-zero lookup has a positive bit length when a
 match token exists. This prepares distance-1 payload proofs. -/
