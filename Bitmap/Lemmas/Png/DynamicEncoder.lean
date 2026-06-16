@@ -3397,6 +3397,16 @@ lemma codeLenToken_expand_size_of_some
       rw [← h]
       simp [CodeLenTokenOutputCount, pushNatRepeat_size]
 
+/-- Successful expansion of a valid code-length token strictly grows the
+decoded code-length array. This is the replay progress fact for generated RLE. -/
+lemma codeLenToken_expand_size_gt_of_some_valid
+    {lengths lengths' : Array Nat} {token : Png.CodeLenToken}
+    (hvalid : CodeLenTokenValid token)
+    (h : Png.CodeLenToken.expand lengths token = some lengths') :
+    lengths.size < lengths'.size := by
+  rw [codeLenToken_expand_size_of_some h]
+  exact Nat.lt_add_of_pos_right (codeLenTokenOutputCount_pos hvalid)
+
 /-- A valid code-length token always names an entry in the generated
 code-length-code alphabet. This is the token-level table lookup bound. -/
 lemma codeLenTokenValid_symbol_lt_codeLenCodeLengths_size
