@@ -1129,6 +1129,22 @@ lemma generatedDynamicLitLenLengths_getElem_eq_zero_or_nine
   · exact Or.inl hzero
   · exact Or.inr (by simpa [generatedDynamicLitLenCodeLen_eq_nine] using hcode)
 
+/-- For generated literal/length entries, positivity is equivalent to being a
+9-bit entry. This turns availability facts into concrete code-length facts. -/
+lemma generatedDynamicLitLenLengths_getElem_pos_iff_eq_nine
+    (freqs : Array Nat) (idx : Nat)
+    (hidx : idx < (Png.generatedDynamicLitLenLengths freqs).size) :
+    0 < (Png.generatedDynamicLitLenLengths freqs)[idx] ↔
+      (Png.generatedDynamicLitLenLengths freqs)[idx] = 9 := by
+  constructor
+  · intro hpos
+    rcases generatedDynamicLitLenLengths_getElem_eq_zero_or_nine freqs idx hidx
+      with hzero | hnine
+    · omega
+    · exact hnine
+  · intro hnine
+    omega
+
 /-- In `get!` form, a generated literal/length table entry is positive exactly
 when its source frequency is positive. This matches payload lookup code. -/
 lemma generatedDynamicLitLenLengths_get!_pos_iff
@@ -1164,6 +1180,16 @@ lemma generatedDynamicLitLenLengths_get!_eq_zero_or_nine
   rw [getElem!_pos (Png.generatedDynamicLitLenLengths freqs) idx hidx]
   exact generatedDynamicLitLenLengths_getElem_eq_zero_or_nine freqs idx hidx
 
+/-- In `get!` form, generated literal/length positivity is equivalent to the
+concrete 9-bit code length. This matches payload-code lookup proofs. -/
+lemma generatedDynamicLitLenLengths_get!_pos_iff_eq_nine
+    (freqs : Array Nat) (idx : Nat)
+    (hidx : idx < (Png.generatedDynamicLitLenLengths freqs).size) :
+    0 < (Png.generatedDynamicLitLenLengths freqs)[idx]! ↔
+      (Png.generatedDynamicLitLenLengths freqs)[idx]! = 9 := by
+  rw [getElem!_pos (Png.generatedDynamicLitLenLengths freqs) idx hidx]
+  exact generatedDynamicLitLenLengths_getElem_pos_iff_eq_nine freqs idx hidx
+
 /-- The generated literal/length length table always contains EOB in bounds.
 This packages the fixed table-size facts for later payload proofs. -/
 lemma generatedDynamicLitLenLengths_eob_inBounds
@@ -1186,6 +1212,19 @@ lemma generatedDynamicLitLenLengths_eob_pos (tokens : Array Png.DeflateToken) :
   have hpos : 0 < Png.generatedDynamicLitLenLengthAt freqs 256 :=
     generatedDynamicLitLenLengthAt_pos_of_freq freqs 256 hfreq
   simpa [Png.generatedDynamicLitLenLengths, freqs] using hpos
+
+/-- Generated literal/length tables assign EOB the concrete 9-bit code length.
+This is the termination-symbol shape needed by generated payload proofs. -/
+lemma generatedDynamicLitLenLengths_eob_eq_nine
+    (tokens : Array Png.DeflateToken) :
+    (Png.generatedDynamicLitLenLengths
+      (Png.litLenSymbolFreqs tokens))[256]'
+        (generatedDynamicLitLenLengths_eob_inBounds tokens) = 9 := by
+  have hpos := generatedDynamicLitLenLengths_eob_pos tokens
+  exact
+    (generatedDynamicLitLenLengths_getElem_pos_iff_eq_nine
+      (Png.litLenSymbolFreqs tokens) 256
+      (generatedDynamicLitLenLengths_eob_inBounds tokens)).mp hpos
 
 /-- Literal tokens receive positive generated literal/length code lengths. This
 connects token frequency collection to later payload-code lookup. -/
@@ -1212,6 +1251,29 @@ lemma generatedDynamicLitLenLengths_literal_pos_at
   change 0 < (Png.generatedDynamicLitLenLengths freqs)[b.toNat]!
   rw [getElem!_pos (Png.generatedDynamicLitLenLengths freqs) b.toNat hidx]
   simpa [Png.generatedDynamicLitLenLengths, freqs] using hpos
+
+/-- Literal tokens receive concrete 9-bit generated literal/length entries.
+This strengthens payload-code availability from positivity to exact length. -/
+lemma generatedDynamicLitLenLengths_literal_eq_nine_at
+    (tokens : Array Png.DeflateToken) (target : Nat) (b : UInt8)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.literal b) :
+    (Png.generatedDynamicLitLenLengths
+      (Png.litLenSymbolFreqs tokens))[b.toNat]! = 9 := by
+  let freqs := Png.litLenSymbolFreqs tokens
+  have hidx :
+      b.toNat < (Png.generatedDynamicLitLenLengths freqs).size := by
+    have hb : b.toNat < 256 := UInt8.toNat_lt b
+    have hsize :
+        (Png.generatedDynamicLitLenLengths freqs).size = 286 := by
+      simp [generatedDynamicLitLenLengths_size, freqs, litLenSymbolFreqs_size]
+    omega
+  have hpos :
+      0 < (Png.generatedDynamicLitLenLengths freqs)[b.toNat]! := by
+    simpa [freqs] using
+      generatedDynamicLitLenLengths_literal_pos_at tokens target b htarget ht
+  exact
+    (generatedDynamicLitLenLengths_get!_pos_iff_eq_nine freqs b.toNat hidx).mp hpos
 
 /-- Valid match tokens receive positive generated literal/length code lengths.
 This is the match-symbol counterpart of literal payload availability. -/
@@ -1244,6 +1306,33 @@ lemma generatedDynamicLitLenLengths_match_pos_at
   rw [getElem!_pos (Png.generatedDynamicLitLenLengths freqs)
     (Png.fixedLenMatchInfo len).1 hidx]
   simpa [Png.generatedDynamicLitLenLengths, freqs] using hpos
+
+/-- Valid match tokens receive concrete 9-bit generated literal/length entries.
+This is the exact-length counterpart of match-symbol availability. -/
+lemma generatedDynamicLitLenLengths_match_eq_nine_at
+    (tokens : Array Png.DeflateToken) (target len : Nat)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.matchDist1 len)
+    (hlen : 3 ≤ len ∧ len ≤ 258) :
+    (Png.generatedDynamicLitLenLengths
+      (Png.litLenSymbolFreqs tokens))[(Png.fixedLenMatchInfo len).1]! = 9 := by
+  let freqs := Png.litLenSymbolFreqs tokens
+  have hidx :
+      (Png.fixedLenMatchInfo len).1 <
+        (Png.generatedDynamicLitLenLengths freqs).size := by
+    have hsym := fixedLenMatchInfo_sym_lt_286 len hlen
+    have hsize :
+        (Png.generatedDynamicLitLenLengths freqs).size = 286 := by
+      simp [generatedDynamicLitLenLengths_size, freqs, litLenSymbolFreqs_size]
+    omega
+  have hpos :
+      0 <
+        (Png.generatedDynamicLitLenLengths freqs)[(Png.fixedLenMatchInfo len).1]! := by
+    simpa [freqs] using
+      generatedDynamicLitLenLengths_match_pos_at tokens target len htarget ht hlen
+  exact
+    (generatedDynamicLitLenLengths_get!_pos_iff_eq_nine
+      freqs (Png.fixedLenMatchInfo len).1 hidx).mp hpos
 
 /-- Match tokens from the public generated tokenizer receive positive generated
 literal/length entries without needing a separate length assumption. -/
