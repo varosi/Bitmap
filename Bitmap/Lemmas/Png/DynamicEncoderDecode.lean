@@ -1,5 +1,6 @@
 import Bitmap.Lemmas.Png.DynamicEncoder
 import Bitmap.Lemmas.Png.DynamicBlockProofsPayloadBase
+import Batteries.Data.Array.Lemmas
 
 namespace Bitmaps
 
@@ -48,6 +49,17 @@ def codeLenTokenListOutputCount : List Png.CodeLenToken → Nat
   | [] => 0
   | token :: tokens =>
       CodeLenTokenOutputCount token + codeLenTokenListOutputCount tokens
+
+/-- Proof-facing list writer for generated code-length tokens. It mirrors the
+runtime array writer while making structural induction direct. -/
+def writeGeneratedCodeLenTokensList (bw : Png.BitWriter) :
+    List Png.CodeLenToken → Png.BitWriter
+  | [] => bw
+  | token :: tokens =>
+      writeGeneratedCodeLenTokensList
+        (bw.writeCodeLenToken
+          (Png.canonicalRevCodesFromLengths Png.codeLenCodeLengths) token)
+        tokens
 
 /-- Successful list expansion increases the decoded-length array by the sum of
 the token output counts. This is the size invariant for stream replay. -/
@@ -168,6 +180,111 @@ lemma codeLenTokenBits_or_tail_eq_code_extra_tail
   simp [codeLenTokenBits, codeLenTokenBitLen, extraTail, codeBits, codes,
     Nat.shiftLeft_or_distrib, Png.shiftLeft_shiftLeft, Nat.or_assoc,
     Nat.add_comm, Nat.add_left_comm, Nat.add_assoc]
+
+/-- One generated code-length token writer is equivalent to writing the
+proof-facing packed token bits. This bridges runtime token writes to replay. -/
+lemma writeGeneratedCodeLenToken_eq_writeBits
+    (bw : Png.BitWriter) {token : Png.CodeLenToken}
+    (hvalid : CodeLenTokenValid token) :
+    bw.writeCodeLenToken
+        (Png.canonicalRevCodesFromLengths Png.codeLenCodeLengths) token =
+      Png.BitWriter.writeBits bw (codeLenTokenBits token)
+        (codeLenTokenBitLen token) := by
+  let codes := Png.canonicalRevCodesFromLengths Png.codeLenCodeLengths
+  let codeBits := codes[token.symbol]!.1
+  have hcode : codeBits < 2 ^ 5 := by
+    simpa [codes, codeBits] using generatedCodeLenCodes_token_bits_lt_codeSpace hvalid
+  have hlen : codes[token.symbol]!.2 = 5 := by
+    simpa [codes] using generatedCodeLenCodes_token_len_eq_five hvalid
+  have hconcat :
+      Png.BitWriter.writeBits bw (codeBits ||| (token.extraBits <<< 5))
+          (5 + token.extraLen) =
+        Png.BitWriter.writeBits
+          (Png.BitWriter.writeBits bw codeBits 5)
+          token.extraBits token.extraLen := by
+    exact Png.writeBits_concat bw codeBits token.extraBits 5 token.extraLen hcode
+  simp [Png.BitWriter.writeCodeLenToken, Png.BitWriter.writeCodeLenSymbol,
+    Png.BitWriter.writeRevCode, Png.writeBitsFast_eq_writeBits, codeLenTokenBits,
+    codeLenTokenBitLen, codes, codeBits, hlen, hconcat.symm]
+
+/-- Writing a generated code-length token list is equivalent to writing its
+packed stream bits. This is the writer side of the stream replay theorem. -/
+lemma writeGeneratedCodeLenTokensList_eq_writeBits
+    (bw : Png.BitWriter) (tokens : List Png.CodeLenToken)
+    (hvalid : ∀ token ∈ tokens, CodeLenTokenValid token) :
+    writeGeneratedCodeLenTokensList bw tokens =
+      Png.BitWriter.writeBits bw (codeLenTokenStreamBits tokens)
+        (codeLenTokenStreamLen tokens) := by
+  induction tokens generalizing bw with
+  | nil =>
+      simp [writeGeneratedCodeLenTokensList, codeLenTokenStreamBits,
+        codeLenTokenStreamLen]
+  | cons token tokens ih =>
+      have hhead : CodeLenTokenValid token := hvalid token (by simp)
+      have htail : ∀ t ∈ tokens, CodeLenTokenValid t := by
+        intro t ht
+        exact hvalid t (by simp [ht])
+      have htoken :=
+        writeGeneratedCodeLenToken_eq_writeBits (bw := bw) (token := token) hhead
+      have hbits := codeLenTokenBits_lt_codeSpace hhead
+      have htailWrite :=
+        ih
+          (Png.BitWriter.writeBits bw (codeLenTokenBits token)
+            (codeLenTokenBitLen token))
+          htail
+      have hconcat :
+          Png.BitWriter.writeBits bw
+              (codeLenTokenBits token |||
+                (codeLenTokenStreamBits tokens <<< codeLenTokenBitLen token))
+              (codeLenTokenBitLen token + codeLenTokenStreamLen tokens) =
+            Png.BitWriter.writeBits
+              (Png.BitWriter.writeBits bw (codeLenTokenBits token)
+                (codeLenTokenBitLen token))
+              (codeLenTokenStreamBits tokens)
+              (codeLenTokenStreamLen tokens) := by
+        exact Png.writeBits_concat bw (codeLenTokenBits token)
+          (codeLenTokenStreamBits tokens)
+          (codeLenTokenBitLen token) (codeLenTokenStreamLen tokens) hbits
+      simp [writeGeneratedCodeLenTokensList, codeLenTokenStreamBits,
+        codeLenTokenStreamLen, htoken, htailWrite, hconcat]
+
+/-- The proof-facing generated token writer is just a left fold over the token
+list. This normalizes the runtime array writer after `Array.foldl_toList`. -/
+lemma writeGeneratedCodeLenTokensList_eq_foldl
+    (bw : Png.BitWriter) (tokens : List Png.CodeLenToken) :
+    writeGeneratedCodeLenTokensList bw tokens =
+      tokens.foldl
+        (fun bw token =>
+          bw.writeCodeLenToken
+            (Png.canonicalRevCodesFromLengths Png.codeLenCodeLengths) token)
+        bw := by
+  induction tokens generalizing bw with
+  | nil =>
+      simp [writeGeneratedCodeLenTokensList]
+  | cons token tokens ih =>
+      simp [writeGeneratedCodeLenTokensList, ih]
+
+/-- The runtime array writer for generated code-length tokens is the same as
+the proof-facing list writer over `Array.toList`. This bridges writer shapes. -/
+lemma writeCodeLenTokens_generated_eq_list
+    (bw : Png.BitWriter) (tokens : Array Png.CodeLenToken) :
+    bw.writeCodeLenTokens
+        (Png.canonicalRevCodesFromLengths Png.codeLenCodeLengths) tokens =
+      writeGeneratedCodeLenTokensList bw tokens.toList := by
+  simp [Png.BitWriter.writeCodeLenTokens, Array.foldl_toList,
+    writeGeneratedCodeLenTokensList_eq_foldl]
+
+/-- Runtime generated code-length token arrays write the same packed bits as
+their proof-facing list stream when all tokens are valid. -/
+lemma writeCodeLenTokens_generated_eq_writeBits
+    (bw : Png.BitWriter) (tokens : Array Png.CodeLenToken)
+    (hvalid : ∀ token ∈ tokens.toList, CodeLenTokenValid token) :
+    bw.writeCodeLenTokens
+        (Png.canonicalRevCodesFromLengths Png.codeLenCodeLengths) tokens =
+      Png.BitWriter.writeBits bw (codeLenTokenStreamBits tokens.toList)
+        (codeLenTokenStreamLen tokens.toList) := by
+  rw [writeCodeLenTokens_generated_eq_list]
+  exact writeGeneratedCodeLenTokensList_eq_writeBits bw tokens.toList hvalid
 
 /-- Decodes the generated five-bit code-length helper code from a writer-built
 stream. This is the Huffman-decode bridge needed before replaying dynamic
