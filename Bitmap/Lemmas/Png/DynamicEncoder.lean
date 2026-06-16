@@ -2988,6 +2988,185 @@ lemma codeLenToken_repeatZeroLong_extraBits_lt_codeSpace
   simp [Png.CodeLenToken.extraBits, Png.CodeLenToken.extraLen]
   omega
 
+/-- Proof-facing validity predicate for generated code-length tokens. It
+records the DEFLATE ranges needed by header replay and extra-bit reads. -/
+def CodeLenTokenValid : Png.CodeLenToken → Prop
+  | .literal len => len ≤ 15
+  | .repeatPrev repeatCount => 3 ≤ repeatCount ∧ repeatCount ≤ 6
+  | .repeatZeroShort repeatCount => 3 ≤ repeatCount ∧ repeatCount ≤ 10
+  | .repeatZeroLong repeatCount => 11 ≤ repeatCount ∧ repeatCount ≤ 138
+
+/-- Every token in a generated code-length token array is valid. This is the
+array-level invariant used while accumulating header RLE tokens. -/
+def CodeLenTokensValid (tokens : Array Png.CodeLenToken) : Prop :=
+  ∀ idx (hidx : idx < tokens.size), CodeLenTokenValid tokens[idx]
+
+/-- Valid code-length tokens always name a symbol in the DEFLATE code-length
+alphabet. This bounds the Huffman lookup while writing and reading headers. -/
+lemma codeLenTokenValid_symbol_le_18
+    {token : Png.CodeLenToken} (hvalid : CodeLenTokenValid token) :
+    token.symbol ≤ 18 := by
+  cases token <;> simp [CodeLenTokenValid, Png.CodeLenToken.symbol] at hvalid ⊢
+  omega
+
+/-- Valid code-length tokens have extra-bit payloads that fit their advertised
+extra-bit width. This is the token-level write/read bit bound. -/
+lemma codeLenTokenValid_extraBits_lt_codeSpace
+    {token : Png.CodeLenToken} (hvalid : CodeLenTokenValid token) :
+    token.extraBits < 2 ^ token.extraLen := by
+  cases token with
+  | literal len =>
+      exact codeLenToken_literal_extraBits_lt_codeSpace len
+  | repeatPrev repeatCount =>
+      exact codeLenToken_repeatPrev_extraBits_lt_codeSpace
+        repeatCount hvalid.1 hvalid.2
+  | repeatZeroShort repeatCount =>
+      exact codeLenToken_repeatZeroShort_extraBits_lt_codeSpace
+        repeatCount hvalid.1 hvalid.2
+  | repeatZeroLong repeatCount =>
+      exact codeLenToken_repeatZeroLong_extraBits_lt_codeSpace
+        repeatCount hvalid.1 hvalid.2
+
+/-- The empty token array satisfies the code-length token validity invariant.
+This is the base accumulator for generated header tokenization. -/
+lemma codeLenTokensValid_empty : CodeLenTokensValid #[] := by
+  intro idx hidx
+  simp at hidx
+
+/-- Appending one valid code-length token preserves the token-array validity
+invariant. This is the local accumulator step for token generators. -/
+lemma codeLenTokensValid_push
+    {tokens : Array Png.CodeLenToken} {token : Png.CodeLenToken}
+    (hvalid : CodeLenTokensValid tokens)
+    (htoken : CodeLenTokenValid token) :
+    CodeLenTokensValid (tokens.push token) := by
+  intro idx hidx
+  by_cases hlt : idx < tokens.size
+  · have hget : (tokens.push token)[idx] = tokens[idx] := by
+      exact Array.getElem_push_lt hlt
+    simpa [hget] using hvalid idx hlt
+  · have heq : idx = tokens.size := by
+      have hsize := Array.size_push (xs := tokens) (v := token)
+      omega
+    subst idx
+    have hget : (tokens.push token)[tokens.size] = token :=
+      Array.getElem_push_eq
+    simpa [hget] using htoken
+
+/-- Zero-run token generation preserves token validity. This proves that the
+encoder only emits legal symbol-17 and symbol-18 repeat counts. -/
+lemma codeLenZeroRunTokensAux_valid
+    (tokens : Array Png.CodeLenToken) (runLen : Nat)
+    (hvalid : CodeLenTokensValid tokens) :
+    CodeLenTokensValid (Png.codeLenZeroRunTokensAux tokens runLen) := by
+  induction runLen using Nat.strong_induction_on generalizing tokens with
+  | h runLen ih =>
+      rw [Png.codeLenZeroRunTokensAux]
+      split
+      · rename_i h18
+        let chunk := Nat.min 138 runLen
+        have hchunkPos : 0 < chunk := by
+          dsimp [chunk]
+          rw [Nat.lt_min]
+          exact ⟨by decide, by omega⟩
+        have hchunkLe : chunk ≤ runLen := by
+          dsimp [chunk]
+          exact Nat.min_le_right 138 runLen
+        have hlt : runLen - chunk < runLen :=
+          Nat.sub_lt_self hchunkPos hchunkLe
+        exact ih (runLen - chunk) hlt (tokens.push (.repeatZeroLong chunk))
+          (codeLenTokensValid_push hvalid (by
+            dsimp [CodeLenTokenValid, chunk]
+            exact ⟨le_min (by decide) h18, Nat.min_le_left 138 runLen⟩))
+      · split
+        · rename_i hnot18 h17
+          let chunk := Nat.min 10 runLen
+          have hchunkPos : 0 < chunk := by
+            dsimp [chunk]
+            rw [Nat.lt_min]
+            exact ⟨by decide, by omega⟩
+          have hchunkLe : chunk ≤ runLen := by
+            dsimp [chunk]
+            exact Nat.min_le_right 10 runLen
+          have hlt : runLen - chunk < runLen :=
+            Nat.sub_lt_self hchunkPos hchunkLe
+          exact ih (runLen - chunk) hlt (tokens.push (.repeatZeroShort chunk))
+            (codeLenTokensValid_push hvalid (by
+              dsimp [CodeLenTokenValid, chunk]
+              exact ⟨le_min (by decide) h17, Nat.min_le_left 10 runLen⟩))
+        · rename_i hnot18 hnot17
+          have hcases : runLen = 0 ∨ runLen = 1 ∨ runLen = 2 := by omega
+          rcases hcases with rfl | rfl | rfl
+          · simpa [Png.codeLenZeroRunTokensAux] using hvalid
+          · simpa [Png.codeLenZeroRunTokensAux, CodeLenTokenValid] using
+              codeLenTokensValid_push hvalid (by simp [CodeLenTokenValid])
+          · simpa [Png.codeLenZeroRunTokensAux, CodeLenTokenValid] using
+              codeLenTokensValid_push
+                (codeLenTokensValid_push hvalid (by simp [CodeLenTokenValid]))
+                (by simp [CodeLenTokenValid])
+
+/-- Nonzero-run token generation preserves token validity when the repeated
+code length itself is a legal DEFLATE code length. -/
+lemma codeLenNonzeroRunTokensAux_valid
+    (tokens : Array Png.CodeLenToken) (len runLen : Nat)
+    (hlen : len ≤ 15)
+    (hvalid : CodeLenTokensValid tokens) :
+    CodeLenTokensValid (Png.codeLenNonzeroRunTokensAux tokens len runLen) := by
+  induction runLen using Nat.strong_induction_on generalizing tokens with
+  | h runLen ih =>
+      rw [Png.codeLenNonzeroRunTokensAux]
+      split
+      · rename_i h16
+        let repeatCount := Nat.min 6 (runLen - 1)
+        have hrepPos : 0 < repeatCount := by
+          dsimp [repeatCount]
+          rw [Nat.lt_min]
+          exact ⟨by decide, by omega⟩
+        have hrepLe : repeatCount ≤ runLen - 1 := by
+          dsimp [repeatCount]
+          exact Nat.min_le_right 6 (runLen - 1)
+        have hdecrease : runLen - (1 + repeatCount) < runLen := by
+          have hle : 1 + repeatCount ≤ runLen := by omega
+          exact Nat.sub_lt_self (by omega) hle
+        exact ih (runLen - (1 + repeatCount)) hdecrease
+          ((tokens.push (.literal len)).push (.repeatPrev repeatCount))
+          (codeLenTokensValid_push
+            (codeLenTokensValid_push hvalid (by simpa [CodeLenTokenValid] using hlen))
+            (by
+              dsimp [CodeLenTokenValid, repeatCount]
+              exact ⟨le_min (by decide) (by omega), Nat.min_le_left 6 (runLen - 1)⟩))
+      · rename_i hnot16
+        have hcases : runLen = 0 ∨ runLen = 1 ∨ runLen = 2 ∨ runLen = 3 := by
+          omega
+        rcases hcases with rfl | rfl | rfl | rfl
+        · simpa [Png.codeLenNonzeroRunTokensAux] using hvalid
+        · simpa [Png.codeLenNonzeroRunTokensAux, CodeLenTokenValid] using
+            codeLenTokensValid_push hvalid (by simpa [CodeLenTokenValid] using hlen)
+        · simpa [Png.codeLenNonzeroRunTokensAux, CodeLenTokenValid] using
+            codeLenTokensValid_push
+              (codeLenTokensValid_push hvalid (by simpa [CodeLenTokenValid] using hlen))
+              (by simpa [CodeLenTokenValid] using hlen)
+        · simpa [Png.codeLenNonzeroRunTokensAux, CodeLenTokenValid] using
+            codeLenTokensValid_push
+              (codeLenTokensValid_push
+                (codeLenTokensValid_push hvalid (by simpa [CodeLenTokenValid] using hlen))
+                (by simpa [CodeLenTokenValid] using hlen))
+              (by simpa [CodeLenTokenValid] using hlen)
+
+/-- Zero-run tokenization from an empty accumulator emits only valid
+code-length tokens. This is the exported zero-run validity fact. -/
+lemma codeLenZeroRunTokens_valid (runLen : Nat) :
+    CodeLenTokensValid (Png.codeLenZeroRunTokens runLen) := by
+  simpa [Png.codeLenZeroRunTokens] using
+    codeLenZeroRunTokensAux_valid #[] runLen codeLenTokensValid_empty
+
+/-- Nonzero-run tokenization from an empty accumulator emits only valid
+code-length tokens for legal code lengths. -/
+lemma codeLenNonzeroRunTokens_valid (len runLen : Nat) (hlen : len ≤ 15) :
+    CodeLenTokensValid (Png.codeLenNonzeroRunTokens len runLen) := by
+  simpa [Png.codeLenNonzeroRunTokens] using
+    codeLenNonzeroRunTokensAux_valid #[] len runLen hlen codeLenTokensValid_empty
+
 end Lemmas
 
 end Bitmaps
