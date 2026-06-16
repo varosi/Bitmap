@@ -1,3 +1,4 @@
+import Batteries.Data.Array.Lemmas
 import Bitmap.Lemmas.Png.FixedBlockProofsRunEncode
 
 namespace Bitmaps
@@ -3081,6 +3082,106 @@ lemma generatedDynamicHeaderLengths_size
     simpa [distLengths, distCount] using
       generatedDynamicDistCount_le_generated_size tokens
   simp [Array.size_append, Array.size_extract, hlit, hdist]
+
+/-- Array-level entry bound used by generated header proofs. It avoids
+repeating the same indexed quantifier for extracted and appended tables. -/
+def ArrayEntriesLe (xs : Array Nat) (bound : Nat) : Prop :=
+  ∀ idx (hidx : idx < xs.size), xs[idx] ≤ bound
+
+/-- Extracting a slice preserves an array-wide entry bound. This is used for
+the advertised `HLIT` and `HDIST` prefixes of generated code-length arrays. -/
+lemma arrayEntriesLe_extract
+    {xs : Array Nat} {bound : Nat} (start stop : Nat)
+    (hxs : ArrayEntriesLe xs bound) :
+    ArrayEntriesLe (xs.extract start stop) bound := by
+  simp only [ArrayEntriesLe, Array.getElem_extract, Array.size_extract] at hxs ⊢
+  intro idx hidx
+  exact hxs (start + idx) (by omega)
+
+/-- Appending two arrays preserves an array-wide entry bound. This packages the
+shape of the generated dynamic header's literal/length plus distance table. -/
+lemma arrayEntriesLe_append
+    {xs ys : Array Nat} {bound : Nat}
+    (hxs : ArrayEntriesLe xs bound) (hys : ArrayEntriesLe ys bound) :
+    ArrayEntriesLe (xs ++ ys) bound := by
+  intro idx hidx
+  by_cases hleft : idx < xs.size
+  · rw [Array.getElem_append_left]
+    exact hxs idx hleft
+  · have hright : idx - xs.size < ys.size := by
+      have hle : xs.size ≤ idx := Nat.le_of_not_gt hleft
+      simp [Array.size_append] at hidx
+      omega
+    have hle : xs.size ≤ idx := Nat.le_of_not_gt hleft
+    rw [Array.getElem_append_right hle]
+    exact hys (idx - xs.size) hright
+
+/-- Generated literal/length code-length arrays obey the DEFLATE 15-bit bound
+at every entry. This gives the header prefix proof an array-level premise. -/
+lemma generatedDynamicLitLenLengths_entries_le_15
+    (freqs : Array Nat) :
+    ArrayEntriesLe (Png.generatedDynamicLitLenLengths freqs) 15 := by
+  intro idx hidx
+  exact generatedDynamicLitLenLengths_getElem_le_15 freqs idx hidx
+
+/-- Generated distance code-length arrays obey the DEFLATE 15-bit bound at
+every entry. This is the distance-side counterpart for header prefixes. -/
+lemma generatedDynamicDistLengths_entries_le_15
+    (freqs : Array Nat) :
+    ArrayEntriesLe (Png.generatedDynamicDistLengths freqs) 15 := by
+  intro idx hidx
+  exact generatedDynamicDistLengths_getElem_le_15 freqs idx hidx
+
+/-- Proof-facing name for the code-length array advertised by the generated
+dynamic header. It mirrors the local `lengths` binding in the writer. -/
+def generatedDynamicHeaderCodeLengths
+    (tokens : Array Png.DeflateToken) : Array Nat :=
+  let litLenLengths :=
+    Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+  let distLengths :=
+    Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)
+  let litLenCount := Png.generatedDynamicLitLenCount litLenLengths
+  let distCount := Png.generatedDynamicDistCount distLengths
+  (litLenLengths.extract 0 litLenCount) ++
+    (distLengths.extract 0 distCount)
+
+/-- The named generated header code-length array has exactly the advertised
+literal/length plus distance entry count. This repackages the writer shape. -/
+lemma generatedDynamicHeaderCodeLengths_size
+    (tokens : Array Png.DeflateToken) :
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    let distLengths :=
+      Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)
+    let litLenCount := Png.generatedDynamicLitLenCount litLenLengths
+    let distCount := Png.generatedDynamicDistCount distLengths
+    (generatedDynamicHeaderCodeLengths tokens).size =
+      litLenCount + distCount := by
+  intro litLenLengths distLengths litLenCount distCount
+  simpa [generatedDynamicHeaderCodeLengths, litLenLengths, distLengths,
+    litLenCount, distCount] using generatedDynamicHeaderLengths_size tokens
+
+/-- Every generated header code-length entry is a valid DEFLATE code length.
+This is the input validity fact needed before replaying header RLE tokens. -/
+lemma generatedDynamicHeaderCodeLengths_entries_le_15
+    (tokens : Array Png.DeflateToken) :
+    ArrayEntriesLe (generatedDynamicHeaderCodeLengths tokens) 15 := by
+  unfold generatedDynamicHeaderCodeLengths
+  apply arrayEntriesLe_append
+  · apply arrayEntriesLe_extract
+    exact generatedDynamicLitLenLengths_entries_le_15
+      (Png.litLenSymbolFreqs tokens)
+  · apply arrayEntriesLe_extract
+    exact generatedDynamicDistLengths_entries_le_15
+      (Png.distSymbolFreqs tokens)
+
+/-- Indexed form of the generated header code-length bound. This is convenient
+for later token-by-token decode proofs. -/
+lemma generatedDynamicHeaderCodeLengths_getElem_le_15
+    (tokens : Array Png.DeflateToken) (idx : Nat)
+    (hidx : idx < (generatedDynamicHeaderCodeLengths tokens).size) :
+    (generatedDynamicHeaderCodeLengths tokens)[idx] ≤ 15 := by
+  exact generatedDynamicHeaderCodeLengths_entries_le_15 tokens idx hidx
 
 /-- Repeating a natural value appends exactly the requested number of entries.
 This is the size invariant for code-length token expansion. -/
