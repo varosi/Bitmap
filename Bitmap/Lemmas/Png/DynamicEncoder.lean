@@ -2793,6 +2793,12 @@ lemma generatedCodeLenHuffman_table_size :
     generatedCodeLenHuffman.table.size = 6 := by
   native_decide
 
+/-- The generated helper Huffman row for one-bit prefixes has width two. This
+is the row bound used by the first decode-fuel step. -/
+lemma generatedCodeLenHuffman_row1_size :
+    generatedCodeLenHuffman.table[1]!.size = 2 := by
+  native_decide
+
 /-- The generated helper Huffman row for one-bit prefixes has no symbols. All
 generated code-length-code symbols are exactly five bits wide. -/
 lemma generatedCodeLenHuffman_row1_get_none
@@ -2803,6 +2809,12 @@ lemma generatedCodeLenHuffman_row1_get_none
         generatedCodeLenHuffman.table[1]![code.val]! = none := by
     native_decide
   exact hall ⟨code, hcode⟩
+
+/-- The generated helper Huffman row for two-bit prefixes has width four. This
+is the row bound used by the second decode-fuel step. -/
+lemma generatedCodeLenHuffman_row2_size :
+    generatedCodeLenHuffman.table[2]!.size = 4 := by
+  native_decide
 
 /-- The generated helper Huffman row for two-bit prefixes has no symbols. This
 is the second empty-row step before the five-bit generated codes resolve. -/
@@ -2815,6 +2827,12 @@ lemma generatedCodeLenHuffman_row2_get_none
     native_decide
   exact hall ⟨code, hcode⟩
 
+/-- The generated helper Huffman row for three-bit prefixes has width eight.
+This is the row bound used by the third decode-fuel step. -/
+lemma generatedCodeLenHuffman_row3_size :
+    generatedCodeLenHuffman.table[3]!.size = 8 := by
+  native_decide
+
 /-- The generated helper Huffman row for three-bit prefixes has no symbols.
 This supports the generated five-bit decode-fuel chain. -/
 lemma generatedCodeLenHuffman_row3_get_none
@@ -2825,6 +2843,12 @@ lemma generatedCodeLenHuffman_row3_get_none
         generatedCodeLenHuffman.table[3]![code.val]! = none := by
     native_decide
   exact hall ⟨code, hcode⟩
+
+/-- The generated helper Huffman row for four-bit prefixes has width sixteen.
+This is the row bound used by the fourth decode-fuel step. -/
+lemma generatedCodeLenHuffman_row4_size :
+    generatedCodeLenHuffman.table[4]!.size = 16 := by
+  native_decide
 
 /-- The generated helper Huffman row for four-bit prefixes has no symbols.
 The next bit is the first row where generated helper symbols can resolve. -/
