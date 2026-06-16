@@ -8,6 +8,87 @@ namespace Lemmas
 set_option linter.unnecessarySimpa false
 set_option linter.unusedSimpArgs false
 
+/-- Proof-facing bit width of one generated code-length token: five helper-code
+bits plus the DEFLATE extra-bit field. -/
+def codeLenTokenBitLen (token : Png.CodeLenToken) : Nat :=
+  5 + token.extraLen
+
+/-- Proof-facing packed bits for one generated code-length token. The low five
+bits are the helper Huffman code, followed by the token extra bits. -/
+def codeLenTokenBits (token : Png.CodeLenToken) : Nat :=
+  let codes := Png.canonicalRevCodesFromLengths Png.codeLenCodeLengths
+  codes[token.symbol]!.1 ||| (token.extraBits <<< 5)
+
+/-- Packed little-endian bit stream for a list of generated code-length tokens.
+This mirrors the writer order used by `writeCodeLenTokens`. -/
+def codeLenTokenStreamBits : List Png.CodeLenToken → Nat
+  | [] => 0
+  | token :: tokens =>
+      codeLenTokenBits token |||
+        (codeLenTokenStreamBits tokens <<< codeLenTokenBitLen token)
+
+/-- Total bit width of a generated code-length token list. This is the reader
+advance amount paired with `codeLenTokenStreamBits`. -/
+def codeLenTokenStreamLen : List Png.CodeLenToken → Nat
+  | [] => 0
+  | token :: tokens => codeLenTokenBitLen token + codeLenTokenStreamLen tokens
+
+/-- A valid generated code-length token's packed bits fit inside its advertised
+bit length. This is the code-space bound needed for stream concatenation. -/
+lemma codeLenTokenBits_lt_codeSpace
+    {token : Png.CodeLenToken} (hvalid : CodeLenTokenValid token) :
+    codeLenTokenBits token < 2 ^ codeLenTokenBitLen token := by
+  have hcode := generatedCodeLenCodes_token_bits_lt_codeSpace hvalid
+  have hextra := codeLenTokenValid_extraBits_lt_codeSpace hvalid
+  have hshift :
+      token.extraBits <<< 5 < 2 ^ (token.extraLen + 5) := by
+    rw [Nat.shiftLeft_eq, Nat.pow_add]
+    exact (Nat.mul_lt_mul_right (Nat.two_pow_pos 5)).mpr hextra
+  have hcodeWide :
+      (Png.canonicalRevCodesFromLengths Png.codeLenCodeLengths)[token.symbol]!.1 <
+        2 ^ (token.extraLen + 5) := by
+    exact lt_of_lt_of_le hcode (Nat.pow_le_pow_right (by decide : 0 < 2) (by omega))
+  have hor :
+      (Png.canonicalRevCodesFromLengths Png.codeLenCodeLengths)[token.symbol]!.1 |||
+          (token.extraBits <<< 5) <
+        2 ^ (token.extraLen + 5) :=
+    Nat.or_lt_two_pow hcodeWide hshift
+  simpa [codeLenTokenBits, codeLenTokenBitLen, Nat.add_comm, Nat.add_left_comm,
+    Nat.add_assoc] using hor
+
+/-- A valid list of generated code-length tokens has packed stream bits that
+fit inside the stream's total bit length. -/
+lemma codeLenTokenStreamBits_lt_codeSpace
+    (tokens : List Png.CodeLenToken)
+    (hvalid : ∀ token ∈ tokens, CodeLenTokenValid token) :
+    codeLenTokenStreamBits tokens < 2 ^ codeLenTokenStreamLen tokens := by
+  induction tokens with
+  | nil =>
+      simp [codeLenTokenStreamBits, codeLenTokenStreamLen]
+  | cons token tokens ih =>
+      have hhead : CodeLenTokenValid token := hvalid token (by simp)
+      have htailValid : ∀ t ∈ tokens, CodeLenTokenValid t := by
+        intro t ht
+        exact hvalid t (by simp [ht])
+      have hbits := codeLenTokenBits_lt_codeSpace hhead
+      have htail := ih htailValid
+      have hshift :
+          codeLenTokenStreamBits tokens <<< codeLenTokenBitLen token <
+            2 ^ (codeLenTokenStreamLen tokens + codeLenTokenBitLen token) := by
+        rw [Nat.shiftLeft_eq, Nat.pow_add]
+        exact (Nat.mul_lt_mul_right (Nat.two_pow_pos (codeLenTokenBitLen token))).mpr htail
+      have hheadWide :
+          codeLenTokenBits token <
+            2 ^ (codeLenTokenStreamLen tokens + codeLenTokenBitLen token) := by
+        exact lt_of_lt_of_le hbits (Nat.pow_le_pow_right (by decide : 0 < 2) (by omega))
+      have hor :
+          codeLenTokenBits token |||
+              (codeLenTokenStreamBits tokens <<< codeLenTokenBitLen token) <
+            2 ^ (codeLenTokenStreamLen tokens + codeLenTokenBitLen token) :=
+        Nat.or_lt_two_pow hheadWide hshift
+      simpa [codeLenTokenStreamBits, codeLenTokenStreamLen, Nat.add_comm,
+        Nat.add_left_comm, Nat.add_assoc] using hor
+
 /-- Decodes the generated five-bit code-length helper code from a writer-built
 stream. This is the Huffman-decode bridge needed before replaying dynamic
 header RLE tokens. -/
