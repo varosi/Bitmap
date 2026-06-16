@@ -3439,6 +3439,60 @@ lemma codeLenNonzeroRunTokens_valid (len runLen : Nat) (hlen : len ≤ 15) :
   simpa [Png.codeLenNonzeroRunTokens] using
     codeLenNonzeroRunTokensAux_valid #[] len runLen hlen codeLenTokensValid_empty
 
+/-- The fuel-recursive code-length tokenizer preserves token validity from any
+valid accumulator. This is the structural induction unlocked by the helper. -/
+lemma codeLenTokensOfLengthsAux_valid
+    (lengths : Array Nat) (tokens : Array Png.CodeLenToken) (i fuel : Nat)
+    (hlengths : ArrayEntriesLe lengths 15)
+    (hvalid : CodeLenTokensValid tokens) :
+    CodeLenTokensValid
+      (Png.codeLenTokensOfLengthsAux lengths tokens i fuel) := by
+  induction fuel generalizing tokens i with
+  | zero =>
+      simpa [Png.codeLenTokensOfLengthsAux] using hvalid
+  | succ fuel ih =>
+      by_cases hi : i < lengths.size
+      · let j := Png.codeLenRunEnd lengths i
+        let len := lengths[i]
+        let runLen := j - i
+        have hlen : len ≤ 15 := by
+          dsimp [len]
+          exact hlengths i hi
+        by_cases hzero : len == 0
+        · have hnext :
+              CodeLenTokensValid
+                (Png.codeLenZeroRunTokensAux tokens runLen) :=
+            codeLenZeroRunTokensAux_valid tokens runLen hvalid
+          simpa [Png.codeLenTokensOfLengthsAux, hi, j, len, runLen, hzero]
+            using ih (Png.codeLenZeroRunTokensAux tokens runLen) j hnext
+        · have hnext :
+              CodeLenTokensValid
+                (Png.codeLenNonzeroRunTokensAux tokens len runLen) :=
+            codeLenNonzeroRunTokensAux_valid tokens len runLen hlen hvalid
+          simpa [Png.codeLenTokensOfLengthsAux, hi, j, len, runLen, hzero]
+            using ih (Png.codeLenNonzeroRunTokensAux tokens len runLen) j hnext
+      · simpa [Png.codeLenTokensOfLengthsAux, hi] using hvalid
+
+/-- Tokenizing a bounded code-length array emits only legal DEFLATE
+code-length RLE tokens. This is the exported array-level validity fact. -/
+lemma codeLenTokensOfLengths_valid
+    (lengths : Array Nat) (hlengths : ArrayEntriesLe lengths 15) :
+    CodeLenTokensValid (Png.codeLenTokensOfLengths lengths) := by
+  simpa [Png.codeLenTokensOfLengths] using
+    codeLenTokensOfLengthsAux_valid lengths #[] 0 (lengths.size + 1)
+      hlengths codeLenTokensValid_empty
+
+/-- The generated dynamic header's RLE token stream contains only legal
+code-length tokens. This prepares token-by-token header replay. -/
+lemma generatedDynamicHeaderCodeLengthTokens_valid
+    (tokens : Array Png.DeflateToken) :
+    CodeLenTokensValid
+      (Png.codeLenTokensOfLengths
+        (generatedDynamicHeaderCodeLengths tokens)) := by
+  exact codeLenTokensOfLengths_valid
+    (generatedDynamicHeaderCodeLengths tokens)
+    (generatedDynamicHeaderCodeLengths_entries_le_15 tokens)
+
 end Lemmas
 
 end Bitmaps

@@ -1308,20 +1308,26 @@ def codeLenRunEnd (lengths : Array Nat) (i : Nat) : Nat :=
   else
     i
 
-def codeLenTokensOfLengths (lengths : Array Nat) : Array CodeLenToken :=
-  Id.run do
-    let mut tokens := #[]
-    let mut i := 0
-    while i < lengths.size do
-      let j := codeLenRunEnd lengths i
-      let len := lengths[i]!
-      let runLen := j - i
-      if len == 0 then
-        tokens := codeLenZeroRunTokensAux tokens runLen
+def codeLenTokensOfLengthsAux (lengths : Array Nat)
+    (tokens : Array CodeLenToken) (i fuel : Nat) : Array CodeLenToken :=
+  match fuel with
+  | 0 => tokens
+  | fuel + 1 =>
+      if h : i < lengths.size then
+        let j := codeLenRunEnd lengths i
+        let len := lengths[i]
+        let runLen := j - i
+        let tokens :=
+          if len == 0 then
+            codeLenZeroRunTokensAux tokens runLen
+          else
+            codeLenNonzeroRunTokensAux tokens len runLen
+        codeLenTokensOfLengthsAux lengths tokens j fuel
       else
-        tokens := codeLenNonzeroRunTokensAux tokens len runLen
-      i := j
-    return tokens
+        tokens
+
+def codeLenTokensOfLengths (lengths : Array Nat) : Array CodeLenToken :=
+  codeLenTokensOfLengthsAux lengths #[] 0 (lengths.size + 1)
 
 def BitWriter.writeDynamicCodeLengths (bw : BitWriter) (lengths : Array Nat)
     (codeLenCodes : Array (Nat × Nat)) : BitWriter :=
