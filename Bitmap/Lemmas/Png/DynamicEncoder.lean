@@ -1767,6 +1767,25 @@ lemma generatedDynamicDistLengths_eq_matchShape
   · intro i hleft hright
     simp [Png.generatedDynamicDistLengths, Png.generatedDynamicDistLengthAt, hfreq]
 
+/-- Match tokens make the generated distance source table assign distance
+symbol `0` the one-bit code length used by distance-1 payloads. -/
+lemma generatedDynamicDistLengths_zero_get!_eq_one_of_match_at
+    (tokens : Array Png.DeflateToken) (target len : Nat)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.matchDist1 len) :
+    (Png.generatedDynamicDistLengths
+      (Png.distSymbolFreqs tokens))[0]! = 1 := by
+  let freqs := Png.distSymbolFreqs tokens
+  have hfreq : 0 < freqs[0]! := by
+    have hmatch := deflateTokensHasMatchDist1_true_of_match_at tokens target len htarget ht
+    simpa [freqs] using distSymbolFreqs_zero_pos_of_hasMatch tokens hmatch
+  have hshape :
+      Png.generatedDynamicDistLengths freqs =
+        Array.ofFn (fun idx : Fin 30 => if idx.val == 0 then 1 else 0) :=
+    generatedDynamicDistLengths_eq_matchShape freqs
+      (by simpa [freqs] using distSymbolFreqs_size tokens) hfreq
+  simp [freqs, hshape]
+
 /-- With no distance-1 frequency, generated distance lengths are all zero. This
 is the literal-only dynamic-block case accepted by the parser. -/
 lemma generatedDynamicDistLengths_eq_zeroShape
@@ -2511,6 +2530,28 @@ lemma generatedDynamicLitLenCodes_literal_len_eq_nine_at
   rw [canonicalRevCodesFromLengths_get!_snd_of_pos lengths b.toNat hsym hpos]
   exact hlen
 
+/-- Generated literal code bit patterns fit in the generated 9-bit row. This
+is the literal-symbol form of the table row bound. -/
+lemma generatedDynamicLitLenCodes_literal_bits_lt_codeSpace_at
+    (tokens : Array Png.DeflateToken) (target : Nat) (b : UInt8)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.literal b) :
+    (Png.canonicalRevCodesFromLengths
+      (Png.generatedDynamicLitLenLengths
+        (Png.litLenSymbolFreqs tokens)))[b.toNat]!.1 <
+      2 ^ Png.generatedDynamicLitLenCodeLen := by
+  let lengths := Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+  have hsym : b.toNat < lengths.size := by
+    have hb : b.toNat < 256 := UInt8.toNat_lt b
+    have hsize : lengths.size = 286 := by
+      simp [lengths, generatedDynamicLitLenLengths_size, litLenSymbolFreqs_size]
+    omega
+  have hpos : 0 < lengths[b.toNat]! := by
+    simpa [lengths] using
+      generatedDynamicLitLenLengths_literal_pos_at tokens target b htarget ht
+  exact generatedDynamicLitLenCodes_bits_lt_codeSpace_of_pos
+    tokens b.toNat (by simpa [lengths] using hsym) (by simpa [lengths] using hpos)
+
 /-- Generated match-symbol lookup has a positive bit length for every valid
 match token. This prepares the match branch of generated payload proofs. -/
 lemma generatedDynamicLitLenCodes_match_len_pos_at
@@ -2561,6 +2602,31 @@ lemma generatedDynamicLitLenCodes_match_len_eq_nine_at
     lengths (Png.fixedLenMatchInfo len).1 hsym hpos]
   exact hlenEq
 
+/-- Generated match-symbol bit patterns fit in the generated 9-bit row. This
+is the match-symbol form of the table row bound. -/
+lemma generatedDynamicLitLenCodes_match_bits_lt_codeSpace_at
+    (tokens : Array Png.DeflateToken) (target len : Nat)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.matchDist1 len)
+    (hlen : 3 ≤ len ∧ len ≤ 258) :
+    (Png.canonicalRevCodesFromLengths
+      (Png.generatedDynamicLitLenLengths
+        (Png.litLenSymbolFreqs tokens)))[(Png.fixedLenMatchInfo len).1]!.1 <
+      2 ^ Png.generatedDynamicLitLenCodeLen := by
+  let lengths := Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+  have hsym : (Png.fixedLenMatchInfo len).1 < lengths.size := by
+    have hfixed := fixedLenMatchInfo_sym_lt_286 len hlen
+    have hsize : lengths.size = 286 := by
+      simp [lengths, generatedDynamicLitLenLengths_size, litLenSymbolFreqs_size]
+    omega
+  have hpos : 0 < lengths[(Png.fixedLenMatchInfo len).1]! := by
+    simpa [lengths] using
+      generatedDynamicLitLenLengths_match_pos_at tokens target len htarget ht hlen
+  exact generatedDynamicLitLenCodes_bits_lt_codeSpace_of_pos
+    tokens (Png.fixedLenMatchInfo len).1
+    (by simpa [lengths] using hsym)
+    (by simpa [lengths] using hpos)
+
 /-- The generated EOB code lookup has a positive bit length. This prepares the
 block-termination step for generated payload proofs. -/
 lemma generatedDynamicLitLenCodes_eob_len_pos
@@ -2596,6 +2662,23 @@ lemma generatedDynamicLitLenCodes_eob_len_eq_nine
   rw [canonicalRevCodesFromLengths_get!_snd_of_pos lengths 256 hsym hpos]
   exact hlen
 
+/-- The generated EOB bit pattern fits in the generated 9-bit row. This is the
+termination-symbol form of the table row bound. -/
+lemma generatedDynamicLitLenCodes_eob_bits_lt_codeSpace
+    (tokens : Array Png.DeflateToken) :
+    (Png.canonicalRevCodesFromLengths
+      (Png.generatedDynamicLitLenLengths
+        (Png.litLenSymbolFreqs tokens)))[256]!.1 <
+      2 ^ Png.generatedDynamicLitLenCodeLen := by
+  let lengths := Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+  have hsym : 256 < lengths.size := by
+    simpa [lengths] using generatedDynamicLitLenLengths_eob_inBounds tokens
+  have hpos : 0 < lengths[256]! := by
+    rw [getElem!_pos lengths 256 hsym]
+    simpa [lengths] using generatedDynamicLitLenLengths_eob_pos tokens
+  exact generatedDynamicLitLenCodes_bits_lt_codeSpace_of_pos
+    tokens 256 (by simpa [lengths] using hsym) (by simpa [lengths] using hpos)
+
 /-- Generated distance-symbol-zero lookup has a positive bit length when a
 match token exists. This prepares distance-1 payload proofs. -/
 lemma generatedDynamicDistCodes_zero_len_pos_of_match_at
@@ -2613,6 +2696,50 @@ lemma generatedDynamicDistCodes_zero_len_pos_of_match_at
     simpa [lengths] using
       generatedDynamicDistLengths_zero_get!_pos_of_match_at tokens target len htarget ht
   exact canonicalRevCodesFromLengths_get!_snd_pos_of_pos lengths 0 hsym hpos
+
+/-- Generated distance-symbol-zero lookup has the exact one-bit length when a
+match token exists. The generated encoder only emits distance-1 matches. -/
+lemma generatedDynamicDistCodes_zero_len_eq_one_of_match_at
+    (tokens : Array Png.DeflateToken) (target len : Nat)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.matchDist1 len) :
+    (Png.canonicalRevCodesFromLengths
+      (Png.generatedDynamicDistLengths
+        (Png.distSymbolFreqs tokens)))[0]!.2 = 1 := by
+  let lengths := Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)
+  have hsym : 0 < lengths.size := by
+    simpa [lengths] using generatedDynamicDistLengths_zero_inBounds tokens
+  have hpos : 0 < lengths[0]! := by
+    simpa [lengths] using
+      generatedDynamicDistLengths_zero_get!_pos_of_match_at tokens target len htarget ht
+  have hlen : lengths[0]! = 1 := by
+    simpa [lengths] using
+      generatedDynamicDistLengths_zero_get!_eq_one_of_match_at tokens target len htarget ht
+  rw [canonicalRevCodesFromLengths_get!_snd_of_pos lengths 0 hsym hpos]
+  exact hlen
+
+/-- Generated distance-symbol-zero bit patterns fit in the one-bit distance
+row when a match token exists. This is the distance payload row bound. -/
+lemma generatedDynamicDistCodes_zero_bits_lt_two_of_match_at
+    (tokens : Array Png.DeflateToken) (target len : Nat)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.matchDist1 len) :
+    (Png.canonicalRevCodesFromLengths
+      (Png.generatedDynamicDistLengths
+        (Png.distSymbolFreqs tokens)))[0]!.1 < 2 := by
+  let lengths := Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)
+  have hsym : 0 < lengths.size := by
+    simpa [lengths] using generatedDynamicDistLengths_zero_inBounds tokens
+  have hpos : 0 < lengths[0]! := by
+    simpa [lengths] using
+      generatedDynamicDistLengths_zero_get!_pos_of_match_at tokens target len htarget ht
+  have hbits :
+      (Png.canonicalRevCodesFromLengths lengths)[0]!.1 < 2 ^ lengths[0]! :=
+    canonicalRevCodesFromLengths_get!_fst_lt_pow_of_pos lengths 0 hsym hpos
+  have hlen : lengths[0]! = 1 := by
+    simpa [lengths] using
+      generatedDynamicDistLengths_zero_get!_eq_one_of_match_at tokens target len htarget ht
+  simpa [lengths, hlen] using hbits
 
 /-- The generated dynamic header advertises all 19 code-length-code entries.
 This records the concrete table shape used by the header writer. -/
