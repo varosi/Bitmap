@@ -1016,6 +1016,11 @@ lemma generatedDynamicLitLenCodeLen_le_15 :
     Png.generatedDynamicLitLenCodeLen ≤ 15 := by
   simp [Png.generatedDynamicLitLenCodeLen]
 
+/-- The generated literal/length code length is concretely 9 bits. This
+packages the encoder choice for finite code-space proofs. -/
+lemma generatedDynamicLitLenCodeLen_eq_nine :
+    Png.generatedDynamicLitLenCodeLen = 9 := rfl
+
 /-- A generated literal/length code-length entry is always a valid DEFLATE code
 length. This follows directly from the by-index generator. -/
 lemma generatedDynamicLitLenLengthAt_le_15 (freqs : Array Nat) (idx : Nat) :
@@ -1074,6 +1079,14 @@ lemma generatedDynamicLitLenLengths_size (freqs : Array Nat) :
     (Png.generatedDynamicLitLenLengths freqs).size = freqs.size := by
   simp [Png.generatedDynamicLitLenLengths]
 
+/-- Generated literal/length tables built from generated token streams have the
+full DEFLATE literal/length-table size. -/
+lemma generatedDynamicLitLenLengths_size_286
+    (tokens : Array Png.DeflateToken) :
+    (Png.generatedDynamicLitLenLengths
+      (Png.litLenSymbolFreqs tokens)).size = 286 := by
+  simp [generatedDynamicLitLenLengths_size, litLenSymbolFreqs_size]
+
 /-- Every in-bounds generated literal/length code-length entry satisfies
 DEFLATE's 15-bit limit. This is the table-level validity shape for `HLIT`. -/
 lemma generatedDynamicLitLenLengths_getElem_le_15
@@ -1104,6 +1117,18 @@ lemma generatedDynamicLitLenLengths_getElem_eq_zero_or_codeLen
   simpa [Png.generatedDynamicLitLenLengths] using
     generatedDynamicLitLenLengthAt_eq_zero_or_codeLen freqs idx
 
+/-- In-bounds generated literal/length table entries are concretely either
+unused or 9-bit codes. This is the finite alphabet shape used by table proofs. -/
+lemma generatedDynamicLitLenLengths_getElem_eq_zero_or_nine
+    (freqs : Array Nat) (idx : Nat)
+    (hidx : idx < (Png.generatedDynamicLitLenLengths freqs).size) :
+    (Png.generatedDynamicLitLenLengths freqs)[idx] = 0 ∨
+      (Png.generatedDynamicLitLenLengths freqs)[idx] = 9 := by
+  rcases generatedDynamicLitLenLengths_getElem_eq_zero_or_codeLen freqs idx hidx
+    with hzero | hcode
+  · exact Or.inl hzero
+  · exact Or.inr (by simpa [generatedDynamicLitLenCodeLen_eq_nine] using hcode)
+
 /-- In `get!` form, a generated literal/length table entry is positive exactly
 when its source frequency is positive. This matches payload lookup code. -/
 lemma generatedDynamicLitLenLengths_get!_pos_iff
@@ -1128,6 +1153,16 @@ lemma generatedDynamicLitLenLengths_get!_eq_zero_or_codeLen
   rw [getElem!_pos (Png.generatedDynamicLitLenLengths freqs) idx hidx]
   exact generatedDynamicLitLenLengths_getElem_eq_zero_or_codeLen
     freqs idx hidx
+
+/-- In `get!` form, generated literal/length entries are concretely either
+unused or 9-bit codes. This matches the writer's lookup style. -/
+lemma generatedDynamicLitLenLengths_get!_eq_zero_or_nine
+    (freqs : Array Nat) (idx : Nat)
+    (hidx : idx < (Png.generatedDynamicLitLenLengths freqs).size) :
+    (Png.generatedDynamicLitLenLengths freqs)[idx]! = 0 ∨
+      (Png.generatedDynamicLitLenLengths freqs)[idx]! = 9 := by
+  rw [getElem!_pos (Png.generatedDynamicLitLenLengths freqs) idx hidx]
+  exact generatedDynamicLitLenLengths_getElem_eq_zero_or_nine freqs idx hidx
 
 /-- The generated literal/length length table always contains EOB in bounds.
 This packages the fixed table-size facts for later payload proofs. -/
@@ -1340,6 +1375,30 @@ lemma generatedDynamicLitLenLengths_size_le_codeSpace
         2 ^ Png.generatedDynamicLitLenCodeLen := by
   simp [generatedDynamicLitLenLengths_size, litLenSymbolFreqs_size,
     Png.generatedDynamicLitLenCodeLen]
+
+/-- The generated literal/length code space is concretely 512 codes. This is
+the numeric side of the 9-bit generated table validity argument. -/
+lemma generatedDynamicLitLenCodeSpace_eq_512 :
+    2 ^ Png.generatedDynamicLitLenCodeLen = 512 := by
+  simp [Png.generatedDynamicLitLenCodeLen]
+
+/-- Generated literal/length tables have strictly fewer entries than the
+available 9-bit code space. This is stronger than needed for non-oversubscribe. -/
+lemma generatedDynamicLitLenLengths_size_lt_codeSpace
+    (tokens : Array Png.DeflateToken) :
+    (Png.generatedDynamicLitLenLengths
+      (Png.litLenSymbolFreqs tokens)).size <
+        2 ^ Png.generatedDynamicLitLenCodeLen := by
+  simp [generatedDynamicLitLenLengths_size_286, generatedDynamicLitLenCodeSpace_eq_512]
+
+/-- Generated literal/length tables fit in the concrete 512-entry 9-bit code
+space. This avoids redoing arithmetic in later canonical-code proofs. -/
+lemma generatedDynamicLitLenLengths_size_le_512
+    (tokens : Array Png.DeflateToken) :
+    (Png.generatedDynamicLitLenLengths
+      (Png.litLenSymbolFreqs tokens)).size ≤ 512 := by
+  simpa [generatedDynamicLitLenCodeSpace_eq_512] using
+    generatedDynamicLitLenLengths_size_le_codeSpace tokens
 
 /-- The generated distance table's scanned maximum code length is within
 DEFLATE's limit. This is the distance-table counterpart to the lit/len bound. -/
