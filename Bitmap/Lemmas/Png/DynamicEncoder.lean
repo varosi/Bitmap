@@ -570,6 +570,16 @@ lemma getElem!_set!_ne {α : Type} [Inhabited α]
         (v := v) (j := target) htarget hne)
   · simp [Array.setIfInBounds, hidx]
 
+/-- Incrementing a different frequency slot preserves this target slot. This
+keeps count-table proofs focused on the one bucket that can change. -/
+lemma incrementNatAt_get!_ne
+    (arr : Array Nat) (idx target : Nat)
+    (htarget : target < arr.size)
+    (hne : idx ≠ target) :
+    (Png.incrementNatAt arr idx)[target]! = arr[target]! := by
+  unfold Png.incrementNatAt
+  exact getElem!_set!_ne arr idx target (arr[idx]! + 1) htarget hne
+
 /-- Incrementing any frequency slot preserves an already-positive slot. This is
 the scanner invariant used by generated payload-availability proofs. -/
 lemma incrementNatAt_get!_pos_of_pos
@@ -1842,6 +1852,142 @@ decreasing_by
     have hlt : i < lengths.size := h
     exact Nat.sub_lt_sub_left (k := i) (m := lengths.size) (n := i + 1)
       hlt (Nat.lt_succ_self i)
+
+/-- If no positive scanned length equals a target bucket, counting code lengths
+preserves that bucket. This isolates the zero-shorter-code argument. -/
+lemma countCodeLengthsAux_get!_preserve_of_forall_pos_ne
+    (lengths : Array Nat) (i idx : Nat) (count : Array Nat)
+    (hidx : idx < count.size)
+    (hpreserve :
+      ∀ j, i ≤ j → (hj : j < lengths.size) →
+        0 < lengths[j]'hj → lengths[j]'hj ≠ idx) :
+    (Png.countCodeLengthsAux lengths i count)[idx]! = count[idx]! := by
+  rw [Png.countCodeLengthsAux.eq_1]
+  by_cases h : i < lengths.size
+  · by_cases hlen : 0 < lengths[i]
+    · have hne : lengths[i] ≠ idx := hpreserve i le_rfl h hlen
+      have hidx' : idx < (Png.incrementNatAt count lengths[i]).size := by
+        simpa using hidx
+      have hrec :=
+        countCodeLengthsAux_get!_preserve_of_forall_pos_ne
+          lengths (i + 1) idx (Png.incrementNatAt count lengths[i]) hidx'
+          (by
+            intro j hle hj hpos
+            exact hpreserve j (by omega) hj hpos)
+      have hinc :
+          (Png.incrementNatAt count lengths[i])[idx]! = count[idx]! :=
+        incrementNatAt_get!_ne count lengths[i] idx hidx hne
+      simp [h, hlen]
+      exact hrec.trans hinc
+    · have hrec :=
+        countCodeLengthsAux_get!_preserve_of_forall_pos_ne
+          lengths (i + 1) idx count hidx
+          (by
+            intro j hle hj hpos
+            exact hpreserve j (by omega) hj hpos)
+      simp [h, hlen, hrec]
+  · simp [h]
+termination_by lengths.size - i
+decreasing_by
+  all_goals
+    have hlt : i < lengths.size := h
+    exact Nat.sub_lt_sub_left (k := i) (m := lengths.size) (n := i + 1)
+      hlt (Nat.lt_succ_self i)
+
+/-- Generated literal/length code-length counting leaves every bucket below
+the uniform 9-bit length unchanged. This prepares the `nextCode[9] = 0` proof. -/
+lemma countCodeLengthsAux_generatedDynamicLitLenLengths_get!_preserve_lt_codeLen
+    (freqs : Array Nat) (i idx : Nat) (count : Array Nat)
+    (hidx : idx < count.size)
+    (hlt : idx < Png.generatedDynamicLitLenCodeLen) :
+    (Png.countCodeLengthsAux (Png.generatedDynamicLitLenLengths freqs) i count)[idx]! =
+      count[idx]! := by
+  exact
+    countCodeLengthsAux_get!_preserve_of_forall_pos_ne
+      (Png.generatedDynamicLitLenLengths freqs) i idx count hidx
+      (by
+        intro j _hle hj hpos heq
+        have hnine :=
+          (generatedDynamicLitLenLengths_getElem_pos_iff_eq_nine freqs j hj).mp hpos
+        have hlt9 : idx < 9 := by
+          simpa [Png.generatedDynamicLitLenCodeLen] using hlt
+        omega)
+
+/-- With the generated initial count table, every bucket below the uniform
+literal/length code size is zero after counting. -/
+lemma countCodeLengthsAux_generatedDynamicLitLenLengths_get!_lt_codeLen
+    (freqs : Array Nat) (idx : Nat)
+    (hlt : idx < Png.generatedDynamicLitLenCodeLen) :
+    (Png.countCodeLengthsAux
+      (Png.generatedDynamicLitLenLengths freqs) 0
+      (Array.replicate (Png.generatedDynamicLitLenCodeLen + 1) 0))[idx]! = 0 := by
+  let count := Array.replicate (Png.generatedDynamicLitLenCodeLen + 1) 0
+  have hidx : idx < count.size := by
+    simp [count]
+    omega
+  calc
+    (Png.countCodeLengthsAux
+        (Png.generatedDynamicLitLenLengths freqs) 0 count)[idx]! =
+      count[idx]! := by
+        exact
+          countCodeLengthsAux_generatedDynamicLitLenLengths_get!_preserve_lt_codeLen
+            freqs 0 idx count hidx hlt
+    _ = 0 := by
+        rw [getElem!_pos count idx hidx]
+        simp [count]
+
+/-- Generated literal/length counts make the canonical 9-bit starting code
+zero. This is the next-code side of the generated table validity proof. -/
+lemma nextCodesAux_generatedDynamicLitLenLengths_get!_codeLen_eq_zero
+    (freqs : Array Nat) :
+    let lengths := Png.generatedDynamicLitLenLengths freqs
+    let count :=
+      Png.countCodeLengthsAux lengths 0
+        (Array.replicate (Png.generatedDynamicLitLenCodeLen + 1) 0)
+    let nextCode0 := Array.replicate (Png.generatedDynamicLitLenCodeLen + 1) 0
+    let nextCode :=
+      (Png.nextCodesAux count Png.generatedDynamicLitLenCodeLen 1 0 nextCode0).2
+    nextCode[Png.generatedDynamicLitLenCodeLen]! = 0 := by
+  intro lengths count nextCode0 nextCode
+  have h0 : count[0]! = 0 := by
+    simpa [count, lengths] using
+      countCodeLengthsAux_generatedDynamicLitLenLengths_get!_lt_codeLen freqs 0
+        (by simp [Png.generatedDynamicLitLenCodeLen])
+  have h1 : count[1]! = 0 := by
+    simpa [count, lengths] using
+      countCodeLengthsAux_generatedDynamicLitLenLengths_get!_lt_codeLen freqs 1
+        (by simp [Png.generatedDynamicLitLenCodeLen])
+  have h2 : count[2]! = 0 := by
+    simpa [count, lengths] using
+      countCodeLengthsAux_generatedDynamicLitLenLengths_get!_lt_codeLen freqs 2
+        (by simp [Png.generatedDynamicLitLenCodeLen])
+  have h3 : count[3]! = 0 := by
+    simpa [count, lengths] using
+      countCodeLengthsAux_generatedDynamicLitLenLengths_get!_lt_codeLen freqs 3
+        (by simp [Png.generatedDynamicLitLenCodeLen])
+  have h4 : count[4]! = 0 := by
+    simpa [count, lengths] using
+      countCodeLengthsAux_generatedDynamicLitLenLengths_get!_lt_codeLen freqs 4
+        (by simp [Png.generatedDynamicLitLenCodeLen])
+  have h5 : count[5]! = 0 := by
+    simpa [count, lengths] using
+      countCodeLengthsAux_generatedDynamicLitLenLengths_get!_lt_codeLen freqs 5
+        (by simp [Png.generatedDynamicLitLenCodeLen])
+  have h6 : count[6]! = 0 := by
+    simpa [count, lengths] using
+      countCodeLengthsAux_generatedDynamicLitLenLengths_get!_lt_codeLen freqs 6
+        (by simp [Png.generatedDynamicLitLenCodeLen])
+  have h7 : count[7]! = 0 := by
+    simpa [count, lengths] using
+      countCodeLengthsAux_generatedDynamicLitLenLengths_get!_lt_codeLen freqs 7
+        (by simp [Png.generatedDynamicLitLenCodeLen])
+  have h8 : count[8]! = 0 := by
+    simpa [count, lengths] using
+      countCodeLengthsAux_generatedDynamicLitLenLengths_get!_lt_codeLen freqs 8
+        (by simp [Png.generatedDynamicLitLenCodeLen])
+  simp [nextCode, nextCode0, Png.nextCodesAux, Png.generatedDynamicLitLenCodeLen,
+    Array.set!, Array.setIfInBounds,
+    h0, h1, h2, h3, h4, h5, h6, h7, h8]
 
 /-- Computing canonical next-code values preserves the next-code table shape.
 Later generated-payload proofs use this before indexing emitted symbols. -/
