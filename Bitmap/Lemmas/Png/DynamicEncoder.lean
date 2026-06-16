@@ -2767,6 +2767,33 @@ lemma mkHuffman_codeLenCodeLengths_isSome :
     (Png.mkHuffman Png.codeLenCodeLengths).isSome = true := by
   native_decide
 
+/-- The concrete Huffman table produced by the generated header's all-5-bit
+code-length-code lengths. Naming it keeps later decode lemmas table-stable. -/
+def generatedCodeLenHuffman : Png.Huffman :=
+  match Png.mkHuffman Png.codeLenCodeLengths with
+  | some table => table
+  | none => Png.emptyHuffman
+
+/-- `mkHuffman` produces the named generated code-length Huffman table. This
+turns the previous `isSome` fact into the exact table used by replay proofs. -/
+lemma mkHuffman_codeLenCodeLengths_eq :
+    Png.mkHuffman Png.codeLenCodeLengths = some generatedCodeLenHuffman := by
+  native_decide
+
+/-- The generated code-length Huffman table has uniform five-bit codes. This
+is the reader fuel and row index used by generated header replay. -/
+lemma generatedCodeLenHuffman_maxLen :
+    generatedCodeLenHuffman.maxLen = 5 := by
+  native_decide
+
+/-- Every entry in the generated code-length-code length table is exactly five.
+This is the source-table shape behind the generated helper Huffman table. -/
+lemma codeLenCodeLengths_get!_eq_five
+    (idx : Nat) (hidx : idx < Png.codeLenCodeLengths.size) :
+    Png.codeLenCodeLengths[idx]! = 5 := by
+  rw [getElem!_pos Png.codeLenCodeLengths idx hidx]
+  simp [Png.codeLenCodeLengths]
+
 /-- The generated code-length-code Huffman table preserves the 19-symbol
 alphabet shape used by the dynamic header. -/
 lemma generatedCodeLenCodes_size :
@@ -2781,6 +2808,48 @@ lemma generatedCodeLenCodes_len_pos
   exact canonicalRevCodesFromLengths_get!_snd_pos_of_pos
     Png.codeLenCodeLengths sym hsym
     (codeLenCodeLengths_get!_pos sym hsym)
+
+/-- Generated code-length-code lookups have exact five-bit lengths. This is
+the exact code-width fact needed by generated header replay. -/
+lemma generatedCodeLenCodes_len_eq_five
+    (sym : Nat) (hsym : sym < Png.codeLenCodeLengths.size) :
+    (Png.canonicalRevCodesFromLengths Png.codeLenCodeLengths)[sym]!.2 = 5 := by
+  have hpos : 0 < Png.codeLenCodeLengths[sym]! :=
+    codeLenCodeLengths_get!_pos sym hsym
+  rw [canonicalRevCodesFromLengths_get!_snd_of_pos
+    Png.codeLenCodeLengths sym hsym hpos]
+  exact codeLenCodeLengths_get!_eq_five sym hsym
+
+/-- Generated code-length-code bit patterns fit in the five-bit row. This is
+the row-bound side of generated code-length-symbol replay. -/
+lemma generatedCodeLenCodes_bits_lt_codeSpace
+    (sym : Nat) (hsym : sym < Png.codeLenCodeLengths.size) :
+    (Png.canonicalRevCodesFromLengths Png.codeLenCodeLengths)[sym]!.1 < 2 ^ 5 := by
+  have hpos : 0 < Png.codeLenCodeLengths[sym]! :=
+    codeLenCodeLengths_get!_pos sym hsym
+  have hbits :
+      (Png.canonicalRevCodesFromLengths Png.codeLenCodeLengths)[sym]!.1 <
+        2 ^ Png.codeLenCodeLengths[sym]! :=
+    canonicalRevCodesFromLengths_get!_fst_lt_pow_of_pos
+      Png.codeLenCodeLengths sym hsym hpos
+  have hlen := codeLenCodeLengths_get!_eq_five sym hsym
+  simpa [hlen] using hbits
+
+/-- The named generated code-length Huffman table maps each generated bit
+pattern back to its symbol. This is the table lookup core for header replay. -/
+lemma generatedCodeLenHuffman_lookup_generated_code
+    (sym : Nat) (hsym : sym < Png.codeLenCodeLengths.size) :
+    let codes := Png.canonicalRevCodesFromLengths Png.codeLenCodeLengths
+    generatedCodeLenHuffman.table[codes[sym]!.2]![codes[sym]!.1]! = some sym := by
+  have hsym19 : sym < 19 := by
+    simpa [codeLenCodeLengths_size] using hsym
+  have hall :
+      ∀ sym : Fin 19,
+        let codes := Png.canonicalRevCodesFromLengths Png.codeLenCodeLengths
+        generatedCodeLenHuffman.table[codes[sym.val]!.2]![codes[sym.val]!.1]! =
+          some sym.val := by
+    native_decide
+  exact hall ⟨sym, hsym19⟩
 
 /-- The DEFLATE code-length alphabet write order has all 19 entries. This is
 the header-side shape fact for generated dynamic tables. -/
