@@ -3329,6 +3329,14 @@ array-level invariant used while accumulating header RLE tokens. -/
 def CodeLenTokensValid (tokens : Array Png.CodeLenToken) : Prop :=
   ∀ idx (hidx : idx < tokens.size), CodeLenTokenValid tokens[idx]
 
+/-- Proof-facing output length for one code-length token. It records how many
+entries the token contributes to the decoded code-length array. -/
+def CodeLenTokenOutputCount : Png.CodeLenToken → Nat
+  | .literal _ => 1
+  | .repeatPrev repeatCount => repeatCount
+  | .repeatZeroShort repeatCount => repeatCount
+  | .repeatZeroLong repeatCount => repeatCount
+
 /-- Valid code-length tokens always name a symbol in the DEFLATE code-length
 alphabet. This bounds the Huffman lookup while writing and reading headers. -/
 lemma codeLenTokenValid_symbol_le_18
@@ -3354,6 +3362,40 @@ lemma codeLenTokenValid_extraBits_lt_codeSpace
   | repeatZeroLong repeatCount =>
       exact codeLenToken_repeatZeroLong_extraBits_lt_codeSpace
         repeatCount hvalid.1 hvalid.2
+
+/-- Valid generated code-length tokens always emit at least one output entry.
+This is the progress fact for replaying generated header RLE tokens. -/
+lemma codeLenTokenOutputCount_pos
+    {token : Png.CodeLenToken} (hvalid : CodeLenTokenValid token) :
+    0 < CodeLenTokenOutputCount token := by
+  cases token <;> simp [CodeLenTokenOutputCount, CodeLenTokenValid] at hvalid ⊢ <;> omega
+
+/-- If a code-length token expands successfully, its output size increases by
+the token's proof-facing output count. This packages the size effect of RLE. -/
+lemma codeLenToken_expand_size_of_some
+    {lengths lengths' : Array Nat} {token : Png.CodeLenToken}
+    (h : Png.CodeLenToken.expand lengths token = some lengths') :
+    lengths'.size = lengths.size + CodeLenTokenOutputCount token := by
+  cases token with
+  | literal len =>
+      simp [Png.CodeLenToken.expand] at h
+      rw [← h]
+      simp [CodeLenTokenOutputCount]
+  | repeatPrev repeatCount =>
+      unfold Png.CodeLenToken.expand at h
+      by_cases hzero : lengths.size == 0
+      · simp [hzero] at h
+      · simp [hzero] at h
+        rw [← h]
+        simp [CodeLenTokenOutputCount, pushNatRepeat_size]
+  | repeatZeroShort repeatCount =>
+      simp [Png.CodeLenToken.expand] at h
+      rw [← h]
+      simp [CodeLenTokenOutputCount, pushNatRepeat_size]
+  | repeatZeroLong repeatCount =>
+      simp [Png.CodeLenToken.expand] at h
+      rw [← h]
+      simp [CodeLenTokenOutputCount, pushNatRepeat_size]
 
 /-- A valid code-length token always names an entry in the generated
 code-length-code alphabet. This is the token-level table lookup bound. -/
