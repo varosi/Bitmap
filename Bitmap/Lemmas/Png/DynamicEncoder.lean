@@ -2911,6 +2911,83 @@ lemma generatedDynamicHeaderLengths_size
       generatedDynamicDistCount_le_generated_size tokens
   simp [Array.size_append, Array.size_extract, hlit, hdist]
 
+/-- Repeating a natural value appends exactly the requested number of entries.
+This is the size invariant for code-length token expansion. -/
+lemma pushNatRepeat_size (xs : Array Nat) (value n : Nat) :
+    (Png.pushNatRepeat xs value n).size = xs.size + n := by
+  induction n generalizing xs with
+  | zero =>
+      simp [Png.pushNatRepeat]
+  | succ n ih =>
+      simp [Png.pushNatRepeat, ih, Nat.add_comm, Nat.add_left_comm]
+
+/-- Literal code-length tokens append their literal length. This is the base
+case for proving generated code-length streams reconstruct advertised tables. -/
+lemma codeLenToken_expand_literal (lengths : Array Nat) (len : Nat) :
+    Png.CodeLenToken.expand lengths (.literal len) =
+      some (lengths.push len) := by
+  rfl
+
+/-- Previous-length repeat tokens replay the last emitted length when one
+exists. This captures the parser precondition for DEFLATE symbol `16`. -/
+lemma codeLenToken_expand_repeatPrev_of_nonempty
+    (lengths : Array Nat) (repeatCount : Nat)
+    (h : lengths.size ≠ 0) :
+    Png.CodeLenToken.expand lengths (.repeatPrev repeatCount) =
+      some (Png.pushNatRepeat lengths lengths[lengths.size - 1]! repeatCount) := by
+  unfold Png.CodeLenToken.expand
+  simp [h]
+
+/-- Short zero-repeat code-length tokens append the requested zero run. This
+is the expansion rule for DEFLATE symbol `17`. -/
+lemma codeLenToken_expand_repeatZeroShort
+    (lengths : Array Nat) (repeatCount : Nat) :
+    Png.CodeLenToken.expand lengths (.repeatZeroShort repeatCount) =
+      some (Png.pushNatRepeat lengths 0 repeatCount) := by
+  rfl
+
+/-- Long zero-repeat code-length tokens append the requested zero run. This is
+the expansion rule for DEFLATE symbol `18`. -/
+lemma codeLenToken_expand_repeatZeroLong
+    (lengths : Array Nat) (repeatCount : Nat) :
+    Png.CodeLenToken.expand lengths (.repeatZeroLong repeatCount) =
+      some (Png.pushNatRepeat lengths 0 repeatCount) := by
+  rfl
+
+/-- Literal code-length tokens never write extra bits. This bounds the trivial
+extra-bit field used by the token writer. -/
+lemma codeLenToken_literal_extraBits_lt_codeSpace (len : Nat) :
+    Png.CodeLenToken.extraBits (.literal len) <
+      2 ^ Png.CodeLenToken.extraLen (.literal len) := by
+  simp [Png.CodeLenToken.extraBits, Png.CodeLenToken.extraLen]
+
+/-- Previous-length repeat tokens fit in the two-bit extra field when their
+repeat count is in the DEFLATE symbol-16 range. -/
+lemma codeLenToken_repeatPrev_extraBits_lt_codeSpace
+    (repeatCount : Nat) (hlo : 3 ≤ repeatCount) (hhi : repeatCount ≤ 6) :
+    Png.CodeLenToken.extraBits (.repeatPrev repeatCount) <
+      2 ^ Png.CodeLenToken.extraLen (.repeatPrev repeatCount) := by
+  simp [Png.CodeLenToken.extraBits, Png.CodeLenToken.extraLen]
+  omega
+
+/-- Short zero-repeat tokens fit in the three-bit extra field when their repeat
+count is in the DEFLATE symbol-17 range. -/
+lemma codeLenToken_repeatZeroShort_extraBits_lt_codeSpace
+    (repeatCount : Nat) (hlo : 3 ≤ repeatCount) (hhi : repeatCount ≤ 10) :
+    Png.CodeLenToken.extraBits (.repeatZeroShort repeatCount) <
+      2 ^ Png.CodeLenToken.extraLen (.repeatZeroShort repeatCount) := by
+  simp [Png.CodeLenToken.extraBits, Png.CodeLenToken.extraLen]
+  omega
+
+/-- Long zero-repeat tokens fit in the seven-bit extra field when their repeat
+count is in the DEFLATE symbol-18 range. -/
+lemma codeLenToken_repeatZeroLong_extraBits_lt_codeSpace
+    (repeatCount : Nat) (hlo : 11 ≤ repeatCount) (hhi : repeatCount ≤ 138) :
+    Png.CodeLenToken.extraBits (.repeatZeroLong repeatCount) <
+      2 ^ Png.CodeLenToken.extraLen (.repeatZeroLong repeatCount) := by
+  simp [Png.CodeLenToken.extraBits, Png.CodeLenToken.extraLen]
+  omega
+
 end Lemmas
 
 end Bitmaps

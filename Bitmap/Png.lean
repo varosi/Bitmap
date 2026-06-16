@@ -1157,22 +1157,90 @@ def BitWriter.writeCodeLenRepeat (bw : BitWriter) (codeLenCodes : Array (Nat × 
   let bw := bw.writeCodeLenSymbol codeLenCodes sym
   bw.writeBitsFast extra extraLen
 
-def BitWriter.writeZeroCodeLenRun (bw : BitWriter) (codeLenCodes : Array (Nat × Nat))
-    (runLen : Nat) : BitWriter :=
+inductive CodeLenToken where
+  | literal (len : Nat)
+  | repeatPrev (repeatCount : Nat)
+  | repeatZeroShort (repeatCount : Nat)
+  | repeatZeroLong (repeatCount : Nat)
+deriving Repr, DecidableEq
+
+def pushNatRepeat (xs : Array Nat) (value : Nat) : Nat → Array Nat
+  | 0 => xs
+  | n + 1 => pushNatRepeat (xs.push value) value n
+
+def CodeLenToken.symbol : CodeLenToken → Nat
+  | .literal len => len
+  | .repeatPrev _ => 16
+  | .repeatZeroShort _ => 17
+  | .repeatZeroLong _ => 18
+
+def CodeLenToken.extraBits : CodeLenToken → Nat
+  | .literal _ => 0
+  | .repeatPrev repeatCount => repeatCount - 3
+  | .repeatZeroShort repeatCount => repeatCount - 3
+  | .repeatZeroLong repeatCount => repeatCount - 11
+
+def CodeLenToken.extraLen : CodeLenToken → Nat
+  | .literal _ => 0
+  | .repeatPrev _ => 2
+  | .repeatZeroShort _ => 3
+  | .repeatZeroLong _ => 7
+
+def CodeLenToken.expand (lengths : Array Nat) : CodeLenToken → Option (Array Nat)
+  | .literal len => some (lengths.push len)
+  | .repeatPrev repeatCount =>
+      if _h : lengths.size == 0 then
+        none
+      else
+        let prev := lengths[lengths.size - 1]!
+        some (pushNatRepeat lengths prev repeatCount)
+  | .repeatZeroShort repeatCount => some (pushNatRepeat lengths 0 repeatCount)
+  | .repeatZeroLong repeatCount => some (pushNatRepeat lengths 0 repeatCount)
+
+def codeLenTokensExpandAux? (tokens : Array CodeLenToken) (i : Nat)
+    (lengths : Array Nat) : Option (Array Nat) :=
+  if h : i < tokens.size then
+    match tokens[i].expand lengths with
+    | none => none
+    | some lengths => codeLenTokensExpandAux? tokens (i + 1) lengths
+  else
+    some lengths
+termination_by tokens.size - i
+decreasing_by
+  have hlt : i < tokens.size := h
+  exact Nat.sub_lt_sub_left (k := i) (m := tokens.size) (n := i + 1)
+    hlt (Nat.lt_succ_self i)
+
+def codeLenTokensExpand? (tokens : Array CodeLenToken) : Option (Array Nat) :=
+  codeLenTokensExpandAux? tokens 0 #[]
+
+def BitWriter.writeCodeLenToken (bw : BitWriter) (codeLenCodes : Array (Nat × Nat))
+    (token : CodeLenToken) : BitWriter :=
+  let bw := bw.writeCodeLenSymbol codeLenCodes token.symbol
+  bw.writeBitsFast token.extraBits token.extraLen
+
+def BitWriter.writeCodeLenTokens (bw : BitWriter) (codeLenCodes : Array (Nat × Nat))
+    (tokens : Array CodeLenToken) : BitWriter :=
+  Id.run do
+    let mut bw := bw
+    for token in tokens do
+      bw := bw.writeCodeLenToken codeLenCodes token
+    return bw
+
+def codeLenZeroRunTokensAux (tokens : Array CodeLenToken) (runLen : Nat) :
+    Array CodeLenToken :=
   if _h18 : 11 ≤ runLen then
     let chunk := Nat.min 138 runLen
-    let bw := bw.writeCodeLenRepeat codeLenCodes 18 (chunk - 11) 7
-    bw.writeZeroCodeLenRun codeLenCodes (runLen - chunk)
+    codeLenZeroRunTokensAux (tokens.push (.repeatZeroLong chunk)) (runLen - chunk)
   else if _h17 : 3 ≤ runLen then
     let chunk := Nat.min 10 runLen
-    let bw := bw.writeCodeLenRepeat codeLenCodes 17 (chunk - 3) 3
-    bw.writeZeroCodeLenRun codeLenCodes (runLen - chunk)
+    codeLenZeroRunTokensAux (tokens.push (.repeatZeroShort chunk)) (runLen - chunk)
   else
     Id.run do
-      let mut bw := bw
+      let mut tokens := tokens
       for _ in [0:runLen] do
-        bw := bw.writeCodeLenSymbol codeLenCodes 0
-      return bw
+        tokens := tokens.push (.literal 0)
+      return tokens
 termination_by runLen
 decreasing_by
   · have hpos : 0 < Nat.min 138 runLen := by
@@ -1186,19 +1254,22 @@ decreasing_by
     have hle : Nat.min 10 runLen ≤ runLen := Nat.min_le_right 10 runLen
     exact Nat.sub_lt_self hpos hle
 
-def BitWriter.writeNonzeroCodeLenRun (bw : BitWriter) (codeLenCodes : Array (Nat × Nat))
-    (len runLen : Nat) : BitWriter :=
+def codeLenZeroRunTokens (runLen : Nat) : Array CodeLenToken :=
+  codeLenZeroRunTokensAux #[] runLen
+
+def codeLenNonzeroRunTokensAux (tokens : Array CodeLenToken) (len runLen : Nat) :
+    Array CodeLenToken :=
   if h16 : 4 ≤ runLen then
-    let bw := bw.writeCodeLenSymbol codeLenCodes len
     let repeatCount := Nat.min 6 (runLen - 1)
-    let bw := bw.writeCodeLenRepeat codeLenCodes 16 (repeatCount - 3) 2
-    bw.writeNonzeroCodeLenRun codeLenCodes len (runLen - (1 + repeatCount))
+    let tokens := tokens.push (.literal len)
+    let tokens := tokens.push (.repeatPrev repeatCount)
+    codeLenNonzeroRunTokensAux tokens len (runLen - (1 + repeatCount))
   else
     Id.run do
-      let mut bw := bw
+      let mut tokens := tokens
       for _ in [0:runLen] do
-        bw := bw.writeCodeLenSymbol codeLenCodes len
-      return bw
+        tokens := tokens.push (.literal len)
+      return tokens
 termination_by runLen
 decreasing_by
   have hrepPos : 0 < Nat.min 6 (runLen - 1) := by
@@ -1207,6 +1278,17 @@ decreasing_by
   have hrepLe : Nat.min 6 (runLen - 1) ≤ runLen - 1 := Nat.min_le_right 6 (runLen - 1)
   have : 1 + Nat.min 6 (runLen - 1) ≤ runLen := by omega
   omega
+
+def codeLenNonzeroRunTokens (len runLen : Nat) : Array CodeLenToken :=
+  codeLenNonzeroRunTokensAux #[] len runLen
+
+def BitWriter.writeZeroCodeLenRun (bw : BitWriter) (codeLenCodes : Array (Nat × Nat))
+    (runLen : Nat) : BitWriter :=
+  bw.writeCodeLenTokens codeLenCodes (codeLenZeroRunTokens runLen)
+
+def BitWriter.writeNonzeroCodeLenRun (bw : BitWriter) (codeLenCodes : Array (Nat × Nat))
+    (len runLen : Nat) : BitWriter :=
+  bw.writeCodeLenTokens codeLenCodes (codeLenNonzeroRunTokens len runLen)
 
 def codeLenRunEnd (lengths : Array Nat) (i : Nat) : Nat :=
   if h : i < lengths.size then
@@ -1226,21 +1308,24 @@ def codeLenRunEnd (lengths : Array Nat) (i : Nat) : Nat :=
   else
     i
 
-def BitWriter.writeDynamicCodeLengths (bw : BitWriter) (lengths : Array Nat)
-    (codeLenCodes : Array (Nat × Nat)) : BitWriter :=
+def codeLenTokensOfLengths (lengths : Array Nat) : Array CodeLenToken :=
   Id.run do
-    let mut bw := bw
+    let mut tokens := #[]
     let mut i := 0
     while i < lengths.size do
       let j := codeLenRunEnd lengths i
       let len := lengths[i]!
       let runLen := j - i
       if len == 0 then
-        bw := bw.writeZeroCodeLenRun codeLenCodes runLen
+        tokens := codeLenZeroRunTokensAux tokens runLen
       else
-        bw := bw.writeNonzeroCodeLenRun codeLenCodes len runLen
+        tokens := codeLenNonzeroRunTokensAux tokens len runLen
       i := j
-    return bw
+    return tokens
+
+def BitWriter.writeDynamicCodeLengths (bw : BitWriter) (lengths : Array Nat)
+    (codeLenCodes : Array (Nat × Nat)) : BitWriter :=
+  bw.writeCodeLenTokens codeLenCodes (codeLenTokensOfLengths lengths)
 
 def generatedDynamicLitLenCount (litLenLengths : Array Nat) : Nat :=
   let litLenLast := lastNonZeroIndex litLenLengths 256

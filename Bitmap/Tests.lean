@@ -349,6 +349,18 @@ private def validateGeneratedDynamicEncoderCase
     throw (IO.userError s!"generated dynamic encoder {name}: token expansion mismatch")
   if Png.deflateTokensHasMatchDist1 tokens != expectDistance then
     throw (IO.userError s!"generated dynamic encoder {name}: unexpected match-token shape")
+  let litLenLengths := Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+  let distLengths := Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)
+  let litLenCount := Png.generatedDynamicLitLenCount litLenLengths
+  let distCount := Png.generatedDynamicDistCount distLengths
+  let headerLengths :=
+    (litLenLengths.extract 0 litLenCount) ++ (distLengths.extract 0 distCount)
+  match Png.codeLenTokensExpand? (Png.codeLenTokensOfLengths headerLengths) with
+  | some headerLengths' =>
+      if headerLengths' != headerLengths then
+        throw (IO.userError s!"generated dynamic encoder {name}: code-length token expansion mismatch")
+  | none =>
+      throw (IO.userError s!"generated dynamic encoder {name}: invalid code-length token stream")
   let deflated := Png.deflateDynamicFullFast raw
   match dynamicTablesFromDeflate? deflated with
   | some (litLen, dist) =>
