@@ -2787,6 +2787,62 @@ lemma generatedCodeLenHuffman_maxLen :
     generatedCodeLenHuffman.maxLen = 5 := by
   native_decide
 
+/-- The generated code-length Huffman table has rows for lengths zero through
+five. This bounds row access in the generated helper decode proof. -/
+lemma generatedCodeLenHuffman_table_size :
+    generatedCodeLenHuffman.table.size = 6 := by
+  native_decide
+
+/-- The generated helper Huffman row for one-bit prefixes has no symbols. All
+generated code-length-code symbols are exactly five bits wide. -/
+lemma generatedCodeLenHuffman_row1_get_none
+    (code : Nat) (hcode : code < 2) :
+    generatedCodeLenHuffman.table[1]![code]! = none := by
+  have hall :
+      ∀ code : Fin 2,
+        generatedCodeLenHuffman.table[1]![code.val]! = none := by
+    native_decide
+  exact hall ⟨code, hcode⟩
+
+/-- The generated helper Huffman row for two-bit prefixes has no symbols. This
+is the second empty-row step before the five-bit generated codes resolve. -/
+lemma generatedCodeLenHuffman_row2_get_none
+    (code : Nat) (hcode : code < 4) :
+    generatedCodeLenHuffman.table[2]![code]! = none := by
+  have hall :
+      ∀ code : Fin 4,
+        generatedCodeLenHuffman.table[2]![code.val]! = none := by
+    native_decide
+  exact hall ⟨code, hcode⟩
+
+/-- The generated helper Huffman row for three-bit prefixes has no symbols.
+This supports the generated five-bit decode-fuel chain. -/
+lemma generatedCodeLenHuffman_row3_get_none
+    (code : Nat) (hcode : code < 8) :
+    generatedCodeLenHuffman.table[3]![code]! = none := by
+  have hall :
+      ∀ code : Fin 8,
+        generatedCodeLenHuffman.table[3]![code.val]! = none := by
+    native_decide
+  exact hall ⟨code, hcode⟩
+
+/-- The generated helper Huffman row for four-bit prefixes has no symbols.
+The next bit is the first row where generated helper symbols can resolve. -/
+lemma generatedCodeLenHuffman_row4_get_none
+    (code : Nat) (hcode : code < 16) :
+    generatedCodeLenHuffman.table[4]![code]! = none := by
+  have hall :
+      ∀ code : Fin 16,
+        generatedCodeLenHuffman.table[4]![code.val]! = none := by
+    native_decide
+  exact hall ⟨code, hcode⟩
+
+/-- The generated helper Huffman row for five-bit prefixes has the expected
+width. This packages row bounds for generated token lookup. -/
+lemma generatedCodeLenHuffman_row5_size :
+    generatedCodeLenHuffman.table[5]!.size = 32 := by
+  native_decide
+
 /-- Every entry in the generated code-length-code length table is exactly five.
 This is the source-table shape behind the generated helper Huffman table. -/
 lemma codeLenCodeLengths_get!_eq_five
