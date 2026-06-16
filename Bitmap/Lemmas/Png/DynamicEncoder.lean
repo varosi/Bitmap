@@ -3423,6 +3423,50 @@ lemma codeLenToken_extraBits_mod
     Nat.mod_eq_of_lt hbits
   simpa [hmod] using h
 
+/-- Any one-bit prefix is unresolved in the generated code-length Huffman
+table. This is the first empty-row step for the future decode-fuel proof. -/
+lemma generatedCodeLenHuffman_prefix1_row_none (bitsTot : Nat) :
+    generatedCodeLenHuffman.table[1]![bitsTot % 2]! = none := by
+  have hcode : bitsTot % 2 < 2 := Nat.mod_lt bitsTot (by decide)
+  exact generatedCodeLenHuffman_row1_get_none (bitsTot % 2) hcode
+
+/-- Any two-bit prefix is unresolved in the generated code-length Huffman
+table. This packages the second empty-row step for token decoding. -/
+lemma generatedCodeLenHuffman_prefix2_row_none (bitsTot : Nat) :
+    generatedCodeLenHuffman.table[2]![bitsTot % 2 ^ 2]! = none := by
+  have hcode : bitsTot % 2 ^ 2 < 4 := by
+    simpa using Nat.mod_lt bitsTot (by decide : 0 < 2 ^ 2)
+  exact generatedCodeLenHuffman_row2_get_none (bitsTot % 2 ^ 2) hcode
+
+/-- Any three-bit prefix is unresolved in the generated code-length Huffman
+table. This packages the third empty-row step for token decoding. -/
+lemma generatedCodeLenHuffman_prefix3_row_none (bitsTot : Nat) :
+    generatedCodeLenHuffman.table[3]![bitsTot % 2 ^ 3]! = none := by
+  have hcode : bitsTot % 2 ^ 3 < 8 := by
+    simpa using Nat.mod_lt bitsTot (by decide : 0 < 2 ^ 3)
+  exact generatedCodeLenHuffman_row3_get_none (bitsTot % 2 ^ 3) hcode
+
+/-- Any four-bit prefix is unresolved in the generated code-length Huffman
+table. The generated helper codes resolve only on the fifth bit. -/
+lemma generatedCodeLenHuffman_prefix4_row_none (bitsTot : Nat) :
+    generatedCodeLenHuffman.table[4]![bitsTot % 2 ^ 4]! = none := by
+  have hcode : bitsTot % 2 ^ 4 < 16 := by
+    simpa using Nat.mod_lt bitsTot (by decide : 0 < 2 ^ 4)
+  exact generatedCodeLenHuffman_row4_get_none (bitsTot % 2 ^ 4) hcode
+
+/-- The five-bit prefix of a packed valid generated token resolves to that
+token's symbol. This is the row lookup used at the final decode-fuel step. -/
+lemma generatedCodeLenHuffman_prefix5_row_some
+    {token : Png.CodeLenToken} (hvalid : CodeLenTokenValid token) (restBits : Nat) :
+    let codes := Png.canonicalRevCodesFromLengths Png.codeLenCodeLengths
+    let bitsTot := codes[token.symbol]!.1 ||| (restBits <<< 5)
+    generatedCodeLenHuffman.table[5]![bitsTot % 2 ^ 5]! = some token.symbol := by
+  intro codes bitsTot
+  have hlen := generatedCodeLenCodes_token_len_eq_five hvalid
+  have hmod := generatedCodeLenToken_bits_mod hvalid restBits
+  have hlookup := generatedCodeLenHuffman_lookup_token_symbol hvalid
+  simpa [bitsTot, codes, hmod, hlen] using hlookup
+
 /-- Reading a generated code-length token code from a stream built by the
 writer returns the token's generated five-bit code and advances five bits. -/
 lemma readGeneratedCodeLenTokenBits_readerAt_writeBits_prefix
