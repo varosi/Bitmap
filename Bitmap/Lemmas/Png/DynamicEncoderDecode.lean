@@ -1041,6 +1041,106 @@ lemma readDynamicTablesLengthsFuel_step_repeatPrev_token_generated
       (by simpa [token, Png.CodeLenToken.extraLen] using hreadToken)
   simpa [token, Png.CodeLenToken.symbol, hrepeat] using hstep
 
+/-- Replays one valid generated code-length token through the dynamic-table
+length reader, producing the same array as `CodeLenToken.expand`. -/
+lemma readDynamicTablesLengthsFuel_step_token_generated
+    (bw : Png.BitWriter) (token : Png.CodeLenToken)
+    (fuel total restBits restLen : Nat)
+    (lengths lengths' : Array Nat)
+    (hvalid : CodeLenTokenValid token)
+    (hexpand : Png.CodeLenToken.expand lengths token = some lengths')
+    (hsize : lengths.size < total)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let codes := Png.canonicalRevCodesFromLengths Png.codeLenCodeLengths
+    let codeBits := codes[token.symbol]!.1
+    let tailBits := token.extraBits ||| (restBits <<< token.extraLen)
+    let bitsTot := codeBits ||| (tailBits <<< 5)
+    let lenTot := 5 + (token.extraLen + restLen)
+    let bw' := Png.BitWriter.writeBits bw bitsTot lenTot
+    let br0 := Png.BitWriter.readerAt bw bw'.flush
+      (Png.flush_size_writeBits_le bw bitsTot lenTot) hbit
+    let brToken := Png.BitWriter.readerAt
+      (Png.BitWriter.writeBits bw bitsTot (5 + token.extraLen)) bw'.flush
+      (by
+        have hk : 5 + token.extraLen ≤ lenTot := by omega
+        simpa [lenTot] using
+          (Png.flush_size_writeBits_prefix bw bitsTot (5 + token.extraLen) lenTot hk))
+      (Png.bitPos_lt_8_writeBits bw bitsTot (5 + token.extraLen) hbit)
+    Png.readDynamicTablesLengthsFuel (fuel + 1) total generatedCodeLenHuffman br0 lengths =
+      Png.readDynamicTablesLengthsFuel fuel total generatedCodeLenHuffman brToken lengths' := by
+  cases token with
+  | literal len =>
+      intro codes codeBits tailBits bitsTot lenTot bw' br0 brToken
+      have hlen : len ≤ 15 := by
+        simpa [CodeLenTokenValid] using hvalid
+      have hlengths' : lengths' = lengths.push len := by
+        simpa [Png.CodeLenToken.expand] using hexpand.symm
+      subst lengths'
+      simpa [codes, codeBits, tailBits, bitsTot, lenTot, bw', br0, brToken,
+        Png.CodeLenToken.symbol, Png.CodeLenToken.extraBits,
+        Png.CodeLenToken.extraLen, Nat.add_assoc] using
+        (readDynamicTablesLengthsFuel_step_literal_token_generated
+          (bw := bw) (len := len) (fuel := fuel) (total := total)
+          (restBits := restBits) (restLen := restLen) (lengths := lengths)
+          hlen hsize hbit hcur)
+  | repeatPrev repeatCount =>
+      intro codes codeBits tailBits bitsTot lenTot bw' br0 brToken
+      have hlo : 3 ≤ repeatCount := by
+        simpa [CodeLenTokenValid] using hvalid.1
+      have hhi : repeatCount ≤ 6 := by
+        simpa [CodeLenTokenValid] using hvalid.2
+      unfold Png.CodeLenToken.expand at hexpand
+      by_cases hzero : lengths.size == 0
+      · simp [hzero] at hexpand
+      · have hnonempty : lengths.size ≠ 0 := by
+          intro h
+          simp [h] at hzero
+        simp [hzero] at hexpand
+        have hlengths' :
+            lengths' =
+              Png.pushNatRepeat lengths lengths[lengths.size - 1]! repeatCount := by
+          exact hexpand.symm
+        subst lengths'
+        simpa [codes, codeBits, tailBits, bitsTot, lenTot, bw', br0, brToken,
+          Png.CodeLenToken.symbol, Png.CodeLenToken.extraBits,
+          Png.CodeLenToken.extraLen, Nat.add_assoc] using
+          (readDynamicTablesLengthsFuel_step_repeatPrev_token_generated
+            (bw := bw) (repeatCount := repeatCount) (fuel := fuel) (total := total)
+            (restBits := restBits) (restLen := restLen) (lengths := lengths)
+            hlo hhi hsize hnonempty hbit hcur)
+  | repeatZeroShort repeatCount =>
+      intro codes codeBits tailBits bitsTot lenTot bw' br0 brToken
+      have hlo : 3 ≤ repeatCount := by
+        simpa [CodeLenTokenValid] using hvalid.1
+      have hhi : repeatCount ≤ 10 := by
+        simpa [CodeLenTokenValid] using hvalid.2
+      have hlengths' : lengths' = Png.pushNatRepeat lengths 0 repeatCount := by
+        simpa [Png.CodeLenToken.expand] using hexpand.symm
+      subst lengths'
+      simpa [codes, codeBits, tailBits, bitsTot, lenTot, bw', br0, brToken,
+        Png.CodeLenToken.symbol, Png.CodeLenToken.extraBits,
+        Png.CodeLenToken.extraLen, Nat.add_assoc] using
+        (readDynamicTablesLengthsFuel_step_repeatZeroShort_token_generated
+          (bw := bw) (repeatCount := repeatCount) (fuel := fuel) (total := total)
+          (restBits := restBits) (restLen := restLen) (lengths := lengths)
+          hlo hhi hsize hbit hcur)
+  | repeatZeroLong repeatCount =>
+      intro codes codeBits tailBits bitsTot lenTot bw' br0 brToken
+      have hlo : 11 ≤ repeatCount := by
+        simpa [CodeLenTokenValid] using hvalid.1
+      have hhi : repeatCount ≤ 138 := by
+        simpa [CodeLenTokenValid] using hvalid.2
+      have hlengths' : lengths' = Png.pushNatRepeat lengths 0 repeatCount := by
+        simpa [Png.CodeLenToken.expand] using hexpand.symm
+      subst lengths'
+      simpa [codes, codeBits, tailBits, bitsTot, lenTot, bw', br0, brToken,
+        Png.CodeLenToken.symbol, Png.CodeLenToken.extraBits,
+        Png.CodeLenToken.extraLen, Nat.add_assoc] using
+        (readDynamicTablesLengthsFuel_step_repeatZeroLong_token_generated
+          (bw := bw) (repeatCount := repeatCount) (fuel := fuel) (total := total)
+          (restBits := restBits) (restLen := restLen) (lengths := lengths)
+          hlo hhi hsize hbit hcur)
+
 end Lemmas
 
 end Bitmaps
