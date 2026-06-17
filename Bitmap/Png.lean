@@ -1650,40 +1650,51 @@ deriving Repr, DecidableEq
 def emptyHuffman : Huffman :=
   { maxLen := 0, table := #[#[]] }
 
-def mkHuffman (lengths : Array Nat) : Option Huffman := do
-  let mut maxLen := 0
-  for l in lengths do
-    if l > maxLen then
-      maxLen := l
-  if maxLen == 0 then
-    none
-  let mut count : Array Nat := Array.replicate (maxLen + 1) 0
-  for l in lengths do
-    if l > 0 then
-      count := count.set! l (count[l]! + 1)
-  let mut nextCode : Array Nat := Array.replicate (maxLen + 1) 0
-  let mut code := 0
-  for bits in [1:maxLen + 1] do
-    code := (code + count[bits - 1]!) <<< 1
-    nextCode := nextCode.set! bits code
-  let mut table : Array (Array (Option Nat)) := Array.mkEmpty (maxLen + 1)
-  table := table.push (#[])
-  for bits in [1:maxLen + 1] do
-    table := table.push (Array.replicate (1 <<< bits) none)
-  for idx in [0:lengths.size] do
-    let len := lengths[idx]!
+def huffmanEmptyTable (maxLen : Nat) : Array (Array (Option Nat)) :=
+  Array.ofFn (fun idx : Fin (maxLen + 1) =>
+    if idx.val == 0 then #[] else Array.replicate (1 <<< idx.val) none)
+
+def fillHuffmanTableAux (lengths : Array Nat) (i : Nat)
+    (nextCode : Array Nat) (table : Array (Array (Option Nat))) :
+    Option (Array (Array (Option Nat))) :=
+  if h : i < lengths.size then
+    let len := lengths[i]
     if len > 0 then
       let codeVal := nextCode[len]!
       if codeVal >= (1 <<< len) then
         none
-      nextCode := nextCode.set! len (codeVal + 1)
-      let rev := reverseBits codeVal len
-      let row := table[len]!
-      if rev >= row.size then
-        none
-      let row' := row.set! rev (some idx)
-      table := table.set! len row'
-  return { maxLen, table }
+      else
+        let nextCode := nextCode.set! len (codeVal + 1)
+        let rev := reverseBits codeVal len
+        let row := table[len]!
+        if rev >= row.size then
+          none
+        else
+          let row' := row.set! rev (some i)
+          let table := table.set! len row'
+          fillHuffmanTableAux lengths (i + 1) nextCode table
+    else
+      fillHuffmanTableAux lengths (i + 1) nextCode table
+  else
+    some table
+termination_by lengths.size - i
+decreasing_by
+  all_goals
+    have hlt : i < lengths.size := h
+    exact Nat.sub_lt_sub_left (k := i) (m := lengths.size) (n := i + 1)
+      hlt (Nat.lt_succ_self i)
+
+def mkHuffman (lengths : Array Nat) : Option Huffman :=
+  let maxLen := maxCodeLenAux lengths 0 0
+  if maxLen == 0 then
+    none
+  else
+    let count := countCodeLengthsAux lengths 0 (Array.replicate (maxLen + 1) 0)
+    let nextCode0 : Array Nat := Array.replicate (maxLen + 1) 0
+    let (_, nextCode) := nextCodesAux count maxLen 1 0 nextCode0
+    match fillHuffmanTableAux lengths 0 nextCode (huffmanEmptyTable maxLen) with
+    | none => none
+    | some table => some { maxLen, table }
 
 /-- Detects the dynamic-table special case where every advertised code length is zero. -/
 def allZeroCodeLengths (lengths : Array Nat) : Bool :=

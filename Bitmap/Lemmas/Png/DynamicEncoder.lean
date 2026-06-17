@@ -1859,6 +1859,107 @@ lemma buildDynamicDistTable_generatedDynamicDistLengths_exists
   | some distTable =>
       exact ⟨distTable, rfl⟩
 
+/-- The refactored Huffman table initializer creates rows zero through
+`maxLen`. This packages the table shape used by `mkHuffman`. -/
+lemma huffmanEmptyTable_size (maxLen : Nat) :
+    (Png.huffmanEmptyTable maxLen).size = maxLen + 1 := by
+  simp [Png.huffmanEmptyTable]
+
+/-- Positive rows in the refactored Huffman table initializer have the
+expected bit-address width. This is the row-size guard for table filling. -/
+lemma huffmanEmptyTable_get!_size
+    (maxLen len : Nat) (hlen : len ≤ maxLen) (hpos : 0 < len) :
+    (Png.huffmanEmptyTable maxLen)[len]!.size = 1 <<< len := by
+  have hidx : len < (Png.huffmanEmptyTable maxLen).size := by
+    rw [huffmanEmptyTable_size]
+    omega
+  have hne : len ≠ 0 := Nat.ne_of_gt hpos
+  rw [getElem!_pos (Png.huffmanEmptyTable maxLen) len hidx]
+  simp [Png.huffmanEmptyTable, hne]
+
+/-- Filling a Huffman table cannot fail when every remaining positive length
+uses one row, that row has enough code budget, and the row exists. This is the
+generic success lemma behind generated literal/length table validity. -/
+lemma fillHuffmanTableAux_uniform_isSome
+    (lengths : Array Nat) (i codeLen : Nat) (nextCode : Array Nat)
+    (table : Array (Array (Option Nat)))
+    (hshape :
+      ∀ j (hj : j < lengths.size), i ≤ j →
+        0 < lengths[j] → lengths[j] = codeLen)
+    (hnextIdx : codeLen < nextCode.size)
+    (htableIdx : codeLen < table.size)
+    (hrow : table[codeLen]!.size = 1 <<< codeLen)
+    (hbudget : nextCode[codeLen]! + (lengths.size - i) ≤ 1 <<< codeLen) :
+    (Png.fillHuffmanTableAux lengths i nextCode table).isSome = true := by
+  rw [Png.fillHuffmanTableAux.eq_1]
+  by_cases hi : i < lengths.size
+  · by_cases hpos : 0 < lengths[i]
+    · have hlen : lengths[i] = codeLen := hshape i hi le_rfl hpos
+      have hcodeLenPos : 0 < codeLen := by
+        simpa [hlen] using hpos
+      have hremainingPos : 0 < lengths.size - i := by omega
+      have hcodeLt : nextCode[codeLen]! < 1 <<< codeLen := by omega
+      have hnotCodeGe : ¬ 1 <<< codeLen ≤ nextCode[codeLen]! := by omega
+      let row := table[codeLen]!
+      have hrev :
+          Png.reverseBits nextCode[codeLen]! codeLen < row.size := by
+        rw [hrow]
+        simpa [Nat.shiftLeft_eq] using
+          Png.reverseBits_lt nextCode[codeLen]! codeLen
+      have hnotRevGe :
+          ¬ row.size ≤ Png.reverseBits nextCode[codeLen]! codeLen := by
+        omega
+      let row' := row.set! (Png.reverseBits nextCode[codeLen]! codeLen) (some i)
+      let table' := table.set! codeLen row'
+      let nextCode' := nextCode.set! codeLen (nextCode[codeLen]! + 1)
+      have hshape' :
+          ∀ j (hj : j < lengths.size), i + 1 ≤ j →
+            0 < lengths[j] → lengths[j] = codeLen := by
+        intro j hj hle hposj
+        exact hshape j hj (by omega) hposj
+      have hnextIdx' : codeLen < nextCode'.size := by
+        simp [nextCode', hnextIdx]
+      have htableIdx' : codeLen < table'.size := by
+        simp [table', htableIdx]
+      have hnextAt :
+          nextCode'[codeLen]! = nextCode[codeLen]! + 1 := by
+        simpa [nextCode'] using
+          getElem!_set!_eq nextCode codeLen (nextCode[codeLen]! + 1) hnextIdx
+      have hrowSet :
+          table'[codeLen]! = row' := by
+        simpa [table'] using getElem!_set!_eq table codeLen row' htableIdx
+      have hrow' : table'[codeLen]!.size = 1 <<< codeLen := by
+        rw [hrowSet]
+        simp [row', row, hrow]
+      have hbudget' :
+          nextCode'[codeLen]! + (lengths.size - (i + 1)) ≤ 1 <<< codeLen := by
+        rw [hnextAt]
+        omega
+      have hrec :=
+        fillHuffmanTableAux_uniform_isSome lengths (i + 1) codeLen nextCode'
+          table' hshape' hnextIdx' htableIdx' hrow' hbudget'
+      simpa [hi, hpos, hlen, hnotCodeGe, row, hnotRevGe, row', table',
+        nextCode', hcodeLenPos] using hrec
+    · have hshape' :
+          ∀ j (hj : j < lengths.size), i + 1 ≤ j →
+            0 < lengths[j] → lengths[j] = codeLen := by
+        intro j hj hle hposj
+        exact hshape j hj (by omega) hposj
+      have hbudget' :
+          nextCode[codeLen]! + (lengths.size - (i + 1)) ≤ 1 <<< codeLen := by
+        omega
+      have hrec :=
+        fillHuffmanTableAux_uniform_isSome lengths (i + 1) codeLen nextCode
+          table hshape' hnextIdx htableIdx hrow hbudget'
+      simpa [hi, hpos] using hrec
+  · simp [hi]
+termination_by lengths.size - i
+decreasing_by
+  all_goals
+    have hlt : i < lengths.size := hi
+    exact Nat.sub_lt_sub_left (k := i) (m := lengths.size) (n := i + 1)
+      hlt (Nat.lt_succ_self i)
+
 /-- Counting generated code lengths preserves the count table shape. This is
 the canonical-code proof analogue of the frequency-table size lemmas. -/
 lemma countCodeLengthsAux_size
@@ -2177,6 +2278,76 @@ decreasing_by
     have hlt : bits < maxLen + 1 := h
     exact Nat.sub_lt_sub_left (k := bits) (m := maxLen + 1) (n := bits + 1)
       hlt (Nat.lt_succ_self bits)
+
+/-- Generated literal/length lengths are accepted by the runtime Huffman table
+builder. This is the literal/length counterpart to generated distance validity. -/
+lemma mkHuffman_generatedDynamicLitLenLengths_isSome
+    (tokens : Array Png.DeflateToken) :
+    (Png.mkHuffman
+      (Png.generatedDynamicLitLenLengths
+        (Png.litLenSymbolFreqs tokens))).isSome = true := by
+  let lengths :=
+    Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+  let maxLen := Png.maxCodeLenAux lengths 0 0
+  let count := Png.countCodeLengthsAux lengths 0 (Array.replicate (maxLen + 1) 0)
+  let nextCode0 : Array Nat := Array.replicate (maxLen + 1) 0
+  let nextCode := (Png.nextCodesAux count maxLen 1 0 nextCode0).2
+  let codeLen := Png.generatedDynamicLitLenCodeLen
+  have hmax : maxLen = codeLen := by
+    simpa [lengths, maxLen, codeLen] using
+      maxCodeLenAux_generatedDynamicLitLenLengths_eq_codeLen tokens
+  have hmaxNe : ¬ maxLen = 0 := by
+    rw [hmax]
+    exact Nat.ne_of_gt (by simpa [codeLen] using generatedDynamicLitLenCodeLen_pos)
+  have hnextSize : nextCode.size = nextCode0.size := by
+    simpa [nextCode] using nextCodesAux_size count maxLen 1 0 nextCode0
+  have hnextIdx : codeLen < nextCode.size := by
+    rw [hnextSize]
+    simp [nextCode0, hmax, codeLen]
+  have htableIdx : codeLen < (Png.huffmanEmptyTable maxLen).size := by
+    simp [huffmanEmptyTable_size, hmax, codeLen]
+  have hrow :
+      (Png.huffmanEmptyTable maxLen)[codeLen]!.size = 1 <<< codeLen := by
+    exact huffmanEmptyTable_get!_size maxLen codeLen (by simp [hmax])
+      (by simpa [codeLen] using generatedDynamicLitLenCodeLen_pos)
+  have hnextZero : nextCode[codeLen]! = 0 := by
+    have hscanned :=
+      nextCodesAux_generatedDynamicLitLenLengths_get!_scannedMax_eq_zero tokens
+    simpa [lengths, maxLen, count, nextCode0, nextCode, codeLen, hmax] using hscanned
+  have hsizeLt : lengths.size < 1 <<< codeLen := by
+    have hlt := generatedDynamicLitLenLengths_size_lt_codeSpace tokens
+    simpa [lengths, codeLen, Nat.shiftLeft_eq] using hlt
+  have hbudget : nextCode[codeLen]! + (lengths.size - 0) ≤ 1 <<< codeLen := by
+    rw [hnextZero]
+    omega
+  have hshape :
+      ∀ j (hj : j < lengths.size), 0 ≤ j →
+        0 < lengths[j] → lengths[j] = codeLen := by
+    intro j hj _hle hpos
+    have hnine :
+        lengths[j] = 9 := by
+      simpa [lengths] using
+        (generatedDynamicLitLenLengths_getElem_pos_iff_eq_nine
+          (Png.litLenSymbolFreqs tokens) j (by simpa [lengths] using hj)).mp hpos
+    simpa [codeLen, generatedDynamicLitLenCodeLen_eq_nine] using hnine
+  have hfill :
+      (Png.fillHuffmanTableAux lengths 0 nextCode
+        (Png.huffmanEmptyTable maxLen)).isSome = true :=
+    fillHuffmanTableAux_uniform_isSome lengths 0 codeLen nextCode
+      (Png.huffmanEmptyTable maxLen) hshape hnextIdx htableIdx hrow hbudget
+  obtain ⟨table, hfillEq⟩ :
+      ∃ table,
+        Png.fillHuffmanTableAux lengths 0 nextCode
+          (Png.huffmanEmptyTable maxLen) = some table := by
+    cases h :
+        Png.fillHuffmanTableAux lengths 0 nextCode
+          (Png.huffmanEmptyTable maxLen) with
+    | none =>
+        simp [h] at hfill
+    | some table =>
+        exact ⟨table, rfl⟩
+  change (Png.mkHuffman lengths).isSome = true
+  simp [Png.mkHuffman, maxLen, count, nextCode0, nextCode, hmaxNe, hfillEq]
 
 /-- Filling canonical reversed codes preserves the output code table shape.
 This isolates the final recursive loop used by generated dynamic payloads. -/
