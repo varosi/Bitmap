@@ -3363,6 +3363,15 @@ lemma arrayEntriesLe_append
     rw [Array.getElem_append_right hle]
     exact hys (idx - xs.size) hright
 
+/-- Extracting an array from zero to its size returns the original array. This
+keeps generated full-header proofs independent of ad hoc extraction rewrites. -/
+lemma array_extract_zero_size {α : Type} (xs : Array α) :
+    xs.extract 0 xs.size = xs := by
+  apply Array.ext
+  · simp
+  · intro i hleft hright
+    simp
+
 /-- Generated literal/length code-length arrays obey the DEFLATE 15-bit bound
 at every entry. This gives the header prefix proof an array-level premise. -/
 lemma generatedDynamicLitLenLengths_entries_le_15
@@ -3466,6 +3475,90 @@ lemma generatedDynamicHeaderCodeLengths_extract_dist
       generatedDynamicLitLenCount_le_generated_size tokens
   simp [generatedDynamicHeaderCodeLengths, litLenLengths, distLengths,
     litLenCount, distCount, hlit]
+
+/-- With the generated full-header shape, the advertised literal/length count
+is the complete generated literal/length table. This avoids prefix/full-table
+conversion in later parser proofs. -/
+lemma generatedDynamicLitLenCount_eq_full
+    (litLenLengths : Array Nat) :
+    Png.generatedDynamicLitLenCount litLenLengths = 286 := by
+  rfl
+
+/-- With the generated full-header shape, the advertised distance count is the
+complete generated distance table. This is the distance-side counterpart. -/
+lemma generatedDynamicDistCount_eq_full
+    (distLengths : Array Nat) :
+    Png.generatedDynamicDistCount distLengths = 30 := by
+  rfl
+
+/-- The generated header code-length buffer is the full generated
+literal/length table followed by the full generated distance table. This is
+the core parser bookkeeping fact after moving away from trimmed headers. -/
+lemma generatedDynamicHeaderCodeLengths_eq_full
+    (tokens : Array Png.DeflateToken) :
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    let distLengths :=
+      Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)
+    generatedDynamicHeaderCodeLengths tokens = litLenLengths ++ distLengths := by
+  intro litLenLengths distLengths
+  have hlitSize : litLenLengths.size = 286 := by
+    simpa [litLenLengths] using generatedDynamicLitLenLengths_size_286 tokens
+  have hdistSize : distLengths.size = 30 := by
+    simp [distLengths, generatedDynamicDistLengths_size, distSymbolFreqs_size]
+  have hlitExtract :
+      litLenLengths.extract 0 286 = litLenLengths := by
+    rw [← hlitSize]
+    exact array_extract_zero_size litLenLengths
+  have hdistExtract :
+      distLengths.extract 0 30 = distLengths := by
+    rw [← hdistSize]
+    exact array_extract_zero_size distLengths
+  simp [generatedDynamicHeaderCodeLengths, litLenLengths, distLengths,
+    Png.generatedDynamicLitLenCount, Png.generatedDynamicDistCount,
+    hlitExtract, hdistExtract]
+
+/-- Extracting the literal/length prefix from the generated header buffer
+recovers the full generated literal/length table. This is the parser's
+`HLIT` split specialized to generated full headers. -/
+lemma generatedDynamicHeaderCodeLengths_extract_lit_full
+    (tokens : Array Png.DeflateToken) :
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    (generatedDynamicHeaderCodeLengths tokens).extract 0 286 = litLenLengths := by
+  intro litLenLengths
+  let distLengths := Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)
+  have hfull :
+      generatedDynamicHeaderCodeLengths tokens = litLenLengths ++ distLengths := by
+    simpa [litLenLengths, distLengths] using
+      generatedDynamicHeaderCodeLengths_eq_full tokens
+  have hlitSize : litLenLengths.size = 286 := by
+    simpa [litLenLengths] using generatedDynamicLitLenLengths_size_286 tokens
+  rw [hfull]
+  simp [hlitSize]
+
+/-- Extracting the distance suffix from the generated header buffer recovers
+the full generated distance table. This is the parser's `HDIST` split
+specialized to generated full headers. -/
+lemma generatedDynamicHeaderCodeLengths_extract_dist_full
+    (tokens : Array Png.DeflateToken) :
+    let distLengths :=
+      Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)
+    (generatedDynamicHeaderCodeLengths tokens).extract 286 (286 + 30) =
+      distLengths := by
+  intro distLengths
+  let litLenLengths :=
+    Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+  have hfull :
+      generatedDynamicHeaderCodeLengths tokens = litLenLengths ++ distLengths := by
+    simpa [litLenLengths, distLengths] using
+      generatedDynamicHeaderCodeLengths_eq_full tokens
+  have hlitSize : litLenLengths.size = 286 := by
+    simpa [litLenLengths] using generatedDynamicLitLenLengths_size_286 tokens
+  have hdistSize : distLengths.size = 30 := by
+    simp [distLengths, generatedDynamicDistLengths_size, distSymbolFreqs_size]
+  rw [hfull]
+  simp [hlitSize, hdistSize]
 
 /-- Repeating a natural value appends exactly the requested number of entries.
 This is the size invariant for code-length token expansion. -/
