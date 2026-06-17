@@ -3180,15 +3180,13 @@ lemma mkHuffman_generatedCodeLenLengthsFilled_eq :
 minimum. This justifies encoding `HLIT = count - 257`. -/
 lemma generatedDynamicLitLenCount_ge (litLenLengths : Array Nat) :
     257 ≤ Png.generatedDynamicLitLenCount litLenLengths := by
-  unfold Png.generatedDynamicLitLenCount
-  exact le_min (by decide) (Nat.le_max_left 257 _)
+  simp [Png.generatedDynamicLitLenCount]
 
 /-- The generated dynamic literal/length count never exceeds the DEFLATE table
 size. This bounds the generated `HLIT` field. -/
 lemma generatedDynamicLitLenCount_le (litLenLengths : Array Nat) :
     Png.generatedDynamicLitLenCount litLenLengths ≤ 286 := by
-  unfold Png.generatedDynamicLitLenCount
-  exact Nat.min_le_left _ _
+  simp [Png.generatedDynamicLitLenCount]
 
 /-- For generated literal/length tables, the advertised `HLIT` count is inside
 the actual generated table. This supports header extraction proofs. -/
@@ -3229,15 +3227,13 @@ lemma generatedDynamicLitLenCount_sub_lt_32
 This justifies encoding `HDIST = count - 1`. -/
 lemma generatedDynamicDistCount_ge (distLengths : Array Nat) :
     1 ≤ Png.generatedDynamicDistCount distLengths := by
-  unfold Png.generatedDynamicDistCount
-  exact le_min (by decide) (Nat.le_max_left 1 _)
+  simp [Png.generatedDynamicDistCount]
 
 /-- The generated dynamic distance count never exceeds the DEFLATE distance
 table size. This bounds the generated `HDIST` field. -/
 lemma generatedDynamicDistCount_le (distLengths : Array Nat) :
     Png.generatedDynamicDistCount distLengths ≤ 30 := by
-  unfold Png.generatedDynamicDistCount
-  exact Nat.min_le_left _ _
+  simp [Png.generatedDynamicDistCount]
 
 /-- For generated distance tables, the advertised `HDIST` count is inside the
 actual generated table. This supports header extraction proofs. -/

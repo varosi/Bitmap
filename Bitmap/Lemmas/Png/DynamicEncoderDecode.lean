@@ -1,4 +1,5 @@
 import Bitmap.Lemmas.Png.DynamicEncoder
+import Bitmap.Lemmas.Png.DynamicBlockProofsSpec
 import Bitmap.Lemmas.Png.DynamicBlockProofsPayloadBase
 import Batteries.Data.Array.Lemmas
 
@@ -1785,6 +1786,42 @@ lemma readDynamicTablesLengthsFuel_generatedHeaderLiteral_readerAt_writeBits
       hvalid hexpand hbit hcur
   simpa [bitsTot, lenTot, bw', br, hcount, Png.readDynamicTablesLengthsFuel]
     using hcore
+
+/-- The generated full-dynamic literal/length and distance arrays pass the
+same table validation boundary used by the generic dynamic parser. This
+packages the tables needed before proving full generated-header parsing. -/
+lemma generatedDynamicTableSpec_ofLengths?_exists
+    (tokens : Array Png.DeflateToken) :
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    let distLengths :=
+      Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)
+    ∃ spec,
+      Png.DynamicTableSpec.ofLengths? litLenLengths distLengths = some spec ∧
+        spec.litLenLengths = litLenLengths ∧
+        spec.distLengths = distLengths := by
+  intro litLenLengths distLengths
+  have hlitSome :
+      (Png.mkHuffman litLenLengths).isSome = true := by
+    simpa [litLenLengths] using
+      mkHuffman_generatedDynamicLitLenLengths_isSome tokens
+  cases hlit : Png.mkHuffman litLenLengths with
+  | none =>
+      simp [hlit] at hlitSome
+  | some litLenTable =>
+      obtain ⟨distTable, hdist⟩ :
+          ∃ distTable, Png.buildDynamicDistTable distLengths = some distTable := by
+        simpa [distLengths] using
+          buildDynamicDistTable_generatedDynamicDistLengths_exists tokens
+      refine
+        ⟨{ litLenLengths := litLenLengths
+           distLengths := distLengths
+           litLenTable := litLenTable
+           distTable := distTable }, ?_, rfl, rfl⟩
+      exact Png.DynamicTableSpec.ofLengths?_mk
+        (litLenLengths := litLenLengths) (distLengths := distLengths)
+        (litLenTable := litLenTable) (distTable := distTable)
+        hlit hdist
 
 end Lemmas
 

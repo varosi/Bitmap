@@ -1336,13 +1336,11 @@ def BitWriter.writeDynamicCodeLengths (bw : BitWriter) (lengths : Array Nat)
     (codeLenCodes : Array (Nat × Nat)) : BitWriter :=
   bw.writeCodeLenTokens codeLenCodes (codeLenLiteralTokensOfLengths lengths)
 
-def generatedDynamicLitLenCount (litLenLengths : Array Nat) : Nat :=
-  let litLenLast := lastNonZeroIndex litLenLengths 256
-  Nat.min 286 (Nat.max 257 (litLenLast + 1))
+def generatedDynamicLitLenCount (_litLenLengths : Array Nat) : Nat :=
+  286
 
-def generatedDynamicDistCount (distLengths : Array Nat) : Nat :=
-  let distLast := lastNonZeroIndex distLengths 0
-  Nat.min 30 (Nat.max 1 (distLast + 1))
+def generatedDynamicDistCount (_distLengths : Array Nat) : Nat :=
+  30
 
 def writeGeneratedDynamicHeader (bw : BitWriter)
     (litLenLengths distLengths : Array Nat) : BitWriter :=
