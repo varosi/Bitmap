@@ -148,6 +148,18 @@ lemma codeLenLiteralTokensOfLengths_expandList
   simpa [pushNatList_empty_toList lengths] using
     (codeLenTokensExpandList_map_literal lengths.toList #[])
 
+/-- Literal code-length tokens decode to exactly one length each. This turns
+the generated header replay theorem's token output count into an array size. -/
+lemma codeLenLiteralTokensOfLengths_outputCount
+    (lengths : Array Nat) :
+    codeLenTokenListOutputCount
+        (Png.codeLenLiteralTokensOfLengths lengths).toList =
+      lengths.size := by
+  have hsize :=
+    codeLenTokensExpandList_size_of_some
+      (codeLenLiteralTokensOfLengths_expandList lengths)
+  simpa using hsize.symm
+
 /-- A valid generated code-length token's packed bits fit inside its advertised
 bit length. This is the code-space bound needed for stream concatenation. -/
 lemma codeLenTokenBits_lt_codeSpace
@@ -1719,6 +1731,60 @@ lemma readDynamicTablesLengthsFuel_codeLenTokenStream_readerAt_writeBits
           have hmain := hstep.trans htail'
           simpa [total, hbitsCons, hlenCons, bwFull, brStart, Nat.add_assoc,
             Nat.add_comm, Nat.add_left_comm] using hmain
+
+/-- Replays the generated dynamic header's literal code-length token stream
+through the generic dynamic table length reader. This is the generated-header
+specialization needed before proving the full `readDynamicTables` parse. -/
+lemma readDynamicTablesLengthsFuel_generatedHeaderLiteral_readerAt_writeBits
+    (bw : Png.BitWriter) (tokens : Array Png.DeflateToken)
+    (restBits restLen : Nat)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let lengths := generatedDynamicHeaderCodeLengths tokens
+    let codeTokens := Png.codeLenLiteralTokensOfLengths lengths
+    let bitsTot := codeLenTokenStreamBits codeTokens.toList |||
+      (restBits <<< codeLenTokenStreamLen codeTokens.toList)
+    let lenTot := codeLenTokenStreamLen codeTokens.toList + restLen
+    let bw' := Png.BitWriter.writeBits bw bitsTot lenTot
+    let br := Png.BitWriter.readerAt bw bw'.flush
+      (Png.flush_size_writeBits_le bw bitsTot lenTot) hbit
+    Png.readDynamicTablesLengthsFuel (codeTokens.toList.length + 1)
+        lengths.size generatedCodeLenHuffman br #[] =
+      some
+        (lengths,
+          Png.BitWriter.readerAt
+            (Png.BitWriter.writeBits bw bitsTot
+              (codeLenTokenStreamLen codeTokens.toList))
+            bw'.flush
+            (by
+              have hk : codeLenTokenStreamLen codeTokens.toList ≤ lenTot := by
+                omega
+              simpa [lenTot] using
+                (Png.flush_size_writeBits_prefix bw bitsTot
+                  (codeLenTokenStreamLen codeTokens.toList) lenTot hk))
+            (Png.bitPos_lt_8_writeBits bw bitsTot
+              (codeLenTokenStreamLen codeTokens.toList) hbit)) := by
+  intro lengths codeTokens bitsTot lenTot bw' br
+  have hvalid : ∀ token ∈ codeTokens.toList, CodeLenTokenValid token := by
+    exact codeLenTokensValid_toList
+      (by
+        simpa [lengths, codeTokens] using
+          generatedDynamicHeaderLiteralCodeLengthTokens_valid tokens)
+  have hexpand :
+      codeLenTokensExpandList? codeTokens.toList #[] = some lengths := by
+    simpa [lengths, codeTokens] using
+      codeLenLiteralTokensOfLengths_expandList lengths
+  have hcount :
+      codeLenTokenListOutputCount codeTokens.toList = lengths.size := by
+    simpa [codeTokens] using
+      codeLenLiteralTokensOfLengths_outputCount lengths
+  have hcore :=
+    readDynamicTablesLengthsFuel_codeLenTokenStream_readerAt_writeBits
+      (bw := bw) (tokens := codeTokens.toList)
+      (fuelTail := 1) (restBits := restBits) (restLen := restLen)
+      (lengths := #[]) (lengths' := lengths)
+      hvalid hexpand hbit hcur
+  simpa [bitsTot, lenTot, bw', br, hcount, Png.readDynamicTablesLengthsFuel]
+    using hcore
 
 end Lemmas
 
