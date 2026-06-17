@@ -380,6 +380,36 @@ lemma writeDynamicCodeLengths_generated_eq_writeBits
   exact writeCodeLenTokens_generated_eq_writeBits bw tokens
     (codeLenTokensValid_toList hvalidArray)
 
+/-- The generated full-dynamic header writer is a named prefix followed by the
+literal code-length token stream. This is the writer-side shape consumed by
+the generated `readDynamicTables` replay. -/
+lemma writeGeneratedDynamicHeader_eq_prefix_writeBits
+    (bw : Png.BitWriter) (tokens : Array Png.DeflateToken) :
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    let distLengths :=
+      Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)
+    let lengths := generatedDynamicHeaderCodeLengths tokens
+    let codeTokens := Png.codeLenLiteralTokensOfLengths lengths
+    let prefixBits :=
+      Png.generatedDynamicHeaderPrefixBits
+        (Png.generatedDynamicLitLenCount litLenLengths)
+        (Png.generatedDynamicDistCount distLengths)
+    Png.writeGeneratedDynamicHeader bw litLenLengths distLengths =
+      Png.BitWriter.writeBits
+        (Png.BitWriter.writeBits bw prefixBits Png.generatedDynamicHeaderPrefixLen)
+        (codeLenTokenStreamBits codeTokens.toList)
+        (codeLenTokenStreamLen codeTokens.toList) := by
+  intro litLenLengths distLengths lengths codeTokens prefixBits
+  have hlengths : ArrayEntriesLe lengths 15 := by
+    simpa [lengths] using generatedDynamicHeaderCodeLengths_entries_le_15 tokens
+  have htail :=
+    writeDynamicCodeLengths_generated_eq_writeBits
+      (bw := Png.BitWriter.writeBits bw prefixBits Png.generatedDynamicHeaderPrefixLen)
+      (lengths := lengths) hlengths
+  simpa [Png.writeGeneratedDynamicHeader, litLenLengths, distLengths, lengths,
+    codeTokens, prefixBits] using htail
+
 /-- Decodes the generated five-bit code-length helper code from a writer-built
 stream. This is the Huffman-decode bridge needed before replaying dynamic
 header RLE tokens. -/

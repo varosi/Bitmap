@@ -1143,6 +1143,24 @@ def codeLenCodeLengths : Array Nat :=
 def codeLenOrder : Array Nat :=
   #[16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
 
+def generatedCodeLenCodeLengthsBits : Nat :=
+  Id.run do
+    let mut bits := 0
+    let mut shift := 0
+    for i in [0:codeLenOrder.size] do
+      bits := bits ||| (codeLenCodeLengths[codeLenOrder[i]!]! <<< shift)
+      shift := shift + 3
+    return bits
+
+def generatedDynamicHeaderPrefixBits (litLenCount distCount : Nat) : Nat :=
+  (litLenCount - 257) |||
+    ((distCount - 1) <<< 5) |||
+    (15 <<< 10) |||
+    (generatedCodeLenCodeLengthsBits <<< 14)
+
+def generatedDynamicHeaderPrefixLen : Nat :=
+  14 + codeLenOrder.size * 3
+
 @[inline] def BitWriter.writeRevCode (bw : BitWriter) (codes : Array (Nat × Nat)) (sym : Nat) :
     BitWriter :=
   let (bits, len) := codes[sym]!
@@ -1347,16 +1365,12 @@ def writeGeneratedDynamicHeader (bw : BitWriter)
   let litLenCount := generatedDynamicLitLenCount litLenLengths
   let distCount := generatedDynamicDistCount distLengths
   let codeLenCodes := canonicalRevCodesFromLengths codeLenCodeLengths
-  Id.run do
-    let mut bw := bw
-    bw := bw.writeBitsFast (litLenCount - 257) 5
-    bw := bw.writeBitsFast (distCount - 1) 5
-    bw := bw.writeBitsFast 15 4
-    for i in [0:codeLenOrder.size] do
-      bw := bw.writeBitsFast codeLenCodeLengths[codeLenOrder[i]!]! 3
-    let lengths := (litLenLengths.extract 0 litLenCount) ++ (distLengths.extract 0 distCount)
-    bw := bw.writeDynamicCodeLengths lengths codeLenCodes
-    return bw
+  let bw :=
+    bw.writeBitsFast
+      (generatedDynamicHeaderPrefixBits litLenCount distCount)
+      generatedDynamicHeaderPrefixLen
+  let lengths := (litLenLengths.extract 0 litLenCount) ++ (distLengths.extract 0 distCount)
+  bw.writeDynamicCodeLengths lengths codeLenCodes
 
 def writeDynamicPayload (bw : BitWriter) (tokens : Array DeflateToken)
     (litLenCodes distCodes : Array (Nat × Nat)) : BitWriter :=
