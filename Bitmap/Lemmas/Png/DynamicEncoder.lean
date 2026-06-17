@@ -3263,6 +3263,43 @@ lemma generatedDynamicHeaderCodeLengths_getElem_le_15
     (generatedDynamicHeaderCodeLengths tokens)[idx] ≤ 15 := by
   exact generatedDynamicHeaderCodeLengths_entries_le_15 tokens idx hidx
 
+/-- Splitting the generated header length buffer at the advertised literal
+count recovers the literal/length prefix. This is parser bookkeeping for the
+full dynamic header proof. -/
+lemma generatedDynamicHeaderCodeLengths_extract_lit
+    (tokens : Array Png.DeflateToken) :
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    let litLenCount := Png.generatedDynamicLitLenCount litLenLengths
+    (generatedDynamicHeaderCodeLengths tokens).extract 0 litLenCount =
+      litLenLengths.extract 0 litLenCount := by
+  intro litLenLengths litLenCount
+  have hlit : litLenCount ≤ litLenLengths.size := by
+    simpa [litLenLengths, litLenCount] using
+      generatedDynamicLitLenCount_le_generated_size tokens
+  simp [generatedDynamicHeaderCodeLengths, litLenLengths, litLenCount, hlit]
+
+/-- Splitting the generated header length buffer after the literal prefix
+recovers the advertised distance prefix. This feeds the generated
+`readDynamicTables` proof after code-length replay. -/
+lemma generatedDynamicHeaderCodeLengths_extract_dist
+    (tokens : Array Png.DeflateToken) :
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    let distLengths :=
+      Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)
+    let litLenCount := Png.generatedDynamicLitLenCount litLenLengths
+    let distCount := Png.generatedDynamicDistCount distLengths
+    (generatedDynamicHeaderCodeLengths tokens).extract litLenCount
+        (litLenCount + distCount) =
+      distLengths.extract 0 distCount := by
+  intro litLenLengths distLengths litLenCount distCount
+  have hlit : litLenCount ≤ litLenLengths.size := by
+    simpa [litLenLengths, litLenCount] using
+      generatedDynamicLitLenCount_le_generated_size tokens
+  simp [generatedDynamicHeaderCodeLengths, litLenLengths, distLengths,
+    litLenCount, distCount, hlit]
+
 /-- Repeating a natural value appends exactly the requested number of entries.
 This is the size invariant for code-length token expansion. -/
 lemma pushNatRepeat_size (xs : Array Nat) (value n : Nat) :
