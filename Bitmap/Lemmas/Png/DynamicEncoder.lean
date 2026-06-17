@@ -3826,6 +3826,17 @@ lemma codeLenTokensOfLengths_valid
     codeLenTokensOfLengthsAux_valid lengths #[] 0 (lengths.size + 1)
       hlengths codeLenTokensValid_empty
 
+/-- Literal-only code-length tokenization preserves the DEFLATE code-length
+bound. This is the header writer invariant for the proved generated path. -/
+lemma codeLenLiteralTokensOfLengths_valid
+    (lengths : Array Nat) (hlengths : ArrayEntriesLe lengths 15) :
+    CodeLenTokensValid (Png.codeLenLiteralTokensOfLengths lengths) := by
+  intro idx hidx
+  have hidxLengths : idx < lengths.size := by
+    simpa [Png.codeLenLiteralTokensOfLengths] using hidx
+  simpa [Png.codeLenLiteralTokensOfLengths, CodeLenTokenValid] using
+    hlengths idx hidxLengths
+
 /-- The generated dynamic header's RLE token stream contains only legal
 code-length tokens. This prepares token-by-token header replay. -/
 lemma generatedDynamicHeaderCodeLengthTokens_valid
@@ -3834,6 +3845,17 @@ lemma generatedDynamicHeaderCodeLengthTokens_valid
       (Png.codeLenTokensOfLengths
         (generatedDynamicHeaderCodeLengths tokens)) := by
   exact codeLenTokensOfLengths_valid
+    (generatedDynamicHeaderCodeLengths tokens)
+    (generatedDynamicHeaderCodeLengths_entries_le_15 tokens)
+
+/-- The generated dynamic header's literal code-length token stream contains
+only legal code-length tokens. This supports the proved writer path. -/
+lemma generatedDynamicHeaderLiteralCodeLengthTokens_valid
+    (tokens : Array Png.DeflateToken) :
+    CodeLenTokensValid
+      (Png.codeLenLiteralTokensOfLengths
+        (generatedDynamicHeaderCodeLengths tokens)) := by
+  exact codeLenLiteralTokensOfLengths_valid
     (generatedDynamicHeaderCodeLengths tokens)
     (generatedDynamicHeaderCodeLengths_entries_le_15 tokens)
 

@@ -355,7 +355,7 @@ private def validateGeneratedDynamicEncoderCase
   let distCount := Png.generatedDynamicDistCount distLengths
   let headerLengths :=
     (litLenLengths.extract 0 litLenCount) ++ (distLengths.extract 0 distCount)
-  match Png.codeLenTokensExpand? (Png.codeLenTokensOfLengths headerLengths) with
+  match Png.codeLenTokensExpand? (Png.codeLenLiteralTokensOfLengths headerLengths) with
   | some headerLengths' =>
       if headerLengths' != headerLengths then
         throw (IO.userError s!"generated dynamic encoder {name}: code-length token expansion mismatch")

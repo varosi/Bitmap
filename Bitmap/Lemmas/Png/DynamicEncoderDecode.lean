@@ -43,6 +43,12 @@ def codeLenTokensExpandList? : List Png.CodeLenToken → Array Nat → Option (A
       | none => none
       | some lengths' => codeLenTokensExpandList? tokens lengths'
 
+/-- Proof-facing array append by a list of natural lengths. Literal token
+expansion uses this as its accumulator target. -/
+def pushNatList (lengths : Array Nat) : List Nat → Array Nat
+  | [] => lengths
+  | len :: lens => pushNatList (lengths.push len) lens
+
 /-- Proof-facing output count for a generated code-length token list. This
 tracks how far the dynamic table reader must advance after replaying tokens. -/
 def codeLenTokenListOutputCount : List Png.CodeLenToken → Nat
@@ -96,6 +102,51 @@ lemma codeLenTokensExpandList_size_gt_of_cons_valid
     simp [codeLenTokenListOutputCount]
     omega
   omega
+
+/-- Expanding literal code-length tokens pushes exactly the listed lengths.
+This is the simple expansion model for the proved dynamic header writer. -/
+lemma codeLenTokensExpandList_map_literal
+    (lens : List Nat) (lengths : Array Nat) :
+    codeLenTokensExpandList?
+        (lens.map Png.CodeLenToken.literal) lengths =
+      some (pushNatList lengths lens) := by
+  induction lens generalizing lengths with
+  | nil =>
+      simp [codeLenTokensExpandList?, pushNatList]
+  | cons len lens ih =>
+      simp [codeLenTokensExpandList?, Png.CodeLenToken.expand, pushNatList, ih]
+
+/-- The proof-facing list append model has the expected `toList` view. This
+turns array equality into ordinary list append arithmetic. -/
+lemma pushNatList_toList (lengths : Array Nat) (lens : List Nat) :
+    (pushNatList lengths lens).toList = lengths.toList ++ lens := by
+  induction lens generalizing lengths with
+  | nil =>
+      simp [pushNatList]
+  | cons len lens ih =>
+      simp [pushNatList, ih, List.append_assoc]
+
+/-- The list append model started from an empty array reconstructs the source
+array. This bridges `Array.map CodeLenToken.literal` back to the lengths. -/
+lemma pushNatList_empty_toList (lengths : Array Nat) :
+    pushNatList #[] lengths.toList = lengths := by
+  apply Array.toList_inj.mp
+  simp [pushNatList_toList]
+
+/-- Literal code-length tokens generated from an array expand back to exactly
+that array. This supplies the parser target for generated dynamic headers. -/
+lemma codeLenLiteralTokensOfLengths_expandList
+    (lengths : Array Nat) :
+    codeLenTokensExpandList?
+        (Png.codeLenLiteralTokensOfLengths lengths).toList #[] =
+      some lengths := by
+  have htokens :
+      (Png.codeLenLiteralTokensOfLengths lengths).toList =
+        lengths.toList.map Png.CodeLenToken.literal := by
+    simp [Png.codeLenLiteralTokensOfLengths]
+  rw [htokens]
+  simpa [pushNatList_empty_toList lengths] using
+    (codeLenTokensExpandList_map_literal lengths.toList #[])
 
 /-- A valid generated code-length token's packed bits fit inside its advertised
 bit length. This is the code-space bound needed for stream concatenation. -/
@@ -285,6 +336,36 @@ lemma writeCodeLenTokens_generated_eq_writeBits
         (codeLenTokenStreamLen tokens.toList) := by
   rw [writeCodeLenTokens_generated_eq_list]
   exact writeGeneratedCodeLenTokensList_eq_writeBits bw tokens.toList hvalid
+
+/-- Array-level token validity implies list-membership validity after
+`Array.toList`. This lets generated runtime token arrays use list replay. -/
+lemma codeLenTokensValid_toList
+    {tokens : Array Png.CodeLenToken}
+    (hvalid : CodeLenTokensValid tokens) :
+    ∀ token ∈ tokens.toList, CodeLenTokenValid token := by
+  intro token hmem
+  rcases List.mem_iff_getElem.mp hmem with ⟨idx, hidx, hget⟩
+  have hidxArray : idx < tokens.size := by
+    simpa using hidx
+  have htoken : tokens[idx] = token := by
+    simpa using hget
+  simpa [htoken] using hvalid idx hidxArray
+
+/-- Runtime dynamic code-length writing for bounded generated arrays emits the
+same packed token stream used by the code-length replay theorem. -/
+lemma writeDynamicCodeLengths_generated_eq_writeBits
+    (bw : Png.BitWriter) (lengths : Array Nat)
+    (hlengths : ArrayEntriesLe lengths 15) :
+    let tokens := Png.codeLenLiteralTokensOfLengths lengths
+    bw.writeDynamicCodeLengths lengths
+        (Png.canonicalRevCodesFromLengths Png.codeLenCodeLengths) =
+      Png.BitWriter.writeBits bw (codeLenTokenStreamBits tokens.toList)
+        (codeLenTokenStreamLen tokens.toList) := by
+  intro tokens
+  have hvalidArray : CodeLenTokensValid tokens := by
+    simpa [tokens] using codeLenLiteralTokensOfLengths_valid lengths hlengths
+  exact writeCodeLenTokens_generated_eq_writeBits bw tokens
+    (codeLenTokensValid_toList hvalidArray)
 
 /-- Decodes the generated five-bit code-length helper code from a writer-built
 stream. This is the Huffman-decode bridge needed before replaying dynamic

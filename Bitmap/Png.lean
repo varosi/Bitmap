@@ -1329,9 +1329,12 @@ def codeLenTokensOfLengthsAux (lengths : Array Nat)
 def codeLenTokensOfLengths (lengths : Array Nat) : Array CodeLenToken :=
   codeLenTokensOfLengthsAux lengths #[] 0 (lengths.size + 1)
 
+def codeLenLiteralTokensOfLengths (lengths : Array Nat) : Array CodeLenToken :=
+  lengths.map CodeLenToken.literal
+
 def BitWriter.writeDynamicCodeLengths (bw : BitWriter) (lengths : Array Nat)
     (codeLenCodes : Array (Nat × Nat)) : BitWriter :=
-  bw.writeCodeLenTokens codeLenCodes (codeLenTokensOfLengths lengths)
+  bw.writeCodeLenTokens codeLenCodes (codeLenLiteralTokensOfLengths lengths)
 
 def generatedDynamicLitLenCount (litLenLengths : Array Nat) : Nat :=
   let litLenLast := lastNonZeroIndex litLenLengths 256
