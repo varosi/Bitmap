@@ -756,6 +756,57 @@ lemma readGeneratedDynamicHeader_codeLenChunk_readerAt_writeBits
   rw [hmod] at hstep'
   exact hstep'
 
+/-- Proof-facing replay of the generated 19-entry code-length-code table loop.
+It mirrors the parser loop while returning `(lengths, reader)`. -/
+def readGeneratedCodeLenLengths19 (br : Png.BitReader) :
+    Option (Array Nat × Png.BitReader) := do
+  let mut codeLenLengths : Array Nat := Array.replicate 19 0
+  let mut brCur := br
+  for i in [0:Png.codeLenOrder.size] do
+    let (len, br') ←
+      if h : brCur.bitIndex + 3 ≤ brCur.data.size * 8 then
+        some (brCur.readBits 3 h)
+      else
+        none
+    codeLenLengths := codeLenLengths.set! Png.codeLenOrder[i]! len
+    brCur := br'
+  return (codeLenLengths, brCur)
+
+/-- The proof-facing generated code-length loop has the same `forIn` shape as
+the loop produced by `readDynamicTables`. -/
+lemma readGeneratedCodeLenLengths19_eq_forIn_mprod (br : Png.BitReader) :
+    forIn (List.range' 0 Png.codeLenOrder.size)
+        ((⟨br, Array.replicate 19 0⟩ : MProd Png.BitReader (Array Nat)))
+        (fun i r =>
+          if h : r.fst.bitIndex + 3 ≤ r.fst.data.size * 8 then
+            some
+              (ForInStep.yield
+                ⟨(r.fst.readBits 3 h).snd,
+                  r.snd.setIfInBounds Png.codeLenOrder[i]! (r.fst.readBits 3 h).fst⟩)
+          else
+            none) =
+      ((fun r : Array Nat × Png.BitReader =>
+          (⟨r.snd, r.fst⟩ : MProd Png.BitReader (Array Nat))) <$>
+        readGeneratedCodeLenLengths19 br) := by
+  unfold readGeneratedCodeLenLengths19
+  generalize hloop :
+    forIn (List.range' 0 Png.codeLenOrder.size)
+        ((⟨br, Array.replicate 19 0⟩ : MProd Png.BitReader (Array Nat)))
+        (fun i r =>
+          if h : r.fst.bitIndex + 3 ≤ r.fst.data.size * 8 then
+            some
+              (ForInStep.yield
+                ⟨(r.fst.readBits 3 h).snd,
+                  r.snd.setIfInBounds Png.codeLenOrder[i]! (r.fst.readBits 3 h).fst⟩)
+          else
+            none) = loop
+  cases loop with
+  | none =>
+      simp [hloop, Option.bind, Option.map]
+  | some r =>
+      cases r
+      simp [hloop, Option.bind, Option.map]
+
 /-- Replays the generated prefix's `HLIT` field from the writer-produced
 dynamic header stream. -/
 lemma readGeneratedDynamicHeader_hlit_readerAt_writeBits
