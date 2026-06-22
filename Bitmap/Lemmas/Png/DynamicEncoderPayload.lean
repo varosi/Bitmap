@@ -967,6 +967,106 @@ lemma buildDynamicDistTable_generatedDynamicDistLengths_eq
   unfold generatedDynamicDistTable
   rw [hdist]
 
+/-- Names the concrete generated distance table used whenever a distance-1
+match token is present. The generated distance table then has only symbol zero. -/
+def generatedDynamicDistMatchTable : Png.Huffman :=
+  match Png.buildDynamicDistTable
+    (Array.ofFn (fun idx : Fin 30 => if idx.val == 0 then 1 else 0)) with
+  | some table => table
+  | none => Png.emptyHuffman
+
+/-- The concrete match-bearing generated distance shape builds the named table.
+This turns the shape theorem into a stable table for payload replay. -/
+lemma buildDynamicDistTable_generatedDistMatchShape_eq :
+    Png.buildDynamicDistTable
+      (Array.ofFn (fun idx : Fin 30 => if idx.val == 0 then 1 else 0)) =
+        some generatedDynamicDistMatchTable := by
+  native_decide
+
+/-- A generated distance table with a match token is exactly the concrete
+single-symbol distance-zero table. -/
+lemma generatedDynamicDistTable_eq_matchTable_of_match_at
+    (tokens : Array Png.DeflateToken) (target len : Nat)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.matchDist1 len) :
+    generatedDynamicDistTable tokens = generatedDynamicDistMatchTable := by
+  let freqs := Png.distSymbolFreqs tokens
+  have hfreq : 0 < freqs[0]! := by
+    have hmatch := deflateTokensHasMatchDist1_true_of_match_at
+      tokens target len htarget ht
+    simpa [freqs] using distSymbolFreqs_zero_pos_of_hasMatch tokens hmatch
+  have hshape :
+      Png.generatedDynamicDistLengths freqs =
+        Array.ofFn (fun idx : Fin 30 => if idx.val == 0 then 1 else 0) :=
+    generatedDynamicDistLengths_eq_matchShape freqs
+      (by simpa [freqs] using distSymbolFreqs_size tokens) hfreq
+  unfold generatedDynamicDistTable
+  rw [hshape, buildDynamicDistTable_generatedDistMatchShape_eq]
+
+/-- The match-bearing generated distance table has one-bit codes. This is the
+distance-side fuel fact for match payload decoding. -/
+lemma generatedDynamicDistMatchTable_maxLen :
+    generatedDynamicDistMatchTable.maxLen = 1 := by
+  native_decide
+
+/-- The match-bearing generated distance table has rows zero and one. -/
+lemma generatedDynamicDistMatchTable_table_size :
+    generatedDynamicDistMatchTable.table.size = 2 := by
+  native_decide
+
+/-- The one-bit generated distance row has two entries. -/
+lemma generatedDynamicDistMatchTable_row1_size :
+    generatedDynamicDistMatchTable.table[1]!.size = 2 := by
+  native_decide
+
+/-- The generated distance code for symbol zero is the one-bit zero code in
+the match-bearing distance table. -/
+lemma generatedDynamicDistMatchCodes_zero :
+    (Png.canonicalRevCodesFromLengths
+      (Array.ofFn (fun idx : Fin 30 => if idx.val == 0 then 1 else 0)))[0]! =
+        (0, 1) := by
+  native_decide
+
+/-- The match-bearing generated distance table maps the generated zero code
+back to distance symbol zero. -/
+lemma generatedDynamicDistMatchTable_lookup_zero :
+    generatedDynamicDistMatchTable.table[1]![0]! = some 0 := by
+  native_decide
+
+/-- Match tokens resolve distance symbol zero in the generated distance table.
+This is the distance-side lookup core for generated payload replay. -/
+lemma generatedDynamicDistTable_lookup_zero_of_match_at
+    (tokens : Array Png.DeflateToken) (target len : Nat)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.matchDist1 len) :
+    let lengths :=
+      Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)
+    let codes := Png.canonicalRevCodesFromLengths lengths
+    (generatedDynamicDistTable tokens).table[codes[0]!.2]![codes[0]!.1]! =
+      some 0 := by
+  intro lengths codes
+  let freqs := Png.distSymbolFreqs tokens
+  have hfreq : 0 < freqs[0]! := by
+    have hmatch := deflateTokensHasMatchDist1_true_of_match_at
+      tokens target len htarget ht
+    simpa [freqs] using distSymbolFreqs_zero_pos_of_hasMatch tokens hmatch
+  have hshape :
+      lengths =
+        Array.ofFn (fun idx : Fin 30 => if idx.val == 0 then 1 else 0) := by
+    simpa [lengths, freqs] using
+      generatedDynamicDistLengths_eq_matchShape freqs
+        (by simpa [freqs] using distSymbolFreqs_size tokens) hfreq
+  have htable :=
+    generatedDynamicDistTable_eq_matchTable_of_match_at
+      tokens target len htarget ht
+  rw [htable]
+  change generatedDynamicDistMatchTable.table[
+      (Png.canonicalRevCodesFromLengths lengths)[0]!.2]![
+        (Png.canonicalRevCodesFromLengths lengths)[0]!.1]! = some 0
+  rw [hshape]
+  rw [generatedDynamicDistMatchCodes_zero]
+  exact generatedDynamicDistMatchTable_lookup_zero
+
 /-- The generated table spec reconstructed from generated lengths contains
 exactly the named generated literal/length and distance tables. This is the
 payload proof's bridge from header parsing to symbol decoding. -/
