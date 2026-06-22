@@ -410,6 +410,46 @@ lemma writeGeneratedDynamicHeader_eq_prefix_writeBits
   simpa [Png.writeGeneratedDynamicHeader, litLenLengths, distLengths, lengths,
     codeTokens, prefixBits] using htail
 
+/-- The generated full-dynamic header writer is equivalent to one packed bit
+stream. This is the shape used by reader-side header replay. -/
+lemma writeGeneratedDynamicHeader_eq_writeBits
+    (bw : Png.BitWriter) (tokens : Array Png.DeflateToken) :
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    let distLengths :=
+      Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)
+    let lengths := generatedDynamicHeaderCodeLengths tokens
+    let codeTokens := Png.codeLenLiteralTokensOfLengths lengths
+    let prefixBits :=
+      Png.generatedDynamicHeaderPrefixBits
+        (Png.generatedDynamicLitLenCount litLenLengths)
+        (Png.generatedDynamicDistCount distLengths)
+    Png.writeGeneratedDynamicHeader bw litLenLengths distLengths =
+      Png.BitWriter.writeBits bw
+        (prefixBits |||
+          (codeLenTokenStreamBits codeTokens.toList <<<
+            Png.generatedDynamicHeaderPrefixLen))
+        (Png.generatedDynamicHeaderPrefixLen +
+          codeLenTokenStreamLen codeTokens.toList) := by
+  intro litLenLengths distLengths lengths codeTokens prefixBits
+  have hprefix :=
+    writeGeneratedDynamicHeader_eq_prefix_writeBits
+      (bw := bw) (tokens := tokens)
+  have hprefixBits :
+      prefixBits < 2 ^ Png.generatedDynamicHeaderPrefixLen := by
+    simpa [prefixBits, Png.generatedDynamicLitLenCount, Png.generatedDynamicDistCount] using
+      (show Png.generatedDynamicHeaderPrefixBits 286 30 <
+          2 ^ Png.generatedDynamicHeaderPrefixLen by
+        native_decide)
+  have hconcat :=
+    Png.writeBits_concat bw prefixBits
+      (codeLenTokenStreamBits codeTokens.toList)
+      Png.generatedDynamicHeaderPrefixLen
+      (codeLenTokenStreamLen codeTokens.toList)
+      hprefixBits
+  simpa [litLenLengths, distLengths, lengths, codeTokens, prefixBits]
+    using hprefix.trans hconcat.symm
+
 /-- The generated dynamic-table prefix has the expected fixed front length.
 This turns parser bounds for `HLIT`, `HDIST`, and `HCLEN` into arithmetic. -/
 lemma generatedDynamicHeaderPrefixLen_eq :
