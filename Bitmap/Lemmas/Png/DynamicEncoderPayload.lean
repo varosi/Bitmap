@@ -194,6 +194,131 @@ decreasing_by
     exact Nat.sub_lt_sub_left (k := i) (m := lengths.size) (n := i + 1)
       hlt (Nat.lt_succ_self i)
 
+/-- Later uniform Huffman fills cannot overwrite a row entry whose canonical
+code is below the current next-code counter. This is the no-overwrite half of
+generated payload row-nine lookup. -/
+lemma fillHuffmanTableAux_uniform_entry_eq_of_code_lt_next
+    (lengths : Array Nat) (i codeLen : Nat) (nextCode : Array Nat)
+    (table out : Array (Array (Option Nat))) (targetCode codeIdx : Nat)
+    (hshape :
+      ∀ j (hj : j < lengths.size), i ≤ j →
+        0 < lengths[j] → lengths[j] = codeLen)
+    (hnextIdx : codeLen < nextCode.size)
+    (htableIdx : codeLen < table.size)
+    (hrow : table[codeLen]!.size = 1 <<< codeLen)
+    (hbudget : nextCode[codeLen]! + (lengths.size - i) ≤ 1 <<< codeLen)
+    (htargetLt : targetCode < nextCode[codeLen]!)
+    (hcodeIdx : codeIdx = Png.reverseBits targetCode codeLen)
+    (hfill :
+      Png.fillHuffmanTableAux lengths i nextCode table = some out) :
+    out[codeLen]![codeIdx]! = table[codeLen]![codeIdx]! := by
+  rw [Png.fillHuffmanTableAux.eq_1] at hfill
+  have htargetSpace : targetCode < 1 <<< codeLen := by omega
+  have hcodeIdxBound : codeIdx < table[codeLen]!.size := by
+    rw [hrow, hcodeIdx]
+    simpa [Nat.shiftLeft_eq] using Png.reverseBits_lt targetCode codeLen
+  by_cases hi : i < lengths.size
+  · by_cases hpos : 0 < lengths[i]
+    · have hlen : lengths[i] = codeLen := hshape i hi le_rfl hpos
+      have hcodeLenPos : 0 < codeLen := by
+        simpa [hlen] using hpos
+      have hremainingPos : 0 < lengths.size - i := by omega
+      let codeVal := nextCode[codeLen]!
+      have hcodeValLt : codeVal < 1 <<< codeLen := by
+        dsimp [codeVal]
+        omega
+      have hnotCodeGe : ¬ codeVal >= (1 <<< codeLen) := by omega
+      let nextCode' := nextCode.set! codeLen (codeVal + 1)
+      let rev := Png.reverseBits codeVal codeLen
+      let row := table[codeLen]!
+      have hrev : rev < row.size := by
+        rw [hrow]
+        simpa [rev, row, Nat.shiftLeft_eq] using
+          Png.reverseBits_lt codeVal codeLen
+      have hnotRevGe : ¬ rev >= row.size := by omega
+      let row' := row.set! rev (some i)
+      let table' := table.set! codeLen row'
+      have hfillRec :
+          Png.fillHuffmanTableAux lengths (i + 1) nextCode' table' =
+            some out := by
+        simpa [hi, hpos, hlen, codeVal, hnotCodeGe, nextCode', rev, row,
+          hnotRevGe, row', table', hcodeLenPos] using hfill
+      have hnextIdx' : codeLen < nextCode'.size := by
+        simp [nextCode', hnextIdx]
+      have htableIdx' : codeLen < table'.size := by
+        simp [table', htableIdx]
+      have hnextAt :
+          nextCode'[codeLen]! = codeVal + 1 := by
+        simpa [nextCode'] using
+          getElem!_set!_eq nextCode codeLen (codeVal + 1) hnextIdx
+      have hrowSet : table'[codeLen]! = row' := by
+        simpa [table'] using getElem!_set!_eq table codeLen row' htableIdx
+      have hrow' : table'[codeLen]!.size = 1 <<< codeLen := by
+        rw [hrowSet]
+        simp [row', row, hrow]
+      have hbudget' :
+          nextCode'[codeLen]! + (lengths.size - (i + 1)) ≤ 1 <<< codeLen := by
+        rw [hnextAt]
+        omega
+      have htargetLt' : targetCode < nextCode'[codeLen]! := by
+        rw [hnextAt]
+        omega
+      have hshape' :
+          ∀ j (hj : j < lengths.size), i + 1 ≤ j →
+            0 < lengths[j] → lengths[j] = codeLen := by
+        intro j hj hle hposj
+        exact hshape j hj (by omega) hposj
+      have hrec :=
+        fillHuffmanTableAux_uniform_entry_eq_of_code_lt_next
+          lengths (i + 1) codeLen nextCode' table' out targetCode codeIdx
+          hshape' hnextIdx' htableIdx' hrow' hbudget' htargetLt' hcodeIdx
+          hfillRec
+      have hne : rev ≠ codeIdx := by
+        intro heq
+        have hrevEq :
+            Png.reverseBits codeVal codeLen =
+              Png.reverseBits targetCode codeLen := by
+          simpa [rev, hcodeIdx] using heq
+        have hcodeValPow : codeVal < 2 ^ codeLen := by
+          simpa [Nat.shiftLeft_eq] using hcodeValLt
+        have htargetPow : targetCode < 2 ^ codeLen := by
+          simpa [Nat.shiftLeft_eq] using htargetSpace
+        have hcodeEq : codeVal = targetCode :=
+          reverseBits_injective_of_lt hcodeValPow htargetPow hrevEq
+        omega
+      have hrowPres : row'[codeIdx]! = row[codeIdx]! := by
+        simpa [row'] using
+          getElem!_set!_ne row rev codeIdx (some i)
+            (by simpa [row] using hcodeIdxBound) hne
+      calc
+        out[codeLen]![codeIdx]! = table'[codeLen]![codeIdx]! := hrec
+        _ = row'[codeIdx]! := by rw [hrowSet]
+        _ = row[codeIdx]! := hrowPres
+        _ = table[codeLen]![codeIdx]! := by rfl
+    · have hshape' :
+        ∀ j (hj : j < lengths.size), i + 1 ≤ j →
+          0 < lengths[j] → lengths[j] = codeLen := by
+        intro j hj hle hposj
+        exact hshape j hj (by omega) hposj
+      have hbudget' :
+          nextCode[codeLen]! + (lengths.size - (i + 1)) ≤ 1 <<< codeLen := by
+        omega
+      have hrec :=
+        fillHuffmanTableAux_uniform_entry_eq_of_code_lt_next
+          lengths (i + 1) codeLen nextCode table out targetCode codeIdx
+          hshape' hnextIdx htableIdx hrow hbudget' htargetLt hcodeIdx
+          (by simpa [hi, hpos] using hfill)
+      exact hrec
+  · have hout : table = out := by
+      simpa [hi] using hfill
+    rw [← hout]
+termination_by lengths.size - i
+decreasing_by
+  all_goals
+    have hlt : i < lengths.size := hi
+    exact Nat.sub_lt_sub_left (k := i) (m := lengths.size) (n := i + 1)
+      hlt (Nat.lt_succ_self i)
+
 /-- Names the generated literal/length Huffman table accepted by `mkHuffman`.
 This lets the payload proof talk about the same table that the header parser
 reconstructs, without unfolding the table builder at every use site. -/
