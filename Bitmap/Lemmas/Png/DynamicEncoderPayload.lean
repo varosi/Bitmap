@@ -1862,6 +1862,31 @@ lemma generatedDynamicDistMatchCodes_zero :
         (0, 1) := by
   native_decide
 
+/-- Match-bearing generated distance code lookup for symbol zero is exactly
+the one-bit zero code. This connects the runtime distance writer to distance-1
+payload replay. -/
+lemma generatedDynamicDistCodes_zero_eq_of_match_at
+    (tokens : Array Png.DeflateToken) (target len : Nat)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.matchDist1 len) :
+    let lengths :=
+      Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)
+    let codes := Png.canonicalRevCodesFromLengths lengths
+    codes[0]! = (0, 1) := by
+  intro lengths codes
+  let freqs := Png.distSymbolFreqs tokens
+  have hfreq : 0 < freqs[0]! := by
+    have hmatch := deflateTokensHasMatchDist1_true_of_match_at
+      tokens target len htarget ht
+    simpa [freqs] using distSymbolFreqs_zero_pos_of_hasMatch tokens hmatch
+  have hshape :
+      lengths =
+        Array.ofFn (fun idx : Fin 30 => if idx.val == 0 then 1 else 0) := by
+    simpa [lengths, freqs] using
+      generatedDynamicDistLengths_eq_matchShape freqs
+        (by simpa [freqs] using distSymbolFreqs_size tokens) hfreq
+  simpa [codes, hshape] using generatedDynamicDistMatchCodes_zero
+
 /-- The match-bearing generated distance table maps the generated zero code
 back to distance symbol zero. -/
 lemma generatedDynamicDistMatchTable_lookup_zero :
@@ -2022,6 +2047,46 @@ lemma generatedDynamicDistTable_decode_zero_of_match_at_readerAt_writeBits
     generatedDynamicDistMatchTable_decode_zero_readerAt_writeBits
       bw bitsTot restLen hrow1 hbit hcur
 
+/-- A generated distance-zero payload code decodes to distance value one. This
+combines generic dynamic-Huffman distance-symbol decoding with the shared
+DEFLATE distance decoder. -/
+lemma generatedDynamicDistTable_decode_zero_distance_one_readerAt_writeBits
+    (tokens : Array Png.DeflateToken) (target len : Nat)
+    (bw : Png.BitWriter) (tailBits tailLen : Nat)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.matchDist1 len)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let bitsTot := tailBits <<< 1
+    let lenTot := 1 + tailLen
+    let bw' := Png.BitWriter.writeBits bw bitsTot lenTot
+    let br0 := Png.BitWriter.readerAt bw bw'.flush
+      (Png.flush_size_writeBits_le bw bitsTot lenTot) hbit
+    let br1 := Png.BitWriter.readerAt (Png.BitWriter.writeBits bw bitsTot 1)
+      bw'.flush
+      (by
+        have hk : 1 ≤ lenTot := by omega
+        simpa [lenTot] using
+          (Png.flush_size_writeBits_prefix bw bitsTot 1 lenTot hk))
+      (Png.bitPos_lt_8_writeBits bw bitsTot 1 hbit)
+    ∃ hdist hbitsD,
+      (generatedDynamicDistTable tokens).decode br0 = some (0, br1) ∧
+      Png.decodeDistance 0 br1 hdist hbitsD = (1, br1) := by
+  intro bitsTot lenTot bw' br0 br1
+  have hdecode :=
+    generatedDynamicDistTable_decode_zero_of_match_at_readerAt_writeBits
+      tokens target len bw tailBits tailLen htarget ht hbit hcur
+  have hdist : 0 < Png.distBases.size := by
+    simpa [Png.distBases] using (Nat.succ_pos 29)
+  have hbitsD :
+      br1.bitIndex +
+        Png.distExtra[0]'(by
+          simpa [Png.distExtra] using (Nat.succ_pos 29)) ≤
+        br1.data.size * 8 := by
+    simpa [Png.distExtra] using Png.bitIndex_le_dataBits br1
+  refine ⟨hdist, hbitsD, ?_, ?_⟩
+  · simpa [bitsTot, lenTot, bw', br0, br1] using hdecode
+  · exact Png.decodeDistance_zero br1 hbitsD
+
 /-- The generated table spec reconstructed from generated lengths contains
 exactly the named generated literal/length and distance tables. This is the
 payload proof's bridge from header parsing to symbol decoding. -/
@@ -2069,6 +2134,17 @@ lemma generatedDynamicTableSpec_eq_named_of_ofLengths?
   simp only at hnamed
   rw [h] at hnamed
   injection hnamed
+
+/-- The generated dynamic table package used by the full dynamic encoder. This
+names the proof-side table spec shared by header parsing and payload replay. -/
+def generatedDynamicTableSpec (tokens : Array Png.DeflateToken) :
+    Png.DynamicTableSpec :=
+  { litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    distLengths :=
+      Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)
+    litLenTable := generatedDynamicLitLenTable tokens
+    distTable := generatedDynamicDistTable tokens }
 
 /-- Proof-facing bit width for one generated dynamic payload token. It mirrors
 the literal/length code, optional length-extra bits, and distance code emitted
@@ -2222,6 +2298,98 @@ lemma dynamicPayloadTokenBits_generated_literal_lt_codeSpace_at
   simpa [dynamicPayloadTokenBits, dynamicPayloadTokenBitLen,
     litLenCodes, distCodes, hcodeLen] using hbits
 
+/-- Generated match payload bits fit in the match token width. This combines
+the generated nine-bit length symbol, DEFLATE length-extra bits, and generated
+one-bit distance symbol for writer replay. -/
+lemma dynamicPayloadTokenBits_generated_match_lt_codeSpace_at
+    (tokens : Array Png.DeflateToken) (target len : Nat)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.matchDist1 len)
+    (hlen : 3 ≤ len ∧ len ≤ 258) :
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens))
+    let distCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens))
+    dynamicPayloadTokenBits litLenCodes distCodes
+      (Png.DeflateToken.matchDist1 len) <
+        2 ^ dynamicPayloadTokenBitLen litLenCodes distCodes
+          (Png.DeflateToken.matchDist1 len) := by
+  intro litLenCodes distCodes
+  rcases hinfo : Png.fixedLenMatchInfo len with ⟨sym, extraBits, extraLen⟩
+  have hlitBits :
+      litLenCodes[sym]!.1 < 2 ^ 9 := by
+    have h :=
+      generatedDynamicLitLenCodes_match_bits_lt_codeSpace_at
+        tokens target len htarget ht hlen
+    simpa [litLenCodes, Png.generatedDynamicLitLenCodeLen, hinfo] using h
+  have hlitLen :
+      litLenCodes[sym]!.2 = 9 := by
+    have h :=
+      generatedDynamicLitLenCodes_match_len_eq_nine_at
+        tokens target len htarget ht hlen
+    simpa [litLenCodes, hinfo] using h
+  have hdistBits :
+      distCodes[0]!.1 < 2 := by
+    simpa [distCodes] using
+      generatedDynamicDistCodes_zero_bits_lt_two_of_match_at
+        tokens target len htarget ht
+  have hdistLen :
+      distCodes[0]!.2 = 1 := by
+    simpa [distCodes] using
+      generatedDynamicDistCodes_zero_len_eq_one_of_match_at
+        tokens target len htarget ht
+  have hextraBits : extraBits < 2 ^ extraLen := by
+    have hspec := Png.fixedLenMatchInfo_spec_internal len hlen.1 hlen.2
+    rw [hinfo] at hspec
+    rcases hspec with
+      ⟨_hsym, _hidxBase, _hidxExtra, _hextra, _hbase, hbits⟩
+    exact hbits
+  have hextraShift :
+      extraBits <<< 9 < 2 ^ (extraLen + 9) := by
+    rw [Nat.shiftLeft_eq, Nat.pow_add]
+    exact (Nat.mul_lt_mul_right (Nat.two_pow_pos 9)).mpr hextraBits
+  have hlitWide :
+      litLenCodes[sym]!.1 < 2 ^ (extraLen + 9) := by
+    exact lt_of_lt_of_le hlitBits
+      (Nat.pow_le_pow_right (by decide : 0 < 2) (by omega))
+  have hprefix :
+      litLenCodes[sym]!.1 ||| (extraBits <<< 9) <
+        2 ^ (extraLen + 9) :=
+    Nat.or_lt_two_pow hlitWide hextraShift
+  have hdistShift :
+      distCodes[0]!.1 <<< (9 + extraLen) <
+        2 ^ (1 + (9 + extraLen)) := by
+    rw [Nat.shiftLeft_eq]
+    calc
+      distCodes[0]!.1 * 2 ^ (9 + extraLen)
+          < 2 * 2 ^ (9 + extraLen) :=
+      (Nat.mul_lt_mul_right (Nat.two_pow_pos (9 + extraLen))).mpr
+        (by simpa using hdistBits)
+      _ = 2 ^ (1 + (9 + extraLen)) := by
+        calc
+          2 * 2 ^ (9 + extraLen)
+              = 2 ^ (9 + extraLen) * 2 := by
+                rw [Nat.mul_comm]
+          _ = 2 ^ ((9 + extraLen) + 1) := by
+                simpa using (Nat.pow_succ 2 (9 + extraLen)).symm
+          _ = 2 ^ (1 + (9 + extraLen)) := by
+                rw [Nat.add_comm]
+  have hprefixWide :
+      litLenCodes[sym]!.1 ||| (extraBits <<< 9) <
+        2 ^ (1 + (9 + extraLen)) := by
+    exact lt_of_lt_of_le hprefix
+      (Nat.pow_le_pow_right (by decide : 0 < 2) (by omega))
+  have hor :
+      (litLenCodes[sym]!.1 ||| (extraBits <<< 9)) |||
+          (distCodes[0]!.1 <<< (9 + extraLen)) <
+        2 ^ (1 + (9 + extraLen)) :=
+    Nat.or_lt_two_pow hprefixWide hdistShift
+  simpa [dynamicPayloadTokenBits, dynamicPayloadTokenBitLen,
+    litLenCodes, distCodes, hinfo, hlitLen, hdistLen,
+    Nat.add_comm, Nat.add_left_comm, Nat.add_assoc, Nat.or_assoc] using hor
+
 /-- Proof-facing list writer for generated dynamic payload tokens. It mirrors
 the runtime payload loop while exposing a structural induction principle. -/
 def writeDynamicPayloadToken
@@ -2234,6 +2402,167 @@ def writeDynamicPayloadToken
       let bw := bw.writeRevCode litLenCodes sym
       let bw := bw.writeBitsFast extraBits extraLen
       bw.writeRevCode distCodes 0
+
+/-- A literal payload-token write is exactly a write of the packed
+literal/length code. This removes the runtime `writeRevCode` wrapper from
+literal replay proofs. -/
+lemma writeDynamicPayloadToken_literal_eq_writeBits
+    (bw : Png.BitWriter) (litLenCodes distCodes : Array (Nat × Nat))
+    (b : UInt8) :
+    writeDynamicPayloadToken bw litLenCodes distCodes
+        (Png.DeflateToken.literal b) =
+      Png.BitWriter.writeBits bw
+        (dynamicPayloadTokenBits litLenCodes distCodes
+          (Png.DeflateToken.literal b))
+        (dynamicPayloadTokenBitLen litLenCodes distCodes
+          (Png.DeflateToken.literal b)) := by
+  simp [writeDynamicPayloadToken, dynamicPayloadTokenBits,
+    dynamicPayloadTokenBitLen, Png.BitWriter.writeRevCode,
+    Png.writeBitsFast_eq_writeBits]
+
+/-- An EOB payload write is exactly a write of the packed EOB code. This is
+the terminal writer bridge for generated payload replay. -/
+lemma writeDynamicPayloadEob_eq_writeBits
+    (bw : Png.BitWriter) (litLenCodes : Array (Nat × Nat)) :
+    bw.writeRevCode litLenCodes 256 =
+      Png.BitWriter.writeBits bw
+        (dynamicPayloadEobBits litLenCodes)
+        (dynamicPayloadEobBitLen litLenCodes) := by
+  simp [dynamicPayloadEobBits, dynamicPayloadEobBitLen,
+    Png.BitWriter.writeRevCode, Png.writeBitsFast_eq_writeBits]
+
+/-- A generated match payload-token write is exactly a write of the packed
+match bits. This bridges the runtime three-write match branch to the stream
+shape consumed by the generic dynamic decoder proof. -/
+lemma writeDynamicPayloadToken_generated_match_eq_writeBits_at
+    (bw : Png.BitWriter) (tokens : Array Png.DeflateToken)
+    (target len : Nat)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.matchDist1 len)
+    (hlen : 3 ≤ len ∧ len ≤ 258) :
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens))
+    let distCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens))
+    writeDynamicPayloadToken bw litLenCodes distCodes
+        (Png.DeflateToken.matchDist1 len) =
+      Png.BitWriter.writeBits bw
+        (dynamicPayloadTokenBits litLenCodes distCodes
+          (Png.DeflateToken.matchDist1 len))
+        (dynamicPayloadTokenBitLen litLenCodes distCodes
+          (Png.DeflateToken.matchDist1 len)) := by
+  intro litLenCodes distCodes
+  rcases hinfo : Png.fixedLenMatchInfo len with ⟨sym, extraBits, extraLen⟩
+  have hlitBits9 :
+      litLenCodes[sym]!.1 < 2 ^ 9 := by
+    have h :=
+      generatedDynamicLitLenCodes_match_bits_lt_codeSpace_at
+        tokens target len htarget ht hlen
+    simpa [litLenCodes, Png.generatedDynamicLitLenCodeLen, hinfo] using h
+  have hlitLen :
+      litLenCodes[sym]!.2 = 9 := by
+    have h :=
+      generatedDynamicLitLenCodes_match_len_eq_nine_at
+        tokens target len htarget ht hlen
+    simpa [litLenCodes, hinfo] using h
+  have hdistLen :
+      distCodes[0]!.2 = 1 := by
+    simpa [distCodes] using
+      generatedDynamicDistCodes_zero_len_eq_one_of_match_at
+        tokens target len htarget ht
+  have hextraBits : extraBits < 2 ^ extraLen := by
+    have hspec := Png.fixedLenMatchInfo_spec_internal len hlen.1 hlen.2
+    rw [hinfo] at hspec
+    rcases hspec with
+      ⟨_hsym, _hidxBase, _hidxExtra, _hextra, _hbase, hbits⟩
+    exact hbits
+  have hlitBits :
+      litLenCodes[sym]!.1 < 2 ^ litLenCodes[sym]!.2 := by
+    simpa [hlitLen] using hlitBits9
+  have hextraShift :
+      extraBits <<< 9 < 2 ^ (extraLen + 9) := by
+    rw [Nat.shiftLeft_eq, Nat.pow_add]
+    exact (Nat.mul_lt_mul_right (Nat.two_pow_pos 9)).mpr hextraBits
+  have hlitWide :
+      litLenCodes[sym]!.1 < 2 ^ (extraLen + 9) := by
+    exact lt_of_lt_of_le hlitBits9
+      (Nat.pow_le_pow_right (by decide : 0 < 2) (by omega))
+  have hprefix9 :
+      litLenCodes[sym]!.1 ||| (extraBits <<< 9) <
+        2 ^ (extraLen + 9) :=
+    Nat.or_lt_two_pow hlitWide hextraShift
+  have hprefix :
+      litLenCodes[sym]!.1 ||| (extraBits <<< litLenCodes[sym]!.2) <
+        2 ^ (litLenCodes[sym]!.2 + extraLen) := by
+    simpa [hlitLen, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc]
+      using hprefix9
+  have hconcatLit :
+      Png.BitWriter.writeBits bw
+          (litLenCodes[sym]!.1 |||
+            (extraBits <<< litLenCodes[sym]!.2))
+          (litLenCodes[sym]!.2 + extraLen) =
+        Png.BitWriter.writeBits
+          (Png.BitWriter.writeBits bw litLenCodes[sym]!.1
+            litLenCodes[sym]!.2)
+          extraBits extraLen :=
+    Png.writeBits_concat bw litLenCodes[sym]!.1 extraBits
+      litLenCodes[sym]!.2 extraLen hlitBits
+  have hconcatDist :
+      Png.BitWriter.writeBits bw
+          ((litLenCodes[sym]!.1 |||
+              (extraBits <<< litLenCodes[sym]!.2)) |||
+            (distCodes[0]!.1 <<<
+              (litLenCodes[sym]!.2 + extraLen)))
+          ((litLenCodes[sym]!.2 + extraLen) + distCodes[0]!.2) =
+        Png.BitWriter.writeBits
+          (Png.BitWriter.writeBits bw
+            (litLenCodes[sym]!.1 |||
+              (extraBits <<< litLenCodes[sym]!.2))
+            (litLenCodes[sym]!.2 + extraLen))
+          distCodes[0]!.1 distCodes[0]!.2 :=
+    Png.writeBits_concat bw
+      (litLenCodes[sym]!.1 ||| (extraBits <<< litLenCodes[sym]!.2))
+      distCodes[0]!.1 (litLenCodes[sym]!.2 + extraLen)
+      distCodes[0]!.2 hprefix
+  calc
+    writeDynamicPayloadToken bw litLenCodes distCodes
+        (Png.DeflateToken.matchDist1 len)
+        =
+      Png.BitWriter.writeBits
+        (Png.BitWriter.writeBits
+          (Png.BitWriter.writeBits bw litLenCodes[sym]!.1
+            litLenCodes[sym]!.2)
+          extraBits extraLen)
+        distCodes[0]!.1 distCodes[0]!.2 := by
+          simp [writeDynamicPayloadToken, Png.BitWriter.writeRevCode,
+            Png.writeBitsFast_eq_writeBits, hinfo]
+    _ =
+      Png.BitWriter.writeBits
+        (Png.BitWriter.writeBits bw
+          (litLenCodes[sym]!.1 |||
+            (extraBits <<< litLenCodes[sym]!.2))
+          (litLenCodes[sym]!.2 + extraLen))
+        distCodes[0]!.1 distCodes[0]!.2 := by
+          rw [hconcatLit]
+    _ =
+      Png.BitWriter.writeBits bw
+        ((litLenCodes[sym]!.1 |||
+            (extraBits <<< litLenCodes[sym]!.2)) |||
+          (distCodes[0]!.1 <<<
+            (litLenCodes[sym]!.2 + extraLen)))
+        ((litLenCodes[sym]!.2 + extraLen) + distCodes[0]!.2) := by
+          rw [hconcatDist]
+    _ =
+      Png.BitWriter.writeBits bw
+        (dynamicPayloadTokenBits litLenCodes distCodes
+          (Png.DeflateToken.matchDist1 len))
+        (dynamicPayloadTokenBitLen litLenCodes distCodes
+          (Png.DeflateToken.matchDist1 len)) := by
+          simp [dynamicPayloadTokenBits, dynamicPayloadTokenBitLen,
+            hinfo, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc,
+            Nat.or_assoc]
 
 /-- Proof-facing list writer for generated dynamic payload tokens. It mirrors
 the runtime payload loop while exposing a structural induction principle. -/
@@ -2274,6 +2603,239 @@ private lemma writeDynamicPayloadTokensList_forIn
       writeDynamicPayloadTokensList bw litLenCodes distCodes tokens := by
   simpa using
     writeDynamicPayloadTokensList_foldl bw tokens litLenCodes distCodes
+
+/-- A token found in an array's `toList` has a corresponding array index. This
+feeds list-level payload replay with the indexed facts used by generated table
+proofs. -/
+lemma deflateToken_mem_toList_index
+    {tokens : Array Png.DeflateToken} {token : Png.DeflateToken}
+    (hmem : token ∈ tokens.toList) :
+    ∃ target, ∃ htarget : target < tokens.size,
+      tokens[target]'htarget = token := by
+  rcases List.mem_iff_getElem.mp hmem with ⟨idx, hidx, hget⟩
+  have hidxArray : idx < tokens.size := by
+    simpa using hidx
+  have htoken : tokens[idx] = token := by
+    simpa using hget
+  exact ⟨idx, hidxArray, by simpa using htoken⟩
+
+/-- A generated payload-token list writes exactly its packed payload stream.
+The membership hypothesis connects each list token back to the source array
+that generated the Huffman tables. -/
+lemma writeDynamicPayloadTokensList_generated_eq_writeBits
+    (source : Array Png.DeflateToken) (tokens : List Png.DeflateToken)
+    (hvalid : DeflateTokensMatchLengthsValid source)
+    (hmember :
+      ∀ token ∈ tokens, ∃ target, ∃ htarget : target < source.size,
+        source[target]'htarget = token)
+    (bw : Png.BitWriter) :
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs source))
+    let distCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicDistLengths (Png.distSymbolFreqs source))
+    writeDynamicPayloadTokensList bw litLenCodes distCodes tokens =
+      Png.BitWriter.writeBits bw
+        (dynamicPayloadStreamBits litLenCodes distCodes tokens)
+        (dynamicPayloadStreamLen litLenCodes distCodes tokens) := by
+  revert bw hmember
+  induction tokens with
+  | nil =>
+      intro _hmember bw litLenCodes distCodes
+      simpa [writeDynamicPayloadTokensList, dynamicPayloadStreamBits,
+        dynamicPayloadStreamLen] using
+        writeDynamicPayloadEob_eq_writeBits bw litLenCodes
+  | cons token tokens ih =>
+      intro hmember bw litLenCodes distCodes
+      have htailMember :
+          ∀ t ∈ tokens, ∃ target, ∃ htarget : target < source.size,
+            source[target]'htarget = t := by
+        intro t ht
+        exact hmember t (List.mem_cons_of_mem token ht)
+      have htokenWrite :
+          writeDynamicPayloadToken bw litLenCodes distCodes token =
+            Png.BitWriter.writeBits bw
+              (dynamicPayloadTokenBits litLenCodes distCodes token)
+              (dynamicPayloadTokenBitLen litLenCodes distCodes token) := by
+        cases token with
+        | literal b =>
+            exact writeDynamicPayloadToken_literal_eq_writeBits
+              bw litLenCodes distCodes b
+        | matchDist1 len =>
+            rcases hmember (Png.DeflateToken.matchDist1 len) (by simp) with
+              ⟨target, htarget, ht⟩
+            have hlen := hvalid target len htarget ht
+            simpa [litLenCodes, distCodes] using
+              writeDynamicPayloadToken_generated_match_eq_writeBits_at
+                (bw := bw) (tokens := source) (target := target)
+                (len := len) htarget ht hlen
+      have htokenBits :
+          dynamicPayloadTokenBits litLenCodes distCodes token <
+            2 ^ dynamicPayloadTokenBitLen litLenCodes distCodes token := by
+        cases token with
+        | literal b =>
+            rcases hmember (Png.DeflateToken.literal b) (by simp) with
+              ⟨target, htarget, ht⟩
+            simpa [litLenCodes, distCodes] using
+              dynamicPayloadTokenBits_generated_literal_lt_codeSpace_at
+                source target b htarget ht
+        | matchDist1 len =>
+            rcases hmember (Png.DeflateToken.matchDist1 len) (by simp) with
+              ⟨target, htarget, ht⟩
+            have hlen := hvalid target len htarget ht
+            simpa [litLenCodes, distCodes] using
+              dynamicPayloadTokenBits_generated_match_lt_codeSpace_at
+                source target len htarget ht hlen
+      have htailWrite :=
+        ih
+          htailMember
+          (Png.BitWriter.writeBits bw
+            (dynamicPayloadTokenBits litLenCodes distCodes token)
+            (dynamicPayloadTokenBitLen litLenCodes distCodes token))
+      have htailWrite' :
+          writeDynamicPayloadTokensList
+              (Png.BitWriter.writeBits bw
+                (dynamicPayloadTokenBits litLenCodes distCodes token)
+                (dynamicPayloadTokenBitLen litLenCodes distCodes token))
+              litLenCodes distCodes tokens =
+            Png.BitWriter.writeBits
+              (Png.BitWriter.writeBits bw
+                (dynamicPayloadTokenBits litLenCodes distCodes token)
+                (dynamicPayloadTokenBitLen litLenCodes distCodes token))
+              (dynamicPayloadStreamBits litLenCodes distCodes tokens)
+              (dynamicPayloadStreamLen litLenCodes distCodes tokens) := by
+        simpa [litLenCodes, distCodes] using htailWrite
+      have hconcat :
+          Png.BitWriter.writeBits bw
+              (dynamicPayloadTokenBits litLenCodes distCodes token |||
+                (dynamicPayloadStreamBits litLenCodes distCodes tokens <<<
+                  dynamicPayloadTokenBitLen litLenCodes distCodes token))
+              (dynamicPayloadTokenBitLen litLenCodes distCodes token +
+                dynamicPayloadStreamLen litLenCodes distCodes tokens) =
+            Png.BitWriter.writeBits
+              (Png.BitWriter.writeBits bw
+                (dynamicPayloadTokenBits litLenCodes distCodes token)
+                (dynamicPayloadTokenBitLen litLenCodes distCodes token))
+              (dynamicPayloadStreamBits litLenCodes distCodes tokens)
+              (dynamicPayloadStreamLen litLenCodes distCodes tokens) :=
+        Png.writeBits_concat bw
+          (dynamicPayloadTokenBits litLenCodes distCodes token)
+          (dynamicPayloadStreamBits litLenCodes distCodes tokens)
+          (dynamicPayloadTokenBitLen litLenCodes distCodes token)
+          (dynamicPayloadStreamLen litLenCodes distCodes tokens)
+          htokenBits
+      simp [writeDynamicPayloadTokensList, dynamicPayloadStreamBits,
+        dynamicPayloadStreamLen, htokenWrite, htailWrite', hconcat]
+
+/-- The generated source token array writes exactly its packed payload stream.
+This is the array-shaped specialization used by the full dynamic encoder. -/
+lemma writeDynamicPayloadTokensList_source_eq_writeBits
+    (source : Array Png.DeflateToken)
+    (hvalid : DeflateTokensMatchLengthsValid source)
+    (bw : Png.BitWriter) :
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs source))
+    let distCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicDistLengths (Png.distSymbolFreqs source))
+    writeDynamicPayloadTokensList bw litLenCodes distCodes source.toList =
+      Png.BitWriter.writeBits bw
+        (dynamicPayloadStreamBits litLenCodes distCodes source.toList)
+        (dynamicPayloadStreamLen litLenCodes distCodes source.toList) := by
+  exact writeDynamicPayloadTokensList_generated_eq_writeBits
+    source source.toList hvalid
+    (fun token hmem => deflateToken_mem_toList_index hmem) bw
+
+/-- The generated payload EOB code produces a terminal dynamic-payload finish
+step through the generic generated literal/length table. -/
+lemma generatedDynamicPayloadEob_finish_readerAt_writeBits
+    (source : Array Png.DeflateToken) (bw : Png.BitWriter)
+    (out : ByteArray) (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let spec := generatedDynamicTableSpec source
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs source))
+    let bits := dynamicPayloadEobBits litLenCodes
+    let len := dynamicPayloadEobBitLen litLenCodes
+    let bw' := Png.BitWriter.writeBits bw bits len
+    let br0 := Png.BitWriter.readerAt bw bw'.flush
+      (Png.flush_size_writeBits_le bw bits len) hbit
+    let br' := Png.BitWriter.readerAt (Png.BitWriter.writeBits bw bits len)
+      bw'.flush
+      (by
+        simpa [bw'] using
+          (le_rfl : (Png.BitWriter.writeBits bw bits len).flush.size ≤
+            (Png.BitWriter.writeBits bw bits len).flush.size))
+      (Png.bitPos_lt_8_writeBits bw bits len hbit)
+    Png.DynamicPayloadFinish spec br0 out br' := by
+  intro spec litLenCodes bits len bw' br0 br'
+  have hlen : len = 9 := by
+    simpa [len, litLenCodes] using
+      dynamicPayloadEobBitLen_generated_eq_nine source
+  have hdecode :
+      (generatedDynamicLitLenTable source).decode br0 = some (256, br') := by
+    have h :=
+      generatedDynamicLitLenTable_decode_eob_readerAt_writeBits
+        source bw 0 0 hbit hcur
+    simpa [br0, br', bw', bits, len, litLenCodes, dynamicPayloadEobBits,
+      hlen] using h
+  exact Png.DynamicPayloadFinish.eob
+    (spec := spec) (br := br0) (out := out)
+    (sym := 256) (br' := br') (by simpa [spec] using hdecode)
+    (by decide) (by decide)
+
+/-- A generated literal payload token produces one validated dynamic-payload
+literal transition through the generic generated literal/length table. -/
+lemma generatedDynamicPayloadLiteral_transition_readerAt_writeBits
+    (source : Array Png.DeflateToken) (target : Nat) (b : UInt8)
+    (bw : Png.BitWriter) (out : ByteArray) (tailBits tailLen : Nat)
+    (htarget : target < source.size)
+    (ht : source[target]'htarget = Png.DeflateToken.literal b)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let spec := generatedDynamicTableSpec source
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs source))
+    let distCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicDistLengths (Png.distSymbolFreqs source))
+    let bits := dynamicPayloadTokenBits litLenCodes distCodes
+      (Png.DeflateToken.literal b)
+    let len := dynamicPayloadTokenBitLen litLenCodes distCodes
+      (Png.DeflateToken.literal b)
+    let bitsTot := bits ||| (tailBits <<< len)
+    let lenTot := len + tailLen
+    let bw' := Png.BitWriter.writeBits bw bitsTot lenTot
+    let br0 := Png.BitWriter.readerAt bw bw'.flush
+      (Png.flush_size_writeBits_le bw bitsTot lenTot) hbit
+    let br' := Png.BitWriter.readerAt (Png.BitWriter.writeBits bw bitsTot len)
+      bw'.flush
+      (by
+        have hk : len ≤ lenTot := by omega
+        simpa [lenTot] using
+          (Png.flush_size_writeBits_prefix bw bitsTot len lenTot hk))
+      (Png.bitPos_lt_8_writeBits bw bitsTot len hbit)
+    Png.DynamicPayloadTransition spec br0 out br'
+      (out.push (Png.u8 b.toNat)) := by
+  intro spec litLenCodes distCodes bits len bitsTot lenTot bw' br0 br'
+  have hlen : len = 9 := by
+    simpa [len, litLenCodes, distCodes] using
+      dynamicPayloadTokenBitLen_generated_literal_eq_nine_at
+        source target b htarget ht
+  have hdecode :
+      (generatedDynamicLitLenTable source).decode br0 =
+        some (b.toNat, br') := by
+    have h :=
+      generatedDynamicLitLenTable_decode_literal_at_readerAt_writeBits
+        source target b bw tailBits tailLen htarget ht hbit hcur
+    simpa [br0, br', bw', bits, len, bitsTot, lenTot, litLenCodes,
+      distCodes, dynamicPayloadTokenBits, hlen] using h
+  have hsym : b.toNat < 256 := UInt8.toNat_lt b
+  exact Png.DynamicPayloadTransition.literal
+    (spec := spec) (br := br0) (out := out)
+    (sym := b.toNat) (br' := br') (by simpa [spec] using hdecode) hsym
 
 end Lemmas
 
