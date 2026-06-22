@@ -217,6 +217,46 @@ lemma dynamicPayloadTokenBitLen_generated_match_eq
   simpa [dynamicPayloadTokenBitLen, litLenCodes, distCodes,
     Nat.add_assoc] using congrArg₂ Nat.add hlit (congrArg₂ Nat.add rfl hdist)
 
+/-- Generated payload EOB bits fit in the EOB code width. This is the
+terminal code-space guard needed by writer concatenation proofs. -/
+lemma dynamicPayloadEobBits_generated_lt_codeSpace
+    (tokens : Array Png.DeflateToken) :
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens))
+    dynamicPayloadEobBits litLenCodes <
+      2 ^ dynamicPayloadEobBitLen litLenCodes := by
+  intro litLenCodes
+  have hbits := generatedDynamicLitLenCodes_eob_bits_lt_codeSpace tokens
+  have hlen := dynamicPayloadEobBitLen_generated_eq_nine tokens
+  simpa [dynamicPayloadEobBits, litLenCodes, hlen] using hbits
+
+/-- Generated literal payload bits fit in the literal token width. This is the
+literal branch's code-space guard for payload writer replay. -/
+lemma dynamicPayloadTokenBits_generated_literal_lt_codeSpace_at
+    (tokens : Array Png.DeflateToken) (target : Nat) (b : UInt8)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.literal b) :
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens))
+    let distCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens))
+    dynamicPayloadTokenBits litLenCodes distCodes
+      (Png.DeflateToken.literal b) <
+        2 ^ dynamicPayloadTokenBitLen litLenCodes distCodes
+          (Png.DeflateToken.literal b) := by
+  intro litLenCodes distCodes
+  have hbits :=
+    generatedDynamicLitLenCodes_literal_bits_lt_codeSpace_at
+      tokens target b htarget ht
+  have hcodeLen :=
+    generatedDynamicLitLenCodes_literal_len_eq_nine_at
+      tokens target b htarget ht
+  simpa [dynamicPayloadTokenBits, dynamicPayloadTokenBitLen,
+    litLenCodes, distCodes, hcodeLen] using hbits
+
 /-- Proof-facing list writer for generated dynamic payload tokens. It mirrors
 the runtime payload loop while exposing a structural induction principle. -/
 def writeDynamicPayloadToken
