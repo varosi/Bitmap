@@ -450,6 +450,85 @@ lemma writeGeneratedDynamicHeader_eq_writeBits
   simpa [litLenLengths, distLengths, lengths, codeTokens, prefixBits]
     using hprefix.trans hconcat.symm
 
+/-- Writing arbitrary suffix bits after the generated full-dynamic header is
+the same as writing one packed header-plus-suffix stream. -/
+lemma writeGeneratedDynamicHeader_rest_eq_writeBits
+    (bw : Png.BitWriter) (tokens : Array Png.DeflateToken)
+    (restBits restLen : Nat) :
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    let distLengths :=
+      Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)
+    let lengths := generatedDynamicHeaderCodeLengths tokens
+    let codeTokens := Png.codeLenLiteralTokensOfLengths lengths
+    let prefixBits :=
+      Png.generatedDynamicHeaderPrefixBits
+        (Png.generatedDynamicLitLenCount litLenLengths)
+        (Png.generatedDynamicDistCount distLengths)
+    let headerBits :=
+      prefixBits |||
+        (codeLenTokenStreamBits codeTokens.toList <<<
+          Png.generatedDynamicHeaderPrefixLen)
+    let headerLen :=
+      Png.generatedDynamicHeaderPrefixLen +
+        codeLenTokenStreamLen codeTokens.toList
+    Png.BitWriter.writeBits
+        (Png.writeGeneratedDynamicHeader bw litLenLengths distLengths)
+        restBits restLen =
+      Png.BitWriter.writeBits bw
+        (headerBits ||| (restBits <<< headerLen))
+        (headerLen + restLen) := by
+  intro litLenLengths distLengths lengths codeTokens prefixBits headerBits headerLen
+  have hheader :=
+    writeGeneratedDynamicHeader_eq_writeBits (bw := bw) (tokens := tokens)
+  have hheader' :
+      Png.writeGeneratedDynamicHeader bw litLenLengths distLengths =
+        Png.BitWriter.writeBits bw headerBits headerLen := by
+    simpa [litLenLengths, distLengths, lengths, codeTokens, prefixBits,
+      headerBits, headerLen] using hheader
+  have hvalid : ∀ token ∈ codeTokens.toList, CodeLenTokenValid token := by
+    exact codeLenTokensValid_toList
+      (by
+        simpa [lengths, codeTokens] using
+          generatedDynamicHeaderLiteralCodeLengthTokens_valid tokens)
+  have hprefixBits :
+      prefixBits < 2 ^ Png.generatedDynamicHeaderPrefixLen := by
+    simpa [prefixBits, Png.generatedDynamicLitLenCount, Png.generatedDynamicDistCount] using
+      (show Png.generatedDynamicHeaderPrefixBits 286 30 <
+          2 ^ Png.generatedDynamicHeaderPrefixLen by
+        native_decide)
+  have htokenBits :
+      codeLenTokenStreamBits codeTokens.toList <
+        2 ^ codeLenTokenStreamLen codeTokens.toList :=
+    codeLenTokenStreamBits_lt_codeSpace codeTokens.toList hvalid
+  have htokenShift :
+      codeLenTokenStreamBits codeTokens.toList <<< Png.generatedDynamicHeaderPrefixLen <
+        2 ^ headerLen := by
+    rw [Nat.shiftLeft_eq]
+    have hmul :
+        codeLenTokenStreamBits codeTokens.toList *
+            2 ^ Png.generatedDynamicHeaderPrefixLen <
+          2 ^ codeLenTokenStreamLen codeTokens.toList *
+            2 ^ Png.generatedDynamicHeaderPrefixLen :=
+      (Nat.mul_lt_mul_right
+        (Nat.two_pow_pos Png.generatedDynamicHeaderPrefixLen)).mpr htokenBits
+    simpa [headerLen, Nat.pow_add, Nat.mul_comm, Nat.mul_left_comm,
+      Nat.mul_assoc, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using hmul
+  have hprefixWide :
+      prefixBits < 2 ^ headerLen := by
+    exact lt_of_lt_of_le hprefixBits
+      (Nat.pow_le_pow_right (by decide : 0 < 2) (by
+        simp [headerLen]))
+  have hheaderBits :
+      headerBits < 2 ^ headerLen := by
+    simpa [headerBits] using Nat.or_lt_two_pow hprefixWide htokenShift
+  have hconcat :=
+    Png.writeBits_concat bw headerBits restBits headerLen restLen hheaderBits
+  have hheaderRest :=
+    congrArg (fun w => Png.BitWriter.writeBits w restBits restLen) hheader'
+  simpa [litLenLengths, distLengths, lengths, codeTokens, prefixBits,
+    headerBits, headerLen] using hheaderRest.trans hconcat.symm
+
 /-- The generated dynamic-table prefix has the expected fixed front length.
 This turns parser bounds for `HLIT`, `HDIST`, and `HCLEN` into arithmetic. -/
 lemma generatedDynamicHeaderPrefixLen_eq :
