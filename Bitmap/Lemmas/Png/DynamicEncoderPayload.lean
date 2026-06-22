@@ -159,6 +159,64 @@ def dynamicPayloadStreamLen
       dynamicPayloadTokenBitLen litLenCodes distCodes token +
         dynamicPayloadStreamLen litLenCodes distCodes tokens
 
+/-- Generated payload EOB is emitted with the generated nine-bit
+literal/length code. This is the terminal width used by payload traces. -/
+lemma dynamicPayloadEobBitLen_generated_eq_nine
+    (tokens : Array Png.DeflateToken) :
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens))
+    dynamicPayloadEobBitLen litLenCodes = 9 := by
+  intro litLenCodes
+  simpa [dynamicPayloadEobBitLen, litLenCodes] using
+    generatedDynamicLitLenCodes_eob_len_eq_nine tokens
+
+/-- A generated literal payload token uses the generated nine-bit
+literal/length row. This links token frequency collection to the payload
+writer's literal branch. -/
+lemma dynamicPayloadTokenBitLen_generated_literal_eq_nine_at
+    (tokens : Array Png.DeflateToken) (target : Nat) (b : UInt8)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.literal b) :
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens))
+    let distCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens))
+    dynamicPayloadTokenBitLen litLenCodes distCodes
+      (Png.DeflateToken.literal b) = 9 := by
+  intro litLenCodes distCodes
+  simpa [dynamicPayloadTokenBitLen, litLenCodes] using
+    generatedDynamicLitLenCodes_literal_len_eq_nine_at
+      tokens target b htarget ht
+
+/-- A generated match payload token uses a nine-bit literal/length symbol,
+the DEFLATE match extra bits, and the generated one-bit distance-zero code. -/
+lemma dynamicPayloadTokenBitLen_generated_match_eq
+    (tokens : Array Png.DeflateToken) (target len : Nat)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.matchDist1 len)
+    (hlen : 3 ≤ len ∧ len ≤ 258) :
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens))
+    let distCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens))
+    dynamicPayloadTokenBitLen litLenCodes distCodes
+      (Png.DeflateToken.matchDist1 len) =
+        9 + (Png.fixedLenMatchInfo len).2.2 + 1 := by
+  intro litLenCodes distCodes
+  have hlit :=
+    generatedDynamicLitLenCodes_match_len_eq_nine_at
+      tokens target len htarget ht hlen
+  have hdist :=
+    generatedDynamicDistCodes_zero_len_eq_one_of_match_at
+      tokens target len htarget ht
+  simpa [dynamicPayloadTokenBitLen, litLenCodes, distCodes,
+    Nat.add_assoc] using congrArg₂ Nat.add hlit (congrArg₂ Nat.add rfl hdist)
+
 /-- Proof-facing list writer for generated dynamic payload tokens. It mirrors
 the runtime payload loop while exposing a structural induction principle. -/
 def writeDynamicPayloadToken
