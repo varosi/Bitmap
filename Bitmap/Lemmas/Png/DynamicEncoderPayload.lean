@@ -392,6 +392,68 @@ lemma generatedDynamicLitLenTable_short_row_get_none
         (Array.replicate (1 <<< rowIdx) (none : Option Nat)) code hcodeRep]
       simp
 
+/-- Generated literal/length rows below nine bits keep their initialized row
+widths. This supplies the modulo bounds for short-prefix decoder steps. -/
+lemma generatedDynamicLitLenTable_short_row_size
+    (tokens : Array Png.DeflateToken) (rowIdx : Nat)
+    (hrowPos : 0 < rowIdx) (hrowLt : rowIdx < 9) :
+    (generatedDynamicLitLenTable tokens).table[rowIdx]!.size = 1 <<< rowIdx := by
+  let lengths :=
+    Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+  have hmk :
+      Png.mkHuffman lengths =
+        some (generatedDynamicLitLenTable tokens) := by
+    simpa [lengths] using mkHuffman_generatedDynamicLitLenLengths_eq tokens
+  have hmax :
+      Png.maxCodeLenAux lengths 0 0 =
+        Png.generatedDynamicLitLenCodeLen := by
+    simpa [lengths] using
+      maxCodeLenAux_generatedDynamicLitLenLengths_eq_codeLen tokens
+  let count := Png.countCodeLengthsAux lengths 0 (Array.replicate 10 0)
+  let nextCode := (Png.nextCodesAux count 9 1 0 (Array.replicate 10 0)).2
+  let init := Png.huffmanEmptyTable 9
+  have hmk' :
+      (match Png.fillHuffmanTableAux lengths 0 nextCode init with
+      | none => none
+      | some table => some ({ maxLen := 9, table := table } : Png.Huffman)) =
+        some (generatedDynamicLitLenTable tokens) := by
+    simpa [Png.mkHuffman, lengths, hmax, Png.generatedDynamicLitLenCodeLen,
+      count, nextCode, init] using hmk
+  cases hfill : Png.fillHuffmanTableAux lengths 0 nextCode init with
+  | none =>
+      simp [hfill] at hmk'
+  | some table =>
+      have hrowInit : rowIdx < init.size := by
+        simp [init, huffmanEmptyTable_size]
+        omega
+      have hsize :=
+        fillHuffmanTableAux_row_size_of_some lengths 0 nextCode init table rowIdx
+          hrowInit hfill
+      simp [hfill] at hmk'
+      rw [← hmk']
+      calc
+        table[rowIdx]!.size = init[rowIdx]!.size := hsize
+        _ = 1 <<< rowIdx := by
+          exact huffmanEmptyTable_get!_size 9 rowIdx (by omega) hrowPos
+
+/-- Any generated literal/length prefix shorter than nine bits is unresolved.
+This is the packed-stream form used by the future `decodeFuel` proof. -/
+lemma generatedDynamicLitLenTable_prefix_row_none
+    (tokens : Array Png.DeflateToken) (bitsTot rowIdx : Nat)
+    (hrowPos : 0 < rowIdx) (hrowLt : rowIdx < 9) :
+    (generatedDynamicLitLenTable tokens).table[rowIdx]![bitsTot % 2 ^ rowIdx]! =
+      none := by
+  have hsize :=
+    generatedDynamicLitLenTable_short_row_size tokens rowIdx hrowPos hrowLt
+  have hcode :
+      bitsTot % 2 ^ rowIdx <
+        (generatedDynamicLitLenTable tokens).table[rowIdx]!.size := by
+    have hpow : 0 < 2 ^ rowIdx := Nat.pow_pos (by decide : 0 < (2 : Nat))
+    have hmod : bitsTot % 2 ^ rowIdx < 2 ^ rowIdx := Nat.mod_lt bitsTot hpow
+    simpa [hsize, Nat.shiftLeft_eq] using hmod
+  exact generatedDynamicLitLenTable_short_row_get_none tokens rowIdx
+    (bitsTot % 2 ^ rowIdx) hrowPos hrowLt hcode
+
 /-- Names the generated dynamic distance table accepted by the parser boundary.
 The table is empty for literal-only generated streams and non-empty when
 distance-1 match tokens are present. -/
