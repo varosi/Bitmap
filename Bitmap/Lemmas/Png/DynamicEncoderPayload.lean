@@ -2837,6 +2837,80 @@ lemma generatedDynamicPayloadLiteral_transition_readerAt_writeBits
     (spec := spec) (br := br0) (out := out)
     (sym := b.toNat) (br' := br') (by simpa [spec] using hdecode) hsym
 
+/-- Builds a generic dynamic copy transition from already-proved match
+decodes. This isolates the semantic `DynamicPayloadTransition.copy`
+constructor from writer/reader arithmetic. -/
+lemma dynamicPayloadTransition_copy_dist1_of_decodes
+    (spec : Png.DynamicTableSpec) (br0 br1 br2 brAfter : Png.BitReader)
+    (out out' : ByteArray) (matchLen : Nat)
+    (hdecodeSym :
+      spec.litLenTable.decode br0 =
+        some ((Png.fixedLenMatchInfo matchLen).1, br1))
+    (hdecodeLenEx :
+      ∃ hsym hbits,
+        Png.decodeLength (Png.fixedLenMatchInfo matchLen).1 br1
+          hsym hbits = (matchLen, br2))
+    (hdecodeDistEx :
+      ∃ hdist hbitsD,
+        spec.distTable.decode br2 = some (0, brAfter) ∧
+        Png.decodeDistance 0 brAfter hdist hbitsD = (1, brAfter))
+    (hcopy : Png.copyDistance out 1 matchLen = some out') :
+    Png.DynamicPayloadTransition spec br0 out brAfter out' := by
+  let sym := (Png.fixedLenMatchInfo matchLen).1
+  rcases hdecodeLenEx with ⟨hsymLen, hbitsLen, hdecodeLen⟩
+  rcases hdecodeDistEx with ⟨hdist0, hbitsD0, hdecodeDist, hdecodeDistance⟩
+  let extra :=
+    Png.lengthExtra[sym - 257]'(by
+      have hidxle : sym - 257 ≤ 28 := by
+        have hs := hsymLen
+        omega
+      have hidxlt : sym - 257 < 29 := Nat.lt_succ_of_le hidxle
+      have hsize : Png.lengthExtra.size = 29 := by decide
+      simpa [hsize] using hidxlt)
+  let extraD :=
+    Png.distExtra[0]'(by
+      have hDistExtraSize : Png.distExtra.size = 30 := by decide
+      have hDistBasesSize : Png.distBases.size = 30 := by decide
+      simpa [hDistExtraSize, hDistBasesSize] using hdist0)
+  have hnotLit : ¬ sym < 256 := by
+    have hs := hsymLen
+    omega
+  have hnotEob : (sym == 256) = false := by
+    cases hbeq : (sym == 256) with
+    | false => simpa using hbeq
+    | true =>
+        have hs : sym = 256 := by simpa [sym] using hbeq
+        omega
+  have hextra :
+      extra =
+        Array.getInternal Png.lengthExtra (sym - 257) (by
+          have hidxle : sym - 257 ≤ 28 := by omega
+          have hidxlt : sym - 257 < 29 := Nat.lt_succ_of_le hidxle
+          have hsize : Png.lengthExtra.size = 29 := by decide
+          simpa [hsize] using hidxlt) := by
+    simp [extra, Array.getInternal, getElem!_pos]
+  have hextraD :
+      extraD =
+        Array.getInternal Png.distExtra 0 (by
+          have hDistExtraSize : Png.distExtra.size = 30 := by decide
+          have hDistBasesSize : Png.distBases.size = 30 := by decide
+          simpa [hDistExtraSize, hDistBasesSize] using hdist0) := by
+    simp [extraD, Array.getInternal, getElem!_pos]
+  exact Png.DynamicPayloadTransition.copy
+    (spec := spec) (br := br0) (out := out)
+    (sym := sym) (extra := extra) (len := matchLen)
+    (distSym := 0) (extraD := extraD) (distance := 1)
+    (br' := br1) (br'' := br2) (br''' := brAfter)
+    (br'''' := brAfter) (out' := out')
+    (by simpa [sym] using hdecodeSym)
+    hnotLit hnotEob hsymLen hextra
+    (by simpa [extra] using hbitsLen)
+    (by simpa [sym] using hdecodeLen)
+    hdecodeDist hdist0 hextraD
+    (by simpa [extraD] using hbitsD0)
+    (by simpa [extraD] using hdecodeDistance)
+    hcopy
+
 end Lemmas
 
 end Bitmaps
