@@ -8,6 +8,18 @@ namespace Lemmas
 set_option linter.unnecessarySimpa false
 set_option linter.unusedSimpArgs false
 
+/-- Bit reversal is injective inside a fixed-width code space. This prevents
+later generated Huffman-table fills from overwriting an earlier row entry. -/
+lemma reverseBits_injective_of_lt
+    {a b len : Nat} (ha : a < 2 ^ len) (hb : b < 2 ^ len)
+    (h : Png.reverseBits a len = Png.reverseBits b len) :
+    a = b := by
+  calc
+    a = Png.reverseBits (Png.reverseBits a len) len := by
+          exact (Png.reverseBits_reverseBits a len ha).symm
+    _ = Png.reverseBits (Png.reverseBits b len) len := by rw [h]
+    _ = b := Png.reverseBits_reverseBits b len hb
+
 /-- Huffman table filling preserves the number of decode rows when it succeeds.
 Generated payload decoding uses this to recover concrete row bounds from
 `mkHuffman` without unfolding every successful table fill. -/
