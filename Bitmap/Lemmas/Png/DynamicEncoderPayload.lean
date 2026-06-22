@@ -1067,6 +1067,91 @@ lemma generatedDynamicDistTable_lookup_zero_of_match_at
   rw [generatedDynamicDistMatchCodes_zero]
   exact generatedDynamicDistMatchTable_lookup_zero
 
+/-- Decodes the generated one-bit distance-zero symbol from a writer-built
+stream. This is the distance-side Huffman bridge for match payload replay. -/
+lemma generatedDynamicDistMatchTable_decode_zero_readerAt_writeBits
+    (bw : Png.BitWriter) (bitsTot restLen : Nat)
+    (hrow1 : generatedDynamicDistMatchTable.table[1]![bitsTot % 2]! = some 0)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let lenTot := 1 + restLen
+    let bw' := Png.BitWriter.writeBits bw bitsTot lenTot
+    let br0 := Png.BitWriter.readerAt bw bw'.flush
+      (Png.flush_size_writeBits_le bw bitsTot lenTot) hbit
+    let br1 := Png.BitWriter.readerAt (Png.BitWriter.writeBits bw bitsTot 1) bw'.flush
+      (by
+        have hk : 1 ≤ lenTot := by omega
+        simpa [lenTot] using
+          (Png.flush_size_writeBits_prefix bw bitsTot 1 lenTot hk))
+      (Png.bitPos_lt_8_writeBits bw bitsTot 1 hbit)
+    generatedDynamicDistMatchTable.decode br0 = some (0, br1) := by
+  let lenTot := 1 + restLen
+  let bw' := Png.BitWriter.writeBits bw bitsTot lenTot
+  let bw1 := Png.BitWriter.writeBits bw bitsTot 1
+  let br0 := Png.BitWriter.readerAt bw bw'.flush
+    (Png.flush_size_writeBits_le bw bitsTot lenTot) hbit
+  let br1 := Png.BitWriter.readerAt bw1 bw'.flush
+    (by
+      have hk : 1 ≤ lenTot := by omega
+      simpa [bw', lenTot] using
+        (Png.flush_size_writeBits_prefix bw bitsTot 1 lenTot hk))
+    (Png.bitPos_lt_8_writeBits bw bitsTot 1 hbit)
+  have hbound0 : br0.bitIndex + 1 ≤ br0.data.size * 8 := by
+    simpa [br0, bw', lenTot] using
+      (Png.readerAt_writeBits_bound (bw := bw) (bits := bitsTot) (len := lenTot)
+        (k := 1) (by omega) hbit)
+  have hbr0 : br0.bytePos < br0.data.size := by
+    exact Png.bytePos_lt_of_bitIndex_lt_dataBits br0 (by omega)
+  have hread0 : br0.readBit = (bitsTot % 2, br1) := by
+    simpa [br0, br1, bw', bw1, lenTot] using
+      (Png.readBit_readerAt_writeBits (bw := bw) (bits := bitsTot) (len := lenTot)
+        hbit hcur (by omega))
+  have htable1 : 1 < generatedDynamicDistMatchTable.table.size := by
+    rw [generatedDynamicDistMatchTable_table_size]
+    decide
+  have hrowGet1 :
+      generatedDynamicDistMatchTable.table[1]! =
+        Array.getInternal generatedDynamicDistMatchTable.table 1 htable1 := by
+    rw [getElem!_pos generatedDynamicDistMatchTable.table 1 htable1]
+    rfl
+  have hcode1 : bitsTot % 2 <
+      (Array.getInternal generatedDynamicDistMatchTable.table 1 htable1).size := by
+    have hlt : bitsTot % 2 < 2 := Nat.mod_lt bitsTot (by decide)
+    rw [← hrowGet1]
+    simpa [generatedDynamicDistMatchTable_row1_size] using hlt
+  have hrow1' :
+      Array.getInternal
+        (Array.getInternal generatedDynamicDistMatchTable.table 1 htable1)
+        (bitsTot % 2) hcode1 = some 0 := by
+    have hentry :
+        generatedDynamicDistMatchTable.table[1]![bitsTot % 2]! =
+          Array.getInternal
+            (Array.getInternal generatedDynamicDistMatchTable.table 1 htable1)
+            (bitsTot % 2) hcode1 := by
+      rw [hrowGet1]
+      rw [getElem!_pos
+        (Array.getInternal generatedDynamicDistMatchTable.table 1 htable1)
+        (bitsTot % 2) hcode1]
+      rfl
+    rw [hentry] at hrow1
+    exact hrow1
+  have hcode1' :
+      0 ||| ((bitsTot % 2) <<< 0) <
+        (Array.getInternal generatedDynamicDistMatchTable.table 1 htable1).size := by
+    simpa using hcode1
+  have hrow1'' :
+      Array.getInternal
+        (Array.getInternal generatedDynamicDistMatchTable.table 1 htable1)
+        (0 ||| ((bitsTot % 2) <<< 0)) hcode1' = some 0 := by
+    simpa using hrow1'
+  unfold Png.Huffman.decode
+  rw [generatedDynamicDistMatchTable_maxLen]
+  simpa [hread0] using
+    (Png.Huffman.decodeFuel_step_some (h := generatedDynamicDistMatchTable)
+      (fuel := 0) (code := 0) (len := 0) (br := br0) (br' := br1)
+      (bit := bitsTot % 2) (sym := 0) (hbyte := hbr0)
+      (hread := hread0) (htable := htable1) (hcode := hcode1')
+      (hrow := hrow1''))
+
 /-- The generated table spec reconstructed from generated lengths contains
 exactly the named generated literal/length and distance tables. This is the
 payload proof's bridge from header parsing to symbol decoding. -/
