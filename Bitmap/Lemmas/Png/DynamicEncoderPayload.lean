@@ -1651,6 +1651,136 @@ lemma generatedDynamicLitLenTable_decode_readerAt_writeBits_core
           (bitsTot % 2 ^ 8) 8 br8 := hstep7
     _ = some (sym, br9) := hstep8
 
+/-- A generated literal token's literal/length code decodes to the literal
+symbol from the same writer-built payload stream. -/
+lemma generatedDynamicLitLenTable_decode_literal_at_readerAt_writeBits
+    (tokens : Array Png.DeflateToken) (target : Nat) (b : UInt8)
+    (bw : Png.BitWriter) (restBits restLen : Nat)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.literal b)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let lengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    let codes := Png.canonicalRevCodesFromLengths lengths
+    let bitsTot := codes[b.toNat]!.1 ||| (restBits <<< 9)
+    let lenTot := 9 + restLen
+    let bw' := Png.BitWriter.writeBits bw bitsTot lenTot
+    let br0 := Png.BitWriter.readerAt bw bw'.flush
+      (Png.flush_size_writeBits_le bw bitsTot lenTot) hbit
+    let br9 := Png.BitWriter.readerAt (Png.BitWriter.writeBits bw bitsTot 9) bw'.flush
+      (by
+        have hk : 9 ≤ lenTot := by omega
+        simpa [lenTot] using
+          (Png.flush_size_writeBits_prefix bw bitsTot 9 lenTot hk))
+      (Png.bitPos_lt_8_writeBits bw bitsTot 9 hbit)
+    (generatedDynamicLitLenTable tokens).decode br0 = some (b.toNat, br9) := by
+  intro lengths codes bitsTot lenTot bw' br0 br9
+  have hsym : b.toNat < lengths.size := by
+    have hb : b.toNat < 256 := UInt8.toNat_lt b
+    have hsize : lengths.size = 286 := by
+      simp [lengths, generatedDynamicLitLenLengths_size, litLenSymbolFreqs_size]
+    omega
+  have hpos : 0 < lengths[b.toNat] := by
+    have hposBang :=
+      generatedDynamicLitLenLengths_literal_pos_at tokens target b htarget ht
+    simpa [lengths, getElem!_pos lengths b.toNat hsym] using hposBang
+  have hrow9 :
+      (generatedDynamicLitLenTable tokens).table[9]![bitsTot % 2 ^ 9]! =
+        some b.toNat := by
+    simpa [lengths, codes, bitsTot] using
+      (generatedDynamicLitLenTable_prefix9_row_some
+        tokens b.toNat restBits
+        (by simpa [lengths] using hsym)
+        (by simpa [lengths] using hpos))
+  simpa [bitsTot, lenTot, bw', br0, br9] using
+    generatedDynamicLitLenTable_decode_readerAt_writeBits_core
+      tokens bw bitsTot restLen b.toNat hrow9 hbit hcur
+
+/-- A generated match token's literal/length code decodes to its DEFLATE
+length symbol. Length extra bits are handled separately by payload replay. -/
+lemma generatedDynamicLitLenTable_decode_match_at_readerAt_writeBits
+    (tokens : Array Png.DeflateToken) (target len : Nat)
+    (bw : Png.BitWriter) (restBits restLen : Nat)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.matchDist1 len)
+    (hlen : 3 ≤ len ∧ len ≤ 258)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let lengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    let codes := Png.canonicalRevCodesFromLengths lengths
+    let sym := (Png.fixedLenMatchInfo len).1
+    let bitsTot := codes[sym]!.1 ||| (restBits <<< 9)
+    let lenTot := 9 + restLen
+    let bw' := Png.BitWriter.writeBits bw bitsTot lenTot
+    let br0 := Png.BitWriter.readerAt bw bw'.flush
+      (Png.flush_size_writeBits_le bw bitsTot lenTot) hbit
+    let br9 := Png.BitWriter.readerAt (Png.BitWriter.writeBits bw bitsTot 9) bw'.flush
+      (by
+        have hk : 9 ≤ lenTot := by omega
+        simpa [lenTot] using
+          (Png.flush_size_writeBits_prefix bw bitsTot 9 lenTot hk))
+      (Png.bitPos_lt_8_writeBits bw bitsTot 9 hbit)
+    (generatedDynamicLitLenTable tokens).decode br0 = some (sym, br9) := by
+  intro lengths codes sym bitsTot lenTot bw' br0 br9
+  have hsym : sym < lengths.size := by
+    have hfixed := fixedLenMatchInfo_sym_lt_286 len hlen
+    have hsize : lengths.size = 286 := by
+      simp [lengths, generatedDynamicLitLenLengths_size, litLenSymbolFreqs_size]
+    omega
+  have hpos : 0 < lengths[sym] := by
+    have hposBang :=
+      generatedDynamicLitLenLengths_match_pos_at tokens target len htarget ht hlen
+    simpa [lengths, sym, getElem!_pos lengths sym hsym] using hposBang
+  have hrow9 :
+      (generatedDynamicLitLenTable tokens).table[9]![bitsTot % 2 ^ 9]! =
+        some sym := by
+    simpa [lengths, codes, sym, bitsTot] using
+      (generatedDynamicLitLenTable_prefix9_row_some
+        tokens sym restBits
+        (by simpa [lengths] using hsym)
+        (by simpa [lengths] using hpos))
+  simpa [bitsTot, lenTot, bw', br0, br9] using
+    generatedDynamicLitLenTable_decode_readerAt_writeBits_core
+      tokens bw bitsTot restLen sym hrow9 hbit hcur
+
+/-- The generated end-of-block code decodes through the generic dynamic
+literal/length table. This supplies the terminal payload trace step. -/
+lemma generatedDynamicLitLenTable_decode_eob_readerAt_writeBits
+    (tokens : Array Png.DeflateToken)
+    (bw : Png.BitWriter) (restBits restLen : Nat)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let lengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    let codes := Png.canonicalRevCodesFromLengths lengths
+    let bitsTot := codes[256]!.1 ||| (restBits <<< 9)
+    let lenTot := 9 + restLen
+    let bw' := Png.BitWriter.writeBits bw bitsTot lenTot
+    let br0 := Png.BitWriter.readerAt bw bw'.flush
+      (Png.flush_size_writeBits_le bw bitsTot lenTot) hbit
+    let br9 := Png.BitWriter.readerAt (Png.BitWriter.writeBits bw bitsTot 9) bw'.flush
+      (by
+        have hk : 9 ≤ lenTot := by omega
+        simpa [lenTot] using
+          (Png.flush_size_writeBits_prefix bw bitsTot 9 lenTot hk))
+      (Png.bitPos_lt_8_writeBits bw bitsTot 9 hbit)
+    (generatedDynamicLitLenTable tokens).decode br0 = some (256, br9) := by
+  intro lengths codes bitsTot lenTot bw' br0 br9
+  have hsym : 256 < lengths.size := by
+    simpa [lengths] using generatedDynamicLitLenLengths_eob_inBounds tokens
+  have hpos : 0 < lengths[256] := by
+    simpa [lengths] using generatedDynamicLitLenLengths_eob_pos tokens
+  have hrow9 :
+      (generatedDynamicLitLenTable tokens).table[9]![bitsTot % 2 ^ 9]! =
+        some 256 := by
+    simpa [lengths, codes, bitsTot] using
+      (generatedDynamicLitLenTable_prefix9_row_some
+        tokens 256 restBits
+        (by simpa [lengths] using hsym)
+        (by simpa [lengths] using hpos))
+  simpa [bitsTot, lenTot, bw', br0, br9] using
+    generatedDynamicLitLenTable_decode_readerAt_writeBits_core
+      tokens bw bitsTot restLen 256 hrow9 hbit hcur
+
 /-- Names the generated dynamic distance table accepted by the parser boundary.
 The table is empty for literal-only generated streams and non-empty when
 distance-1 match tokens are present. -/
@@ -1856,6 +1986,41 @@ lemma generatedDynamicDistMatchTable_decode_zero_readerAt_writeBits
       (bit := bitsTot % 2) (sym := 0) (hbyte := hbr0)
       (hread := hread0) (htable := htable1) (hcode := hcode1')
       (hrow := hrow1''))
+
+/-- A generated match token's distance code decodes to distance symbol zero
+through the generated distance table, not a fixed-table shortcut. -/
+lemma generatedDynamicDistTable_decode_zero_of_match_at_readerAt_writeBits
+    (tokens : Array Png.DeflateToken) (target len : Nat)
+    (bw : Png.BitWriter) (restBits restLen : Nat)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.matchDist1 len)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let bitsTot := restBits <<< 1
+    let lenTot := 1 + restLen
+    let bw' := Png.BitWriter.writeBits bw bitsTot lenTot
+    let br0 := Png.BitWriter.readerAt bw bw'.flush
+      (Png.flush_size_writeBits_le bw bitsTot lenTot) hbit
+    let br1 := Png.BitWriter.readerAt (Png.BitWriter.writeBits bw bitsTot 1) bw'.flush
+      (by
+        have hk : 1 ≤ lenTot := by omega
+        simpa [lenTot] using
+          (Png.flush_size_writeBits_prefix bw bitsTot 1 lenTot hk))
+      (Png.bitPos_lt_8_writeBits bw bitsTot 1 hbit)
+    (generatedDynamicDistTable tokens).decode br0 = some (0, br1) := by
+  intro bitsTot lenTot bw' br0 br1
+  have htable :=
+    generatedDynamicDistTable_eq_matchTable_of_match_at
+      tokens target len htarget ht
+  have hmod : bitsTot % 2 = 0 := by
+    simpa [bitsTot, Nat.shiftLeft_eq] using
+      (Nat.mul_mod_right restBits (2 ^ 1))
+  have hrow1 :
+      generatedDynamicDistMatchTable.table[1]![bitsTot % 2]! = some 0 := by
+    simpa [hmod] using generatedDynamicDistMatchTable_lookup_zero
+  rw [htable]
+  simpa [bitsTot, lenTot, bw', br0, br1] using
+    generatedDynamicDistMatchTable_decode_zero_readerAt_writeBits
+      bw bitsTot restLen hrow1 hbit hcur
 
 /-- The generated table spec reconstructed from generated lengths contains
 exactly the named generated literal/length and distance tables. This is the
