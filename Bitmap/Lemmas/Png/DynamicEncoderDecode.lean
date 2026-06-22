@@ -807,6 +807,275 @@ lemma readGeneratedCodeLenLengths19_eq_forIn_mprod (br : Png.BitReader) :
       cases r
       simp [hloop, Option.bind, Option.map]
 
+/-- Reader positioned at generated code-length-code entry `idx`. The index is
+counted after the 14-bit dynamic-header front matter. -/
+def generatedCodeLenReaderAt
+    (bw : Png.BitWriter) (restBits restLen idx : Nat)
+    (hidx : idx ≤ Png.codeLenOrder.size)
+    (hbit : bw.bitPos < 8) : Png.BitReader :=
+  let prefixBits := Png.generatedDynamicHeaderPrefixBits 286 30
+  let bitsTot := prefixBits ||| (restBits <<< Png.generatedDynamicHeaderPrefixLen)
+  let lenTot := Png.generatedDynamicHeaderPrefixLen + restLen
+  let bw' := Png.BitWriter.writeBits bw bitsTot lenTot
+  Png.BitWriter.readerAt (Png.BitWriter.writeBits bw bitsTot (14 + 3 * idx)) bw'.flush
+    (by
+      have hsize : Png.codeLenOrder.size = 19 := codeLenOrder_size
+      have hlen : Png.generatedDynamicHeaderPrefixLen = 71 := generatedDynamicHeaderPrefixLen_eq
+      have hskip : 14 + 3 * idx ≤ lenTot := by omega
+      simpa [bw', lenTot] using
+        Png.flush_size_writeBits_prefix bw bitsTot (14 + 3 * idx) lenTot hskip)
+    (Png.bitPos_lt_8_writeBits bw bitsTot (14 + 3 * idx) hbit)
+
+/-- The generated code-length reader has enough input for entry `idx`. This is
+the condition used by the parser loop before each 3-bit read. -/
+lemma generatedCodeLenReaderAt_bound
+    (bw : Png.BitWriter) (restBits restLen idx : Nat)
+    (hidx : idx < Png.codeLenOrder.size)
+    (hbit : bw.bitPos < 8) :
+    let br := generatedCodeLenReaderAt bw restBits restLen idx (Nat.le_of_lt hidx) hbit
+    br.bitIndex + 3 ≤ br.data.size * 8 := by
+  intro br
+  let prefixBits := Png.generatedDynamicHeaderPrefixBits 286 30
+  let bitsTot := prefixBits ||| (restBits <<< Png.generatedDynamicHeaderPrefixLen)
+  let lenTot := Png.generatedDynamicHeaderPrefixLen + restLen
+  let skip := 14 + 3 * idx
+  have hskip : skip ≤ lenTot := by
+    have hsize : Png.codeLenOrder.size = 19 := codeLenOrder_size
+    rw [hsize] at hidx
+    have hlen : Png.generatedDynamicHeaderPrefixLen = 71 := generatedDynamicHeaderPrefixLen_eq
+    omega
+  have hk : 3 ≤ lenTot - skip := by
+    have hsize : Png.codeLenOrder.size = 19 := codeLenOrder_size
+    rw [hsize] at hidx
+    have hlen : Png.generatedDynamicHeaderPrefixLen = 71 := generatedDynamicHeaderPrefixLen_eq
+    omega
+  simpa [generatedCodeLenReaderAt, br, prefixBits, bitsTot, lenTot, skip] using
+    (readerAt_writeBits_shift_bound_generated
+      (bw := bw) (bits := bitsTot) (len := lenTot)
+      (skip := skip) (k := 3) hskip hk hbit)
+
+/-- One generated code-length-code loop branch succeeds and advances to the
+next named reader. -/
+lemma readGeneratedCodeLenChunk_if_readerAt_writeBits
+    (bw : Png.BitWriter) (restBits restLen idx : Nat)
+    (hidx : idx < Png.codeLenOrder.size)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let br := generatedCodeLenReaderAt bw restBits restLen idx (Nat.le_of_lt hidx) hbit
+    let brNext := generatedCodeLenReaderAt bw restBits restLen (idx + 1)
+      (Nat.succ_le_of_lt hidx) hbit
+    (if h : br.bitIndex + 3 ≤ br.data.size * 8 then
+        some (br.readBits 3 h)
+      else
+        none) =
+      some (5, brNext) := by
+  intro br brNext
+  have hbound :
+      br.bitIndex + 3 ≤ br.data.size * 8 := by
+    simpa [br] using
+      generatedCodeLenReaderAt_bound
+        (bw := bw) (restBits := restBits) (restLen := restLen)
+        (idx := idx) hidx hbit
+  rw [dif_pos hbound]
+  have hreadRaw :=
+    readGeneratedDynamicHeader_codeLenChunk_readerAt_writeBits
+      (bw := bw) (restBits := restBits) (restLen := restLen)
+      (idx := idx) hidx hbit hcur
+  have hread :
+      br.readBits 3 hbound = (5, brNext) := by
+    simpa [generatedCodeLenReaderAt, br, brNext, Png.readBits_proof_irrel]
+      using hreadRaw
+  exact congrArg some hread
+
+/-- One generated code-length-code parser loop step succeeds, including the
+array update performed by `readDynamicTables`. -/
+lemma readGeneratedCodeLenLoopStep_readerAt_writeBits
+    (bw : Png.BitWriter) (restBits restLen idx : Nat)
+    (codeLenLengths : Array Nat)
+    (hidx : idx < Png.codeLenOrder.size)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let br := generatedCodeLenReaderAt bw restBits restLen idx (Nat.le_of_lt hidx) hbit
+    let brNext := generatedCodeLenReaderAt bw restBits restLen (idx + 1)
+      (Nat.succ_le_of_lt hidx) hbit
+    (if h : br.bitIndex + 3 ≤ br.data.size * 8 then
+        some
+          (ForInStep.yield
+            (⟨(br.readBits 3 h).snd,
+              codeLenLengths.setIfInBounds
+                Png.codeLenOrder[idx]! (br.readBits 3 h).fst⟩ :
+              MProd Png.BitReader (Array Nat)))
+      else
+        none) =
+      some
+        (ForInStep.yield
+          (⟨brNext,
+            codeLenLengths.setIfInBounds Png.codeLenOrder[idx]! 5⟩ :
+            MProd Png.BitReader (Array Nat))) := by
+  intro br brNext
+  have hbound :
+      br.bitIndex + 3 ≤ br.data.size * 8 := by
+    simpa [br] using
+      generatedCodeLenReaderAt_bound
+        (bw := bw) (restBits := restBits) (restLen := restLen)
+        (idx := idx) hidx hbit
+  rw [dif_pos hbound]
+  have hreadRaw :=
+    readGeneratedDynamicHeader_codeLenChunk_readerAt_writeBits
+      (bw := bw) (restBits := restBits) (restLen := restLen)
+      (idx := idx) hidx hbit hcur
+  have hread :
+      br.readBits 3 hbound = (5, brNext) := by
+    simpa [generatedCodeLenReaderAt, br, brNext, Png.readBits_proof_irrel]
+      using hreadRaw
+  simp [hread]
+
+/-- Specializes a generated code-length-code parser step to the concrete
+`codeLenOrder` slot used by that iteration. -/
+lemma readGeneratedCodeLenLoopStepAt_readerAt_writeBits
+    (bw : Png.BitWriter) (restBits restLen idx order : Nat)
+    (codeLenLengths : Array Nat)
+    (hidx : idx < Png.codeLenOrder.size)
+    (horder : Png.codeLenOrder[idx]! = order)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let br := generatedCodeLenReaderAt bw restBits restLen idx (Nat.le_of_lt hidx) hbit
+    let brNext := generatedCodeLenReaderAt bw restBits restLen (idx + 1)
+      (Nat.succ_le_of_lt hidx) hbit
+    (if h : br.bitIndex + 3 ≤ br.data.size * 8 then
+        some
+          (ForInStep.yield
+            (⟨(br.readBits 3 h).snd,
+              codeLenLengths.setIfInBounds order (br.readBits 3 h).fst⟩ :
+              MProd Png.BitReader (Array Nat)))
+      else
+        none) =
+      some
+        (ForInStep.yield
+          (⟨brNext, codeLenLengths.setIfInBounds order 5⟩ :
+            MProd Png.BitReader (Array Nat))) := by
+  subst horder
+  exact
+    readGeneratedCodeLenLoopStep_readerAt_writeBits
+      (bw := bw) (restBits := restBits) (restLen := restLen)
+      (idx := idx) (codeLenLengths := codeLenLengths) hidx hbit hcur
+
+/-- Replays all 19 generated code-length-code entries and reconstructs the
+generated all-five helper-code table. -/
+lemma readGeneratedCodeLenLengths19_readerAt_writeBits
+    (bw : Png.BitWriter) (restBits restLen : Nat)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let br := generatedCodeLenReaderAt bw restBits restLen 0 (by
+      have hsize : Png.codeLenOrder.size = 19 := codeLenOrder_size
+      omega) hbit
+    readGeneratedCodeLenLengths19 br =
+      some
+        (generatedCodeLenLengthsFilled,
+          generatedCodeLenReaderAt bw restBits restLen Png.codeLenOrder.size le_rfl hbit) := by
+  intro br
+  let a0 : Array Nat := Array.replicate 19 0
+  let a1 : Array Nat := a0.setIfInBounds 16 5
+  let a2 : Array Nat := a1.setIfInBounds 17 5
+  let a3 : Array Nat := a2.setIfInBounds 18 5
+  let a4 : Array Nat := a3.setIfInBounds 0 5
+  let a5 : Array Nat := a4.setIfInBounds 8 5
+  let a6 : Array Nat := a5.setIfInBounds 7 5
+  let a7 : Array Nat := a6.setIfInBounds 9 5
+  let a8 : Array Nat := a7.setIfInBounds 6 5
+  let a9 : Array Nat := a8.setIfInBounds 10 5
+  let a10 : Array Nat := a9.setIfInBounds 5 5
+  let a11 : Array Nat := a10.setIfInBounds 11 5
+  let a12 : Array Nat := a11.setIfInBounds 4 5
+  let a13 : Array Nat := a12.setIfInBounds 12 5
+  let a14 : Array Nat := a13.setIfInBounds 3 5
+  let a15 : Array Nat := a14.setIfInBounds 13 5
+  let a16 : Array Nat := a15.setIfInBounds 2 5
+  let a17 : Array Nat := a16.setIfInBounds 14 5
+  let a18 : Array Nat := a17.setIfInBounds 1 5
+  let a19 : Array Nat := a18.setIfInBounds 15 5
+  have hfilled : a19 = generatedCodeLenLengthsFilled := by
+    native_decide
+  have h0 := readGeneratedCodeLenLoopStepAt_readerAt_writeBits
+    (bw := bw) (restBits := restBits) (restLen := restLen) (idx := 0)
+    (order := 16) (codeLenLengths := a0)
+    (by native_decide) (by native_decide) hbit hcur
+  have h1 := readGeneratedCodeLenLoopStepAt_readerAt_writeBits
+    (bw := bw) (restBits := restBits) (restLen := restLen) (idx := 1)
+    (order := 17) (codeLenLengths := a1)
+    (by native_decide) (by native_decide) hbit hcur
+  have h2 := readGeneratedCodeLenLoopStepAt_readerAt_writeBits
+    (bw := bw) (restBits := restBits) (restLen := restLen) (idx := 2)
+    (order := 18) (codeLenLengths := a2)
+    (by native_decide) (by native_decide) hbit hcur
+  have h3 := readGeneratedCodeLenLoopStepAt_readerAt_writeBits
+    (bw := bw) (restBits := restBits) (restLen := restLen) (idx := 3)
+    (order := 0) (codeLenLengths := a3)
+    (by native_decide) (by native_decide) hbit hcur
+  have h4 := readGeneratedCodeLenLoopStepAt_readerAt_writeBits
+    (bw := bw) (restBits := restBits) (restLen := restLen) (idx := 4)
+    (order := 8) (codeLenLengths := a4)
+    (by native_decide) (by native_decide) hbit hcur
+  have h5 := readGeneratedCodeLenLoopStepAt_readerAt_writeBits
+    (bw := bw) (restBits := restBits) (restLen := restLen) (idx := 5)
+    (order := 7) (codeLenLengths := a5)
+    (by native_decide) (by native_decide) hbit hcur
+  have h6 := readGeneratedCodeLenLoopStepAt_readerAt_writeBits
+    (bw := bw) (restBits := restBits) (restLen := restLen) (idx := 6)
+    (order := 9) (codeLenLengths := a6)
+    (by native_decide) (by native_decide) hbit hcur
+  have h7 := readGeneratedCodeLenLoopStepAt_readerAt_writeBits
+    (bw := bw) (restBits := restBits) (restLen := restLen) (idx := 7)
+    (order := 6) (codeLenLengths := a7)
+    (by native_decide) (by native_decide) hbit hcur
+  have h8 := readGeneratedCodeLenLoopStepAt_readerAt_writeBits
+    (bw := bw) (restBits := restBits) (restLen := restLen) (idx := 8)
+    (order := 10) (codeLenLengths := a8)
+    (by native_decide) (by native_decide) hbit hcur
+  have h9 := readGeneratedCodeLenLoopStepAt_readerAt_writeBits
+    (bw := bw) (restBits := restBits) (restLen := restLen) (idx := 9)
+    (order := 5) (codeLenLengths := a9)
+    (by native_decide) (by native_decide) hbit hcur
+  have h10 := readGeneratedCodeLenLoopStepAt_readerAt_writeBits
+    (bw := bw) (restBits := restBits) (restLen := restLen) (idx := 10)
+    (order := 11) (codeLenLengths := a10)
+    (by native_decide) (by native_decide) hbit hcur
+  have h11 := readGeneratedCodeLenLoopStepAt_readerAt_writeBits
+    (bw := bw) (restBits := restBits) (restLen := restLen) (idx := 11)
+    (order := 4) (codeLenLengths := a11)
+    (by native_decide) (by native_decide) hbit hcur
+  have h12 := readGeneratedCodeLenLoopStepAt_readerAt_writeBits
+    (bw := bw) (restBits := restBits) (restLen := restLen) (idx := 12)
+    (order := 12) (codeLenLengths := a12)
+    (by native_decide) (by native_decide) hbit hcur
+  have h13 := readGeneratedCodeLenLoopStepAt_readerAt_writeBits
+    (bw := bw) (restBits := restBits) (restLen := restLen) (idx := 13)
+    (order := 3) (codeLenLengths := a13)
+    (by native_decide) (by native_decide) hbit hcur
+  have h14 := readGeneratedCodeLenLoopStepAt_readerAt_writeBits
+    (bw := bw) (restBits := restBits) (restLen := restLen) (idx := 14)
+    (order := 13) (codeLenLengths := a14)
+    (by native_decide) (by native_decide) hbit hcur
+  have h15 := readGeneratedCodeLenLoopStepAt_readerAt_writeBits
+    (bw := bw) (restBits := restBits) (restLen := restLen) (idx := 15)
+    (order := 2) (codeLenLengths := a15)
+    (by native_decide) (by native_decide) hbit hcur
+  have h16 := readGeneratedCodeLenLoopStepAt_readerAt_writeBits
+    (bw := bw) (restBits := restBits) (restLen := restLen) (idx := 16)
+    (order := 14) (codeLenLengths := a16)
+    (by native_decide) (by native_decide) hbit hcur
+  have h17 := readGeneratedCodeLenLoopStepAt_readerAt_writeBits
+    (bw := bw) (restBits := restBits) (restLen := restLen) (idx := 17)
+    (order := 1) (codeLenLengths := a17)
+    (by native_decide) (by native_decide) hbit hcur
+  have h18 := readGeneratedCodeLenLoopStepAt_readerAt_writeBits
+    (bw := bw) (restBits := restBits) (restLen := restLen) (idx := 18)
+    (order := 15) (codeLenLengths := a18)
+    (by native_decide) (by native_decide) hbit hcur
+  rw [← hfilled]
+  unfold readGeneratedCodeLenLengths19
+  simp [br, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13,
+    a14, a15, a16, a17, a18, a19, Png.codeLenOrder,
+    List.forIn_eq_bindList, List.range',
+    h0, h1, h2, h3, h4, h5, h6, h7, h8, h9, h10, h11, h12, h13, h14, h15,
+    h16, h17, h18, Option.bind, Option.map]
+
 /-- Replays the generated prefix's `HLIT` field from the writer-produced
 dynamic header stream. -/
 lemma readGeneratedDynamicHeader_hlit_readerAt_writeBits
