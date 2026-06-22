@@ -8,6 +8,180 @@ namespace Lemmas
 set_option linter.unnecessarySimpa false
 set_option linter.unusedSimpArgs false
 
+/-- Huffman table filling preserves the number of decode rows when it succeeds.
+Generated payload decoding uses this to recover concrete row bounds from
+`mkHuffman` without unfolding every successful table fill. -/
+lemma fillHuffmanTableAux_size_of_some
+    (lengths : Array Nat) (i : Nat) (nextCode : Array Nat)
+    (table out : Array (Array (Option Nat)))
+    (hfill :
+      Png.fillHuffmanTableAux lengths i nextCode table = some out) :
+    out.size = table.size := by
+  rw [Png.fillHuffmanTableAux.eq_1] at hfill
+  by_cases hi : i < lengths.size
+  · by_cases hlen : lengths[i] > 0
+    · let codeVal := nextCode[lengths[i]]!
+      by_cases hcode : codeVal >= (1 <<< lengths[i])
+      · simp [hi, hlen, codeVal, hcode] at hfill
+      · let nextCode' := nextCode.set! lengths[i] (codeVal + 1)
+        let rev := Png.reverseBits codeVal lengths[i]
+        let row := table[lengths[i]]!
+        by_cases hrev : rev >= row.size
+        · simp [hi, hlen, codeVal, hcode, nextCode', rev, row, hrev] at hfill
+        · let row' := row.set! rev (some i)
+          let table' := table.set! lengths[i] row'
+          have hfillRec :
+              Png.fillHuffmanTableAux lengths (i + 1) nextCode' table' =
+                some out := by
+            simpa [hi, hlen, codeVal, hcode, nextCode', rev, row, hrev,
+              row', table'] using hfill
+          have hrec :=
+            fillHuffmanTableAux_size_of_some lengths (i + 1) nextCode'
+              table' out hfillRec
+          calc
+            out.size = table'.size := hrec
+            _ = table.size := by simp [table']
+    · have hrec :=
+        fillHuffmanTableAux_size_of_some lengths (i + 1) nextCode table out
+          (by simpa [hi, hlen] using hfill)
+      exact hrec
+  · have hout : table = out := by
+      simpa [hi] using hfill
+    rw [← hout]
+termination_by lengths.size - i
+decreasing_by
+  all_goals
+    have hlt : i < lengths.size := hi
+    exact Nat.sub_lt_sub_left (k := i) (m := lengths.size) (n := i + 1)
+      hlt (Nat.lt_succ_self i)
+
+/-- Successful Huffman table filling preserves the width of any existing row.
+Generated payload decoding uses this to recover the concrete lookup-row size
+after the builder has installed symbol entries. -/
+lemma fillHuffmanTableAux_row_size_of_some
+    (lengths : Array Nat) (i : Nat) (nextCode : Array Nat)
+    (table out : Array (Array (Option Nat))) (rowIdx : Nat)
+    (hrow : rowIdx < table.size)
+    (hfill :
+      Png.fillHuffmanTableAux lengths i nextCode table = some out) :
+    out[rowIdx]!.size = table[rowIdx]!.size := by
+  rw [Png.fillHuffmanTableAux.eq_1] at hfill
+  by_cases hi : i < lengths.size
+  · by_cases hlen : lengths[i] > 0
+    · let codeVal := nextCode[lengths[i]]!
+      by_cases hcode : codeVal >= (1 <<< lengths[i])
+      · simp [hi, hlen, codeVal, hcode] at hfill
+      · let nextCode' := nextCode.set! lengths[i] (codeVal + 1)
+        let rev := Png.reverseBits codeVal lengths[i]
+        let row := table[lengths[i]]!
+        by_cases hrev : rev >= row.size
+        · simp [hi, hlen, codeVal, hcode, nextCode', rev, row, hrev] at hfill
+        · let row' := row.set! rev (some i)
+          let table' := table.set! lengths[i] row'
+          have hfillRec :
+              Png.fillHuffmanTableAux lengths (i + 1) nextCode' table' =
+                some out := by
+            simpa [hi, hlen, codeVal, hcode, nextCode', rev, row, hrev,
+              row', table'] using hfill
+          have hrow' : rowIdx < table'.size := by
+            simpa [table'] using hrow
+          have hrec :=
+            fillHuffmanTableAux_row_size_of_some lengths (i + 1) nextCode'
+              table' out rowIdx hrow' hfillRec
+          have htable' : table'[rowIdx]!.size = table[rowIdx]!.size := by
+            by_cases heq : lengths[i] = rowIdx
+            · subst rowIdx
+              simp [table', row', row, hrow]
+            · have hset : table'[rowIdx]! = table[rowIdx]! := by
+                simpa [table'] using
+                  getElem!_set!_ne table (lengths[i]) rowIdx row' hrow heq
+              simpa [hset]
+          exact hrec.trans htable'
+    · have hrec :=
+        fillHuffmanTableAux_row_size_of_some lengths (i + 1) nextCode table out
+          rowIdx hrow (by simpa [hi, hlen] using hfill)
+      exact hrec
+  · have hout : table = out := by
+      simpa [hi] using hfill
+    rw [← hout]
+termination_by lengths.size - i
+decreasing_by
+  all_goals
+    have hlt : i < lengths.size := hi
+    exact Nat.sub_lt_sub_left (k := i) (m := lengths.size) (n := i + 1)
+      hlt (Nat.lt_succ_self i)
+
+/-- Uniform Huffman table filling leaves rows other than the uniform code-length
+row unchanged. Generated payload decoding uses this to show shorter prefix rows
+cannot resolve before the nine-bit literal/length row. -/
+lemma fillHuffmanTableAux_uniform_row_eq_of_ne
+    (lengths : Array Nat) (i codeLen : Nat) (nextCode : Array Nat)
+    (table out : Array (Array (Option Nat))) (rowIdx : Nat)
+    (hshape :
+      ∀ j (hj : j < lengths.size), i ≤ j →
+        0 < lengths[j] → lengths[j] = codeLen)
+    (hrowNe : rowIdx ≠ codeLen)
+    (hrow : rowIdx < table.size)
+    (hfill :
+      Png.fillHuffmanTableAux lengths i nextCode table = some out) :
+    out[rowIdx]! = table[rowIdx]! := by
+  rw [Png.fillHuffmanTableAux.eq_1] at hfill
+  by_cases hi : i < lengths.size
+  · by_cases hlen : lengths[i] > 0
+    · have hlenEq : lengths[i] = codeLen :=
+        hshape i hi le_rfl hlen
+      let codeVal := nextCode[lengths[i]]!
+      by_cases hcode : codeVal >= (1 <<< lengths[i])
+      · simp [hi, hlen, codeVal, hcode] at hfill
+      · let nextCode' := nextCode.set! lengths[i] (codeVal + 1)
+        let rev := Png.reverseBits codeVal lengths[i]
+        let row := table[lengths[i]]!
+        by_cases hrev : rev >= row.size
+        · simp [hi, hlen, codeVal, hcode, nextCode', rev, row, hrev] at hfill
+        · let row' := row.set! rev (some i)
+          let table' := table.set! lengths[i] row'
+          have hfillRec :
+              Png.fillHuffmanTableAux lengths (i + 1) nextCode' table' =
+                some out := by
+            simpa [hi, hlen, codeVal, hcode, nextCode', rev, row, hrev,
+              row', table'] using hfill
+          have hrow' : rowIdx < table'.size := by
+            simpa [table'] using hrow
+          have hshape' :
+              ∀ j (hj : j < lengths.size), i + 1 ≤ j →
+                0 < lengths[j] → lengths[j] = codeLen := by
+            intro j hj hle hpos
+            exact hshape j hj (by omega) hpos
+          have hrec :=
+            fillHuffmanTableAux_uniform_row_eq_of_ne lengths (i + 1) codeLen
+              nextCode' table' out rowIdx hshape' hrowNe hrow' hfillRec
+          have hset : table'[rowIdx]! = table[rowIdx]! := by
+            have hne : lengths[i] ≠ rowIdx := by
+              intro heq
+              exact hrowNe (heq ▸ hlenEq)
+            simpa [table'] using
+              getElem!_set!_ne table (lengths[i]) rowIdx row' hrow hne
+          exact hrec.trans hset
+    · have hshape' :
+        ∀ j (hj : j < lengths.size), i + 1 ≤ j →
+          0 < lengths[j] → lengths[j] = codeLen := by
+        intro j hj hle hpos
+        exact hshape j hj (by omega) hpos
+      have hrec :=
+        fillHuffmanTableAux_uniform_row_eq_of_ne lengths (i + 1) codeLen
+          nextCode table out rowIdx hshape' hrowNe hrow
+          (by simpa [hi, hlen] using hfill)
+      exact hrec
+  · have hout : table = out := by
+      simpa [hi] using hfill
+    rw [← hout]
+termination_by lengths.size - i
+decreasing_by
+  all_goals
+    have hlt : i < lengths.size := hi
+    exact Nat.sub_lt_sub_left (k := i) (m := lengths.size) (n := i + 1)
+      hlt (Nat.lt_succ_self i)
+
 /-- Names the generated literal/length Huffman table accepted by `mkHuffman`.
 This lets the payload proof talk about the same table that the header parser
 reconstructs, without unfolding the table builder at every use site. -/
@@ -35,6 +209,188 @@ lemma mkHuffman_generatedDynamicLitLenLengths_eq
       simp [h] at hsome
   | some table =>
       rfl
+
+/-- The generated literal/length table has the uniform nine-bit maximum.
+Payload decode proofs use this to unfold `Huffman.decode` with fixed fuel. -/
+lemma generatedDynamicLitLenTable_maxLen
+    (tokens : Array Png.DeflateToken) :
+    (generatedDynamicLitLenTable tokens).maxLen = 9 := by
+  let lengths :=
+    Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+  have hmk :
+      Png.mkHuffman lengths =
+        some (generatedDynamicLitLenTable tokens) := by
+    simpa [lengths] using mkHuffman_generatedDynamicLitLenLengths_eq tokens
+  have hmax :
+      Png.maxCodeLenAux lengths 0 0 =
+        Png.generatedDynamicLitLenCodeLen := by
+    simpa [lengths] using
+      maxCodeLenAux_generatedDynamicLitLenLengths_eq_codeLen tokens
+  let count := Png.countCodeLengthsAux lengths 0 (Array.replicate 10 0)
+  let nextCode := (Png.nextCodesAux count 9 1 0 (Array.replicate 10 0)).2
+  let init := Png.huffmanEmptyTable 9
+  have hmk' :
+      (match Png.fillHuffmanTableAux lengths 0 nextCode init with
+      | none => none
+      | some table => some ({ maxLen := 9, table := table } : Png.Huffman)) =
+        some (generatedDynamicLitLenTable tokens) := by
+    simpa [Png.mkHuffman, lengths, hmax, Png.generatedDynamicLitLenCodeLen,
+      count, nextCode, init] using hmk
+  cases hfill : Png.fillHuffmanTableAux lengths 0 nextCode init with
+  | none =>
+      simp [hfill] at hmk'
+  | some table =>
+      simp [hfill] at hmk'
+      rw [← hmk']
+
+/-- The generated literal/length decode table has rows for lengths zero
+through nine. Payload decode proofs use this for the final nine-bit row. -/
+lemma generatedDynamicLitLenTable_table_size
+    (tokens : Array Png.DeflateToken) :
+    (generatedDynamicLitLenTable tokens).table.size = 10 := by
+  let lengths :=
+    Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+  have hmk :
+      Png.mkHuffman lengths =
+        some (generatedDynamicLitLenTable tokens) := by
+    simpa [lengths] using mkHuffman_generatedDynamicLitLenLengths_eq tokens
+  have hmax :
+      Png.maxCodeLenAux lengths 0 0 =
+        Png.generatedDynamicLitLenCodeLen := by
+    simpa [lengths] using
+      maxCodeLenAux_generatedDynamicLitLenLengths_eq_codeLen tokens
+  let count := Png.countCodeLengthsAux lengths 0 (Array.replicate 10 0)
+  let nextCode := (Png.nextCodesAux count 9 1 0 (Array.replicate 10 0)).2
+  let init := Png.huffmanEmptyTable 9
+  have hmk' :
+      (match Png.fillHuffmanTableAux lengths 0 nextCode init with
+      | none => none
+      | some table => some ({ maxLen := 9, table := table } : Png.Huffman)) =
+        some (generatedDynamicLitLenTable tokens) := by
+    simpa [Png.mkHuffman, lengths, hmax, Png.generatedDynamicLitLenCodeLen,
+      count, nextCode, init] using hmk
+  cases hfill : Png.fillHuffmanTableAux lengths 0 nextCode init with
+  | none =>
+      simp [hfill] at hmk'
+  | some table =>
+      have hsize :=
+        fillHuffmanTableAux_size_of_some lengths 0 nextCode init table hfill
+      simp [hfill] at hmk'
+      rw [← hmk']
+      calc
+        table.size = init.size := hsize
+        _ = 10 := by simp [init, huffmanEmptyTable_size]
+
+/-- The generated literal/length table's nine-bit row has the expected 512
+entries. This is the concrete row bound for generated payload symbol lookup. -/
+lemma generatedDynamicLitLenTable_row9_size
+    (tokens : Array Png.DeflateToken) :
+    (generatedDynamicLitLenTable tokens).table[9]!.size = 512 := by
+  let lengths :=
+    Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+  have hmk :
+      Png.mkHuffman lengths =
+        some (generatedDynamicLitLenTable tokens) := by
+    simpa [lengths] using mkHuffman_generatedDynamicLitLenLengths_eq tokens
+  have hmax :
+      Png.maxCodeLenAux lengths 0 0 =
+        Png.generatedDynamicLitLenCodeLen := by
+    simpa [lengths] using
+      maxCodeLenAux_generatedDynamicLitLenLengths_eq_codeLen tokens
+  let count := Png.countCodeLengthsAux lengths 0 (Array.replicate 10 0)
+  let nextCode := (Png.nextCodesAux count 9 1 0 (Array.replicate 10 0)).2
+  let init := Png.huffmanEmptyTable 9
+  have hmk' :
+      (match Png.fillHuffmanTableAux lengths 0 nextCode init with
+      | none => none
+      | some table => some ({ maxLen := 9, table := table } : Png.Huffman)) =
+        some (generatedDynamicLitLenTable tokens) := by
+    simpa [Png.mkHuffman, lengths, hmax, Png.generatedDynamicLitLenCodeLen,
+      count, nextCode, init] using hmk
+  cases hfill : Png.fillHuffmanTableAux lengths 0 nextCode init with
+  | none =>
+      simp [hfill] at hmk'
+  | some table =>
+      have hrow : 9 < init.size := by
+        simp [init, huffmanEmptyTable_size]
+      have hsize :=
+        fillHuffmanTableAux_row_size_of_some lengths 0 nextCode init table 9
+          hrow hfill
+      simp [hfill] at hmk'
+      rw [← hmk']
+      calc
+        table[9]!.size = init[9]!.size := hsize
+        _ = 512 := by
+          have hinit := huffmanEmptyTable_get!_size 9 9 le_rfl (by decide)
+          simpa [init, Nat.shiftLeft_eq] using hinit
+
+/-- Generated literal/length rows shorter than nine bits are empty. This is
+the continuation fact needed before a generated payload symbol resolves. -/
+lemma generatedDynamicLitLenTable_short_row_get_none
+    (tokens : Array Png.DeflateToken) (rowIdx code : Nat)
+    (hrowPos : 0 < rowIdx) (hrowLt : rowIdx < 9)
+    (hcode : code < (generatedDynamicLitLenTable tokens).table[rowIdx]!.size) :
+    (generatedDynamicLitLenTable tokens).table[rowIdx]![code]! = none := by
+  let lengths :=
+    Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+  have hmk :
+      Png.mkHuffman lengths =
+        some (generatedDynamicLitLenTable tokens) := by
+    simpa [lengths] using mkHuffman_generatedDynamicLitLenLengths_eq tokens
+  have hmax :
+      Png.maxCodeLenAux lengths 0 0 =
+        Png.generatedDynamicLitLenCodeLen := by
+    simpa [lengths] using
+      maxCodeLenAux_generatedDynamicLitLenLengths_eq_codeLen tokens
+  let count := Png.countCodeLengthsAux lengths 0 (Array.replicate 10 0)
+  let nextCode := (Png.nextCodesAux count 9 1 0 (Array.replicate 10 0)).2
+  let init := Png.huffmanEmptyTable 9
+  have hmk' :
+      (match Png.fillHuffmanTableAux lengths 0 nextCode init with
+      | none => none
+      | some table => some ({ maxLen := 9, table := table } : Png.Huffman)) =
+        some (generatedDynamicLitLenTable tokens) := by
+    simpa [Png.mkHuffman, lengths, hmax, Png.generatedDynamicLitLenCodeLen,
+      count, nextCode, init] using hmk
+  cases hfill : Png.fillHuffmanTableAux lengths 0 nextCode init with
+  | none =>
+      simp [hfill] at hmk'
+  | some table =>
+      have hshape :
+          ∀ j (hj : j < lengths.size), 0 ≤ j →
+            0 < lengths[j] → lengths[j] = 9 := by
+        intro j hj _hle hpos
+        have hnine :
+            lengths[j] = 9 := by
+          simpa [lengths] using
+            (generatedDynamicLitLenLengths_getElem_pos_iff_eq_nine
+              (Png.litLenSymbolFreqs tokens) j (by simpa [lengths] using hj)).mp
+              (by simpa [lengths] using hpos)
+        exact hnine
+      have hrowInit : rowIdx < init.size := by
+        simp [init, huffmanEmptyTable_size]
+        omega
+      have hrowNe : rowIdx ≠ 9 := by omega
+      have hpres :=
+        fillHuffmanTableAux_uniform_row_eq_of_ne lengths 0 9 nextCode init
+          table rowIdx hshape hrowNe hrowInit hfill
+      simp [hfill] at hmk'
+      rw [← hmk'] at hcode ⊢
+      have hcodeInit : code < init[rowIdx]!.size := by
+        simpa [hpres] using hcode
+      rw [hpres]
+      have hinitRow :
+          init[rowIdx]! =
+            Array.replicate (1 <<< rowIdx) (none : Option Nat) := by
+        rw [getElem!_pos init rowIdx hrowInit]
+        simp [init, Png.huffmanEmptyTable, Nat.ne_of_gt hrowPos]
+      rw [hinitRow]
+      have hcodeRep :
+          code < (Array.replicate (1 <<< rowIdx) (none : Option Nat)).size := by
+        simpa [hinitRow] using hcodeInit
+      rw [getElem!_pos
+        (Array.replicate (1 <<< rowIdx) (none : Option Nat)) code hcodeRep]
+      simp
 
 /-- Names the generated dynamic distance table accepted by the parser boundary.
 The table is empty for literal-only generated streams and non-empty when
