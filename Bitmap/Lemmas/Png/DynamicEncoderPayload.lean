@@ -2604,6 +2604,34 @@ private lemma writeDynamicPayloadTokensList_forIn
   simpa using
     writeDynamicPayloadTokensList_foldl bw tokens litLenCodes distCodes
 
+/-- The runtime array payload writer is the proof-facing list writer over
+`Array.toList`. This bridges `Png.writeDynamicPayload` to stream replay. -/
+lemma writeDynamicPayload_eq_writeDynamicPayloadTokensList
+    (bw : Png.BitWriter) (tokens : Array Png.DeflateToken)
+    (litLenCodes distCodes : Array (Nat × Nat)) :
+    Png.writeDynamicPayload bw tokens litLenCodes distCodes =
+      writeDynamicPayloadTokensList bw litLenCodes distCodes tokens.toList := by
+  cases tokens with
+  | mk data =>
+      induction data generalizing bw with
+      | nil =>
+          simp [Png.writeDynamicPayload, writeDynamicPayloadTokensList]
+      | cons token data ih =>
+          cases token with
+          | literal b =>
+              simpa [Png.writeDynamicPayload, writeDynamicPayloadTokensList,
+                writeDynamicPayloadToken] using
+                ih (bw.writeRevCode litLenCodes b.toNat)
+          | matchDist1 len =>
+              simpa [Png.writeDynamicPayload, writeDynamicPayloadTokensList,
+                writeDynamicPayloadToken] using
+                ih
+                  (((bw.writeRevCode litLenCodes
+                    (Png.fixedLenMatchInfo len).1).writeBits
+                    (Png.fixedLenMatchInfo len).2.1
+                    (Png.fixedLenMatchInfo len).2.2).writeRevCode
+                    distCodes 0)
+
 /-- A token found in an array's `toList` has a corresponding array index. This
 feeds list-level payload replay with the indexed facts used by generated table
 proofs. -/
