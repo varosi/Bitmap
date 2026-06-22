@@ -319,6 +319,169 @@ decreasing_by
     exact Nat.sub_lt_sub_left (k := i) (m := lengths.size) (n := i + 1)
       hlt (Nat.lt_succ_self i)
 
+/-- Uniform Huffman table filling agrees with canonical reversed-code filling
+at any positive target symbol. This is the row-nine lookup core for generated
+literal/length payload decoding. -/
+lemma fillHuffmanTableAux_uniform_lookup_of_canonical_at
+    (lengths : Array Nat) (i codeLen : Nat) (nextCode : Array Nat)
+    (table out : Array (Array (Option Nat)))
+    (revCodes : Array (Nat × Nat)) (target : Nat)
+    (hshape :
+      ∀ j (hj : j < lengths.size), i ≤ j →
+        0 < lengths[j] → lengths[j] = codeLen)
+    (hnextIdx : codeLen < nextCode.size)
+    (htableIdx : codeLen < table.size)
+    (hrow : table[codeLen]!.size = 1 <<< codeLen)
+    (hbudget : nextCode[codeLen]! + (lengths.size - i) ≤ 1 <<< codeLen)
+    (htarget : target < lengths.size)
+    (hle : i ≤ target)
+    (hrevSize : revCodes.size = lengths.size)
+    (hposTarget : 0 < lengths[target])
+    (hfill :
+      Png.fillHuffmanTableAux lengths i nextCode table = some out) :
+    let codesOut := Png.fillCanonicalRevCodesAux lengths i nextCode revCodes
+    out[codeLen]![codesOut[target]!.1]! = some target := by
+  rw [Png.fillHuffmanTableAux.eq_1] at hfill
+  have hi : i < lengths.size := lt_of_le_of_lt hle htarget
+  by_cases hpos : 0 < lengths[i]
+  · have hlen : lengths[i] = codeLen := hshape i hi le_rfl hpos
+    have hcodeLenPos : 0 < codeLen := by
+      simpa [hlen] using hpos
+    let codeVal := nextCode[codeLen]!
+    have hcodeValLt : codeVal < 1 <<< codeLen := by
+      have hremainingPos : 0 < lengths.size - i := by omega
+      dsimp [codeVal]
+      omega
+    have hnotCodeGe : ¬ codeVal >= (1 <<< codeLen) := by omega
+    let nextCode' := nextCode.set! codeLen (codeVal + 1)
+    let rev := Png.reverseBits codeVal codeLen
+    let row := table[codeLen]!
+    have hrevBound : rev < row.size := by
+      rw [hrow]
+      simpa [rev, row, Nat.shiftLeft_eq] using
+        Png.reverseBits_lt codeVal codeLen
+    have hnotRevGe : ¬ rev >= row.size := by omega
+    let row' := row.set! rev (some i)
+    let table' := table.set! codeLen row'
+    let revCodes' := revCodes.set! i (rev, codeLen)
+    have hfillRec :
+        Png.fillHuffmanTableAux lengths (i + 1) nextCode' table' =
+          some out := by
+      simpa [hi, hpos, hlen, codeVal, hnotCodeGe, nextCode', rev, row,
+        hnotRevGe, row', table', hcodeLenPos] using hfill
+    have hnextIdx' : codeLen < nextCode'.size := by
+      simp [nextCode', hnextIdx]
+    have htableIdx' : codeLen < table'.size := by
+      simp [table', htableIdx]
+    have hnextAt :
+        nextCode'[codeLen]! = codeVal + 1 := by
+      simpa [nextCode'] using
+        getElem!_set!_eq nextCode codeLen (codeVal + 1) hnextIdx
+    have hrowSet : table'[codeLen]! = row' := by
+      simpa [table'] using getElem!_set!_eq table codeLen row' htableIdx
+    have hrow' : table'[codeLen]!.size = 1 <<< codeLen := by
+      rw [hrowSet]
+      simp [row', row, hrow]
+    have hbudget' :
+        nextCode'[codeLen]! + (lengths.size - (i + 1)) ≤ 1 <<< codeLen := by
+      rw [hnextAt]
+      omega
+    have hshape' :
+        ∀ j (hj : j < lengths.size), i + 1 ≤ j →
+          0 < lengths[j] → lengths[j] = codeLen := by
+      intro j hj hle' hposj
+      exact hshape j hj (by omega) hposj
+    have hcodesUnfold :
+        Png.fillCanonicalRevCodesAux lengths i nextCode revCodes =
+          Png.fillCanonicalRevCodesAux lengths (i + 1) nextCode' revCodes' := by
+      rw [Png.fillCanonicalRevCodesAux.eq_1]
+      simp [hi, hpos, hlen, codeVal, nextCode', rev, revCodes', hcodeLenPos]
+    by_cases heq : i = target
+    · subst target
+      have htargetRev' : i < revCodes'.size := by
+        simp [revCodes', hrevSize, hi]
+      have hcodesPres :=
+        fillCanonicalRevCodesAux_get!_of_lt lengths (i + 1) nextCode'
+          revCodes' i htargetRev' (Nat.lt_succ_self i)
+      have hsetRev : revCodes'[i]! = (rev, codeLen) := by
+        have hiRev : i < revCodes.size := by
+          simpa [hrevSize] using hi
+        simpa [revCodes'] using
+          getElem!_set!_eq revCodes i (rev, codeLen) hiRev
+      have hcodesFst :
+          (Png.fillCanonicalRevCodesAux lengths i nextCode revCodes)[i]!.1 =
+            rev := by
+        rw [hcodesUnfold]
+        calc
+          (Png.fillCanonicalRevCodesAux lengths (i + 1) nextCode'
+              revCodes')[i]!.1 =
+              revCodes'[i]!.1 := by
+                simpa using congrArg Prod.fst hcodesPres
+          _ = rev := by simp [hsetRev]
+      have hentryTable' : table'[codeLen]![rev]! = some i := by
+        rw [hrowSet]
+        have hrowEntry : row'[rev]! = some i := by
+          simpa [row'] using getElem!_set!_eq row rev (some i) hrevBound
+        exact hrowEntry
+      have hpres :=
+        fillHuffmanTableAux_uniform_entry_eq_of_code_lt_next
+          lengths (i + 1) codeLen nextCode' table' out codeVal rev
+          hshape' hnextIdx' htableIdx' hrow' hbudget'
+          (by rw [hnextAt]; omega) rfl hfillRec
+      intro codesOut
+      dsimp [codesOut]
+      rw [hcodesFst]
+      calc
+        out[codeLen]![rev]! = table'[codeLen]![rev]! := hpres
+        _ = some i := hentryTable'
+    · have hltTarget : i < target := Nat.lt_of_le_of_ne hle heq
+      have hrevSize' : revCodes'.size = lengths.size := by
+        simp [revCodes', hrevSize]
+      have hrec :=
+        fillHuffmanTableAux_uniform_lookup_of_canonical_at
+          lengths (i + 1) codeLen nextCode' table' out revCodes' target
+          hshape' hnextIdx' htableIdx' hrow' hbudget' htarget
+          (Nat.succ_le_of_lt hltTarget) hrevSize' hposTarget hfillRec
+      intro codesOut
+      dsimp [codesOut]
+      rw [hcodesUnfold]
+      exact hrec
+  · have hshape' :
+      ∀ j (hj : j < lengths.size), i + 1 ≤ j →
+        0 < lengths[j] → lengths[j] = codeLen := by
+      intro j hj hle' hposj
+      exact hshape j hj (by omega) hposj
+    have hbudget' :
+        nextCode[codeLen]! + (lengths.size - (i + 1)) ≤ 1 <<< codeLen := by
+      omega
+    have hcodesUnfold :
+        Png.fillCanonicalRevCodesAux lengths i nextCode revCodes =
+          Png.fillCanonicalRevCodesAux lengths (i + 1) nextCode revCodes := by
+      rw [Png.fillCanonicalRevCodesAux.eq_1]
+      simp [hi, hpos]
+    have hltTarget : i < target := by
+      have hne : i ≠ target := by
+        intro heq
+        subst target
+        exact hpos hposTarget
+      exact Nat.lt_of_le_of_ne hle hne
+    have hrec :=
+      fillHuffmanTableAux_uniform_lookup_of_canonical_at
+        lengths (i + 1) codeLen nextCode table out revCodes target
+        hshape' hnextIdx htableIdx hrow hbudget' htarget
+        (Nat.succ_le_of_lt hltTarget) hrevSize hposTarget
+        (by simpa [hi, hpos] using hfill)
+    intro codesOut
+    dsimp [codesOut]
+    rw [hcodesUnfold]
+    exact hrec
+termination_by target - i
+decreasing_by
+  all_goals
+    have hlt : i < target := by omega
+    exact Nat.sub_lt_sub_left (k := i) (m := target) (n := i + 1)
+      hlt (Nat.lt_succ_self i)
+
 /-- Names the generated literal/length Huffman table accepted by `mkHuffman`.
 This lets the payload proof talk about the same table that the header parser
 reconstructs, without unfolding the table builder at every use site. -/
@@ -590,6 +753,198 @@ lemma generatedDynamicLitLenTable_prefix_row_none
     simpa [hsize, Nat.shiftLeft_eq] using hmod
   exact generatedDynamicLitLenTable_short_row_get_none tokens rowIdx
     (bitsTot % 2 ^ rowIdx) hrowPos hrowLt hcode
+
+/-- The generated literal/length Huffman table maps every positive generated
+canonical code back to its symbol. This is the payload-side table lookup core. -/
+lemma generatedDynamicLitLenTable_lookup_generated_code_of_pos
+    (tokens : Array Png.DeflateToken) (sym : Nat)
+    (hsym :
+      sym <
+        (Png.generatedDynamicLitLenLengths
+          (Png.litLenSymbolFreqs tokens)).size)
+    (hpos :
+      0 <
+        (Png.generatedDynamicLitLenLengths
+          (Png.litLenSymbolFreqs tokens))[sym]) :
+    let lengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    let codes := Png.canonicalRevCodesFromLengths lengths
+    (generatedDynamicLitLenTable tokens).table[9]![codes[sym]!.1]! =
+      some sym := by
+  intro lengths codes
+  have hmk :
+      Png.mkHuffman lengths =
+        some (generatedDynamicLitLenTable tokens) := by
+    simpa [lengths] using mkHuffman_generatedDynamicLitLenLengths_eq tokens
+  have hmax :
+      Png.maxCodeLenAux lengths 0 0 =
+        Png.generatedDynamicLitLenCodeLen := by
+    simpa [lengths] using
+      maxCodeLenAux_generatedDynamicLitLenLengths_eq_codeLen tokens
+  let count := Png.countCodeLengthsAux lengths 0 (Array.replicate 10 0)
+  let nextCode0 : Array Nat := Array.replicate 10 0
+  let nextCode := (Png.nextCodesAux count 9 1 0 nextCode0).2
+  let init := Png.huffmanEmptyTable 9
+  have hmk' :
+      (match Png.fillHuffmanTableAux lengths 0 nextCode init with
+      | none => none
+      | some table => some ({ maxLen := 9, table := table } : Png.Huffman)) =
+        some (generatedDynamicLitLenTable tokens) := by
+    simpa [Png.mkHuffman, lengths, hmax, Png.generatedDynamicLitLenCodeLen,
+      count, nextCode0, nextCode, init] using hmk
+  cases hfill : Png.fillHuffmanTableAux lengths 0 nextCode init with
+  | none =>
+      simp [hfill] at hmk'
+  | some table =>
+      have hshape :
+          ∀ j (hj : j < lengths.size), 0 ≤ j →
+            0 < lengths[j] → lengths[j] = 9 := by
+        intro j hj _hle hposj
+        simpa [lengths] using
+          (generatedDynamicLitLenLengths_getElem_pos_iff_eq_nine
+            (Png.litLenSymbolFreqs tokens) j (by simpa [lengths] using hj)).mp
+            (by simpa [lengths] using hposj)
+      have hnextSize : nextCode.size = nextCode0.size := by
+        simpa [nextCode] using nextCodesAux_size count 9 1 0 nextCode0
+      have hnextIdx : 9 < nextCode.size := by
+        rw [hnextSize]
+        simp [nextCode0]
+      have htableIdx : 9 < init.size := by
+        simp [init, huffmanEmptyTable_size]
+      have hrow : init[9]!.size = 1 <<< 9 := by
+        exact huffmanEmptyTable_get!_size 9 9 le_rfl (by decide)
+      have hnextZero : nextCode[9]! = 0 := by
+        have hscanned :=
+          nextCodesAux_generatedDynamicLitLenLengths_get!_scannedMax_eq_zero tokens
+        simpa [lengths, count, nextCode0, nextCode, hmax,
+          Png.generatedDynamicLitLenCodeLen] using hscanned
+      have hsizeLt : lengths.size < 1 <<< 9 := by
+        have hlt := generatedDynamicLitLenLengths_size_lt_codeSpace tokens
+        simpa [lengths, Png.generatedDynamicLitLenCodeLen, Nat.shiftLeft_eq] using hlt
+      have hbudget : nextCode[9]! + (lengths.size - 0) ≤ 1 <<< 9 := by
+        rw [hnextZero]
+        omega
+      have hlookup :=
+        fillHuffmanTableAux_uniform_lookup_of_canonical_at
+          lengths 0 9 nextCode init table (Array.replicate lengths.size (0, 0))
+          sym hshape hnextIdx htableIdx hrow hbudget
+          (by simpa [lengths] using hsym) (Nat.zero_le sym) (by simp)
+          (by simpa [lengths] using hpos) hfill
+      simp [hfill] at hmk'
+      rw [← hmk']
+      simpa [codes, Png.canonicalRevCodesFromLengths, lengths, count,
+        nextCode0, nextCode, hmax, Png.generatedDynamicLitLenCodeLen] using hlookup
+
+/-- Literal payload symbols resolve in the generated literal/length table.
+This is the token-indexed lookup form for literal replay. -/
+lemma generatedDynamicLitLenTable_lookup_literal_at
+    (tokens : Array Png.DeflateToken) (target : Nat) (b : UInt8)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.literal b) :
+    let lengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    let codes := Png.canonicalRevCodesFromLengths lengths
+    (generatedDynamicLitLenTable tokens).table[9]![codes[b.toNat]!.1]! =
+      some b.toNat := by
+  intro lengths codes
+  have hsym : b.toNat < lengths.size := by
+    have hb : b.toNat < 256 := UInt8.toNat_lt b
+    have hsize : lengths.size = 286 := by
+      simp [lengths, generatedDynamicLitLenLengths_size, litLenSymbolFreqs_size]
+    omega
+  have hpos : 0 < lengths[b.toNat] := by
+    have hposBang :=
+      generatedDynamicLitLenLengths_literal_pos_at tokens target b htarget ht
+    simpa [lengths, getElem!_pos lengths b.toNat hsym] using hposBang
+  simpa [lengths, codes] using
+    generatedDynamicLitLenTable_lookup_generated_code_of_pos
+      tokens b.toNat (by simpa [lengths] using hsym) (by simpa [lengths] using hpos)
+
+/-- Match payload literal/length symbols resolve in the generated table. This
+is the token-indexed lookup form for distance-1 match replay. -/
+lemma generatedDynamicLitLenTable_lookup_match_at
+    (tokens : Array Png.DeflateToken) (target len : Nat)
+    (htarget : target < tokens.size)
+    (ht : tokens[target]'htarget = Png.DeflateToken.matchDist1 len)
+    (hlen : 3 ≤ len ∧ len ≤ 258) :
+    let lengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    let codes := Png.canonicalRevCodesFromLengths lengths
+    let sym := (Png.fixedLenMatchInfo len).1
+    (generatedDynamicLitLenTable tokens).table[9]![codes[sym]!.1]! =
+      some sym := by
+  intro lengths codes sym
+  have hsym : sym < lengths.size := by
+    have hfixed := fixedLenMatchInfo_sym_lt_286 len hlen
+    have hsize : lengths.size = 286 := by
+      simp [lengths, generatedDynamicLitLenLengths_size, litLenSymbolFreqs_size]
+    omega
+  have hpos : 0 < lengths[sym] := by
+    have hposBang :=
+      generatedDynamicLitLenLengths_match_pos_at tokens target len htarget ht hlen
+    simpa [lengths, sym, getElem!_pos lengths sym hsym] using hposBang
+  simpa [lengths, codes, sym] using
+    generatedDynamicLitLenTable_lookup_generated_code_of_pos
+      tokens sym (by simpa [lengths] using hsym) (by simpa [lengths] using hpos)
+
+/-- The generated end-of-block symbol resolves in the generated table. This is
+the terminal lookup form for generated payload replay. -/
+lemma generatedDynamicLitLenTable_lookup_eob
+    (tokens : Array Png.DeflateToken) :
+    let lengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    let codes := Png.canonicalRevCodesFromLengths lengths
+    (generatedDynamicLitLenTable tokens).table[9]![codes[256]!.1]! =
+      some 256 := by
+  intro lengths codes
+  have hsym : 256 < lengths.size := by
+    simpa [lengths] using generatedDynamicLitLenLengths_eob_inBounds tokens
+  have hpos : 0 < lengths[256] := by
+    simpa [lengths] using generatedDynamicLitLenLengths_eob_pos tokens
+  simpa [lengths, codes] using
+    generatedDynamicLitLenTable_lookup_generated_code_of_pos
+      tokens 256 (by simpa [lengths] using hsym) (by simpa [lengths] using hpos)
+
+/-- Appending later payload bits after a generated nine-bit literal/length code
+preserves the row-nine lookup. This is the packed-stream final prefix lookup. -/
+lemma generatedDynamicLitLenTable_prefix9_row_some
+    (tokens : Array Png.DeflateToken) (sym restBits : Nat)
+    (hsym :
+      sym <
+        (Png.generatedDynamicLitLenLengths
+          (Png.litLenSymbolFreqs tokens)).size)
+    (hpos :
+      0 <
+        (Png.generatedDynamicLitLenLengths
+          (Png.litLenSymbolFreqs tokens))[sym]) :
+    let lengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    let codes := Png.canonicalRevCodesFromLengths lengths
+    let bitsTot := codes[sym]!.1 ||| (restBits <<< 9)
+    (generatedDynamicLitLenTable tokens).table[9]![bitsTot % 2 ^ 9]! =
+      some sym := by
+  intro lengths codes bitsTot
+  have hlookup :=
+    generatedDynamicLitLenTable_lookup_generated_code_of_pos
+      tokens sym hsym hpos
+  have hbits :
+      codes[sym]!.1 < 2 ^ 9 := by
+    have hposBang : 0 < lengths[sym]! := by
+      simpa [getElem!_pos lengths sym (by simpa [lengths] using hsym)] using hpos
+    have hraw :=
+      generatedDynamicLitLenCodes_bits_lt_codeSpace_of_pos
+        tokens sym hsym (by simpa [lengths] using hposBang)
+    simpa [lengths, codes, Png.generatedDynamicLitLenCodeLen] using hraw
+  have hmod :
+      (codes[sym]!.1 ||| (restBits <<< 9)) % 2 ^ 9 =
+        codes[sym]!.1 := by
+    have h :=
+      Png.mod_two_pow_or_shift
+        (a := codes[sym]!.1) (b := restBits) (k := 9) (len := 9) le_rfl
+    have hmodCode : codes[sym]!.1 % 2 ^ 9 = codes[sym]!.1 :=
+      Nat.mod_eq_of_lt hbits
+    simpa [hmodCode] using h
+  simpa [lengths, codes, bitsTot, hmod] using hlookup
 
 /-- Names the generated dynamic distance table accepted by the parser boundary.
 The table is empty for literal-only generated streams and non-empty when
