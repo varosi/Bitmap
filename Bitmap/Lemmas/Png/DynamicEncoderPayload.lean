@@ -2224,6 +2224,283 @@ def DynamicPayloadTraceOutputValid (out : ByteArray) :
         DynamicPayloadTraceOutputValid
           (Png.pushRepeat out (out.get! (out.size - 1)) len) tokens
 
+/-- List-shaped token expansion from an arbitrary output prefix. It is the
+proof-facing counterpart of `deflateTokensExpand` for trace-output comparison. -/
+def deflateTokensExpandListFrom (out : ByteArray) :
+    List Png.DeflateToken → ByteArray
+  | [] => out
+  | token :: tokens =>
+      deflateTokensExpandListFrom (Png.deflateTokenExpand out token) tokens
+
+/-- Trace output composes across list append. This is the basic transport fact
+for accumulator-style tokenizers that append to an existing token prefix. -/
+lemma dynamicPayloadTraceOut_append
+    (out : ByteArray) (xs ys : List Png.DeflateToken) :
+    dynamicPayloadTraceOut out (xs ++ ys) =
+      dynamicPayloadTraceOut (dynamicPayloadTraceOut out xs) ys := by
+  induction xs generalizing out with
+  | nil =>
+      simp [dynamicPayloadTraceOut]
+  | cons token xs ih =>
+      cases token with
+      | literal b =>
+          simp [dynamicPayloadTraceOut, ih]
+      | matchDist1 len =>
+          simp [dynamicPayloadTraceOut, ih]
+
+/-- Trace-output validity composes across list append. The suffix starts from
+the output produced by replaying the prefix. -/
+lemma DynamicPayloadTraceOutputValid_append
+    (out : ByteArray) (xs ys : List Png.DeflateToken) :
+    DynamicPayloadTraceOutputValid out (xs ++ ys) ↔
+      DynamicPayloadTraceOutputValid out xs ∧
+        DynamicPayloadTraceOutputValid
+          (dynamicPayloadTraceOut out xs) ys := by
+  induction xs generalizing out with
+  | nil =>
+      simp [DynamicPayloadTraceOutputValid, dynamicPayloadTraceOut]
+  | cons token xs ih =>
+      cases token with
+      | literal b =>
+          simp [DynamicPayloadTraceOutputValid, dynamicPayloadTraceOut, ih]
+      | matchDist1 len =>
+          simp [DynamicPayloadTraceOutputValid, dynamicPayloadTraceOut, ih,
+            and_assoc]
+
+/-- Appending a literal token preserves replay validity because literals do not
+need a prior byte. This is the literal-push step for accumulator proofs. -/
+lemma DynamicPayloadTraceOutputValid_array_push_literal
+    (out : ByteArray) (tokens : Array Png.DeflateToken) (b : UInt8)
+    (hvalid : DynamicPayloadTraceOutputValid out tokens.toList) :
+    DynamicPayloadTraceOutputValid out
+      (tokens.push (Png.DeflateToken.literal b)).toList := by
+  rw [Array.toList_push, DynamicPayloadTraceOutputValid_append]
+  exact ⟨hvalid, by simp [DynamicPayloadTraceOutputValid]⟩
+
+/-- Replaying an array with one appended literal is replaying the prefix and
+then pushing that literal byte. -/
+lemma dynamicPayloadTraceOut_array_push_literal
+    (out : ByteArray) (tokens : Array Png.DeflateToken) (b : UInt8) :
+    dynamicPayloadTraceOut out
+      (tokens.push (Png.DeflateToken.literal b)).toList =
+        (dynamicPayloadTraceOut out tokens.toList).push b := by
+  rw [Array.toList_push, dynamicPayloadTraceOut_append]
+  simp [dynamicPayloadTraceOut]
+
+/-- Appending a distance-1 match preserves replay validity when the replayed
+prefix has a byte available to copy. -/
+lemma DynamicPayloadTraceOutputValid_array_push_matchDist1
+    (out : ByteArray) (tokens : Array Png.DeflateToken) (len : Nat)
+    (hvalid : DynamicPayloadTraceOutputValid out tokens.toList)
+    (hout : 0 < (dynamicPayloadTraceOut out tokens.toList).size) :
+    DynamicPayloadTraceOutputValid out
+      (tokens.push (Png.DeflateToken.matchDist1 len)).toList := by
+  rw [Array.toList_push, DynamicPayloadTraceOutputValid_append]
+  exact ⟨hvalid, by simpa [DynamicPayloadTraceOutputValid] using hout⟩
+
+/-- Replaying an array with one appended distance-1 match repeats the last
+prefix byte by the match length. -/
+lemma dynamicPayloadTraceOut_array_push_matchDist1
+    (out : ByteArray) (tokens : Array Png.DeflateToken) (len : Nat) :
+    dynamicPayloadTraceOut out
+      (tokens.push (Png.DeflateToken.matchDist1 len)).toList =
+        Png.pushRepeat (dynamicPayloadTraceOut out tokens.toList)
+          ((dynamicPayloadTraceOut out tokens.toList).get!
+            ((dynamicPayloadTraceOut out tokens.toList).size - 1)) len := by
+  rw [Array.toList_push, dynamicPayloadTraceOut_append]
+  simp [dynamicPayloadTraceOut]
+
+/-- Repeated literal-token appends preserve replay validity. This covers the
+short-run branch of the generated dynamic tokenizer. -/
+lemma DynamicPayloadTraceOutputValid_pushLiteralRepeat
+    (out : ByteArray) (tokens : Array Png.DeflateToken) (b : UInt8) (n : Nat)
+    (hvalid : DynamicPayloadTraceOutputValid out tokens.toList) :
+    DynamicPayloadTraceOutputValid out
+      (Png.pushLiteralRepeat tokens b n).toList := by
+  induction n generalizing tokens with
+  | zero =>
+      simpa [Png.pushLiteralRepeat] using hvalid
+  | succ n ih =>
+      exact ih (tokens.push (Png.DeflateToken.literal b))
+        (DynamicPayloadTraceOutputValid_array_push_literal out tokens b hvalid)
+
+/-- Distance-1 match chunks preserve replay validity once the current replay
+output is nonempty. This covers the long-run match suffix. -/
+lemma DynamicPayloadTraceOutputValid_deflateMatchDist1Chunks
+    (out : ByteArray) (tokens : Array Png.DeflateToken) (remaining : Nat)
+    (hvalid : DynamicPayloadTraceOutputValid out tokens.toList)
+    (hout : 0 < (dynamicPayloadTraceOut out tokens.toList).size) :
+    DynamicPayloadTraceOutputValid out
+      (Png.deflateMatchDist1Chunks tokens remaining).toList := by
+  induction remaining using Nat.strong_induction_on generalizing tokens with
+  | h remaining ih =>
+      by_cases hrem : 3 ≤ remaining
+      · let chunk := Png.chooseFixedMatchChunkLen remaining
+        have hpush :
+            DynamicPayloadTraceOutputValid out
+              (tokens.push (Png.DeflateToken.matchDist1 chunk)).toList :=
+          DynamicPayloadTraceOutputValid_array_push_matchDist1
+            out tokens chunk hvalid hout
+        have houtPush :
+            0 <
+              (dynamicPayloadTraceOut out
+                (tokens.push (Png.DeflateToken.matchDist1 chunk)).toList).size := by
+          rw [dynamicPayloadTraceOut_array_push_matchDist1]
+          exact Png.pushRepeat_pos (dynamicPayloadTraceOut out tokens.toList)
+            ((dynamicPayloadTraceOut out tokens.toList).get!
+              ((dynamicPayloadTraceOut out tokens.toList).size - 1)) chunk hout
+        have hlt : remaining - chunk < remaining := by
+          simpa [chunk] using
+            Png.chooseFixedMatchChunkLen_sub_lt remaining hrem
+        have hih :=
+          ih (remaining - chunk) hlt
+            (tokens.push (Png.DeflateToken.matchDist1 chunk)) hpush houtPush
+        rw [deflateMatchDist1Chunks_of_ge3 tokens remaining hrem]
+        simpa [chunk] using hih
+      · rw [deflateMatchDist1Chunks_of_lt3 tokens remaining hrem]
+        exact hvalid
+
+/-- The generated tokenizer preserves replay validity from any valid token
+prefix. This follows the same accumulator recursion as tokenizer expansion. -/
+lemma DynamicPayloadTraceOutputValid_deflateTokensDist1Aux
+    (data : Array UInt8) (i : Nat) (tokens : Array Png.DeflateToken)
+    (hvalid : DynamicPayloadTraceOutputValid ByteArray.empty tokens.toList) :
+    DynamicPayloadTraceOutputValid ByteArray.empty
+      (Png.deflateTokensDist1Aux data i tokens).toList := by
+  rw [Png.deflateTokensDist1Aux.eq_1]
+  by_cases hlt : i < data.size
+  · let b := data[i]
+    let j := Png.sameByteRunEndFast data b (i + 1)
+    let runLen := j - i
+    let tokens' :=
+      if 4 ≤ runLen then
+        Png.deflateMatchDist1Chunks
+          (tokens.push (Png.DeflateToken.literal b)) (runLen - 1)
+      else
+        Png.pushLiteralRepeat tokens b runLen
+    have htokens' :
+        DynamicPayloadTraceOutputValid ByteArray.empty tokens'.toList := by
+      by_cases h4 : 4 ≤ runLen
+      · have hpushLit :
+            DynamicPayloadTraceOutputValid ByteArray.empty
+              (tokens.push (Png.DeflateToken.literal b)).toList :=
+          DynamicPayloadTraceOutputValid_array_push_literal
+            ByteArray.empty tokens b hvalid
+        have houtLit :
+            0 <
+              (dynamicPayloadTraceOut ByteArray.empty
+                (tokens.push (Png.DeflateToken.literal b)).toList).size := by
+          rw [dynamicPayloadTraceOut_array_push_literal]
+          simp
+        have hchunks :=
+          DynamicPayloadTraceOutputValid_deflateMatchDist1Chunks
+            ByteArray.empty (tokens.push (Png.DeflateToken.literal b))
+            (runLen - 1) hpushLit houtLit
+        simpa [tokens', h4] using hchunks
+      · have hlits :=
+          DynamicPayloadTraceOutputValid_pushLiteralRepeat
+            ByteArray.empty tokens b runLen hvalid
+        simpa [tokens', h4] using hlits
+    have hrec :=
+      DynamicPayloadTraceOutputValid_deflateTokensDist1Aux data j tokens' htokens'
+    simpa [hlt, b, j, runLen, tokens'] using hrec
+  · simp [hlt, hvalid]
+termination_by data.size - i
+decreasing_by
+  have hgt : i < Png.sameByteRunEndFast data data[i] (i + 1) := by
+    exact sameByteRunEndFast_gt_prev data i hlt
+  have hle : Png.sameByteRunEndFast data data[i] (i + 1) ≤ data.size := by
+    exact sameByteRunEndFast_le_size data data[i] (i + 1) (Nat.succ_le_of_lt hlt)
+  exact (by omega :
+    data.size - Png.sameByteRunEndFast data data[i] (i + 1) < data.size - i)
+
+/-- Tokens emitted by the public generated dynamic tokenizer can be replayed
+from an empty output buffer without an invalid distance-1 match. -/
+lemma DynamicPayloadTraceOutputValid_deflateTokensDist1 (raw : ByteArray) :
+    DynamicPayloadTraceOutputValid ByteArray.empty
+      (Png.deflateTokensDist1 raw).toList := by
+  simpa [Png.deflateTokensDist1] using
+    DynamicPayloadTraceOutputValid_deflateTokensDist1Aux raw.data 0 #[]
+      (by simp [DynamicPayloadTraceOutputValid])
+
+/-- Recursive list expansion is the same as list `foldl` with
+`deflateTokenExpand`. This connects proof-facing list replay to arrays. -/
+lemma deflateTokensExpandListFrom_eq_foldl
+    (out : ByteArray) (tokens : List Png.DeflateToken) :
+    deflateTokensExpandListFrom out tokens =
+      tokens.foldl Png.deflateTokenExpand out := by
+  induction tokens generalizing out with
+  | nil =>
+      simp [deflateTokensExpandListFrom]
+  | cons token tokens ih =>
+      simp [deflateTokensExpandListFrom, ih]
+
+/-- Array token expansion is proof-facing list expansion over `Array.toList`.
+This bridges `deflateTokensExpand` to trace-output replay. -/
+lemma deflateTokensExpand_eq_deflateTokensExpandListFrom
+    (tokens : Array Png.DeflateToken) :
+    Png.deflateTokensExpand tokens =
+      deflateTokensExpandListFrom ByteArray.empty tokens.toList := by
+  simp [Png.deflateTokensExpand, Array.foldl_toList,
+    deflateTokensExpandListFrom_eq_foldl]
+
+/-- On replay-valid token lists, proof-facing trace output agrees with
+`deflateTokenExpand` semantics. The match case uses the prior-byte validity
+condition to remove `deflateTokenExpand`'s empty-output guard. -/
+lemma dynamicPayloadTraceOut_eq_deflateTokensExpandListFrom_of_valid
+    (out : ByteArray) (tokens : List Png.DeflateToken)
+    (hvalid : DynamicPayloadTraceOutputValid out tokens) :
+    dynamicPayloadTraceOut out tokens =
+      deflateTokensExpandListFrom out tokens := by
+  induction tokens generalizing out with
+  | nil =>
+      simp [dynamicPayloadTraceOut, deflateTokensExpandListFrom]
+  | cons token tokens ih =>
+      cases token with
+      | literal b =>
+          have htail :
+              DynamicPayloadTraceOutputValid (out.push b) tokens := by
+            simpa [DynamicPayloadTraceOutputValid] using hvalid
+          simpa [dynamicPayloadTraceOut, deflateTokensExpandListFrom,
+            Png.deflateTokenExpand] using ih (out.push b) htail
+      | matchDist1 len =>
+          have hout : 0 < out.size := by
+            simpa [DynamicPayloadTraceOutputValid] using hvalid.1
+          have htail :
+              DynamicPayloadTraceOutputValid
+                (Png.pushRepeat out (out.get! (out.size - 1)) len) tokens := by
+            simpa [DynamicPayloadTraceOutputValid] using hvalid.2
+          have htoken :
+              Png.deflateTokenExpand out (Png.DeflateToken.matchDist1 len) =
+                Png.pushRepeat out (out.get! (out.size - 1)) len := by
+            calc
+              Png.deflateTokenExpand out (Png.DeflateToken.matchDist1 len) =
+                  Png.pushByteRepeat out (out.get! (out.size - 1)) len := by
+                    exact deflateTokenExpand_matchDist1_of_pos out len hout
+              _ = Png.pushRepeat out (out.get! (out.size - 1)) len := by
+                    rw [pushByteRepeat_eq_pushRepeat]
+          simpa [dynamicPayloadTraceOut, deflateTokensExpandListFrom, htoken]
+            using
+              ih (Png.pushRepeat out (out.get! (out.size - 1)) len) htail
+
+/-- Replaying the public generated dynamic tokenizer yields exactly the source
+bytes. This is the output side of the generated payload trace bridge. -/
+lemma dynamicPayloadTraceOut_deflateTokensDist1_eq (raw : ByteArray) :
+    dynamicPayloadTraceOut ByteArray.empty
+      (Png.deflateTokensDist1 raw).toList = raw := by
+  have hvalid := DynamicPayloadTraceOutputValid_deflateTokensDist1 raw
+  calc
+    dynamicPayloadTraceOut ByteArray.empty
+        (Png.deflateTokensDist1 raw).toList =
+      deflateTokensExpandListFrom ByteArray.empty
+        (Png.deflateTokensDist1 raw).toList := by
+        exact dynamicPayloadTraceOut_eq_deflateTokensExpandListFrom_of_valid
+          ByteArray.empty (Png.deflateTokensDist1 raw).toList hvalid
+    _ = Png.deflateTokensExpand (Png.deflateTokensDist1 raw) := by
+        exact (deflateTokensExpand_eq_deflateTokensExpandListFrom
+          (Png.deflateTokensDist1 raw)).symm
+    _ = raw := deflateTokensExpand_deflateTokensDist1 raw
+
 /-- Generated payload EOB is emitted with the generated nine-bit
 literal/length code. This is the terminal width used by payload traces. -/
 lemma dynamicPayloadEobBitLen_generated_eq_nine
@@ -3481,6 +3758,241 @@ lemma generatedDynamicPayloadMatch_transition_readerAt_writeBits
         (Png.pushRepeat out (out.get! (out.size - 1)) matchLen) := by
     simpa [hbr0Eq] using hmanualSeqManual
   simpa [hbrAfterEq] using hmanualSeq
+
+/-- Re-normalizes the literal byte produced by generic dynamic decoding. This
+lets generated payload traces use the original `UInt8` token byte directly. -/
+@[simp] lemma u8_toNat_eq_self (b : UInt8) : Png.u8 b.toNat = b := by
+  simp [Png.u8]
+
+set_option maxRecDepth 200000 in
+set_option maxHeartbeats 5000000 in
+/-- Replays a generated dynamic payload-token list through the generic
+dynamic-Huffman payload trace. This is the recursive bridge from emitted
+token bits to decoded output bytes. -/
+lemma generatedDynamicPayloadTraceList_readerAt_writeBits
+    (source : Array Png.DeflateToken) (tokens : List Png.DeflateToken)
+    (hvalid : DeflateTokensMatchLengthsValid source)
+    (hmember :
+      ∀ token ∈ tokens, ∃ target, ∃ htarget : target < source.size,
+        source[target]'htarget = token)
+    (out : ByteArray)
+    (houtValid : DynamicPayloadTraceOutputValid out tokens)
+    (bw : Png.BitWriter)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let spec := generatedDynamicTableSpec source
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs source))
+    let distCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicDistLengths (Png.distSymbolFreqs source))
+    let bits := dynamicPayloadStreamBits litLenCodes distCodes tokens
+    let len := dynamicPayloadStreamLen litLenCodes distCodes tokens
+    let bwAll := Png.BitWriter.writeBits bw bits len
+    let br0 := Png.BitWriter.readerAt bw bwAll.flush
+      (Png.flush_size_writeBits_le bw bits len) hbit
+    let brAfter := Png.BitWriter.readerAt (Png.BitWriter.writeBits bw bits len)
+      bwAll.flush
+      (by
+        simpa [bwAll] using
+          (le_rfl : (Png.BitWriter.writeBits bw bits len).flush.size ≤
+            (Png.BitWriter.writeBits bw bits len).flush.size))
+      (Png.bitPos_lt_8_writeBits bw bits len hbit)
+    Png.DynamicPayloadTrace spec (tokens.length + 1) br0 out brAfter
+      (dynamicPayloadTraceOut out tokens) := by
+  revert hmember out bw
+  induction tokens with
+  | nil =>
+      intro _hmember out houtValid bw hbit hcur spec litLenCodes distCodes
+        bits len bwAll br0 brAfter
+      have htrace :=
+        generatedDynamicPayloadTrace_nil_readerAt_writeBits
+          (source := source) (bw := bw) (out := out) hbit hcur
+      simpa [spec, litLenCodes, distCodes, bits, len, bwAll, br0, brAfter,
+        dynamicPayloadStreamBits, dynamicPayloadStreamLen,
+        dynamicPayloadTraceOut] using htrace
+  | cons token tokens ih =>
+      intro hmember out houtValid bw hbit hcur spec litLenCodes distCodes
+        bits len bwAll br0 brAfter
+      have htailMember :
+          ∀ t ∈ tokens, ∃ target, ∃ htarget : target < source.size,
+            source[target]'htarget = t := by
+        intro t ht
+        exact hmember t (List.mem_cons_of_mem token ht)
+      let tokenBits := dynamicPayloadTokenBits litLenCodes distCodes token
+      let tokenLen := dynamicPayloadTokenBitLen litLenCodes distCodes token
+      let tailBits := dynamicPayloadStreamBits litLenCodes distCodes tokens
+      let tailLen := dynamicPayloadStreamLen litLenCodes distCodes tokens
+      let bwMid := Png.BitWriter.writeBits bw bits tokenLen
+      let brMid := Png.BitWriter.readerAt bwMid bwAll.flush
+        (by
+          have hk : tokenLen ≤ len := by
+            simp [len, dynamicPayloadStreamLen, tokenLen, tailLen]
+          simpa [bwMid, bwAll] using
+            Png.flush_size_writeBits_prefix bw bits tokenLen len hk)
+        (Png.bitPos_lt_8_writeBits bw bits tokenLen hbit)
+      have htokenBits :
+          tokenBits < 2 ^ tokenLen := by
+        cases token with
+        | literal b =>
+            rcases hmember (Png.DeflateToken.literal b) (by simp) with
+              ⟨target, htarget, ht⟩
+            simpa [litLenCodes, distCodes, tokenBits, tokenLen] using
+              dynamicPayloadTokenBits_generated_literal_lt_codeSpace_at
+                source target b htarget ht
+        | matchDist1 matchLen =>
+            rcases hmember (Png.DeflateToken.matchDist1 matchLen) (by simp) with
+              ⟨target, htarget, ht⟩
+            have hlen := hvalid target matchLen htarget ht
+            simpa [litLenCodes, distCodes, tokenBits, tokenLen] using
+              dynamicPayloadTokenBits_generated_match_lt_codeSpace_at
+                source target matchLen htarget ht hlen
+      have hprefix :
+          bwMid = Png.BitWriter.writeBits bw tokenBits tokenLen := by
+        simpa [bwMid, bits, dynamicPayloadStreamBits, tokenBits, tokenLen,
+          tailBits] using
+          Png.writeBits_or_shift_tail bw tokenBits tailBits tokenLen htokenBits
+      let bwTailAll :=
+        Png.BitWriter.writeBits
+          (Png.BitWriter.writeBits bw tokenBits tokenLen) tailBits tailLen
+      have hconcat :
+          bwAll = bwTailAll := by
+        have h :=
+          Png.writeBits_concat bw tokenBits tailBits tokenLen tailLen htokenBits
+        simpa [bwAll, bits, len, dynamicPayloadStreamBits,
+          dynamicPayloadStreamLen, tokenBits, tokenLen, tailBits, tailLen,
+          bwTailAll] using h
+      have hbrMidEq :
+          brMid =
+            Png.BitWriter.readerAt
+              (Png.BitWriter.writeBits bw tokenBits tokenLen)
+              bwTailAll.flush
+              (Png.flush_size_writeBits_le
+                (Png.BitWriter.writeBits bw tokenBits tokenLen)
+                tailBits tailLen)
+              (Png.bitPos_lt_8_writeBits bw tokenBits tokenLen hbit) := by
+        refine readerAt_eq_of_eqs hprefix ?_ _ _ _ _
+        simpa [hconcat]
+      have hbitMid :
+          (Png.BitWriter.writeBits bw tokenBits tokenLen).bitPos < 8 :=
+        Png.bitPos_lt_8_writeBits bw tokenBits tokenLen hbit
+      have hcurMid :
+          (Png.BitWriter.writeBits bw tokenBits tokenLen).curClearAbove :=
+        Png.curClearAbove_writeBits bw tokenBits tokenLen hbit hcur
+      cases token with
+      | literal b =>
+          rcases hmember (Png.DeflateToken.literal b) (by simp) with
+            ⟨target, htarget, ht⟩
+          have hstep :=
+            generatedDynamicPayloadLiteral_transition_readerAt_writeBits
+              (source := source) (target := target) (b := b) (bw := bw)
+              (out := out) (tailBits := tailBits) (tailLen := tailLen)
+              htarget ht hbit hcur
+          have hstep' :
+              Png.DynamicPayloadTransition spec br0 out brMid
+                (out.push b) := by
+            simpa [spec, litLenCodes, distCodes, tokenBits, tokenLen,
+              tailBits, tailLen, bits, len, bwAll, br0, brMid,
+              dynamicPayloadStreamBits, dynamicPayloadStreamLen] using hstep
+          have htailValid :
+              DynamicPayloadTraceOutputValid (out.push b) tokens := by
+            simpa [DynamicPayloadTraceOutputValid] using houtValid
+          have hrestRaw :=
+            ih htailMember (out.push b)
+              htailValid
+              (Png.BitWriter.writeBits bw tokenBits tokenLen)
+              hbitMid hcurMid
+          have hrest :
+              Png.DynamicPayloadTrace spec (tokens.length + 1) brMid
+                (out.push b) brAfter
+                (dynamicPayloadTraceOut (out.push b) tokens) := by
+            have hbrAfterEq :
+                Png.BitWriter.readerAt
+                    (Png.BitWriter.writeBits
+                      (Png.BitWriter.writeBits bw tokenBits tokenLen)
+                      tailBits tailLen)
+                    bwTailAll.flush
+                    (by
+                      simpa [bwTailAll] using
+                        (le_rfl :
+                          (Png.BitWriter.writeBits
+                            (Png.BitWriter.writeBits bw tokenBits tokenLen)
+                            tailBits tailLen).flush.size ≤
+                          (Png.BitWriter.writeBits
+                            (Png.BitWriter.writeBits bw tokenBits tokenLen)
+                            tailBits tailLen).flush.size))
+                    (Png.bitPos_lt_8_writeBits
+                      (Png.BitWriter.writeBits bw tokenBits tokenLen)
+                      tailBits tailLen hbitMid) = brAfter := by
+              refine readerAt_eq_of_eqs ?_ ?_ _ _ _ _
+              · simpa [bwAll, bwTailAll] using hconcat.symm
+              · simpa [bwAll, bwTailAll] using
+                  congrArg Png.BitWriter.flush hconcat.symm
+            have hrest' := hrestRaw
+            simpa [spec, litLenCodes, distCodes, tailBits, tailLen,
+              bwTailAll, hbrMidEq, hbrAfterEq] using hrest'
+          have htrace :=
+            Png.DynamicPayloadTrace.step (spec := spec)
+              (hstep := hstep') (hrest := hrest)
+          simpa [dynamicPayloadTraceOut, Nat.add_assoc] using htrace
+      | matchDist1 matchLen =>
+          rcases hmember (Png.DeflateToken.matchDist1 matchLen) (by simp) with
+            ⟨target, htarget, ht⟩
+          have hlenMatch := hvalid target matchLen htarget ht
+          have houtPos : 0 < out.size := by
+            simpa [DynamicPayloadTraceOutputValid] using houtValid.1
+          have hstep :=
+            generatedDynamicPayloadMatch_transition_readerAt_writeBits
+              (source := source) (target := target) (matchLen := matchLen)
+              (bw := bw) (tailBits := tailBits) (tailLen := tailLen)
+              (out := out) htarget ht hlenMatch houtPos hbit hcur
+          let out' :=
+            Png.pushRepeat out (out.get! (out.size - 1)) matchLen
+          have hstep' :
+              Png.DynamicPayloadTransition spec br0 out brMid out' := by
+            simpa [spec, litLenCodes, distCodes, tokenBits, tokenLen,
+              tailBits, tailLen, bits, len, bwAll, br0, brMid, out',
+              dynamicPayloadStreamBits, dynamicPayloadStreamLen] using hstep
+          have htailValid :
+              DynamicPayloadTraceOutputValid out' tokens := by
+            simpa [DynamicPayloadTraceOutputValid, out'] using houtValid.2
+          have hrestRaw :=
+            ih htailMember out'
+              htailValid
+              (Png.BitWriter.writeBits bw tokenBits tokenLen)
+              hbitMid hcurMid
+          have hrest :
+              Png.DynamicPayloadTrace spec (tokens.length + 1) brMid
+                out' brAfter (dynamicPayloadTraceOut out' tokens) := by
+            have hbrAfterEq :
+                Png.BitWriter.readerAt
+                    (Png.BitWriter.writeBits
+                      (Png.BitWriter.writeBits bw tokenBits tokenLen)
+                      tailBits tailLen)
+                    bwTailAll.flush
+                    (by
+                      simpa [bwTailAll] using
+                        (le_rfl :
+                          (Png.BitWriter.writeBits
+                            (Png.BitWriter.writeBits bw tokenBits tokenLen)
+                            tailBits tailLen).flush.size ≤
+                          (Png.BitWriter.writeBits
+                            (Png.BitWriter.writeBits bw tokenBits tokenLen)
+                            tailBits tailLen).flush.size))
+                    (Png.bitPos_lt_8_writeBits
+                      (Png.BitWriter.writeBits bw tokenBits tokenLen)
+                      tailBits tailLen hbitMid) = brAfter := by
+              refine readerAt_eq_of_eqs ?_ ?_ _ _ _ _
+              · simpa [bwAll, bwTailAll] using hconcat.symm
+              · simpa [bwAll, bwTailAll] using
+                  congrArg Png.BitWriter.flush hconcat.symm
+            have hrest' := hrestRaw
+            simpa [spec, litLenCodes, distCodes, tailBits, tailLen,
+              bwTailAll, hbrMidEq, hbrAfterEq] using hrest'
+          have htrace :=
+            Png.DynamicPayloadTrace.step (spec := spec)
+              (hstep := hstep') (hrest := hrest)
+          simpa [dynamicPayloadTraceOut, out', Nat.add_assoc] using htrace
 
 end Lemmas
 
