@@ -3077,6 +3077,35 @@ lemma writeDynamicPayloadTokensList_source_eq_writeBits
     source source.toList hvalid
     (fun token hmem => deflateToken_mem_toList_index hmem) bw
 
+/-- The runtime generated dynamic payload writer emits the packed payload
+stream for its source token array. This removes the `forIn` loop from later
+block-level proofs. -/
+lemma writeDynamicPayload_source_eq_writeBits
+    (source : Array Png.DeflateToken)
+    (hvalid : DeflateTokensMatchLengthsValid source)
+    (bw : Png.BitWriter) :
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs source))
+    let distCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicDistLengths (Png.distSymbolFreqs source))
+    Png.writeDynamicPayload bw source litLenCodes distCodes =
+      Png.BitWriter.writeBits bw
+        (dynamicPayloadStreamBits litLenCodes distCodes source.toList)
+        (dynamicPayloadStreamLen litLenCodes distCodes source.toList) := by
+  intro litLenCodes distCodes
+  calc
+    Png.writeDynamicPayload bw source litLenCodes distCodes =
+        writeDynamicPayloadTokensList bw litLenCodes distCodes source.toList := by
+          exact writeDynamicPayload_eq_writeDynamicPayloadTokensList
+            bw source litLenCodes distCodes
+    _ = Png.BitWriter.writeBits bw
+        (dynamicPayloadStreamBits litLenCodes distCodes source.toList)
+        (dynamicPayloadStreamLen litLenCodes distCodes source.toList) := by
+          exact writeDynamicPayloadTokensList_source_eq_writeBits
+            source hvalid bw
+
 /-- The generated payload EOB code produces a terminal dynamic-payload finish
 step through the generic generated literal/length table. -/
 lemma generatedDynamicPayloadEob_finish_readerAt_writeBits
@@ -3993,6 +4022,157 @@ lemma generatedDynamicPayloadTraceList_readerAt_writeBits
             Png.DynamicPayloadTrace.step (spec := spec)
               (hstep := hstep') (hrest := hrest)
           simpa [dynamicPayloadTraceOut, out', Nat.add_assoc] using htrace
+
+/-- Final dynamic-block loop step from the runtime table parser result. This
+keeps generated full-dynamic proofs close to the public decoder branch. -/
+lemma zlibDecompressLoopFuel_step_dynamic_final_of_readDynamicTables
+    (fuel : Nat) (br brHeader brPayload brFinal : Png.BitReader)
+    (out out' : ByteArray) (spec : Png.DynamicTableSpec)
+    (hcond : br.bitIndex + 3 ≤ br.data.size * 8)
+    (hread3 : br.readBits 3 hcond = (5, brHeader))
+    (htables :
+      Png.readDynamicTables brHeader =
+        some (spec.litLenTable, spec.distTable, brPayload))
+    (hdecode :
+      Png.decodeCompressedBlock spec.litLenTable spec.distTable brPayload out =
+        some (brFinal, out')) :
+    Png.zlibDecompressLoopFuel (fuel + 1) br out = some (brFinal, out') := by
+  rw [Png.zlibDecompressLoopFuel]
+  simp [hcond, hread3, htables, hdecode]
+
+/-- Final dynamic-block loop step from a generated payload trace and the
+runtime table parser result. This is the block-level bridge for full dynamic
+encoding. -/
+lemma zlibDecompressLoopFuel_step_dynamic_final_of_generated_trace
+    {steps : Nat}
+    (fuel : Nat) (br brHeader brPayload brFinal : Png.BitReader)
+    (out out' : ByteArray) (spec : Png.DynamicTableSpec)
+    (hcond : br.bitIndex + 3 ≤ br.data.size * 8)
+    (hread3 : br.readBits 3 hcond = (5, brHeader))
+    (htables :
+      Png.readDynamicTables brHeader =
+        some (spec.litLenTable, spec.distTable, brPayload))
+    (htrace : Png.DynamicPayloadTrace spec steps brPayload out brFinal out')
+    (hsteps : steps ≤ brPayload.data.size * 8 + 1) :
+    Png.zlibDecompressLoopFuel (fuel + 1) br out = some (brFinal, out') := by
+  have hdecode :
+      Png.decodeCompressedBlock spec.litLenTable spec.distTable brPayload out =
+        some (brFinal, out') :=
+    Png.decodeCompressedBlock_of_trace htrace hsteps
+  exact zlibDecompressLoopFuel_step_dynamic_final_of_readDynamicTables
+    (fuel := fuel) (br := br) (brHeader := brHeader)
+    (brPayload := brPayload) (brFinal := brFinal)
+    (out := out) (out' := out') (spec := spec)
+    hcond hread3 htables hdecode
+
+set_option maxRecDepth 400000 in
+set_option maxHeartbeats 6000000 in
+/-- Reads the final dynamic block tag from a writer stream whose first three
+bits are `BFINAL=1, BTYPE=2`, followed by an arbitrary suffix. -/
+lemma finalDynamicReader0_readBits3
+    (streamBits streamLen : Nat) :
+    let hdr0 := Png.BitWriter.empty
+    let hdrHeader := Png.BitWriter.writeBits hdr0 5 3
+    let streamBitsFull := 5 ||| (streamBits <<< 3)
+    let streamLenFull := 3 + streamLen
+    let collapsedWriter :=
+      Png.BitWriter.writeBits hdr0 streamBitsFull streamLenFull
+    let hbitHeader : hdrHeader.bitPos < 8 := by
+      simpa [hdrHeader] using Png.bitPos_lt_8_writeBits hdr0 5 3 (by decide)
+    let streamReader0 : Png.BitReader := {
+      data := collapsedWriter.flush
+      bytePos := 0
+      bitPos := 0
+      hpos := by exact Nat.zero_le _
+      hend := by intro _; rfl
+      hbit := by decide
+    }
+    let streamReaderHeader := Png.BitWriter.readerAt hdrHeader
+      (Png.BitWriter.writeBits hdrHeader streamBits streamLen).flush
+      (Png.flush_size_writeBits_le hdrHeader streamBits streamLen)
+      hbitHeader
+    let hread0 : streamReader0.bitIndex + 3 ≤ streamReader0.data.size * 8 := by
+      simpa [streamReader0, Png.BitWriter.readerAt, hdr0, Png.BitWriter.empty] using
+        (Png.readerAt_writeBits_bound (bw := hdr0) (bits := streamBitsFull)
+          (len := streamLenFull) (k := 3) (hk := by omega)
+          (hbit := by decide))
+    streamReader0.readBits 3 hread0 = (5, streamReaderHeader) := by
+  intro hdr0 hdrHeader streamBitsFull streamLenFull collapsedWriter
+    hbitHeader streamReader0 streamReaderHeader hread0
+  let streamReaderHeader0 := Png.BitWriter.readerAt hdrHeader collapsedWriter.flush
+      (by
+        simpa [collapsedWriter, hdrHeader, streamBitsFull, streamLenFull] using
+          (Png.flush_size_writeBits_prefix (bw := hdr0) (bits := streamBitsFull)
+            (k := 3) (len := streamLenFull) (hk := by omega)))
+      hbitHeader
+  have hstream :
+      collapsedWriter = Png.BitWriter.writeBits hdrHeader streamBits streamLen := by
+    have hbits : 5 < 2 ^ 3 := by decide
+    simpa [collapsedWriter, hdrHeader, streamBitsFull, streamLenFull] using
+      (Png.writeBits_concat hdr0 5 streamBits 3 streamLen hbits)
+  have hstreamData :
+      collapsedWriter.flush =
+        (Png.BitWriter.writeBits hdrHeader streamBits streamLen).flush := by
+    simpa using congrArg Png.BitWriter.flush hstream
+  have hreaderEq : streamReaderHeader0 = streamReaderHeader := by
+    change
+      Png.BitWriter.readerAt hdrHeader collapsedWriter.flush
+        (by
+          simpa [collapsedWriter, hdrHeader, streamBitsFull, streamLenFull] using
+            (Png.flush_size_writeBits_prefix (bw := hdr0)
+              (bits := streamBitsFull) (k := 3)
+              (len := streamLenFull) (hk := by omega)))
+        hbitHeader =
+      Png.BitWriter.readerAt hdrHeader
+        (Png.BitWriter.writeBits hdrHeader streamBits streamLen).flush
+        (Png.flush_size_writeBits_le hdrHeader streamBits streamLen)
+        hbitHeader
+    exact readerAt_eq_of_eqs
+      (hbw := rfl) (hdata := hstreamData)
+      (hflush1 := by
+        simpa [collapsedWriter, hdrHeader, streamBitsFull, streamLenFull] using
+          (Png.flush_size_writeBits_prefix (bw := hdr0)
+            (bits := streamBitsFull) (k := 3)
+            (len := streamLenFull) (hk := by omega)))
+      (hflush2 := Png.flush_size_writeBits_le hdrHeader streamBits streamLen)
+      (hbit1 := hbitHeader) (hbit2 := hbitHeader)
+  have hread0_at :
+      (Png.BitWriter.readerAt hdr0 collapsedWriter.flush
+        (Png.flush_size_writeBits_le hdr0 streamBitsFull streamLenFull)
+        (by decide)).bitIndex + 3 ≤
+        (Png.BitWriter.readerAt hdr0 collapsedWriter.flush
+          (Png.flush_size_writeBits_le hdr0 streamBitsFull streamLenFull)
+          (by decide)).data.size * 8 := by
+    simpa using
+      (Png.readerAt_writeBits_bound (bw := hdr0) (bits := streamBitsFull)
+        (len := streamLenFull) (k := 3) (hk := by omega)
+        (hbit := by decide))
+  have hread0' :
+      streamReader0.bitIndex + 3 ≤ streamReader0.data.size * 8 := by
+    simpa [streamReader0, Png.BitWriter.readerAt, hdr0, Png.BitWriter.empty]
+      using hread0_at
+  have hmod3 : streamBitsFull % 2 ^ 3 = 5 := by
+    have h := Png.mod_two_pow_or_shift
+      (a := 5) (b := streamBits) (k := 3) (len := 3) (by decide)
+    simpa [streamBitsFull] using h
+  have hprefix :=
+    Png.readBits_readerAt_writeBits_prefix
+      (bw := hdr0) (bits := streamBitsFull) (len := streamLenFull)
+      (k := 3) (hk := by omega) (hbit := by decide)
+      (hcur := Png.curClearAbove_empty) (hread := hread0_at)
+  have hprefix0 :
+      streamReader0.readBits 3 hread0_at = (5, streamReaderHeader0) := by
+    simpa [streamReader0, streamReaderHeader0, hmod3, hdr0,
+      Png.BitWriter.empty] using hprefix
+  have hprefix1 :
+      streamReader0.readBits 3 hread0_at = (5, streamReaderHeader) := by
+    simpa [hreaderEq] using hprefix0
+  have hirrel :
+      streamReader0.readBits 3 hread0 =
+        streamReader0.readBits 3 hread0_at :=
+    Png.readBits_proof_irrel (br := streamReader0) (n := 3)
+      hread0 hread0_at
+  exact hirrel.trans hprefix1
 
 end Lemmas
 
