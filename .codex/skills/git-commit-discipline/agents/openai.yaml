@@ -1,0 +1,7 @@
+interface:
+  display_name: "Git Commit Discipline"
+  short_description: "Create clear commits and no-ff merges."
+  default_prompt: "Use $git-commit-discipline to commit or merge this work with descriptive Git history."
+
+policy:
+  allow_implicit_invocation: true
