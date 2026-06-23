@@ -23,6 +23,7 @@ If a cleaner proof design would break the proof API, ask first. This includes re
    - Put new proof code under the relevant library or executable's `Lemmas` subdirectory whenever possible, such as `<LibraryName>/Lemmas/` or `<ExecutableName>/Lemmas/`.
    - Prefer that target's existing `Lemmas` module or a new focused proof module under its `Lemmas` subtree over implementation-adjacent proof code.
    - If a proof must live outside `Lemmas` because it depends on private/local implementation details or must expose a lightweight public API lemma, keep it minimal and explain why.
+   - When possible, structure proof work as clean buildable increments: each meaningful lemma, module split, or theorem step should leave the affected target compiling so it can be committed independently.
 
 2. Search before proving.
    - Use `rg` for local theorem names, definitions, and similar proof patterns.
@@ -72,7 +73,7 @@ If a cleaner proof design would break the proof API, ask first. This includes re
    - Keep comments current when proofs are generalized or moved.
 
 9. Validate end to end.
-   - Build the smallest affected module first.
+   - Build the smallest affected module first, and repeat this after each incremental proof step when feasible.
    - Run the relevant full target, normally `lake build Bitmap`, `lake test`, or the target requested by the user.
    - Search changed proof code for forbidden escapes: `sorry`, `admit`, `axiom`, and `implemented_by`.
    - Report theorem names added, tests removed, validation commands, and any remaining unproved assumptions.
