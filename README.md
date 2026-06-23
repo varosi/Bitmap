@@ -24,7 +24,7 @@ has focused layout and validation lemmas plus runtime fixture coverage.
 | Bit depth | Grayscale: 1, 8, or 16 bits per channel. RGB, Grayscale+Alpha, and RGBA: 8 or 16 bits per channel |
 | Pixel formats | `PixelGray1`/`BitmapGray1`, `PixelGray8`, `PixelRGB8`, `PixelGrayAlpha8`, `PixelRGBA8`, `PixelGray16`, `PixelRGB16`, `PixelGrayAlpha16`, `PixelRGBA16` |
 | Filter type | Existing `encodeBitmap` APIs emit filter `0` rows. `encodeBitmapWithOptionsChecked` and `encodeBitmapGray1WithOptionsChecked` can opt into fixed filters `0` None, `1` Sub, `2` Up, `3` Average, `4` Paeth, or deterministic adaptive per-row selection |
-| Compression modes | `.stored` (uncompressed DEFLATE), `.fixed` (fixed-Huffman with LZ77 distance-1 run encoding), `.dynamic` (dynamic-block header; payload currently delegates to fixed-Huffman) |
+| Compression modes | `.stored` (uncompressed DEFLATE), `.fixed` (fixed-Huffman with LZ77 distance-1 run encoding), `.dynamic` (generated dynamic-Huffman tables and dynamic-Huffman payload codes, using distance-1 LZ77 run encoding) |
 | Interlace | None (encoder always emits non-interlaced PNGs) |
 | Chunks emitted | Existing pure `encodeBitmap` APIs emit `IHDR`, one `IDAT`, `IEND` only. `encodeBitmapWithOptionsChecked` and `encodeBitmapGray1WithOptionsChecked` can also emit validated `gAMA`, `cHRM`, `sRGB`, `pHYs`, or explicit `tIME` chunks, with optional compatible `gAMA=45455` before `sRGB` and compatible sRGB chromaticities before `sRGB`. File-writing helpers emit the current UTC `tIME` by default; `writePngWithoutTime` keeps deterministic no-`tIME` output |
 | Integrity | CRC-32 per chunk, Adler-32 in the zlib trailer |
@@ -60,7 +60,6 @@ has focused layout and validation lemmas plus runtime fixture coverage.
 - `sBIT` chunks — explicitly **rejected** (decoder returns `none`) rather than silently ignored, to avoid the silent-corruption hazard of dropping precision metadata that affects pixel semantics
 - Unknown critical chunks (any chunk type whose first byte is uppercase and not `IHDR`/`PLTE`/`IDAT`/`IEND`) — rejected per the PNG spec
 - Reading-back of most ancillary chunk **content** (`tEXt`, `iCCP`, etc.) — those chunks are validated and skipped; `decodeBitmapWithMetadata` preserves supported `gAMA`, `cHRM`, `sRGB`, `pHYs`, `tIME`, `bKGD`, and `tRNS`
-- Genuinely-distinct dynamic-Huffman encoding — `.dynamic` emits a dynamic-block header but delegates the deflate payload to fixed-Huffman
 
 ## Usage
 
@@ -219,7 +218,9 @@ The dynamic DEFLATE proof now has a generic operational spec layer: successful
 `DynamicPayloadTrace` decodes to the specified bytes, `DynamicDeflateStreamSpec`
 covers dynamic-only multi-block streams through `BFINAL`, and
 `ZlibDynamicStreamSpec` adds the zlib header and Adler-32 trailer checks. The
-concrete dynamic-fast encoder proof is a regression client of that generic layer.
+public generated dynamic encoder is proved end-to-end through the runtime
+`readDynamicTables` and generic dynamic payload decoder path; the older
+fixed-shaped dynamic helper remains regression coverage.
 
 This is still not a standalone RFC-1951 grammar/completeness theorem independent of
 the runtime parser, nor a single mixed stored/fixed/dynamic block-stream theorem.

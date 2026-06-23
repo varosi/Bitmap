@@ -1,4 +1,5 @@
 import Bitmap.Lemmas.Png.DynamicBlockProofsLoop
+import Bitmap.Lemmas.Png.DynamicEncoderPayload
 import Bitmap.Lemmas.Png.DynamicBlockProofsSpec
 import Bitmap.Lemmas.Png.DynamicBlockProofsSpecConcrete
 import Bitmap.Lemmas.Png.EncodeDecodeBase
@@ -15,6 +16,10 @@ attribute [local simp] Png.byteArray_get_proof_irrel
 /-- The concrete zlib byte stream that wraps `deflateDynamicFast`. -/
 def zlibDynamicFastBytes (raw : ByteArray) : ByteArray :=
   ByteArray.mk #[u8 0x78, u8 0x01] ++ deflateDynamicFast raw ++ u32be (adler32 raw).toNat
+
+/-- The concrete zlib byte stream that wraps the generated full-dynamic encoder. -/
+def zlibDynamicFullFastBytes (raw : ByteArray) : ByteArray :=
+  zlibCompressOf (deflateDynamicFullFast raw) raw
 
 /-- Dynamic zlib output uses the same fixed CMF/FLG envelope as the other encoders.
 This wrapper keeps older dynamic proofs phrased in terms of `zlibCompressDynamic`. -/
@@ -241,6 +246,102 @@ lemma zlibDecompress_deflateDynamicFast (raw : ByteArray) :
     simpa [hposEq, readU32BE_proof_irrel] using hadler
   simp [hAdlerPos', hread, bytes]
 
+set_option maxRecDepth 200000 in
+set_option maxHeartbeats 8000000 in
+/-- Zlib decompression of the generated full-dynamic stream yields the original
+bytes. This is the zlib-envelope wrapper around the full dynamic block proof. -/
+lemma zlibDecompress_deflateDynamicFullFast (raw : ByteArray) :
+    zlibDecompress (zlibDynamicFullFastBytes raw)
+      (by
+        exact le_trans (by decide : 2 ≤ 6)
+          (by
+            simpa [zlibDynamicFullFastBytes] using
+              zlibCompressOf_size_ge (deflateDynamicFullFast raw) raw)) =
+      some raw := by
+  classical
+  let deflated := deflateDynamicFullFast raw
+  let bytes := zlibDynamicFullFastBytes raw
+  have hmin : 6 ≤ bytes.size := by
+    simpa [bytes, zlibDynamicFullFastBytes, deflated] using
+      zlibCompressOf_size_ge deflated raw
+  have h0 : 0 < bytes.size := lt_of_lt_of_le (by decide : 0 < 6) hmin
+  have h1 : 1 < bytes.size := lt_of_lt_of_le (by decide : 1 < 6) hmin
+  have h0' : 0 < bytes.size := h0
+  have h1' : 1 < bytes.size := h1
+  have hcmf' : bytes[0]'h0' = u8 0x78 := by
+    simpa [bytes, zlibDynamicFullFastBytes, deflated] using
+      (zlibCompressOf_cmf_flg deflated raw).1
+  have hflg' : bytes[1]'h1' = u8 0x01 := by
+    simpa [bytes, zlibDynamicFullFastBytes, deflated] using
+      (zlibCompressOf_cmf_flg deflated raw).2
+  have hcmf : bytes.get 0 h0 = u8 0x78 := by
+    have htmp : bytes.get 0 h0' = u8 0x78 := by
+      simpa [byteArray_get_eq_getElem] using hcmf'
+    simpa using htmp
+  have hflg : bytes.get 1 h1 = u8 0x01 := by
+    have htmp : bytes.get 1 h1' = u8 0x01 := by
+      simpa [byteArray_get_eq_getElem] using hflg'
+    simpa using htmp
+  have hdeflated : bytes.extract 2 (bytes.size - 4) = deflated := by
+    simpa [bytes, zlibDynamicFullFastBytes, deflated] using
+      zlibCompressOf_extract_deflated deflated raw
+  have hAdlerPos : bytes.size - 4 + 3 < bytes.size := by
+    omega
+  have hadler : readU32BE bytes (bytes.size - 4) hAdlerPos =
+      (adler32 raw).toNat := by
+    have hextract :
+        bytes.extract (bytes.size - 4) (bytes.size - 4 + 4) =
+          u32be (adler32 raw).toNat := by
+      simpa [bytes, zlibDynamicFullFastBytes, deflated] using
+        zlibCompressOf_extract_adler deflated raw
+    have hlt : (adler32 raw).toNat < 2 ^ 32 := by
+      simpa using (UInt32.toNat_lt (adler32 raw))
+    exact readU32BE_of_extract_eq (bytes := bytes) (pos := bytes.size - 4)
+      (n := (adler32 raw).toNat) (h := hAdlerPos) hextract hlt
+  let streamReader0 : BitReader := {
+    data := deflated
+    bytePos := 0
+    bitPos := 0
+    hpos := by exact Nat.zero_le _
+    hend := by intro _; rfl
+    hbit := by decide
+  }
+  obtain ⟨streamReaderFinal, hloop, hAlign⟩ :
+      ∃ brFinal,
+        zlibDecompressLoop streamReader0 ByteArray.empty =
+          some (brFinal, raw) ∧
+          brFinal.alignByte.bytePos = deflated.size := by
+    simpa [deflated, streamReader0] using
+      zlibDecompressLoop_deflateDynamicFullFast raw
+  have hmod : ((u8 0x78).toNat <<< 8 + (u8 0x01).toNat) % 31 = 0 := by
+    decide
+  have hbtype : (u8 0x78 &&& (0x0F : UInt8)) = 8 := by
+    decide
+  have hflg0 : (u8 0x01 &&& (0x20 : UInt8)) = 0 := by
+    decide
+  have hsizeZ : 2 ≤ bytes.size := by omega
+  change zlibDecompress bytes hsizeZ = some raw
+  unfold zlibDecompress
+  simp [bytes, hcmf, hflg, hmod, hbtype, hflg0, hdeflated]
+  rw [hloop]
+  have hsize : bytes.size = deflated.size + 6 := by
+    simpa [bytes, zlibDynamicFullFastBytes, deflated] using
+      zlibCompressOf_size deflated raw
+  have hposEq :
+      streamReaderFinal.alignByte.bytePos + 2 = bytes.size - 4 := by
+    have : deflated.size + 2 = (deflated.size + 6) - 4 := by omega
+    simpa [hAlign, hsize, Nat.add_assoc, Nat.add_left_comm,
+      Nat.add_comm] using this
+  have hAdlerPos' :
+      streamReaderFinal.alignByte.bytePos + 2 + 3 < bytes.size := by
+    simpa [hposEq, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm]
+      using hAdlerPos
+  have hread :
+      readU32BE bytes (streamReaderFinal.alignByte.bytePos + 2)
+        hAdlerPos' = (adler32 raw).toNat := by
+    simpa [hposEq, readU32BE_proof_irrel] using hadler
+  simp [hAdlerPos', hread, bytes]
+
 set_option maxRecDepth 400000 in
 set_option maxHeartbeats 6000000 in
 /-- The real dynamic deflate stream starts with a non-stored block header, so
@@ -360,6 +461,151 @@ lemma inflateStored_deflateDynamicFast_none (raw : ByteArray) :
     simp [inflateStored, hpos, hauxNone]
   simpa [hdata] using hstored
 
+set_option maxRecDepth 400000 in
+set_option maxHeartbeats 6000000 in
+/-- Stored-only inflation rejects the generated full-dynamic stream because its
+first block is dynamic, not stored. -/
+lemma inflateStored_deflateDynamicFullFast_none (raw : ByteArray) :
+    inflateStored (deflateDynamicFullFast raw) = none := by
+  let tokens := deflateTokensDist1 raw
+  let litLenLengths :=
+    generatedDynamicLitLenLengths (litLenSymbolFreqs tokens)
+  let distLengths :=
+    generatedDynamicDistLengths (distSymbolFreqs tokens)
+  let litLenCodes := canonicalRevCodesFromLengths litLenLengths
+  let distCodes := canonicalRevCodesFromLengths distLengths
+  let lengths := generatedDynamicHeaderCodeLengths tokens
+  let codeTokens := codeLenLiteralTokensOfLengths lengths
+  let prefixBits :=
+    generatedDynamicHeaderPrefixBits
+      (generatedDynamicLitLenCount litLenLengths)
+      (generatedDynamicDistCount distLengths)
+  let headerBits :=
+    prefixBits |||
+      (codeLenTokenStreamBits codeTokens.toList <<<
+        generatedDynamicHeaderPrefixLen)
+  let headerLen :=
+    generatedDynamicHeaderPrefixLen +
+      codeLenTokenStreamLen codeTokens.toList
+  let payloadBits :=
+    dynamicPayloadStreamBits litLenCodes distCodes tokens.toList
+  let payloadLen :=
+    dynamicPayloadStreamLen litLenCodes distCodes tokens.toList
+  let suffixBits := headerBits ||| (payloadBits <<< headerLen)
+  let suffixLen := headerLen + payloadLen
+  let streamBitsFull := 5 ||| (suffixBits <<< 3)
+  let streamLenFull := 3 + suffixLen
+  let hdr0 := BitWriter.empty
+  let collapsedWriter := BitWriter.writeBits hdr0 streamBitsFull streamLenFull
+  let streamReader0 : BitReader := {
+    data := collapsedWriter.flush
+    bytePos := 0
+    bitPos := 0
+    hpos := by exact Nat.zero_le _
+    hend := by intro _; rfl
+    hbit := by decide
+  }
+  have hdata :
+      deflateDynamicFullFast raw = collapsedWriter.flush := by
+    simpa [tokens, litLenLengths, distLengths, litLenCodes, distCodes,
+      lengths, codeTokens, prefixBits, headerBits, headerLen, payloadBits,
+      payloadLen, suffixBits, suffixLen, streamBitsFull, streamLenFull,
+      hdr0, collapsedWriter] using
+      deflateDynamicFullFast_eq_collapsedWriter raw
+  have hread0 : streamReader0.bitIndex + 3 ≤ streamReader0.data.size * 8 := by
+    simpa [streamReader0, BitWriter.readerAt, hdr0, BitWriter.empty,
+      collapsedWriter] using
+      (readerAt_writeBits_bound (bw := hdr0) (bits := streamBitsFull)
+        (len := streamLenFull) (k := 3) (hk := by omega)
+        (hbit := by decide))
+  have hread :
+      streamReader0.readBits 3 hread0 =
+        (5,
+          BitWriter.readerAt (BitWriter.writeBits hdr0 5 3)
+            (BitWriter.writeBits (BitWriter.writeBits hdr0 5 3)
+              suffixBits suffixLen).flush
+            (flush_size_writeBits_le (BitWriter.writeBits hdr0 5 3)
+              suffixBits suffixLen)
+            (by
+              simpa using bitPos_lt_8_writeBits hdr0 5 3 (by decide))) := by
+    simpa [tokens, litLenLengths, distLengths, litLenCodes, distCodes,
+      lengths, codeTokens, prefixBits, headerBits, headerLen, payloadBits,
+      payloadLen, suffixBits, suffixLen, streamBitsFull, streamLenFull,
+      hdr0, collapsedWriter, streamReader0] using
+      finalDynamicReader0_readBits3 suffixBits suffixLen
+  have hreadAux :
+      streamReader0.readBits 3 hread0 = streamReader0.readBitsAux 3 := by
+    simpa [BitReader.readBits] using
+      (readBitsFastU32_eq_readBitsAux (br := streamReader0) (n := 3)
+        (h := hread0))
+  have hpos : 0 < collapsedWriter.flush.size := by
+    have : 3 ≤ collapsedWriter.flush.size * 8 := by
+      simpa [streamReader0] using hread0
+    by_contra hzero
+    have hsize0 : collapsedWriter.flush.size = 0 := Nat.eq_zero_of_not_pos hzero
+    omega
+  have haux :
+      streamReader0.readBitsAux 3 =
+        (((collapsedWriter.flush.get 0 hpos).toNat >>> 0) % 2 ^ 3,
+          { data := collapsedWriter.flush
+            bytePos := 0
+            bitPos := 3
+            hpos := by exact Nat.zero_le _
+            hend := by
+              intro hEq
+              have : False := by
+                simp [hEq] at hpos
+              exact False.elim this
+            hbit := by decide }) := by
+    simpa [streamReader0] using
+      (readBitsAux_within_byte_lt (br := streamReader0) (n := 3)
+        (hspan := by simp [streamReader0]) (hlt := hpos))
+  have hmod :
+      ((collapsedWriter.flush.get 0 hpos).toNat % 2 ^ 3) = 5 := by
+    have hreadFst : (streamReader0.readBits 3 hread0).1 = 5 := by
+      simpa using congrArg Prod.fst hread
+    have hauxFst :
+        (streamReader0.readBitsAux 3).1 =
+          ((collapsedWriter.flush.get 0 hpos).toNat % 2 ^ 3) := by
+      simpa using congrArg Prod.fst haux
+    calc
+      (collapsedWriter.flush.get 0 hpos).toNat % 2 ^ 3 =
+          (streamReader0.readBitsAux 3).1 := hauxFst.symm
+      _ = (streamReader0.readBits 3 hread0).1 := by
+        simp [hreadAux]
+      _ = 5 := hreadFst
+  have hbit2mod :
+      (((collapsedWriter.flush.get 0 hpos).toNat % 2 ^ 3).testBit 2) =
+        true := by
+    rw [hmod]
+    decide
+  have hbit2 : ((collapsedWriter.flush.get 0 hpos).toNat).testBit 2 = true := by
+    have hbit2mod' := hbit2mod
+    rw [Nat.testBit_mod_two_pow] at hbit2mod'
+    simpa using hbit2mod'
+  let header := collapsedWriter.flush.get 0 hpos
+  have hmaskedBit : (((header.toNat >>> 1) &&& 3).testBit 1) = true := by
+    simp [header, hbit2, Nat.testBit_shiftRight]
+    decide
+  have hbtypeNat : ((header.toNat >>> 1) &&& 3) ≠ 0 := by
+    intro hzero
+    have : (((header.toNat >>> 1) &&& 3).testBit 1) = false := by
+      simp [hzero]
+    rw [hmaskedBit] at this
+    cases this
+  have hbtype : ((header >>> 1) &&& (0x03 : UInt8)) ≠ 0 := by
+    intro h0
+    have h0' : (header.toNat >>> 1) &&& 3 = 0 := by
+      have h0' := congrArg UInt8.toNat h0
+      simpa [UInt8.toNat_and, UInt8.toNat_shiftRight] using h0'
+    exact hbtypeNat h0'
+  have hauxNone : inflateStoredAux collapsedWriter.flush hpos = none := by
+    unfold inflateStoredAux
+    simp [header, hbtype]
+  have hstored : inflateStored collapsedWriter.flush = none := by
+    simp [inflateStored, hpos, hauxNone]
+  simpa [hdata] using hstored
+
 /-- Stored-only zlib decompression rejects real dynamic-compression streams. -/
 lemma zlibDecompressStored_zlibCompressDynamic_none (raw : ByteArray)
     (hsize : 2 ≤ (zlibCompressDynamic raw).size) :
@@ -383,7 +629,7 @@ lemma zlibDecompressStored_zlibCompressDynamic_none (raw : ByteArray)
   have hdeflated : bytes.extract 2 (bytes.size - 4) = deflateDynamic raw := by
     simpa [bytes] using zlibCompressDynamic_extract_deflated raw
   have hinflate : inflateStored (bytes.extract 2 (bytes.size - 4)) = none := by
-    simpa [hdeflated, deflateDynamic] using inflateStored_deflateDynamicFast_none raw
+    simpa [hdeflated, deflateDynamic] using inflateStored_deflateDynamicFullFast_none raw
   have hmod : ((u8 0x78).toNat <<< 8 + (u8 0x01).toNat) % 31 = 0 := by
     decide
   have hbtype : (u8 0x78 &&& (0x0F : UInt8)) = 8 := by
@@ -397,8 +643,9 @@ lemma zlibDecompressStored_zlibCompressDynamic_none (raw : ByteArray)
 lemma zlibDecompress_zlibCompressDynamic (raw : ByteArray)
     (hsize : 2 ≤ (zlibCompressDynamic raw).size) :
     zlibDecompress (zlibCompressDynamic raw) hsize = some raw := by
-  simpa [zlibCompressDynamic, zlibDynamicFastBytes, deflateDynamic, ByteArray.append_assoc] using
-    zlibDecompress_deflateDynamicFast raw
+  simpa [zlibCompressDynamic, zlibDynamicFullFastBytes, zlibCompressOf,
+    deflateDynamic, ByteArray.append_assoc] using
+    zlibDecompress_deflateDynamicFullFast raw
 
 end Lemmas
 

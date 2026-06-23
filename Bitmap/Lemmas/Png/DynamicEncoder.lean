@@ -5,10 +5,10 @@ namespace Bitmaps
 
 namespace Lemmas
 
-/-- This checkpoint keeps public `.dynamic` on the existing proved encoder while
-the generated dynamic encoder is proved incrementally. -/
-lemma deflateDynamic_eq_deflateDynamicFast (raw : ByteArray) :
-    Png.deflateDynamic raw = Png.deflateDynamicFast raw := rfl
+/-- Public `.dynamic` now uses the generated full dynamic-Huffman encoder.
+The old fixed-shaped dynamic helper remains private regression coverage. -/
+lemma deflateDynamic_eq_deflateDynamicFullFast (raw : ByteArray) :
+    Png.deflateDynamic raw = Png.deflateDynamicFullFast raw := rfl
 
 /-- Base token-expansion fact for the generated encoder proof: a literal token
 appends exactly its byte to the expanded output. -/

@@ -1447,7 +1447,7 @@ def deflateDynamicFast (raw : ByteArray) : ByteArray :=
   bw8.flush
 
 def deflateDynamic (raw : ByteArray) : ByteArray :=
-  deflateDynamicFast raw
+  deflateDynamicFullFast raw
 
 def zlibCompressFixed (raw : ByteArray) : ByteArray :=
   let header := ByteArray.mk #[u8 0x78, u8 0x01]

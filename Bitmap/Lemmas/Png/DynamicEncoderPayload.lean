@@ -4963,6 +4963,80 @@ lemma zlibDecompressLoop_deflateDynamicFullFast_stream (raw : ByteArray) :
     exact congrArg Png.BitWriter.flush hstream.symm
   simpa [hfinalEq] using hloop
 
+/-- Public-loop form of the full dynamic block proof. It hides the generated
+writer normalization and records the aligned final byte position needed by the
+zlib envelope proof. -/
+lemma zlibDecompressLoop_deflateDynamicFullFast (raw : ByteArray) :
+    let deflated := Png.deflateDynamicFullFast raw
+    let br0 : Png.BitReader := {
+      data := deflated
+      bytePos := 0
+      bitPos := 0
+      hpos := by exact Nat.zero_le _
+      hend := by intro _; rfl
+      hbit := by decide
+    }
+    ∃ brFinal,
+      Png.zlibDecompressLoop br0 ByteArray.empty = some (brFinal, raw) ∧
+        brFinal.alignByte.bytePos = deflated.size := by
+  intro deflated br0
+  let tokens := Png.deflateTokensDist1 raw
+  let litLenLengths :=
+    Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+  let distLengths :=
+    Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)
+  let litLenCodes := Png.canonicalRevCodesFromLengths litLenLengths
+  let distCodes := Png.canonicalRevCodesFromLengths distLengths
+  let lengths := generatedDynamicHeaderCodeLengths tokens
+  let codeTokens := Png.codeLenLiteralTokensOfLengths lengths
+  let prefixBits :=
+    Png.generatedDynamicHeaderPrefixBits
+      (Png.generatedDynamicLitLenCount litLenLengths)
+      (Png.generatedDynamicDistCount distLengths)
+  let headerBits :=
+    prefixBits |||
+      (codeLenTokenStreamBits codeTokens.toList <<<
+        Png.generatedDynamicHeaderPrefixLen)
+  let headerLen :=
+    Png.generatedDynamicHeaderPrefixLen +
+      codeLenTokenStreamLen codeTokens.toList
+  let payloadBits :=
+    dynamicPayloadStreamBits litLenCodes distCodes tokens.toList
+  let payloadLen :=
+    dynamicPayloadStreamLen litLenCodes distCodes tokens.toList
+  let suffixBits := headerBits ||| (payloadBits <<< headerLen)
+  let suffixLen := headerLen + payloadLen
+  let streamBitsFull := 5 ||| (suffixBits <<< 3)
+  let streamLenFull := 3 + suffixLen
+  let hdr0 := Png.BitWriter.empty
+  let collapsedWriter :=
+    Png.BitWriter.writeBits hdr0 streamBitsFull streamLenFull
+  have hdeflated : deflated = collapsedWriter.flush := by
+    simpa [deflated, tokens, litLenLengths, distLengths, litLenCodes,
+      distCodes, lengths, codeTokens, prefixBits, headerBits, headerLen,
+      payloadBits, payloadLen, suffixBits, suffixLen, streamBitsFull,
+      streamLenFull, hdr0, collapsedWriter] using
+      deflateDynamicFullFast_eq_collapsedWriter raw
+  let brFinal := Png.BitWriter.readerAt collapsedWriter
+    collapsedWriter.flush (by rfl)
+    (Png.bitPos_lt_8_writeBits hdr0 streamBitsFull streamLenFull
+      (by decide))
+  refine ⟨brFinal, ?_, ?_⟩
+  · simpa [deflated, br0, tokens, litLenLengths, distLengths, litLenCodes,
+      distCodes, lengths, codeTokens, prefixBits, headerBits, headerLen,
+      payloadBits, payloadLen, suffixBits, suffixLen, streamBitsFull,
+      streamLenFull, hdr0, collapsedWriter, brFinal, hdeflated] using
+      zlibDecompressLoop_deflateDynamicFullFast_stream raw
+  · calc
+      brFinal.alignByte.bytePos = collapsedWriter.flush.size := by
+        simpa [brFinal] using
+          Png.readerAt_alignByte_bytePos_eq_flush
+            (bw := collapsedWriter)
+            (hbit := Png.bitPos_lt_8_writeBits hdr0 streamBitsFull
+              streamLenFull (by decide))
+      _ = deflated.size := by
+        simp [hdeflated]
+
 
 end Lemmas
 
