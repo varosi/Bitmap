@@ -4174,6 +4174,182 @@ lemma finalDynamicReader0_readBits3
       hread0 hread0_at
   exact hirrel.trans hprefix1
 
+/-- The full dynamic encoder is its explicit generated-header writer followed
+by the runtime dynamic payload writer. This names the runtime shape for later
+proof normalization. -/
+lemma deflateDynamicFullFast_eq_payloadWriter (raw : ByteArray) :
+    let tokens := Png.deflateTokensDist1 raw
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    let distLengths :=
+      Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)
+    let litLenCodes := Png.canonicalRevCodesFromLengths litLenLengths
+    let distCodes := Png.canonicalRevCodesFromLengths distLengths
+    let bw0 := Png.BitWriter.empty
+    let bw1 := bw0.writeBits 1 1
+    let bw2 := bw1.writeBits 2 2
+    let bw3 := Png.writeGeneratedDynamicHeader bw2 litLenLengths distLengths
+    let bw4 := Png.writeDynamicPayload bw3 tokens litLenCodes distCodes
+    Png.deflateDynamicFullFast raw = bw4.flush := by
+  rfl
+
+/-- The full dynamic encoder's payload writer is equivalent to one packed
+payload bitstream after the generated header. -/
+lemma deflateDynamicFullFast_eq_payloadBitsWriter (raw : ByteArray) :
+    let tokens := Png.deflateTokensDist1 raw
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    let distLengths :=
+      Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)
+    let litLenCodes := Png.canonicalRevCodesFromLengths litLenLengths
+    let distCodes := Png.canonicalRevCodesFromLengths distLengths
+    let bw0 := Png.BitWriter.empty
+    let bw1 := bw0.writeBits 1 1
+    let bw2 := bw1.writeBits 2 2
+    let bw3 := Png.writeGeneratedDynamicHeader bw2 litLenLengths distLengths
+    let payloadBits :=
+      dynamicPayloadStreamBits litLenCodes distCodes tokens.toList
+    let payloadLen :=
+      dynamicPayloadStreamLen litLenCodes distCodes tokens.toList
+    Png.deflateDynamicFullFast raw =
+      (Png.BitWriter.writeBits bw3 payloadBits payloadLen).flush := by
+  intro tokens litLenLengths distLengths litLenCodes distCodes bw0 bw1 bw2
+    bw3 payloadBits payloadLen
+  have hvalid := deflateTokensDist1_matchLengthsValid raw
+  have hpayload :=
+    writeDynamicPayload_source_eq_writeBits
+      (source := tokens) hvalid (bw := bw3)
+  have hpayload' :
+      Png.writeDynamicPayload bw3 tokens litLenCodes distCodes =
+        Png.BitWriter.writeBits bw3 payloadBits payloadLen := by
+    simpa [tokens, litLenLengths, distLengths, litLenCodes, distCodes,
+      payloadBits, payloadLen] using hpayload
+  simpa [Png.deflateDynamicFullFast, tokens, litLenLengths, distLengths,
+    litLenCodes, distCodes, bw0, bw1, bw2, bw3, payloadBits, payloadLen,
+    hpayload']
+
+/-- The full dynamic encoder's generated header and payload collapse to one
+packed suffix after the three-bit dynamic block tag. -/
+lemma deflateDynamicFullFast_eq_blockSuffixWriter (raw : ByteArray) :
+    let tokens := Png.deflateTokensDist1 raw
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    let distLengths :=
+      Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)
+    let litLenCodes := Png.canonicalRevCodesFromLengths litLenLengths
+    let distCodes := Png.canonicalRevCodesFromLengths distLengths
+    let lengths := generatedDynamicHeaderCodeLengths tokens
+    let codeTokens := Png.codeLenLiteralTokensOfLengths lengths
+    let prefixBits :=
+      Png.generatedDynamicHeaderPrefixBits
+        (Png.generatedDynamicLitLenCount litLenLengths)
+        (Png.generatedDynamicDistCount distLengths)
+    let headerBits :=
+      prefixBits |||
+        (codeLenTokenStreamBits codeTokens.toList <<<
+          Png.generatedDynamicHeaderPrefixLen)
+    let headerLen :=
+      Png.generatedDynamicHeaderPrefixLen +
+        codeLenTokenStreamLen codeTokens.toList
+    let payloadBits :=
+      dynamicPayloadStreamBits litLenCodes distCodes tokens.toList
+    let payloadLen :=
+      dynamicPayloadStreamLen litLenCodes distCodes tokens.toList
+    let suffixBits := headerBits ||| (payloadBits <<< headerLen)
+    let suffixLen := headerLen + payloadLen
+    let bw0 := Png.BitWriter.empty
+    let bw1 := bw0.writeBits 1 1
+    let bw2 := bw1.writeBits 2 2
+    Png.deflateDynamicFullFast raw =
+      (Png.BitWriter.writeBits bw2 suffixBits suffixLen).flush := by
+  intro tokens litLenLengths distLengths litLenCodes distCodes lengths
+    codeTokens prefixBits headerBits headerLen payloadBits payloadLen
+    suffixBits suffixLen bw0 bw1 bw2
+  have hpayload :=
+    deflateDynamicFullFast_eq_payloadBitsWriter raw
+  have hrest :=
+    writeGeneratedDynamicHeader_rest_eq_writeBits
+      (bw := bw2) (tokens := tokens) (restBits := payloadBits)
+      (restLen := payloadLen)
+  have hrest' :
+      Png.BitWriter.writeBits
+          (Png.writeGeneratedDynamicHeader bw2 litLenLengths distLengths)
+          payloadBits payloadLen =
+        Png.BitWriter.writeBits bw2 suffixBits suffixLen := by
+    simpa [tokens, litLenLengths, distLengths, lengths, codeTokens,
+      prefixBits, headerBits, headerLen, payloadBits, payloadLen,
+      suffixBits, suffixLen] using hrest
+  simpa [tokens, litLenLengths, distLengths, litLenCodes, distCodes, bw0,
+    bw1, bw2, payloadBits, payloadLen, suffixBits, suffixLen, hrest']
+    using hpayload
+
+/-- The full dynamic encoder is one packed final dynamic block bitstream. This
+is the writer shape consumed by the top-level deflate loop proof. -/
+lemma deflateDynamicFullFast_eq_collapsedWriter (raw : ByteArray) :
+    let tokens := Png.deflateTokensDist1 raw
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    let distLengths :=
+      Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)
+    let litLenCodes := Png.canonicalRevCodesFromLengths litLenLengths
+    let distCodes := Png.canonicalRevCodesFromLengths distLengths
+    let lengths := generatedDynamicHeaderCodeLengths tokens
+    let codeTokens := Png.codeLenLiteralTokensOfLengths lengths
+    let prefixBits :=
+      Png.generatedDynamicHeaderPrefixBits
+        (Png.generatedDynamicLitLenCount litLenLengths)
+        (Png.generatedDynamicDistCount distLengths)
+    let headerBits :=
+      prefixBits |||
+        (codeLenTokenStreamBits codeTokens.toList <<<
+          Png.generatedDynamicHeaderPrefixLen)
+    let headerLen :=
+      Png.generatedDynamicHeaderPrefixLen +
+        codeLenTokenStreamLen codeTokens.toList
+    let payloadBits :=
+      dynamicPayloadStreamBits litLenCodes distCodes tokens.toList
+    let payloadLen :=
+      dynamicPayloadStreamLen litLenCodes distCodes tokens.toList
+    let suffixBits := headerBits ||| (payloadBits <<< headerLen)
+    let suffixLen := headerLen + payloadLen
+    let streamBitsFull := 5 ||| (suffixBits <<< 3)
+    let streamLenFull := 3 + suffixLen
+    Png.deflateDynamicFullFast raw =
+      (Png.BitWriter.writeBits Png.BitWriter.empty
+        streamBitsFull streamLenFull).flush := by
+  intro tokens litLenLengths distLengths litLenCodes distCodes lengths
+    codeTokens prefixBits headerBits headerLen payloadBits payloadLen
+    suffixBits suffixLen streamBitsFull streamLenFull
+  let bw0 := Png.BitWriter.empty
+  let bw1 := bw0.writeBits 1 1
+  let bw2 := bw1.writeBits 2 2
+  have hblock :=
+    deflateDynamicFullFast_eq_blockSuffixWriter raw
+  have htag :
+      bw2 = Png.BitWriter.writeBits bw0 5 3 := by
+    have h :=
+      Png.writeBits_concat bw0 1 2 1 2 (by decide : 1 < 2 ^ 1)
+    simpa [bw0, bw1, bw2, Nat.add_comm] using h.symm
+  have hcollapse :
+      Png.BitWriter.writeBits bw2 suffixBits suffixLen =
+        Png.BitWriter.writeBits Png.BitWriter.empty
+          streamBitsFull streamLenFull := by
+    have h :=
+      Png.writeBits_concat Png.BitWriter.empty 5 suffixBits 3 suffixLen
+        (by decide : 5 < 2 ^ 3)
+    simpa [bw0, htag, streamBitsFull, streamLenFull] using h.symm
+  calc
+    Png.deflateDynamicFullFast raw =
+        (Png.BitWriter.writeBits bw2 suffixBits suffixLen).flush := by
+          simpa [tokens, litLenLengths, distLengths, litLenCodes, distCodes,
+            lengths, codeTokens, prefixBits, headerBits, headerLen,
+            payloadBits, payloadLen, suffixBits, suffixLen, bw0, bw1, bw2]
+            using hblock
+    _ = (Png.BitWriter.writeBits Png.BitWriter.empty
+          streamBitsFull streamLenFull).flush := by
+          simp [hcollapse]
+
+
 end Lemmas
 
 end Bitmaps
