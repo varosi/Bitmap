@@ -4582,6 +4582,387 @@ lemma deflateDynamicFullFast_eq_collapsedWriter (raw : ByteArray) :
           streamBitsFull streamLenFull).flush := by
           simp [hcollapse]
 
+/-- Splits the packed generated dynamic suffix at the generated-header boundary.
+The stream proof uses this to reuse the payload decoder theorem after the
+runtime header parser has advanced to the payload start. -/
+lemma generatedDynamicPayloadPrefixWriter_eq_suffixWriter
+    (tokens : Array Png.DeflateToken) (hdrHeader : Png.BitWriter) :
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    let distLengths :=
+      Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)
+    let litLenCodes := Png.canonicalRevCodesFromLengths litLenLengths
+    let distCodes := Png.canonicalRevCodesFromLengths distLengths
+    let lengths := generatedDynamicHeaderCodeLengths tokens
+    let codeTokens := Png.codeLenLiteralTokensOfLengths lengths
+    let prefixBits :=
+      Png.generatedDynamicHeaderPrefixBits
+        (Png.generatedDynamicLitLenCount litLenLengths)
+        (Png.generatedDynamicDistCount distLengths)
+    let headerBits :=
+      prefixBits |||
+        (codeLenTokenStreamBits codeTokens.toList <<<
+          Png.generatedDynamicHeaderPrefixLen)
+    let headerLen :=
+      Png.generatedDynamicHeaderPrefixLen +
+        codeLenTokenStreamLen codeTokens.toList
+    let payloadBits :=
+      dynamicPayloadStreamBits litLenCodes distCodes tokens.toList
+    let payloadLen :=
+      dynamicPayloadStreamLen litLenCodes distCodes tokens.toList
+    let suffixBits := headerBits ||| (payloadBits <<< headerLen)
+    let suffixLen := headerLen + payloadLen
+    let bwPayloadStart :=
+      Png.BitWriter.writeBits hdrHeader suffixBits headerLen
+    let bwPayloadAll :=
+      Png.BitWriter.writeBits bwPayloadStart payloadBits payloadLen
+    let suffixWriter :=
+      Png.BitWriter.writeBits hdrHeader suffixBits suffixLen
+    bwPayloadAll = suffixWriter := by
+  intro litLenLengths distLengths litLenCodes distCodes lengths codeTokens
+    prefixBits headerBits headerLen payloadBits payloadLen suffixBits
+    suffixLen bwPayloadStart bwPayloadAll suffixWriter
+  have hheaderBits :
+      headerBits < 2 ^ headerLen := by
+    simpa [litLenLengths, distLengths, lengths, codeTokens, prefixBits,
+      headerBits, headerLen] using
+      generatedDynamicHeaderBits_lt_codeSpace tokens
+  have hprefix :
+      bwPayloadStart =
+        Png.BitWriter.writeBits hdrHeader headerBits headerLen := by
+    simpa [bwPayloadStart, suffixBits] using
+      Png.writeBits_or_shift_tail hdrHeader headerBits payloadBits
+        headerLen hheaderBits
+  have hconcat :=
+    Png.writeBits_concat hdrHeader headerBits payloadBits headerLen
+      payloadLen hheaderBits
+  simpa [bwPayloadAll, bwPayloadStart, suffixWriter, suffixBits, suffixLen,
+    hprefix] using hconcat.symm
+
+/-- Parses the generated dynamic header from the packed suffix and lands on
+the payload start. This connects the runtime header parser with the generated
+table package used by the payload replay proof. -/
+lemma readDynamicTables_generatedDynamicSuffix_readerAt_writeBits
+    (tokens : Array Png.DeflateToken) (hdrHeader : Png.BitWriter)
+    (hbit : hdrHeader.bitPos < 8) (hcur : hdrHeader.curClearAbove) :
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    let distLengths :=
+      Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)
+    let litLenCodes := Png.canonicalRevCodesFromLengths litLenLengths
+    let distCodes := Png.canonicalRevCodesFromLengths distLengths
+    let lengths := generatedDynamicHeaderCodeLengths tokens
+    let codeTokens := Png.codeLenLiteralTokensOfLengths lengths
+    let prefixBits :=
+      Png.generatedDynamicHeaderPrefixBits
+        (Png.generatedDynamicLitLenCount litLenLengths)
+        (Png.generatedDynamicDistCount distLengths)
+    let headerBits :=
+      prefixBits |||
+        (codeLenTokenStreamBits codeTokens.toList <<<
+          Png.generatedDynamicHeaderPrefixLen)
+    let headerLen :=
+      Png.generatedDynamicHeaderPrefixLen +
+        codeLenTokenStreamLen codeTokens.toList
+    let payloadBits :=
+      dynamicPayloadStreamBits litLenCodes distCodes tokens.toList
+    let payloadLen :=
+      dynamicPayloadStreamLen litLenCodes distCodes tokens.toList
+    let suffixBits := headerBits ||| (payloadBits <<< headerLen)
+    let suffixLen := headerLen + payloadLen
+    let suffixWriter :=
+      Png.BitWriter.writeBits hdrHeader suffixBits suffixLen
+    let streamReaderHeader := Png.BitWriter.readerAt hdrHeader
+      suffixWriter.flush
+      (Png.flush_size_writeBits_le hdrHeader suffixBits suffixLen)
+      hbit
+    let bwPayloadStart :=
+      Png.BitWriter.writeBits hdrHeader suffixBits headerLen
+    let brPayload := Png.BitWriter.readerAt bwPayloadStart
+      suffixWriter.flush
+      (by
+        have hk : headerLen ≤ suffixLen := by omega
+        simpa [bwPayloadStart, suffixWriter, suffixLen] using
+          Png.flush_size_writeBits_prefix hdrHeader suffixBits
+            headerLen suffixLen hk)
+      (Png.bitPos_lt_8_writeBits hdrHeader suffixBits headerLen hbit)
+    Png.readDynamicTables streamReaderHeader =
+      some ((generatedDynamicTableSpec tokens).litLenTable,
+        (generatedDynamicTableSpec tokens).distTable, brPayload) := by
+  intro litLenLengths distLengths litLenCodes distCodes lengths codeTokens
+    prefixBits headerBits headerLen payloadBits payloadLen suffixBits
+    suffixLen suffixWriter streamReaderHeader bwPayloadStart brPayload
+  have htablesExists :=
+    readDynamicTables_generatedHeader_readerAt_writeBits
+      (bw := hdrHeader) (tokens := tokens)
+      (restBits := payloadBits) (restLen := payloadLen)
+      hbit hcur
+  rcases htablesExists with ⟨specParsed, hspecParsed, htablesParsed⟩
+  have hspecEq : specParsed = generatedDynamicTableSpec tokens := by
+    simpa [generatedDynamicTableSpec] using
+      generatedDynamicTableSpec_eq_named_of_ofLengths?
+        (tokens := tokens) (spec := specParsed)
+        (by
+          simpa [litLenLengths, distLengths] using hspecParsed)
+  let codeBits := codeLenTokenStreamBits codeTokens.toList
+  let codeLen := codeLenTokenStreamLen codeTokens.toList
+  let restAfterPrefixBits := codeBits ||| (payloadBits <<< codeLen)
+  let restAfterPrefixLen := codeLen + payloadLen
+  let parserBits := Png.generatedDynamicHeaderPrefixBits 286 30 |||
+    (restAfterPrefixBits <<< Png.generatedDynamicHeaderPrefixLen)
+  let parserLen := Png.generatedDynamicHeaderPrefixLen + restAfterPrefixLen
+  have hbitsEq : parserBits = suffixBits := by
+    have hshiftPayload :
+        (payloadBits <<< codeLen) <<< Png.generatedDynamicHeaderPrefixLen =
+          payloadBits <<<
+            (Png.generatedDynamicHeaderPrefixLen + codeLen) := by
+      calc
+        (payloadBits <<< codeLen) <<< Png.generatedDynamicHeaderPrefixLen =
+            payloadBits <<<
+              (codeLen + Png.generatedDynamicHeaderPrefixLen) := by
+              simp [Nat.shiftLeft_eq, Nat.pow_add, Nat.mul_assoc,
+                Nat.mul_comm, Nat.mul_left_comm]
+        _ = payloadBits <<<
+              (Png.generatedDynamicHeaderPrefixLen + codeLen) := by
+              rw [Nat.add_comm]
+    simp [parserBits, restAfterPrefixBits, codeBits, codeLen, suffixBits,
+      headerBits, headerLen, prefixBits, Png.generatedDynamicLitLenCount,
+      Png.generatedDynamicDistCount, Nat.or_assoc, Nat.shiftLeft_or_distrib,
+      hshiftPayload, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc]
+  have hlenEq : parserLen = suffixLen := by
+    simp [parserLen, restAfterPrefixLen, codeLen, suffixLen, headerLen,
+      Nat.add_comm, Nat.add_left_comm, Nat.add_assoc]
+  have htables' :
+      Png.readDynamicTables streamReaderHeader =
+        some (specParsed.litLenTable, specParsed.distTable, brPayload) := by
+    simpa [litLenLengths, distLengths, lengths, codeTokens, prefixBits,
+      headerBits, headerLen, payloadBits, payloadLen, suffixBits, suffixLen,
+      suffixWriter, streamReaderHeader, bwPayloadStart, brPayload,
+      codeBits, codeLen, restAfterPrefixBits, restAfterPrefixLen,
+      parserBits, parserLen, hbitsEq, hlenEq] using htablesParsed
+  simpa [hspecEq]
+    using htables'
+
+set_option maxRecDepth 200000 in
+set_option maxHeartbeats 5000000 in
+/-- Decodes the payload that follows the generated dynamic header in the
+packed suffix. This isolates the transport from the header parser's payload
+reader to the existing generated-payload decoder theorem. -/
+lemma decodeCompressedBlock_deflateTokensDist1Payload_suffix_readerAt_writeBits
+    (raw : ByteArray) (hdrHeader : Png.BitWriter)
+    (hbit : hdrHeader.bitPos < 8) (hcur : hdrHeader.curClearAbove) :
+    let tokens := Png.deflateTokensDist1 raw
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    let distLengths :=
+      Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)
+    let litLenCodes := Png.canonicalRevCodesFromLengths litLenLengths
+    let distCodes := Png.canonicalRevCodesFromLengths distLengths
+    let lengths := generatedDynamicHeaderCodeLengths tokens
+    let codeTokens := Png.codeLenLiteralTokensOfLengths lengths
+    let prefixBits :=
+      Png.generatedDynamicHeaderPrefixBits
+        (Png.generatedDynamicLitLenCount litLenLengths)
+        (Png.generatedDynamicDistCount distLengths)
+    let headerBits :=
+      prefixBits |||
+        (codeLenTokenStreamBits codeTokens.toList <<<
+          Png.generatedDynamicHeaderPrefixLen)
+    let headerLen :=
+      Png.generatedDynamicHeaderPrefixLen +
+        codeLenTokenStreamLen codeTokens.toList
+    let payloadBits :=
+      dynamicPayloadStreamBits litLenCodes distCodes tokens.toList
+    let payloadLen :=
+      dynamicPayloadStreamLen litLenCodes distCodes tokens.toList
+    let suffixBits := headerBits ||| (payloadBits <<< headerLen)
+    let suffixLen := headerLen + payloadLen
+    let suffixWriter :=
+      Png.BitWriter.writeBits hdrHeader suffixBits suffixLen
+    let bwPayloadStart :=
+      Png.BitWriter.writeBits hdrHeader suffixBits headerLen
+    let brPayload := Png.BitWriter.readerAt bwPayloadStart
+      suffixWriter.flush
+      (by
+        have hk : headerLen ≤ suffixLen := by omega
+        simpa [bwPayloadStart, suffixWriter, suffixLen] using
+          Png.flush_size_writeBits_prefix hdrHeader suffixBits
+            headerLen suffixLen hk)
+      (Png.bitPos_lt_8_writeBits hdrHeader suffixBits headerLen hbit)
+    let brFinal := Png.BitWriter.readerAt suffixWriter suffixWriter.flush
+      (by rfl)
+      (Png.bitPos_lt_8_writeBits hdrHeader suffixBits suffixLen hbit)
+    Png.decodeCompressedBlock
+      (generatedDynamicTableSpec tokens).litLenTable
+      (generatedDynamicTableSpec tokens).distTable
+      brPayload ByteArray.empty = some (brFinal, raw) := by
+  intro tokens litLenLengths distLengths litLenCodes distCodes lengths
+    codeTokens prefixBits headerBits headerLen payloadBits payloadLen
+    suffixBits suffixLen suffixWriter bwPayloadStart brPayload brFinal
+  let bwPayloadAll :=
+    Png.BitWriter.writeBits bwPayloadStart payloadBits payloadLen
+  have hpayloadAll :
+      bwPayloadAll = suffixWriter := by
+    simpa [tokens, litLenLengths, distLengths, litLenCodes, distCodes,
+      lengths, codeTokens, prefixBits, headerBits, headerLen, payloadBits,
+      payloadLen, suffixBits, suffixLen, bwPayloadStart, bwPayloadAll,
+      suffixWriter] using
+      generatedDynamicPayloadPrefixWriter_eq_suffixWriter tokens hdrHeader
+  have hbitPayload :
+      bwPayloadStart.bitPos < 8 :=
+    Png.bitPos_lt_8_writeBits hdrHeader suffixBits headerLen hbit
+  have hcurPayload :
+      bwPayloadStart.curClearAbove :=
+    Png.curClearAbove_writeBits hdrHeader suffixBits headerLen hbit hcur
+  have hdecode :=
+    decodeCompressedBlock_deflateTokensDist1Payload_readerAt_writeBits
+      (raw := raw) (bw := bwPayloadStart) hbitPayload hcurPayload
+  have hfinalEq :
+      Png.BitWriter.readerAt bwPayloadAll bwPayloadAll.flush (by rfl)
+        (Png.bitPos_lt_8_writeBits bwPayloadStart payloadBits payloadLen
+          hbitPayload) = brFinal := by
+    refine readerAt_eq_of_eqs hpayloadAll ?_ _ _ _ _
+    exact congrArg Png.BitWriter.flush hpayloadAll
+  simpa [tokens, litLenLengths, distLengths, litLenCodes, distCodes,
+    payloadBits, payloadLen, bwPayloadStart, bwPayloadAll, brPayload,
+    brFinal, hpayloadAll, hfinalEq, generatedDynamicTableSpec] using hdecode
+
+set_option maxRecDepth 200000 in
+set_option maxHeartbeats 5000000 in
+/-- The raw full-dynamic DEFLATE stream produced by the generated encoder is
+accepted by the public DEFLATE loop and reconstructs the source bytes. -/
+lemma zlibDecompressLoop_deflateDynamicFullFast_stream (raw : ByteArray) :
+    let tokens := Png.deflateTokensDist1 raw
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    let distLengths :=
+      Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)
+    let litLenCodes := Png.canonicalRevCodesFromLengths litLenLengths
+    let distCodes := Png.canonicalRevCodesFromLengths distLengths
+    let lengths := generatedDynamicHeaderCodeLengths tokens
+    let codeTokens := Png.codeLenLiteralTokensOfLengths lengths
+    let prefixBits :=
+      Png.generatedDynamicHeaderPrefixBits
+        (Png.generatedDynamicLitLenCount litLenLengths)
+        (Png.generatedDynamicDistCount distLengths)
+    let headerBits :=
+      prefixBits |||
+        (codeLenTokenStreamBits codeTokens.toList <<<
+          Png.generatedDynamicHeaderPrefixLen)
+    let headerLen :=
+      Png.generatedDynamicHeaderPrefixLen +
+        codeLenTokenStreamLen codeTokens.toList
+    let payloadBits :=
+      dynamicPayloadStreamBits litLenCodes distCodes tokens.toList
+    let payloadLen :=
+      dynamicPayloadStreamLen litLenCodes distCodes tokens.toList
+    let suffixBits := headerBits ||| (payloadBits <<< headerLen)
+    let suffixLen := headerLen + payloadLen
+    let streamBitsFull := 5 ||| (suffixBits <<< 3)
+    let streamLenFull := 3 + suffixLen
+    let hdr0 := Png.BitWriter.empty
+    let collapsedWriter :=
+      Png.BitWriter.writeBits hdr0 streamBitsFull streamLenFull
+    let streamReader0 : Png.BitReader := {
+      data := collapsedWriter.flush
+      bytePos := 0
+      bitPos := 0
+      hpos := by exact Nat.zero_le _
+      hend := by intro _; rfl
+      hbit := by decide
+    }
+    let streamReaderFinal := Png.BitWriter.readerAt collapsedWriter
+      collapsedWriter.flush (by rfl)
+      (Png.bitPos_lt_8_writeBits hdr0 streamBitsFull streamLenFull
+        (by decide))
+    Png.zlibDecompressLoop streamReader0 ByteArray.empty =
+      some (streamReaderFinal, raw) := by
+  intro tokens litLenLengths distLengths litLenCodes distCodes lengths
+    codeTokens prefixBits headerBits headerLen payloadBits payloadLen
+    suffixBits suffixLen streamBitsFull streamLenFull hdr0 collapsedWriter
+    streamReader0 streamReaderFinal
+  let hdrHeader := Png.BitWriter.writeBits hdr0 5 3
+  let suffixWriter :=
+    Png.BitWriter.writeBits hdrHeader suffixBits suffixLen
+  have hbitHeader : hdrHeader.bitPos < 8 := by
+    simpa [hdrHeader] using Png.bitPos_lt_8_writeBits hdr0 5 3 (by decide)
+  let streamReaderHeader := Png.BitWriter.readerAt hdrHeader
+    suffixWriter.flush
+    (Png.flush_size_writeBits_le hdrHeader suffixBits suffixLen)
+    hbitHeader
+  have hcurHeader : hdrHeader.curClearAbove := by
+    simpa [hdrHeader] using
+      Png.curClearAbove_writeBits hdr0 5 3 (by decide) Png.curClearAbove_empty
+  have hstream :
+      collapsedWriter = suffixWriter := by
+    have h :=
+      Png.writeBits_concat hdr0 5 suffixBits 3 suffixLen
+        (by decide : 5 < 2 ^ 3)
+    simpa [collapsedWriter, suffixWriter, hdrHeader, streamBitsFull,
+      streamLenFull] using h
+  have hcond :
+      streamReader0.bitIndex + 3 ≤ streamReader0.data.size * 8 := by
+    simpa [streamReader0, Png.BitWriter.readerAt, hdr0,
+      Png.BitWriter.empty, collapsedWriter] using
+      (Png.readerAt_writeBits_bound (bw := hdr0) (bits := streamBitsFull)
+        (len := streamLenFull) (k := 3) (hk := by omega)
+        (hbit := by decide))
+  have hread3 :
+      streamReader0.readBits 3 hcond = (5, streamReaderHeader) := by
+    have h :=
+      finalDynamicReader0_readBits3 suffixBits suffixLen
+    simpa [hdr0, hdrHeader, streamBitsFull, streamLenFull,
+      collapsedWriter, streamReader0, streamReaderHeader, suffixWriter]
+      using h
+  let bwPayloadStart :=
+    Png.BitWriter.writeBits hdrHeader suffixBits headerLen
+  let brPayload := Png.BitWriter.readerAt bwPayloadStart suffixWriter.flush
+    (by
+      have hk : headerLen ≤ suffixLen := by omega
+      simpa [bwPayloadStart, suffixWriter, suffixLen] using
+        Png.flush_size_writeBits_prefix hdrHeader suffixBits headerLen
+          suffixLen hk)
+    (Png.bitPos_lt_8_writeBits hdrHeader suffixBits headerLen hbitHeader)
+  let brSuffixFinal := Png.BitWriter.readerAt suffixWriter suffixWriter.flush
+    (by rfl)
+    (Png.bitPos_lt_8_writeBits hdrHeader suffixBits suffixLen hbitHeader)
+  have htables :
+      Png.readDynamicTables streamReaderHeader =
+        some ((generatedDynamicTableSpec tokens).litLenTable,
+          (generatedDynamicTableSpec tokens).distTable, brPayload) := by
+    simpa [tokens, litLenLengths, distLengths, litLenCodes, distCodes,
+      lengths, codeTokens, prefixBits, headerBits, headerLen, payloadBits,
+      payloadLen, suffixBits, suffixLen, suffixWriter, streamReaderHeader,
+      bwPayloadStart, brPayload] using
+      readDynamicTables_generatedDynamicSuffix_readerAt_writeBits
+        tokens hdrHeader hbitHeader hcurHeader
+  have hdecode :
+      Png.decodeCompressedBlock
+        (generatedDynamicTableSpec tokens).litLenTable
+        (generatedDynamicTableSpec tokens).distTable brPayload
+        ByteArray.empty = some (brSuffixFinal, raw) := by
+    simpa [tokens, litLenLengths, distLengths, litLenCodes, distCodes,
+      lengths, codeTokens, prefixBits, headerBits, headerLen, payloadBits,
+      payloadLen, suffixBits, suffixLen, suffixWriter, bwPayloadStart,
+      brPayload, brSuffixFinal] using
+      decodeCompressedBlock_deflateTokensDist1Payload_suffix_readerAt_writeBits
+        raw hdrHeader hbitHeader hcurHeader
+  change
+    Png.zlibDecompressLoopFuel (streamReader0.data.size * 8 + 1)
+      streamReader0 ByteArray.empty = some (streamReaderFinal, raw)
+  have hloop :=
+    zlibDecompressLoopFuel_step_dynamic_final_of_readDynamicTables
+      (fuel := streamReader0.data.size * 8)
+      (br := streamReader0) (brHeader := streamReaderHeader)
+      (brPayload := brPayload) (brFinal := brSuffixFinal)
+      (out := ByteArray.empty) (out' := raw)
+      (spec := generatedDynamicTableSpec tokens)
+      hcond hread3 htables hdecode
+  have hfinalEq : brSuffixFinal = streamReaderFinal := by
+    refine readerAt_eq_of_eqs hstream.symm ?_ _ _ _ _
+    exact congrArg Png.BitWriter.flush hstream.symm
+  simpa [hfinalEq] using hloop
+
 
 end Lemmas
 
