@@ -2004,7 +2004,7 @@ private def perfIters : Nat := 10
 -- that generic dynamic-Huffman decoding does not dominate the whole test suite.
 private def perfPngResolution : Nat := 512
 
-private def perfPngIters : Nat := 1
+private def perfPngIters : Nat := 5
 
 private def perfDynamicRatioLimit : Nat := 8
 
