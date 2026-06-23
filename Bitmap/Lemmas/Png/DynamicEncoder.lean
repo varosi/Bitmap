@@ -5,10 +5,15 @@ namespace Bitmaps
 
 namespace Lemmas
 
-/-- Public `.dynamic` now uses the generated full dynamic-Huffman encoder.
-The old fixed-shaped dynamic helper remains private regression coverage. -/
-lemma deflateDynamic_eq_deflateDynamicFullFast (raw : ByteArray) :
-    Png.deflateDynamic raw = Png.deflateDynamicFullFast raw := rfl
+/-- Public `.dynamic` uses the greedy LZ77 dynamic-Huffman encoder. The older
+distance-1 generated dynamic helper remains regression coverage. -/
+lemma deflateDynamic_eq_lz77 (raw : ByteArray) :
+    Png.deflateDynamic raw = Png.deflateDynamicLz77 raw := rfl
+
+/-- Legacy self-identity for the generated distance-1 dynamic helper. This keeps
+old helper-specific proofs separate from the public encoder path. -/
+lemma deflateDynamicFullFast_eq_self (raw : ByteArray) :
+    Png.deflateDynamicFullFast raw = Png.deflateDynamicFullFast raw := rfl
 
 /-- Base token-expansion fact for the generated encoder proof: a literal token
 appends exactly its byte to the expanded output. -/

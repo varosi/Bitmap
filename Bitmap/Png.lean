@@ -1040,8 +1040,22 @@ def deflateTokensLz77Aux (fuel : Nat) (data : Array UInt8) (i : Nat)
       else
         tokens
 
-def deflateTokensLz77 (raw : ByteArray) : Array Lz77Token :=
+def deflateTokensLz77FastCandidate (raw : ByteArray) : Array Lz77Token :=
   deflateTokensLz77Aux raw.size raw.data 0 lz77EmptyBuckets #[]
+
+def deflateTokensLz77LiteralFrom (data : Array UInt8) (i : Nat)
+    (tokens : Array Lz77Token) : Array Lz77Token :=
+  if h : i < data.size then
+    deflateTokensLz77LiteralFrom data (i + 1) (tokens.push (.literal data[i]))
+  else
+    tokens
+termination_by data.size - i
+decreasing_by
+  exact Nat.sub_lt_sub_left (k := i) (m := data.size) (n := i + 1) h
+    (Nat.lt_succ_self i)
+
+def deflateTokensLz77Literal (raw : ByteArray) : Array Lz77Token :=
+  deflateTokensLz77LiteralFrom raw.data 0 #[]
 
 def lz77CopyDistanceFast (out : ByteArray) (distance len : Nat) : Option ByteArray :=
   if distance = 0 || distance > out.size then
@@ -1079,6 +1093,17 @@ decreasing_by
 
 def deflateTokensExpandLz77? (tokens : Array Lz77Token) : Option ByteArray :=
   deflateTokensExpandLz77From? tokens 0 ByteArray.empty
+
+def deflateTokensLz77 (raw : ByteArray) : Array Lz77Token :=
+  let tokens := deflateTokensLz77FastCandidate raw
+  match deflateTokensExpandLz77? tokens with
+  | some raw' =>
+      if raw' = raw then
+        tokens
+      else
+        deflateTokensLz77Literal raw
+  | none =>
+      deflateTokensLz77Literal raw
 
 def writeFixedPayloadLz77From (bw : BitWriter) (tokens : Array Lz77Token) (i : Nat) :
     BitWriter :=
@@ -2159,7 +2184,7 @@ def copyDistanceFast (out : ByteArray) (distance len : Nat) : Option ByteArray :
       return dest
 
 def copyDistance (out : ByteArray) (distance len : Nat) : Option ByteArray :=
-  copyDistanceFast out distance len
+  lz77CopyDistanceFast out distance len
 
 def decodeLength (sym : Nat) (br : BitReader)
     (h : 257 ≤ sym ∧ sym ≤ 285)
