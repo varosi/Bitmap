@@ -4088,6 +4088,114 @@ lemma generatedDynamicPayloadTraceList_readerAt_writeBits
               (hstep := hstep') (hrest := hrest)
           simpa [dynamicPayloadTraceOut, out', Nat.add_assoc] using htrace
 
+set_option maxRecDepth 200000 in
+set_option maxHeartbeats 5000000 in
+/-- Generated dynamic payload bits are accepted by the generic compressed-block
+decoder and produce the proof-facing trace output. -/
+lemma decodeCompressedBlock_generatedDynamicPayload_readerAt_writeBits
+    (source : Array Png.DeflateToken)
+    (hvalid : DeflateTokensMatchLengthsValid source)
+    (houtValid : DynamicPayloadTraceOutputValid ByteArray.empty source.toList)
+    (bw : Png.BitWriter)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let spec := generatedDynamicTableSpec source
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs source))
+    let distCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicDistLengths (Png.distSymbolFreqs source))
+    let bits := dynamicPayloadStreamBits litLenCodes distCodes source.toList
+    let len := dynamicPayloadStreamLen litLenCodes distCodes source.toList
+    let bwAll := Png.BitWriter.writeBits bw bits len
+    let br0 := Png.BitWriter.readerAt bw bwAll.flush
+      (Png.flush_size_writeBits_le bw bits len) hbit
+    let brAfter := Png.BitWriter.readerAt
+      (Png.BitWriter.writeBits bw bits len) bwAll.flush
+      (by
+        simpa [bwAll] using
+          (le_rfl : (Png.BitWriter.writeBits bw bits len).flush.size ≤
+            (Png.BitWriter.writeBits bw bits len).flush.size))
+      (Png.bitPos_lt_8_writeBits bw bits len hbit)
+    Png.decodeCompressedBlock spec.litLenTable spec.distTable br0
+      ByteArray.empty =
+        some (brAfter, dynamicPayloadTraceOut ByteArray.empty source.toList) := by
+  intro spec litLenCodes distCodes bits len bwAll br0 brAfter
+  have htrace :=
+    generatedDynamicPayloadTraceList_readerAt_writeBits
+      (source := source) (tokens := source.toList) hvalid
+      (fun token hmem => deflateToken_mem_toList_index hmem)
+      (out := ByteArray.empty)
+      houtValid
+      (bw := bw) hbit hcur
+  have htrace' :
+      Png.DynamicPayloadTrace spec (source.toList.length + 1) br0
+        ByteArray.empty brAfter
+        (dynamicPayloadTraceOut ByteArray.empty source.toList) := by
+    simpa [spec, litLenCodes, distCodes, bits, len, bwAll, br0, brAfter]
+      using htrace
+  have hstepsLen :
+      source.toList.length + 1 ≤ len := by
+    have h :=
+      dynamicPayloadStreamLen_generated_ge_steps
+        (source := source) (tokens := source.toList) hvalid
+        (fun token hmem => deflateToken_mem_toList_index hmem)
+    simpa [litLenCodes, distCodes, len] using h
+  have hlenLeData : len ≤ br0.data.size * 8 := by
+    have hlenLeBitCount : len ≤ bwAll.bitCount := by
+      have h := Nat.le_add_left len bw.bitCount
+      simpa [bwAll, Png.bitCount_writeBits, Nat.add_comm] using h
+    have hbitCountLe : bwAll.bitCount ≤ bwAll.flush.size * 8 :=
+      Png.flush_size_mul_ge_bitCount (bw := bwAll) (hbit := bwAll.hbit)
+    exact le_trans hlenLeBitCount (by simpa [br0, Png.BitWriter.readerAt] using hbitCountLe)
+  have hfuel : source.toList.length + 1 ≤ br0.data.size * 8 + 1 := by
+    omega
+  exact Png.decodeCompressedBlock_of_trace htrace' hfuel
+
+set_option maxRecDepth 200000 in
+set_option maxHeartbeats 5000000 in
+/-- Payload decoder specialization for the public generated dynamic tokenizer:
+decoding the generated payload reconstructs the original raw bytes. -/
+lemma decodeCompressedBlock_deflateTokensDist1Payload_readerAt_writeBits
+    (raw : ByteArray) (bw : Png.BitWriter)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let source := Png.deflateTokensDist1 raw
+    let spec := generatedDynamicTableSpec source
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs source))
+    let distCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicDistLengths (Png.distSymbolFreqs source))
+    let bits := dynamicPayloadStreamBits litLenCodes distCodes source.toList
+    let len := dynamicPayloadStreamLen litLenCodes distCodes source.toList
+    let bwAll := Png.BitWriter.writeBits bw bits len
+    let br0 := Png.BitWriter.readerAt bw bwAll.flush
+      (Png.flush_size_writeBits_le bw bits len) hbit
+    let brAfter := Png.BitWriter.readerAt
+      (Png.BitWriter.writeBits bw bits len) bwAll.flush
+      (by
+        simpa [bwAll] using
+          (le_rfl : (Png.BitWriter.writeBits bw bits len).flush.size ≤
+            (Png.BitWriter.writeBits bw bits len).flush.size))
+      (Png.bitPos_lt_8_writeBits bw bits len hbit)
+    Png.decodeCompressedBlock spec.litLenTable spec.distTable br0
+      ByteArray.empty = some (brAfter, raw) := by
+  intro source spec litLenCodes distCodes bits len bwAll br0 brAfter
+  have hdecode :=
+    decodeCompressedBlock_generatedDynamicPayload_readerAt_writeBits
+      (source := source)
+      (hvalid := by
+        simpa [source] using deflateTokensDist1_matchLengthsValid raw)
+      (houtValid := by
+        simpa [source] using DynamicPayloadTraceOutputValid_deflateTokensDist1 raw)
+      (bw := bw) hbit hcur
+  have hout :
+      dynamicPayloadTraceOut ByteArray.empty source.toList = raw := by
+    simpa [source] using dynamicPayloadTraceOut_deflateTokensDist1_eq raw
+  simpa [source, spec, litLenCodes, distCodes, bits, len, bwAll, br0,
+    brAfter, hout] using hdecode
+
 /-- Final dynamic-block loop step from the runtime table parser result. This
 keeps generated full-dynamic proofs close to the public decoder branch. -/
 lemma zlibDecompressLoopFuel_step_dynamic_final_of_readDynamicTables
@@ -4292,6 +4400,66 @@ lemma deflateDynamicFullFast_eq_payloadBitsWriter (raw : ByteArray) :
   simpa [Png.deflateDynamicFullFast, tokens, litLenLengths, distLengths,
     litLenCodes, distCodes, bw0, bw1, bw2, bw3, payloadBits, payloadLen,
     hpayload']
+
+/-- The packed generated dynamic header fits in the generated header width.
+This exposes the code-space bound needed to split header and payload bits. -/
+lemma generatedDynamicHeaderBits_lt_codeSpace
+    (tokens : Array Png.DeflateToken) :
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    let distLengths :=
+      Png.generatedDynamicDistLengths (Png.distSymbolFreqs tokens)
+    let lengths := generatedDynamicHeaderCodeLengths tokens
+    let codeTokens := Png.codeLenLiteralTokensOfLengths lengths
+    let prefixBits :=
+      Png.generatedDynamicHeaderPrefixBits
+        (Png.generatedDynamicLitLenCount litLenLengths)
+        (Png.generatedDynamicDistCount distLengths)
+    let headerBits :=
+      prefixBits |||
+        (codeLenTokenStreamBits codeTokens.toList <<<
+          Png.generatedDynamicHeaderPrefixLen)
+    let headerLen :=
+      Png.generatedDynamicHeaderPrefixLen +
+        codeLenTokenStreamLen codeTokens.toList
+    headerBits < 2 ^ headerLen := by
+  intro litLenLengths distLengths lengths codeTokens prefixBits headerBits headerLen
+  have hvalid : ∀ token ∈ codeTokens.toList, CodeLenTokenValid token := by
+    exact codeLenTokensValid_toList
+      (by
+        simpa [lengths, codeTokens] using
+          generatedDynamicHeaderLiteralCodeLengthTokens_valid tokens)
+  have hprefixBits :
+      prefixBits < 2 ^ Png.generatedDynamicHeaderPrefixLen := by
+    simpa [prefixBits, Png.generatedDynamicLitLenCount,
+      Png.generatedDynamicDistCount] using
+      (show Png.generatedDynamicHeaderPrefixBits 286 30 <
+          2 ^ Png.generatedDynamicHeaderPrefixLen by
+        native_decide)
+  have htokenBits :
+      codeLenTokenStreamBits codeTokens.toList <
+        2 ^ codeLenTokenStreamLen codeTokens.toList :=
+    codeLenTokenStreamBits_lt_codeSpace codeTokens.toList hvalid
+  have htokenShift :
+      codeLenTokenStreamBits codeTokens.toList <<<
+          Png.generatedDynamicHeaderPrefixLen <
+        2 ^ headerLen := by
+    rw [Nat.shiftLeft_eq]
+    have hmul :
+        codeLenTokenStreamBits codeTokens.toList *
+            2 ^ Png.generatedDynamicHeaderPrefixLen <
+          2 ^ codeLenTokenStreamLen codeTokens.toList *
+            2 ^ Png.generatedDynamicHeaderPrefixLen :=
+      (Nat.mul_lt_mul_right
+        (Nat.two_pow_pos Png.generatedDynamicHeaderPrefixLen)).mpr htokenBits
+    simpa [headerLen, Nat.pow_add, Nat.mul_comm, Nat.mul_left_comm,
+      Nat.mul_assoc, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using hmul
+  have hprefixWide :
+      prefixBits < 2 ^ headerLen := by
+    exact lt_of_lt_of_le hprefixBits
+      (Nat.pow_le_pow_right (by decide : 0 < 2) (by
+        simp [headerLen]))
+  simpa [headerBits] using Nat.or_lt_two_pow hprefixWide htokenShift
 
 /-- The full dynamic encoder's generated header and payload collapse to one
 packed suffix after the three-bit dynamic block tag. -/
