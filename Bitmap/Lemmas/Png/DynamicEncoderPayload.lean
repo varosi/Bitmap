@@ -2200,6 +2200,30 @@ def dynamicPayloadStreamLen
       dynamicPayloadTokenBitLen litLenCodes distCodes token +
         dynamicPayloadStreamLen litLenCodes distCodes tokens
 
+/-- Proof-facing expansion of payload tokens from a current decoded output.
+It mirrors generic DEFLATE payload semantics for literals and distance-1
+matches, and is the output target for generated dynamic traces. -/
+def dynamicPayloadTraceOut (out : ByteArray) :
+    List Png.DeflateToken → ByteArray
+  | [] => out
+  | Png.DeflateToken.literal b :: tokens =>
+      dynamicPayloadTraceOut (out.push b) tokens
+  | Png.DeflateToken.matchDist1 len :: tokens =>
+      dynamicPayloadTraceOut
+        (Png.pushRepeat out (out.get! (out.size - 1)) len) tokens
+
+/-- Runtime-side precondition for replaying a generated token list from a
+current output buffer. Each match token must have a byte to copy from. -/
+def DynamicPayloadTraceOutputValid (out : ByteArray) :
+    List Png.DeflateToken → Prop
+  | [] => True
+  | Png.DeflateToken.literal b :: tokens =>
+      DynamicPayloadTraceOutputValid (out.push b) tokens
+  | Png.DeflateToken.matchDist1 len :: tokens =>
+      0 < out.size ∧
+        DynamicPayloadTraceOutputValid
+          (Png.pushRepeat out (out.get! (out.size - 1)) len) tokens
+
 /-- Generated payload EOB is emitted with the generated nine-bit
 literal/length code. This is the terminal width used by payload traces. -/
 lemma dynamicPayloadEobBitLen_generated_eq_nine
@@ -2813,6 +2837,40 @@ lemma generatedDynamicPayloadEob_finish_readerAt_writeBits
     (spec := spec) (br := br0) (out := out)
     (sym := 256) (br' := br') (by simpa [spec] using hdecode)
     (by decide) (by decide)
+
+/-- The empty generated payload-token list replays as a one-step trace that
+only consumes the generated EOB marker. This is the base case for list traces. -/
+lemma generatedDynamicPayloadTrace_nil_readerAt_writeBits
+    (source : Array Png.DeflateToken) (bw : Png.BitWriter)
+    (out : ByteArray) (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let spec := generatedDynamicTableSpec source
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs source))
+    let distCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicDistLengths (Png.distSymbolFreqs source))
+    let bits := dynamicPayloadStreamBits litLenCodes distCodes []
+    let len := dynamicPayloadStreamLen litLenCodes distCodes []
+    let bw' := Png.BitWriter.writeBits bw bits len
+    let br0 := Png.BitWriter.readerAt bw bw'.flush
+      (Png.flush_size_writeBits_le bw bits len) hbit
+    let brAfter := Png.BitWriter.readerAt (Png.BitWriter.writeBits bw bits len)
+      bw'.flush
+      (by
+        simpa [bw'] using
+          (le_rfl : (Png.BitWriter.writeBits bw bits len).flush.size ≤
+            (Png.BitWriter.writeBits bw bits len).flush.size))
+      (Png.bitPos_lt_8_writeBits bw bits len hbit)
+    Png.DynamicPayloadTrace spec 1 br0 out brAfter out := by
+  intro spec litLenCodes distCodes bits len bw' br0 brAfter
+  have hfinish :=
+    generatedDynamicPayloadEob_finish_readerAt_writeBits
+      (source := source) (bw := bw) (out := out) hbit hcur
+  exact Png.DynamicPayloadTrace.finish
+    (by
+      simpa [spec, litLenCodes, distCodes, bits, len, bw', br0, brAfter,
+        dynamicPayloadStreamBits, dynamicPayloadStreamLen] using hfinish)
 
 /-- A generated literal payload token produces one validated dynamic-payload
 literal transition through the generic generated literal/length table. -/
