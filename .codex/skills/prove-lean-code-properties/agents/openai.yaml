@@ -1,0 +1,7 @@
+interface:
+  display_name: "Prove Lean Code Properties"
+  short_description: "Prove code properties with fast Lean proofs."
+  default_prompt: "Use $prove-lean-code-properties to prove properties about this Lean code with reusable, fast proofs."
+
+policy:
+  allow_implicit_invocation: true
