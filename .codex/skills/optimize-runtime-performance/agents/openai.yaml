@@ -1,0 +1,7 @@
+interface:
+  display_name: "Optimize Runtime Performance"
+  short_description: "Measure and optimize runtime safely."
+  default_prompt: "Use $optimize-runtime-performance to speed up this code with measured benchmarks and preserved correctness."
+
+policy:
+  allow_implicit_invocation: true
