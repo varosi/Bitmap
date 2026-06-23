@@ -3106,6 +3106,71 @@ lemma writeDynamicPayload_source_eq_writeBits
           exact writeDynamicPayloadTokensList_source_eq_writeBits
             source hvalid bw
 
+/-- Generated payload streams have at least one bit per replay step. This
+supplies the decoder-fuel bound for token traces. -/
+lemma dynamicPayloadStreamLen_generated_ge_steps
+    (source : Array Png.DeflateToken) (tokens : List Png.DeflateToken)
+    (hvalid : DeflateTokensMatchLengthsValid source)
+    (hmember :
+      ∀ token ∈ tokens, ∃ target, ∃ htarget : target < source.size,
+        source[target]'htarget = token) :
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs source))
+    let distCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicDistLengths (Png.distSymbolFreqs source))
+    tokens.length + 1 ≤
+      dynamicPayloadStreamLen litLenCodes distCodes tokens := by
+  induction tokens with
+  | nil =>
+      intro litLenCodes distCodes
+      have hlen : dynamicPayloadEobBitLen litLenCodes = 9 := by
+        simpa [litLenCodes] using
+          dynamicPayloadEobBitLen_generated_eq_nine source
+      change 1 ≤ dynamicPayloadEobBitLen litLenCodes
+      rw [hlen]
+      decide
+  | cons token tokens ih =>
+      intro litLenCodes distCodes
+      have htailMember :
+          ∀ t ∈ tokens, ∃ target, ∃ htarget : target < source.size,
+            source[target]'htarget = t := by
+        intro t ht
+        exact hmember t (List.mem_cons_of_mem token ht)
+      have htail := ih htailMember
+      have htail' :
+          tokens.length + 1 ≤
+            dynamicPayloadStreamLen litLenCodes distCodes tokens := by
+        simpa [litLenCodes, distCodes] using htail
+      have htokenLenPos :
+          1 ≤ dynamicPayloadTokenBitLen litLenCodes distCodes token := by
+        cases token with
+        | literal b =>
+            rcases hmember (Png.DeflateToken.literal b) (by simp) with
+              ⟨target, htarget, ht⟩
+            have hlen :
+                dynamicPayloadTokenBitLen litLenCodes distCodes
+                  (Png.DeflateToken.literal b) = 9 := by
+              simpa [litLenCodes, distCodes] using
+                dynamicPayloadTokenBitLen_generated_literal_eq_nine_at
+                  source target b htarget ht
+            omega
+        | matchDist1 len =>
+            rcases hmember (Png.DeflateToken.matchDist1 len) (by simp) with
+              ⟨target, htarget, ht⟩
+            have hlenBounds := hvalid target len htarget ht
+            have hlen :
+                dynamicPayloadTokenBitLen litLenCodes distCodes
+                  (Png.DeflateToken.matchDist1 len) =
+                    9 + (Png.fixedLenMatchInfo len).2.2 + 1 := by
+              simpa [litLenCodes, distCodes] using
+                dynamicPayloadTokenBitLen_generated_match_eq
+                  source target len htarget ht hlenBounds
+            omega
+      simp [dynamicPayloadStreamLen]
+      omega
+
 /-- The generated payload EOB code produces a terminal dynamic-payload finish
 step through the generic generated literal/length table. -/
 lemma generatedDynamicPayloadEob_finish_readerAt_writeBits
