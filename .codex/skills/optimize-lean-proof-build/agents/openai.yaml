@@ -1,0 +1,7 @@
+interface:
+  display_name: "Optimize Lean Proof Build"
+  short_description: "Speed up Lean proof builds safely."
+  default_prompt: "Use $optimize-lean-proof-build to optimize this Lean proof build without removing proved lemmas or theorems."
+
+policy:
+  allow_implicit_invocation: true
