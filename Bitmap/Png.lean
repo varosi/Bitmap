@@ -530,6 +530,77 @@ def fixedLenMatchInfo (len : Nat) : Nat × Nat × Nat :=
   else
     (285, 0, 0)
 
+def deflateMinMatchLen : Nat := 3
+
+def deflateMaxMatchLen : Nat := 258
+
+def deflateMaxDistance : Nat := 32768
+
+def deflateHashBucketCount : Nat := 32768
+
+def deflateDistanceBases : Array Nat :=
+  #[1, 2, 3, 4,
+    5, 7,
+    9, 13,
+    17, 25,
+    33, 49,
+    65, 97,
+    129, 193,
+    257, 385,
+    513, 769,
+    1025, 1537,
+    2049, 3073,
+    4097, 6145,
+    8193, 12289,
+    16385, 24577]
+
+def deflateDistanceExtraLens : Array Nat :=
+  #[0, 0, 0, 0,
+    1, 1,
+    2, 2,
+    3, 3,
+    4, 4,
+    5, 5,
+    6, 6,
+    7, 7,
+    8, 8,
+    9, 9,
+    10, 10,
+    11, 11,
+    12, 12,
+    13, 13]
+
+def deflateLengthInfo (len : Nat) : Nat × Nat × Nat :=
+  fixedLenMatchInfo len
+
+def deflateDistanceInfoSearch (distance sym : Nat) : Option (Nat × Nat × Nat) :=
+  if h : sym < deflateDistanceBases.size then
+    let base := deflateDistanceBases[sym]
+    let extraLen := deflateDistanceExtraLens[sym]!
+    let limit := base + (1 <<< extraLen)
+    if base ≤ distance && distance < limit then
+      some (sym, distance - base, extraLen)
+    else
+      deflateDistanceInfoSearch distance (sym + 1)
+  else
+    none
+termination_by deflateDistanceBases.size - sym
+decreasing_by
+  have hlt : sym < deflateDistanceBases.size := h
+  exact Nat.sub_lt_sub_left (k := sym) (m := deflateDistanceBases.size)
+    (n := sym + 1) hlt (Nat.lt_succ_self sym)
+
+def deflateDistanceInfo? (distance : Nat) : Option (Nat × Nat × Nat) :=
+  if 1 ≤ distance && distance ≤ deflateMaxDistance then
+    deflateDistanceInfoSearch distance 0
+  else
+    none
+
+def deflateDistanceInfo (distance : Nat) : Nat × Nat × Nat :=
+  match deflateDistanceInfo? distance with
+  | some info => info
+  | none => (0, 0, 0)
+
 @[inline] def BitWriter.writeFixedLiteralFast (bw : BitWriter) (b : UInt8) : BitWriter :=
   let (bits, len) := fixedLitLenRevCodeFast b.toNat
   bw.writeBitsFast bits len
@@ -541,6 +612,18 @@ def fixedLenMatchInfo (len : Nat) : Nat × Nat × Nat :=
   let bw := bw.writeBitsFast extraBits extraLen
   -- Fixed-Huffman distance symbol 0 encodes distance = 1.
   bw.writeBitsFast 0 5
+
+@[inline] def BitWriter.writeFixedMatchFast (bw : BitWriter) (matchLen distance : Nat) : BitWriter :=
+  let (sym, extraBits, extraLen) := deflateLengthInfo matchLen
+  let (symBits, symLen) := fixedLitLenRevCodeFast sym
+  let bw := bw.writeBitsFast symBits symLen
+  let bw := bw.writeBitsFast extraBits extraLen
+  match deflateDistanceInfo? distance with
+  | some (distSym, distExtraBits, distExtraLen) =>
+      let bw := bw.writeBitsFast (reverseBits distSym 5) 5
+      bw.writeBitsFast distExtraBits distExtraLen
+  | none =>
+      bw.writeBitsFast 0 5
 
 @[inline] def chooseFixedMatchChunkLen (remaining : Nat) : Nat :=
   if remaining > 258 then
@@ -850,8 +933,183 @@ def deflateFixedRunFast (raw : ByteArray) : ByteArray :=
   let bw4 := bw3.writeBits (reverseBits eobCode eobLen) eobLen
   bw4.flush
 
+inductive Lz77Token where
+  | literal (b : UInt8)
+  | match (len distance : Nat)
+deriving Repr, DecidableEq
+
+def lz77EmptyBuckets : Array (Array Nat) :=
+  Array.replicate deflateHashBucketCount #[]
+
+@[inline] def lz77HashAt (data : Array UInt8) (i : Nat) : Nat :=
+  if i + 2 < data.size then
+    (((data[i]!.toNat * 257 + data[i + 1]!.toNat) * 257 + data[i + 2]!.toNat) %
+      deflateHashBucketCount)
+  else
+    0
+
+@[inline] def lz77InsertPosition (data : Array UInt8) (buckets : Array (Array Nat))
+    (pos : Nat) : Array (Array Nat) :=
+  if pos + 2 < data.size then
+    let hash := lz77HashAt data pos
+    let bucket := buckets[hash]!
+    buckets.set! hash (bucket.push pos)
+  else
+    buckets
+
+def lz77InsertPositions (data : Array UInt8) (stop pos : Nat)
+    (buckets : Array (Array Nat)) : Array (Array Nat) :=
+  if h : pos < stop then
+    lz77InsertPositions data stop (pos + 1) (lz77InsertPosition data buckets pos)
+  else
+    buckets
+termination_by stop - pos
+decreasing_by
+  exact Nat.sub_lt_sub_left (k := pos) (m := stop) (n := pos + 1) h (Nat.lt_succ_self pos)
+
+def lz77CommonLenAux (data : Array UInt8) (i candidate maxLen len : Nat) : Nat :=
+  if h : len < maxLen then
+    if data[i + len]! == data[candidate + len]! then
+      lz77CommonLenAux data i candidate maxLen (len + 1)
+    else
+      len
+  else
+    len
+termination_by maxLen - len
+decreasing_by
+  exact Nat.sub_lt_sub_left (k := len) (m := maxLen) (n := len + 1) h (Nat.lt_succ_self len)
+
+@[inline] def lz77CommonLen (data : Array UInt8) (i candidate maxLen : Nat) : Nat :=
+  lz77CommonLenAux data i candidate maxLen 0
+
+@[inline] def lz77BetterMatch (bestLen bestDistance len distance : Nat) : Bool :=
+  len > bestLen || (len == bestLen && (bestDistance == 0 || distance < bestDistance))
+
+def lz77FindBestInBucket (data : Array UInt8) (i : Nat) (bucket : Array Nat)
+    (revIdx bestLen bestDistance : Nat) : Option (Nat × Nat) :=
+  if 0 < revIdx then
+    let candidate := bucket[revIdx - 1]!
+    let (bestLen, bestDistance) :=
+      if candidate < i then
+        let distance := i - candidate
+        if distance ≤ deflateMaxDistance then
+          let maxLen := Nat.min deflateMaxMatchLen (data.size - i)
+          let len := lz77CommonLen data i candidate maxLen
+          if deflateMinMatchLen ≤ len && lz77BetterMatch bestLen bestDistance len distance then
+            (len, distance)
+          else
+            (bestLen, bestDistance)
+        else
+          (bestLen, bestDistance)
+      else
+        (bestLen, bestDistance)
+    if bestLen == deflateMaxMatchLen then
+      some (bestLen, bestDistance)
+    else
+      lz77FindBestInBucket data i bucket (revIdx - 1) bestLen bestDistance
+  else if deflateMinMatchLen ≤ bestLen then
+    some (bestLen, bestDistance)
+  else
+    none
+termination_by revIdx
+decreasing_by
+  omega
+
+@[inline] def lz77FindBest (data : Array UInt8) (i : Nat)
+    (buckets : Array (Array Nat)) : Option (Nat × Nat) :=
+  if i + 2 < data.size then
+    let bucket := buckets[lz77HashAt data i]!
+    lz77FindBestInBucket data i bucket bucket.size 0 0
+  else
+    none
+
+def deflateTokensLz77Aux (fuel : Nat) (data : Array UInt8) (i : Nat)
+    (buckets : Array (Array Nat)) (tokens : Array Lz77Token) : Array Lz77Token :=
+  match fuel with
+  | 0 => tokens
+  | fuel + 1 =>
+      if _h : i < data.size then
+        match lz77FindBest data i buckets with
+        | some (len, distance) =>
+            let j := Nat.min data.size (i + len)
+            let buckets := lz77InsertPositions data j i buckets
+            deflateTokensLz77Aux fuel data j buckets (tokens.push (.match len distance))
+        | none =>
+            let buckets := lz77InsertPositions data (i + 1) i buckets
+            deflateTokensLz77Aux fuel data (i + 1) buckets (tokens.push (.literal data[i]))
+      else
+        tokens
+
+def deflateTokensLz77 (raw : ByteArray) : Array Lz77Token :=
+  deflateTokensLz77Aux raw.size raw.data 0 lz77EmptyBuckets #[]
+
+def lz77CopyDistanceFast (out : ByteArray) (distance len : Nat) : Option ByteArray :=
+  if distance = 0 || distance > out.size then
+    none
+  else
+    some <| Id.run do
+      let mut result := out
+      for _ in [0:len] do
+        let idx := result.size - distance
+        let b := result.get! idx
+        result := result.push b
+      return result
+
+def lz77TokenExpand? (out : ByteArray) : Lz77Token → Option ByteArray
+  | .literal b => some (out.push b)
+  | .match len distance =>
+      if deflateMinMatchLen ≤ len && len ≤ deflateMaxMatchLen &&
+          1 ≤ distance && distance ≤ deflateMaxDistance then
+        lz77CopyDistanceFast out distance len
+      else
+        none
+
+def deflateTokensExpandLz77From? (tokens : Array Lz77Token) (i : Nat)
+    (out : ByteArray) : Option ByteArray :=
+  if h : i < tokens.size then
+    match lz77TokenExpand? out tokens[i] with
+    | some out' => deflateTokensExpandLz77From? tokens (i + 1) out'
+    | none => none
+  else
+    some out
+termination_by tokens.size - i
+decreasing_by
+  exact Nat.sub_lt_sub_left (k := i) (m := tokens.size) (n := i + 1) h
+    (Nat.lt_succ_self i)
+
+def deflateTokensExpandLz77? (tokens : Array Lz77Token) : Option ByteArray :=
+  deflateTokensExpandLz77From? tokens 0 ByteArray.empty
+
+def writeFixedPayloadLz77From (bw : BitWriter) (tokens : Array Lz77Token) (i : Nat) :
+    BitWriter :=
+  if h : i < tokens.size then
+    let bw :=
+      match tokens[i] with
+      | .literal b => bw.writeFixedLiteralFast b
+      | .match len distance => bw.writeFixedMatchFast len distance
+    writeFixedPayloadLz77From bw tokens (i + 1)
+  else
+    bw
+termination_by tokens.size - i
+decreasing_by
+  exact Nat.sub_lt_sub_left (k := i) (m := tokens.size) (n := i + 1) h
+    (Nat.lt_succ_self i)
+
+def writeFixedPayloadLz77 (bw : BitWriter) (tokens : Array Lz77Token) : BitWriter :=
+  writeFixedPayloadLz77From bw tokens 0
+
+def deflateFixedLz77 (raw : ByteArray) : ByteArray :=
+  let tokens := deflateTokensLz77 raw
+  let bw0 := BitWriter.empty
+  let bw1 := bw0.writeBits 1 1
+  let bw2 := bw1.writeBits 1 2
+  let bw3 := writeFixedPayloadLz77 bw2 tokens
+  let (eobCode, eobLen) := fixedLitLenCode 256
+  let bw4 := bw3.writeBits (reverseBits eobCode eobLen) eobLen
+  bw4.flush
+
 def deflateFixed (raw : ByteArray) : ByteArray :=
-  deflateFixedRunFast raw
+  deflateFixedLz77 raw
 
 inductive DeflateToken where
   | literal (b : UInt8)
@@ -1035,6 +1293,47 @@ decreasing_by
 def distSymbolFreqs (tokens : Array DeflateToken) : Array Nat :=
   distSymbolFreqsAux tokens 0 (Array.replicate 30 0)
 
+def litLenSymbolFreqsLz77Aux (tokens : Array Lz77Token) (i : Nat)
+    (freqs : Array Nat) : Array Nat :=
+  if h : i < tokens.size then
+    let freqs :=
+      match tokens[i] with
+      | .literal b => incrementNatAt freqs b.toNat
+      | .match len _distance =>
+          let (sym, _, _) := deflateLengthInfo len
+          incrementNatAt freqs sym
+    litLenSymbolFreqsLz77Aux tokens (i + 1) freqs
+  else
+    freqs
+termination_by tokens.size - i
+decreasing_by
+  exact Nat.sub_lt_sub_left (k := i) (m := tokens.size) (n := i + 1) h
+    (Nat.lt_succ_self i)
+
+def litLenSymbolFreqsLz77 (tokens : Array Lz77Token) : Array Nat :=
+  incrementNatAt (litLenSymbolFreqsLz77Aux tokens 0 (Array.replicate 286 0)) 256
+
+def distSymbolFreqsLz77Aux (tokens : Array Lz77Token) (i : Nat)
+    (freqs : Array Nat) : Array Nat :=
+  if h : i < tokens.size then
+    let freqs :=
+      match tokens[i] with
+      | .literal _ => freqs
+      | .match _len distance =>
+          match deflateDistanceInfo? distance with
+          | some (sym, _, _) => incrementNatAt freqs sym
+          | none => freqs
+    distSymbolFreqsLz77Aux tokens (i + 1) freqs
+  else
+    freqs
+termination_by tokens.size - i
+decreasing_by
+  exact Nat.sub_lt_sub_left (k := i) (m := tokens.size) (n := i + 1) h
+    (Nat.lt_succ_self i)
+
+def distSymbolFreqsLz77 (tokens : Array Lz77Token) : Array Nat :=
+  distSymbolFreqsLz77Aux tokens 0 (Array.replicate 30 0)
+
 /-- Uniform code length for generated dynamic literal/length alphabets.
 The literal/length alphabet has at most 286 symbols, so 9 bits leaves room for
 a complete canonical table while still omitting unused symbols. -/
@@ -1057,6 +1356,9 @@ def generatedDynamicDistLengthAt (freqs : Array Nat) (idx : Nat) : Nat :=
 
 def generatedDynamicDistLengths (freqs : Array Nat) : Array Nat :=
   Array.ofFn (fun idx : Fin freqs.size => generatedDynamicDistLengthAt freqs idx.val)
+
+def generatedDynamicDistLengthsLz77 (_freqs : Array Nat) : Array Nat :=
+  Array.replicate 30 5
 
 def lastNonZeroIndex (arr : Array Nat) (minIdx : Nat) : Nat :=
   Id.run do
@@ -1388,6 +1690,27 @@ def writeDynamicPayload (bw : BitWriter) (tokens : Array DeflateToken)
     bw := bw.writeRevCode litLenCodes 256
     return bw
 
+def writeDynamicPayloadLz77 (bw : BitWriter) (tokens : Array Lz77Token)
+    (litLenCodes distCodes : Array (Nat × Nat)) : BitWriter :=
+  Id.run do
+    let mut bw := bw
+    for token in tokens do
+      match token with
+      | .literal b =>
+          bw := bw.writeRevCode litLenCodes b.toNat
+      | .match len distance =>
+          let (sym, extraBits, extraLen) := deflateLengthInfo len
+          bw := bw.writeRevCode litLenCodes sym
+          bw := bw.writeBitsFast extraBits extraLen
+          match deflateDistanceInfo? distance with
+          | some (distSym, distExtraBits, distExtraLen) =>
+              bw := bw.writeRevCode distCodes distSym
+              bw := bw.writeBitsFast distExtraBits distExtraLen
+          | none =>
+              bw := bw.writeRevCode distCodes 0
+    bw := bw.writeRevCode litLenCodes 256
+    return bw
+
 def deflateDynamicFullFast (raw : ByteArray) : ByteArray :=
   let tokens := deflateTokensDist1 raw
   let litLenLengths := generatedDynamicLitLenLengths (litLenSymbolFreqs tokens)
@@ -1399,6 +1722,19 @@ def deflateDynamicFullFast (raw : ByteArray) : ByteArray :=
   let bw2 := bw1.writeBits 2 2
   let bw3 := writeGeneratedDynamicHeader bw2 litLenLengths distLengths
   let bw4 := writeDynamicPayload bw3 tokens litLenCodes distCodes
+  bw4.flush
+
+def deflateDynamicLz77 (raw : ByteArray) : ByteArray :=
+  let tokens := deflateTokensLz77 raw
+  let litLenLengths := generatedDynamicLitLenLengths (litLenSymbolFreqsLz77 tokens)
+  let distLengths := generatedDynamicDistLengthsLz77 (distSymbolFreqsLz77 tokens)
+  let litLenCodes := canonicalRevCodesFromLengths litLenLengths
+  let distCodes := canonicalRevCodesFromLengths distLengths
+  let bw0 := BitWriter.empty
+  let bw1 := bw0.writeBits 1 1
+  let bw2 := bw1.writeBits 2 2
+  let bw3 := writeGeneratedDynamicHeader bw2 litLenLengths distLengths
+  let bw4 := writeDynamicPayloadLz77 bw3 tokens litLenCodes distCodes
   bw4.flush
 
 @[inline] def writeDynamicFixedTables (bw : BitWriter) : BitWriter :=
@@ -1447,7 +1783,7 @@ def deflateDynamicFast (raw : ByteArray) : ByteArray :=
   bw8.flush
 
 def deflateDynamic (raw : ByteArray) : ByteArray :=
-  deflateDynamicFullFast raw
+  deflateDynamicLz77 raw
 
 def zlibCompressFixed (raw : ByteArray) : ByteArray :=
   let header := ByteArray.mk #[u8 0x78, u8 0x01]

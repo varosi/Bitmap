@@ -24,7 +24,7 @@ has focused layout and validation lemmas plus runtime fixture coverage.
 | Bit depth | Grayscale: 1, 8, or 16 bits per channel. RGB, Grayscale+Alpha, and RGBA: 8 or 16 bits per channel |
 | Pixel formats | `PixelGray1`/`BitmapGray1`, `PixelGray8`, `PixelRGB8`, `PixelGrayAlpha8`, `PixelRGBA8`, `PixelGray16`, `PixelRGB16`, `PixelGrayAlpha16`, `PixelRGBA16` |
 | Filter type | Existing `encodeBitmap` APIs emit filter `0` rows. `encodeBitmapWithOptionsChecked` and `encodeBitmapGray1WithOptionsChecked` can opt into fixed filters `0` None, `1` Sub, `2` Up, `3` Average, `4` Paeth, or deterministic adaptive per-row selection |
-| Compression modes | `.stored` (uncompressed DEFLATE), `.fixed` (fixed-Huffman with LZ77 distance-1 run encoding), `.dynamic` (generated dynamic-Huffman tables and dynamic-Huffman payload codes, using distance-1 LZ77 run encoding) |
+| Compression modes | `.stored` (uncompressed DEFLATE), `.fixed` (fixed-Huffman with greedy 32 KiB-window LZ77 encoding), `.dynamic` (generated dynamic-Huffman tables and dynamic-Huffman payload codes, using greedy 32 KiB-window LZ77 encoding) |
 | Interlace | None (encoder always emits non-interlaced PNGs) |
 | Chunks emitted | Existing pure `encodeBitmap` APIs emit `IHDR`, one `IDAT`, `IEND` only. `encodeBitmapWithOptionsChecked` and `encodeBitmapGray1WithOptionsChecked` can also emit validated `gAMA`, `cHRM`, `sRGB`, `pHYs`, or explicit `tIME` chunks, with optional compatible `gAMA=45455` before `sRGB` and compatible sRGB chromaticities before `sRGB`. File-writing helpers emit the current UTC `tIME` by default; `writePngWithoutTime` keeps deterministic no-`tIME` output |
 | Integrity | CRC-32 per chunk, Adler-32 in the zlib trailer |
@@ -222,12 +222,53 @@ public generated dynamic encoder is proved end-to-end through the runtime
 `readDynamicTables` and generic dynamic payload decoder path; the older
 fixed-shaped dynamic helper remains regression coverage.
 
+The planned full-LZ77 encoder proof is a round-trip correctness proof for the
+streams the encoder emits: every emitted match is valid, and decoding the
+generated fixed or dynamic DEFLATE payload reconstructs the original bytes. It
+does not initially prove that the greedy matcher chooses the globally smallest
+compressed representation. Future compression-ratio work can add lazy matching,
+which looks one byte ahead before committing to a match, and optimal parsing,
+which chooses a lowest-cost literal/match sequence for the whole stream.
+
 This is still not a standalone RFC-1951 grammar/completeness theorem independent of
 the runtime parser, nor a single mixed stored/fixed/dynamic block-stream theorem.
 The proof-level dynamic table boundary delegates bit-level header parsing to
 `readDynamicTables`; runtime tests cover code-length repeats `16`, `17`, and `18`,
 repeat overflow shape, literal-only zero-distance blocks, LZ77 matches, and dynamic
 multi-block fixtures.
+
+### LZ77 encoder proof roadmap
+
+Good next theorem targets for full-LZ77 encoding:
+
+- `deflateDistanceInfo_decodeDistance_correct`: encoded distance symbol and
+  extra bits decode back to the original distance.
+- `deflateLengthInfo_decodeLength_correct`: encoded length symbol and extra
+  bits decode back to the original match length.
+- `copyDistance_spec`: arbitrary valid `distance` and `len` copy exactly the
+  bytes described by the LZ77 back-reference, including overlap.
+- `deflateTokensLz77_valid`: every emitted match has `3 ≤ len ≤ 258`,
+  `1 ≤ distance ≤ 32768`, and `distance ≤ current output size`.
+- `deflateTokensExpand_deflateTokensLz77`: expanding the token stream
+  reconstructs the raw input.
+- `writeFixedPayload_lz77_decode_correct`: fixed-Huffman payload written from
+  valid LZ77 tokens decodes to token expansion.
+- `writeDynamicPayload_lz77_decode_correct`: generated dynamic-Huffman payload
+  written from valid LZ77 tokens decodes to token expansion.
+- `zlibDecompress_zlibCompressFixed_lz77` and
+  `zlibDecompress_zlibCompressDynamic_lz77`: public compressed zlib wrappers
+  decode to the original raw bytes.
+
+Future optional theorem targets:
+
+- `lz77Greedy_longest_at_position`: the greedy finder chooses the longest match
+  available at the current position.
+- `lz77Greedy_tieBreaks_nearest`: equal-length matches choose the smallest
+  distance.
+- `lazyMatching_preserves_roundTrip`: lazy matching changes token choice but
+  still expands to the same input.
+- `optimalParsing_minimal_cost`: optimal parsing produces a token stream whose
+  encoded bit cost is minimal under a fixed cost model.
 
 ### External-PNG spec status
 

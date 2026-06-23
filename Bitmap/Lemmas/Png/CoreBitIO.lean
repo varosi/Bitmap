@@ -3266,6 +3266,72 @@ lemma bit1Inv_writeFixedMatchDist1Fast (bw : BitWriter) (matchLen : Nat) (h : bi
     (bit1Inv_writeBits _ extraBits extraLen
       (bit1Inv_writeBits _ (fixedLitLenRevCodeFast sym).1 (fixedLitLenRevCodeFast sym).2 h))
 
+lemma bit1Inv_writeFixedMatchFast (bw : BitWriter) (matchLen distance : Nat)
+    (h : bit1Inv bw) :
+    bit1Inv (BitWriter.writeFixedMatchFast bw matchLen distance) := by
+  unfold BitWriter.writeFixedMatchFast
+  simp [writeBitsFast_eq_writeBits]
+  let info := deflateLengthInfo matchLen
+  let sym := info.1
+  let extraBits := info.2.1
+  let extraLen := info.2.2
+  by_cases hdist : deflateDistanceInfo? distance = none
+  · simp [hdist]
+    exact bit1Inv_writeBits _ 0 5
+      (bit1Inv_writeBits _ extraBits extraLen
+        (bit1Inv_writeBits _ (fixedLitLenRevCodeFast sym).1 (fixedLitLenRevCodeFast sym).2 h))
+  · rcases Option.ne_none_iff_exists'.mp hdist with ⟨distInfo, hdistInfo⟩
+    cases distInfo with
+    | mk distSym rest =>
+        cases rest with
+        | mk distExtraBits distExtraLen =>
+            simp [hdistInfo]
+            exact bit1Inv_writeBits _ distExtraBits distExtraLen
+              (bit1Inv_writeBits _ (reverseBits distSym 5) 5
+                (bit1Inv_writeBits _ extraBits extraLen
+                  (bit1Inv_writeBits _ (fixedLitLenRevCodeFast sym).1
+                    (fixedLitLenRevCodeFast sym).2 h)))
+
+lemma bit1Inv_writeFixedPayloadLz77From (bw : BitWriter) (tokens : Array Lz77Token)
+    (i : Nat) (h : bit1Inv bw) :
+    bit1Inv (writeFixedPayloadLz77From bw tokens i) := by
+  classical
+  have hk :
+      ∀ k, ∀ i bw, tokens.size - i = k → bit1Inv bw →
+        bit1Inv (writeFixedPayloadLz77From bw tokens i) := by
+    intro k
+    induction k with
+    | zero =>
+        intro i bw hk hbw
+        have hle : tokens.size ≤ i := Nat.le_of_sub_eq_zero hk
+        have hlt : ¬ i < tokens.size := not_lt_of_ge hle
+        rw [writeFixedPayloadLz77From]
+        simp [hlt, hbw]
+    | succ k ih =>
+        intro i bw hk hbw
+        by_cases hlt : i < tokens.size
+        · have hk' : tokens.size - (i + 1) = k := by omega
+          rw [writeFixedPayloadLz77From]
+          simp [hlt]
+          match htok : tokens[i] with
+          | .literal b =>
+              simp
+              exact ih (i := i + 1) (bw := bw.writeFixedLiteralFast b) hk'
+                (bit1Inv_writeFixedLiteralFast _ _ hbw)
+          | .match len distance =>
+              simp
+              exact ih (i := i + 1) (bw := bw.writeFixedMatchFast len distance) hk'
+                (bit1Inv_writeFixedMatchFast _ _ _ hbw)
+        · rw [writeFixedPayloadLz77From]
+          simp [hlt, hbw]
+  exact hk (tokens.size - i) i bw rfl h
+
+lemma bit1Inv_writeFixedPayloadLz77 (bw : BitWriter) (tokens : Array Lz77Token)
+    (h : bit1Inv bw) :
+    bit1Inv (writeFixedPayloadLz77 bw tokens) := by
+  simpa [writeFixedPayloadLz77] using
+    bit1Inv_writeFixedPayloadLz77From (bw := bw) (tokens := tokens) (i := 0) h
+
 lemma bit1Inv_writeFixedLiteralRepeatFast (bw : BitWriter) (b : UInt8) (n : Nat)
     (h : bit1Inv bw) :
     bit1Inv (bw.writeFixedLiteralRepeatFast b n) := by
@@ -3606,8 +3672,8 @@ lemma deflateFixedAuxFast_eq_spec_core (data : Array UInt8) (i : Nat) (bw : BitW
         · simp [deflateFixedAuxFast, deflateFixedAux, hlt]
   exact hk (data.size - i) i bw rfl
 
-lemma deflateFixed_eq_runFast_core (raw : ByteArray) :
-    deflateFixed raw = deflateFixedRunFast raw := by
+lemma deflateFixed_eq_lz77_core (raw : ByteArray) :
+    deflateFixed raw = deflateFixedLz77 raw := by
   rfl
 
 lemma bit1Inv_flush_bit1 (bw : BitWriter) (h : bit1Inv bw) :
@@ -3673,31 +3739,33 @@ lemma deflateFixedSpec_bit1 (raw : ByteArray) :
 
 lemma deflateFixed_bit1 (raw : ByteArray) :
     ∃ h : 0 < (deflateFixed raw).size, ((deflateFixed raw).get 0 h).toNat.testBit 1 = true := by
+  let tokens := deflateTokensLz77 raw
   let bw0 := BitWriter.empty
   let bw1 := bw0.writeBits 1 1
   let bw2 := bw1.writeBits 1 2
-  let bw3 := deflateFixedRunAuxFast raw.data 0 bw2
+  let bw3 := writeFixedPayloadLz77 bw2 tokens
   let eob := fixedLitLenCode 256
   let bw4 := bw3.writeBits (reverseBits eob.1 eob.2) eob.2
   have h2 : bit1Inv (BitWriter.writeBits (BitWriter.writeBits BitWriter.empty 1 1) 1 2) := by
     simpa using bit1Inv_deflateFixed_header
-  have h3 : bit1Inv (deflateFixedRunAuxFast raw.data 0
-      (BitWriter.writeBits (BitWriter.writeBits BitWriter.empty 1 1) 1 2)) := by
+  have h3 : bit1Inv (writeFixedPayloadLz77
+      (BitWriter.writeBits (BitWriter.writeBits BitWriter.empty 1 1) 1 2) tokens) := by
     simpa using
-      (bit1Inv_deflateFixedRunAuxFast (data := raw.data) (i := 0)
-        (bw := BitWriter.writeBits (BitWriter.writeBits BitWriter.empty 1 1) 1 2) h2)
+      (bit1Inv_writeFixedPayloadLz77
+        (bw := BitWriter.writeBits (BitWriter.writeBits BitWriter.empty 1 1) 1 2)
+        (tokens := tokens) h2)
   have hinv : bit1Inv bw4 := by
     simpa [bw0, bw1, bw2, bw3, eob, bw4] using
       (bit1Inv_writeBits
-        (bw := deflateFixedRunAuxFast raw.data 0
-          (BitWriter.writeBits (BitWriter.writeBits BitWriter.empty 1 1) 1 2))
+        (bw := writeFixedPayloadLz77
+          (BitWriter.writeBits (BitWriter.writeBits BitWriter.empty 1 1) 1 2) tokens)
         (bits := reverseBits eob.1 eob.2) (len := eob.2) h3)
   rcases bit1Inv_flush_bit1 (bw := bw4) hinv with ⟨hsize, hbit⟩
   have hsize' : 0 < (deflateFixed raw).size := by
-    simpa [deflateFixed_eq_runFast_core raw, deflateFixedRunFast, bw0, bw1, bw2, bw3, eob, bw4]
+    simpa [deflateFixed_eq_lz77_core raw, deflateFixedLz77, tokens, bw0, bw1, bw2, bw3, eob, bw4]
       using hsize
   refine ⟨hsize', ?_⟩
-  simpa [deflateFixed_eq_runFast_core raw, deflateFixedRunFast, bw0, bw1, bw2, bw3, eob, bw4,
+  simpa [deflateFixed_eq_lz77_core raw, deflateFixedLz77, tokens, bw0, bw1, bw2, bw3, eob, bw4,
     byteArray_get_proof_irrel] using hbit
 
 lemma deflateFixed_header_bit1 (raw : ByteArray) (h : 0 < (deflateFixed raw).size) :
