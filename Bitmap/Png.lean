@@ -1062,7 +1062,8 @@ def lz77TokenExpand? (out : ByteArray) : Lz77Token → Option ByteArray
   | .literal b => some (out.push b)
   | .match len distance =>
       if deflateMinMatchLen ≤ len && len ≤ deflateMaxMatchLen &&
-          1 ≤ distance && distance ≤ deflateMaxDistance then
+          1 ≤ distance && distance ≤ deflateMaxDistance &&
+          (deflateDistanceInfo? distance).isSome then
         lz77CopyDistanceFast out distance len
       else
         none
