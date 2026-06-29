@@ -4,6 +4,64 @@ namespace Bitmaps
 
 namespace Png
 
+/-- Concatenates two LSB-first bit streams represented as `(bits, bitLength)`.
+This is the proof-facing shape used to mirror successive `writeBits` calls. -/
+def lz77BitPairAppend (head tail : Nat × Nat) : Nat × Nat :=
+  (head.1 ||| (tail.1 <<< head.2), head.2 + tail.2)
+
+/-- Proof-facing fixed-Huffman bits for a literal LZ77 token. -/
+def fixedLz77LiteralBits (b : UInt8) : Nat × Nat :=
+  let codeLen := fixedLitLenCode b.toNat
+  (reverseBits codeLen.1 codeLen.2, codeLen.2)
+
+/-- Proof-facing fixed-Huffman bits for a match token. It is option-valued
+because valid full-LZ77 matches must have encodable distance metadata. -/
+def fixedLz77MatchBits? (len distance : Nat) : Option (Nat × Nat) :=
+  let lenInfo := deflateLengthInfo len
+  let sym := lenInfo.1
+  let extraBits := lenInfo.2.1
+  let extraLen := lenInfo.2.2
+  let codeLen := fixedLitLenCode sym
+  let symBits := (reverseBits codeLen.1 codeLen.2, codeLen.2)
+  let lenExtraBits := (extraBits, extraLen)
+  match deflateDistanceInfo? distance with
+  | some (distSym, distExtraBits, distExtraLen) =>
+      let distSymBits := (reverseBits distSym 5, 5)
+      let distExtra := (distExtraBits, distExtraLen)
+      some <| lz77BitPairAppend symBits
+        (lz77BitPairAppend lenExtraBits
+          (lz77BitPairAppend distSymBits distExtra))
+  | none =>
+      none
+
+/-- Proof-facing fixed-Huffman bits for one LZ77 token. -/
+def fixedLz77TokenBits? : Lz77Token → Option (Nat × Nat)
+  | .literal b => some (fixedLz77LiteralBits b)
+  | .match len distance => fixedLz77MatchBits? len distance
+
+/-- Proof-facing fixed-Huffman bits for LZ77 tokens from index `i`, followed
+by the fixed end-of-block code. -/
+def fixedLz77PayloadBitsEobFrom? (tokens : Array Lz77Token) (i : Nat) :
+    Option (Nat × Nat) :=
+  if h : i < tokens.size then
+    match fixedLz77TokenBits? tokens[i] with
+    | some head =>
+        match fixedLz77PayloadBitsEobFrom? tokens (i + 1) with
+        | some tail => some (lz77BitPairAppend head tail)
+        | none => none
+    | none => none
+  else
+    let eob := fixedLitLenCode 256
+    some (reverseBits eob.1 eob.2, eob.2)
+termination_by tokens.size - i
+decreasing_by
+  exact Nat.sub_lt_sub_left (k := i) (m := tokens.size) (n := i + 1) h
+    (Nat.lt_succ_self i)
+
+/-- Proof-facing fixed-Huffman bits for a complete LZ77 payload plus EOB. -/
+def fixedLz77PayloadBitsEob? (tokens : Array Lz77Token) : Option (Nat × Nat) :=
+  fixedLz77PayloadBitsEobFrom? tokens 0
+
 /-- Public LZ77 length metadata is the fixed-Huffman match-length metadata,
 packaged under the encoder-facing name used by full LZ77 payload writers. -/
 lemma deflateLengthInfo_spec_internal (len : Nat) (hlo : 3 ≤ len) (hhi : len ≤ 258) :
