@@ -1043,19 +1043,8 @@ def deflateTokensLz77Aux (fuel : Nat) (data : Array UInt8) (i : Nat)
 def deflateTokensLz77FastCandidate (raw : ByteArray) : Array Lz77Token :=
   deflateTokensLz77Aux raw.size raw.data 0 lz77EmptyBuckets #[]
 
-def deflateTokensLz77LiteralFrom (data : Array UInt8) (i : Nat)
-    (tokens : Array Lz77Token) : Array Lz77Token :=
-  if h : i < data.size then
-    deflateTokensLz77LiteralFrom data (i + 1) (tokens.push (.literal data[i]))
-  else
-    tokens
-termination_by data.size - i
-decreasing_by
-  exact Nat.sub_lt_sub_left (k := i) (m := data.size) (n := i + 1) h
-    (Nat.lt_succ_self i)
-
 def deflateTokensLz77Literal (raw : ByteArray) : Array Lz77Token :=
-  deflateTokensLz77LiteralFrom raw.data 0 #[]
+  Array.ofFn (fun i : Fin raw.data.size => Lz77Token.literal raw.data[i])
 
 def lz77CopyDistanceFast (out : ByteArray) (distance len : Nat) : Option ByteArray :=
   if distance = 0 || distance > out.size then

@@ -15,6 +15,80 @@ old helper-specific proofs separate from the public encoder path. -/
 lemma deflateDynamicFullFast_eq_self (raw : ByteArray) :
     Png.deflateDynamicFullFast raw = Png.deflateDynamicFullFast raw := rfl
 
+/-- Literal LZ77 fallback tokens expand to the suffix of the raw byte array.
+This is the fallback case for the validated greedy tokenizer proof. -/
+lemma deflateTokensExpandLz77LiteralFrom_eq_byteArrayFromArray
+    (raw : ByteArray) :
+    ∀ i out, i ≤ raw.data.size →
+      Png.deflateTokensExpandLz77From? (Png.deflateTokensLz77Literal raw) i out =
+        some (Png.byteArrayFromArray raw.data i out) := by
+  classical
+  have hk :
+      ∀ k, ∀ i out, raw.data.size - i = k → i ≤ raw.data.size →
+        Png.deflateTokensExpandLz77From? (Png.deflateTokensLz77Literal raw) i out =
+          some (Png.byteArrayFromArray raw.data i out) := by
+    intro k
+    induction k with
+    | zero =>
+        intro i out hk hi
+        have hnotData : ¬ i < raw.data.size := by omega
+        have hnotTok : ¬ i < (Png.deflateTokensLz77Literal raw).size := by
+          simpa [Png.deflateTokensLz77Literal] using hnotData
+        have hnotRaw : ¬ i < raw.size := by
+          simpa [ByteArray.size_data] using hnotData
+        rw [Png.deflateTokensExpandLz77From?.eq_1]
+        rw [Png.byteArrayFromArray_unfold]
+        simp [hnotTok, hnotRaw]
+    | succ k ih =>
+        intro i out hk hi
+        have hdata : i < raw.data.size := by omega
+        have htok : i < (Png.deflateTokensLz77Literal raw).size := by
+          simpa [Png.deflateTokensLz77Literal] using hdata
+        have htokEq :
+            (Png.deflateTokensLz77Literal raw)[i]'htok =
+              Png.Lz77Token.literal raw.data[i] := by
+          simp [Png.deflateTokensLz77Literal]
+        have hraw : i < raw.size := by
+          simpa [ByteArray.size_data] using hdata
+        have hrec :
+            Png.deflateTokensExpandLz77From? (Png.deflateTokensLz77Literal raw)
+                (i + 1) (out.push raw.data[i]) =
+              some (Png.byteArrayFromArray raw.data (i + 1) (out.push raw.data[i])) := by
+          exact ih (i + 1) (out.push raw.data[i]) (by omega) (Nat.succ_le_of_lt hdata)
+        rw [Png.deflateTokensExpandLz77From?.eq_1]
+        rw [Png.byteArrayFromArray_unfold]
+        simpa [htok, htokEq, Png.lz77TokenExpand?, hraw] using hrec
+  intro i out hi
+  exact hk (raw.data.size - i) i out rfl hi
+
+/-- The literal fallback token stream expands exactly to the original raw bytes. -/
+lemma deflateTokensExpandLz77Literal (raw : ByteArray) :
+    Png.deflateTokensExpandLz77? (Png.deflateTokensLz77Literal raw) = some raw := by
+  have h :=
+    deflateTokensExpandLz77LiteralFrom_eq_byteArrayFromArray raw 0 ByteArray.empty
+      (Nat.zero_le raw.data.size)
+  have hraw : Png.byteArrayFromArray raw.data 0 ByteArray.empty = raw := by
+    simpa using Png.byteArrayFromArray_empty (data := raw.data)
+  simpa [Png.deflateTokensExpandLz77?, hraw] using h
+
+/-- The public LZ77 tokenizer validates the greedy candidate stream and falls
+back to literals, so token expansion always reconstructs the raw input. -/
+lemma deflateTokensExpandLz77_deflateTokensLz77 (raw : ByteArray) :
+    Png.deflateTokensExpandLz77? (Png.deflateTokensLz77 raw) = some raw := by
+  let tokens := Png.deflateTokensLz77FastCandidate raw
+  unfold Png.deflateTokensLz77
+  by_cases hExpand : Png.deflateTokensExpandLz77? tokens = none
+  · have hfallback := deflateTokensExpandLz77Literal raw
+    simpa [tokens, hExpand] using hfallback
+  · cases hsome : Png.deflateTokensExpandLz77? tokens with
+    | none =>
+        exact False.elim (hExpand hsome)
+    | some raw' =>
+        by_cases heq : raw' = raw
+        · simp [tokens, hsome, heq]
+        · have hfallback := deflateTokensExpandLz77Literal raw
+          simpa [tokens, hsome, heq] using hfallback
+
 /-- Base token-expansion fact for the generated encoder proof: a literal token
 appends exactly its byte to the expanded output. -/
 lemma deflateTokenExpand_literal (out : ByteArray) (b : UInt8) :
