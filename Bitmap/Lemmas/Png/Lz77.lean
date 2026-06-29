@@ -249,6 +249,19 @@ lemma decodeDistance_readerAt_writeBits_prefix
       simp [hcanonBasePlus]
     simpa [bitsTot, lenTot, bw', br, brExtra] using hdecode
 
+/-- A successful LZ77 copy could not have taken the runtime failure branch, so
+the copied distance is nonzero and within the current output size. -/
+lemma lz77CopyDistanceFast_some_distance_valid
+    {out out' : ByteArray} {distance len : Nat}
+    (hcopy : lz77CopyDistanceFast out distance len = some out') :
+    1 ≤ distance ∧ distance ≤ out.size := by
+  unfold lz77CopyDistanceFast at hcopy
+  by_cases hbad : distance = 0 || distance > out.size
+  · simp [hbad] at hcopy
+  · have hgood := hbad
+    simp only [Bool.or_eq_true, decide_eq_true_eq, not_or] at hgood
+    exact ⟨Nat.succ_le_of_lt (Nat.pos_of_ne_zero hgood.1), Nat.le_of_not_gt hgood.2⟩
+
 /-- A successful LZ77 match-token expansion exposes all encoder-side validity
 facts needed by fixed and dynamic payload trace builders. -/
 lemma lz77TokenExpand?_match_some_spec
@@ -256,6 +269,7 @@ lemma lz77TokenExpand?_match_some_spec
     (h : lz77TokenExpand? out (.match len distance) = some out') :
     deflateMinMatchLen ≤ len ∧ len ≤ deflateMaxMatchLen ∧
       1 ≤ distance ∧ distance ≤ deflateMaxDistance ∧
+      distance ≤ out.size ∧
       (∃ info, deflateDistanceInfo? distance = some info) ∧
       lz77CopyDistanceFast out distance len = some out' := by
   unfold lz77TokenExpand? at h
@@ -272,7 +286,8 @@ lemma lz77TokenExpand?_match_some_spec
         have hprops := hvalid
         simp only [hinfo, Bool.and_eq_true, decide_eq_true_eq] at hprops
         rcases hprops with ⟨⟨⟨⟨hlenLo, hlenHi⟩, hdistLo⟩, hdistHi⟩, _hinfoSome⟩
-        exact ⟨hlenLo, hlenHi, hdistLo, hdistHi, ⟨info, rfl⟩, hcopy⟩
+        have hcopyValid := lz77CopyDistanceFast_some_distance_valid hcopy
+        exact ⟨hlenLo, hlenHi, hdistLo, hdistHi, hcopyValid.2, ⟨info, rfl⟩, hcopy⟩
   · simp [hvalid] at h
 
 /-- Successful match expansion uses the same copy routine as the decoder's
@@ -283,7 +298,7 @@ lemma lz77TokenExpand?_match_some_copyDistance
     copyDistance out distance len = some out' := by
   rcases lz77TokenExpand?_match_some_spec (out := out) (out' := out')
       (len := len) (distance := distance) h with
-    ⟨_, _, _, _, _, hcopy⟩
+    ⟨_, _, _, _, _, _, hcopy⟩
   simpa [copyDistance] using hcopy
 
 end Png
