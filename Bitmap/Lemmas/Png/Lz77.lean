@@ -62,6 +62,42 @@ decreasing_by
 def fixedLz77PayloadBitsEob? (tokens : Array Lz77Token) : Option (Nat × Nat) :=
   fixedLz77PayloadBitsEobFrom? tokens 0
 
+/-- Appending two well-sized proof bit-pairs produces a bit-pair that still
+fits in its declared combined length. -/
+lemma lz77BitPairAppend_bits_lt {head tail : Nat × Nat}
+    (hhead : head.1 < 2 ^ head.2) (htail : tail.1 < 2 ^ tail.2) :
+    (lz77BitPairAppend head tail).1 < 2 ^ (lz77BitPairAppend head tail).2 := by
+  have htailShift : tail.1 <<< head.2 < 2 ^ (head.2 + tail.2) := by
+    simpa [Nat.shiftLeft_eq, Nat.pow_add, Nat.mul_comm, Nat.mul_left_comm, Nat.mul_assoc] using
+      Nat.mul_lt_mul_of_pos_right htail (Nat.two_pow_pos head.2)
+  have hheadBig : head.1 < 2 ^ (head.2 + tail.2) := by
+    exact lt_of_lt_of_le hhead
+      (Nat.pow_le_pow_right (by decide : 1 ≤ 2) (Nat.le_add_right head.2 tail.2))
+  simpa [lz77BitPairAppend, Nat.or_comm] using
+    (Nat.or_lt_two_pow htailShift hheadBig)
+
+/-- Writing an appended proof bit-pair is the same as writing the head pair
+followed by the tail pair. -/
+lemma lz77BitPairAppend_writeBits (bw : BitWriter) {head tail : Nat × Nat}
+    (hhead : head.1 < 2 ^ head.2) :
+    BitWriter.writeBits bw (lz77BitPairAppend head tail).1
+        (lz77BitPairAppend head tail).2 =
+      BitWriter.writeBits (BitWriter.writeBits bw head.1 head.2) tail.1 tail.2 := by
+  simpa [lz77BitPairAppend] using
+    (writeBits_concat bw head.1 tail.1 head.2 tail.2 hhead)
+
+/-- Fixed-Huffman literal proof bits fit in their advertised code length. -/
+lemma fixedLz77LiteralBits_bits_lt (b : UInt8) :
+    (fixedLz77LiteralBits b).1 < 2 ^ (fixedLz77LiteralBits b).2 := by
+  simp [fixedLz77LiteralBits, reverseBits_lt]
+
+/-- Writing proof-facing fixed literal bits is the runtime fixed literal writer. -/
+lemma fixedLz77LiteralBits_writeBits (bw : BitWriter) (b : UInt8) :
+    BitWriter.writeBits bw (fixedLz77LiteralBits b).1 (fixedLz77LiteralBits b).2 =
+      BitWriter.writeFixedLiteralFast bw b := by
+  unfold fixedLz77LiteralBits
+  exact (writeFixedLiteralFast_eq_writeBits (bw := bw) (b := b)).symm
+
 /-- Public LZ77 length metadata is the fixed-Huffman match-length metadata,
 packaged under the encoder-facing name used by full LZ77 payload writers. -/
 lemma deflateLengthInfo_spec_internal (len : Nat) (hlo : 3 ≤ len) (hhi : len ≤ 258) :
@@ -149,6 +185,65 @@ lemma deflateDistanceInfo?_some_spec_get!
       (extraBits := extraBits) (extraLen := extraLen)
       (by simpa [hvalid] using hinfo)
   · simp [hvalid] at hinfo
+
+/-- Fixed-Huffman match proof bits fit in their advertised length whenever the
+match length is valid and the distance metadata exists. -/
+lemma fixedLz77MatchBits?_some_bits_lt
+    {len distance : Nat} {bits : Nat × Nat}
+    (hbits : fixedLz77MatchBits? len distance = some bits)
+    (hlenLo : 3 ≤ len) (hlenHi : len ≤ 258) :
+    bits.1 < 2 ^ bits.2 := by
+  classical
+  unfold fixedLz77MatchBits? at hbits
+  rcases hlenInfo : deflateLengthInfo len with ⟨sym, extraBits, extraLen⟩
+  simp [hlenInfo] at hbits
+  rcases hdistInfo : deflateDistanceInfo? distance with
+    _ | ⟨distSym, distExtraBits, distExtraLen⟩
+  · simp [hdistInfo] at hbits
+  · simp [hdistInfo] at hbits
+    cases hbits
+    let codeLen := fixedLitLenCode sym
+    let symBits : Nat × Nat := (reverseBits codeLen.1 codeLen.2, codeLen.2)
+    let lenExtraBits : Nat × Nat := (extraBits, extraLen)
+    let distSymBits : Nat × Nat := (reverseBits distSym 5, 5)
+    let distExtra : Nat × Nat := (distExtraBits, distExtraLen)
+    have hsymBits : symBits.1 < 2 ^ symBits.2 := by
+      simpa [symBits, codeLen] using reverseBits_lt codeLen.1 codeLen.2
+    have hlenSpec :
+        ∃ _hsym : 257 ≤ sym ∧ sym ≤ 285,
+          ∃ hidxBase : sym - 257 < lengthBases.size,
+            ∃ hidxExtra : sym - 257 < lengthExtra.size,
+              extraLen = Array.getInternal lengthExtra (sym - 257) hidxExtra ∧
+              Array.getInternal lengthBases (sym - 257) hidxBase + extraBits = len ∧
+              extraBits < 2 ^ extraLen := by
+      simpa [hlenInfo] using deflateLengthInfo_spec_internal len hlenLo hlenHi
+    have hlenExtra : lenExtraBits.1 < 2 ^ lenExtraBits.2 := by
+      simpa [hlenInfo, lenExtraBits] using
+        (by
+          rcases hlenSpec with ⟨_, _, _, _, _, hbitsLt⟩
+          exact hbitsLt)
+    have hdistSpec := deflateDistanceInfo?_some_spec_get! hdistInfo
+    have hdistSymBits : distSymBits.1 < 2 ^ distSymBits.2 := by
+      simpa [distSymBits] using reverseBits_lt distSym 5
+    have hdistExtra : distExtra.1 < 2 ^ distExtra.2 := by
+      rcases hdistSpec with ⟨_, _, _, hbitsLt⟩
+      simpa [distExtra] using hbitsLt
+    have htail1 :
+        (lz77BitPairAppend distSymBits distExtra).1 <
+          2 ^ (lz77BitPairAppend distSymBits distExtra).2 :=
+      lz77BitPairAppend_bits_lt hdistSymBits hdistExtra
+    have htail2 :
+        (lz77BitPairAppend lenExtraBits (lz77BitPairAppend distSymBits distExtra)).1 <
+          2 ^ (lz77BitPairAppend lenExtraBits (lz77BitPairAppend distSymBits distExtra)).2 :=
+      lz77BitPairAppend_bits_lt hlenExtra htail1
+    have htail3 :
+        (lz77BitPairAppend symBits
+            (lz77BitPairAppend lenExtraBits (lz77BitPairAppend distSymBits distExtra))).1 <
+          2 ^ (lz77BitPairAppend symBits
+            (lz77BitPairAppend lenExtraBits (lz77BitPairAppend distSymBits distExtra))).2 :=
+      lz77BitPairAppend_bits_lt hsymBits htail2
+    simpa [symBits, lenExtraBits, distSymBits, distExtra, codeLen]
+      using htail3
 
 /-- Successful distance metadata can be used with the decoder's internal
 array proofs, avoiding repeated `get!` coercion in payload proofs. -/
