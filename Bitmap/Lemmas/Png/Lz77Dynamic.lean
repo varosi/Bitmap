@@ -2856,6 +2856,359 @@ lemma generatedDynamicPayloadLz77Literal_transition_readerAt_writeBits
     (spec := spec) (br := br0) (out := out)
     (sym := b.toNat) (br' := br') (by simpa [spec, generatedDynamicTableSpecLz77] using hdecode)
     hsym
+
+/-- Generated dynamic LZ77 match token lengths normalize to the field layout
+used by decoder replay: literal/length code, length extras, distance code,
+distance extras, then the remaining payload tail. -/
+lemma dynamicPayloadLz77TokenBitLen_generated_match_tail_eq
+    (source : Array Png.Lz77Token) (target len distance : Nat)
+    (htarget : target < source.size)
+    (ht : source[target]'htarget = Png.Lz77Token.match len distance)
+    (hlen : 3 ≤ len ∧ len ≤ 258)
+    {sym extraBits extraLen distSym distExtraBits distExtraLen : Nat}
+    (hlenInfo : Png.deflateLengthInfo len = (sym, extraBits, extraLen))
+    (hdistInfo :
+      Png.deflateDistanceInfo? distance =
+        some (distSym, distExtraBits, distExtraLen))
+    (tailLen : Nat) :
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source))
+    let distCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source))
+    dynamicPayloadLz77TokenBitLen litLenCodes distCodes
+        (Png.Lz77Token.match len distance) + tailLen =
+      9 + (extraLen + (5 + (distExtraLen + tailLen))) := by
+  intro litLenCodes distCodes
+  have htoken :=
+    dynamicPayloadLz77TokenBitLen_generated_match_eq
+      source target len distance htarget ht hlen hlenInfo hdistInfo
+  have htoken' :
+      dynamicPayloadLz77TokenBitLen litLenCodes distCodes
+          (Png.Lz77Token.match len distance) =
+        9 + extraLen + 5 + distExtraLen := by
+    simpa [litLenCodes, distCodes] using htoken
+  omega
+
+/-- Generated dynamic LZ77 match token bits normalize to the field layout used
+by the decoder replay lemmas, with an arbitrary payload tail appended. -/
+lemma dynamicPayloadLz77TokenBits_generated_match_tail_eq
+    (source : Array Png.Lz77Token) (target len distance : Nat)
+    (htarget : target < source.size)
+    (ht : source[target]'htarget = Png.Lz77Token.match len distance)
+    (hlen : 3 ≤ len ∧ len ≤ 258)
+    {sym extraBits extraLen distSym distExtraBits distExtraLen : Nat}
+    (hlenInfo : Png.deflateLengthInfo len = (sym, extraBits, extraLen))
+    (hdistInfo :
+      Png.deflateDistanceInfo? distance =
+        some (distSym, distExtraBits, distExtraLen))
+    (tailBits : Nat) :
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source))
+    let distCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source))
+    let tokenBits :=
+      dynamicPayloadLz77TokenBits litLenCodes distCodes
+        (Png.Lz77Token.match len distance)
+    let tokenLen :=
+      dynamicPayloadLz77TokenBitLen litLenCodes distCodes
+        (Png.Lz77Token.match len distance)
+    let distExtraTailBits := distExtraBits ||| (tailBits <<< distExtraLen)
+    let distTailBits := distCodes[distSym]!.1 ||| (distExtraTailBits <<< 5)
+    let lenTailBits := extraBits ||| (distTailBits <<< extraLen)
+    tokenBits ||| (tailBits <<< tokenLen) =
+      litLenCodes[sym]!.1 ||| (lenTailBits <<< 9) := by
+  intro litLenCodes distCodes tokenBits tokenLen distExtraTailBits
+    distTailBits lenTailBits
+  rcases Png.deflateDistanceInfo_decodeDistance_correct hdistInfo with
+    ⟨hdistSym, _hdistExtra, _hextraDist, _hbaseDist, _hbitsDistLt⟩
+  let distLengths :=
+    Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source)
+  have hdistSymLen : distSym < distLengths.size := by
+    have hsize : distLengths.size = 30 := by
+      simpa [distLengths] using
+        generatedDynamicDistLengthsLz77_size (Png.distSymbolFreqsLz77 source)
+    have hbaseSize : Png.distBases.size = 30 := by decide
+    omega
+  have hdistLen :
+      distCodes[distSym]!.2 = 5 := by
+    simpa [distCodes, distLengths] using
+      generatedDynamicDistCodesLz77_len_eq_five
+        (Png.distSymbolFreqsLz77 source) distSym hdistSymLen
+  have hlitLen :
+      litLenCodes[sym]!.2 = 9 := by
+    have h :=
+      generatedDynamicLitLenCodesLz77_match_len_eq_nine_at
+        source target len distance htarget ht hlen
+    simpa [litLenCodes, hlenInfo] using h
+  simp [tokenBits, tokenLen, dynamicPayloadLz77TokenBits,
+    dynamicPayloadLz77TokenBitLen, hlenInfo, hdistInfo, hlitLen, hdistLen,
+    distExtraTailBits, distTailBits, lenTailBits, Nat.or_assoc,
+    Nat.shiftLeft_or_distrib, Png.shiftLeft_shiftLeft, Nat.add_assoc,
+    Nat.add_comm, Nat.add_left_comm]
+
+set_option maxRecDepth 250000 in
+set_option maxHeartbeats 5000000 in
+/-- Field-by-field replay for one generated dynamic LZ77 match token. This is
+the compact transition lemma used before rewriting from public packed token
+bits. -/
+lemma generatedDynamicPayloadLz77Match_manual_transition_readerAt_writeBits
+    (source : Array Png.Lz77Token) (target : Nat)
+    (bw : Png.BitWriter) (out out' : ByteArray)
+    (len distance sym extraBits extraLen distSym distExtraBits distExtraLen : Nat)
+    (tailBits tailLen : Nat)
+    (htarget : target < source.size)
+    (ht : source[target]'htarget = Png.Lz77Token.match len distance)
+    (hlenInfo : Png.deflateLengthInfo len = (sym, extraBits, extraLen))
+    (hdistInfo :
+      Png.deflateDistanceInfo? distance =
+        some (distSym, distExtraBits, distExtraLen))
+    (hexpand : Png.lz77TokenExpand? out (.match len distance) = some out')
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let spec := generatedDynamicTableSpecLz77 source
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source))
+    let distCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source))
+    let litBits := litLenCodes[sym]!.1
+    let distBits := distCodes[distSym]!.1
+    let distExtraTailBits := distExtraBits ||| (tailBits <<< distExtraLen)
+    let distExtraTailLen := distExtraLen + tailLen
+    let distTailBits := distBits ||| (distExtraTailBits <<< 5)
+    let distTailLen := 5 + distExtraTailLen
+    let lenTailBits := extraBits ||| (distTailBits <<< extraLen)
+    let lenTailLen := extraLen + distTailLen
+    let bitsTot := litBits ||| (lenTailBits <<< 9)
+    let lenTot := 9 + lenTailLen
+    let bwLenStart := Png.BitWriter.writeBits bw bitsTot 9
+    let bwDistStart := Png.BitWriter.writeBits bwLenStart lenTailBits extraLen
+    let bwDistExtraStart := Png.BitWriter.writeBits bwDistStart distTailBits 5
+    let bwAll := Png.BitWriter.writeBits bw bitsTot lenTot
+    let br0 := Png.BitWriter.readerAt bw bwAll.flush
+      (Png.flush_size_writeBits_le bw bitsTot lenTot) hbit
+    let brAfter := Png.BitWriter.readerAt
+      (Png.BitWriter.writeBits bwDistExtraStart distExtraTailBits distExtraLen)
+      (Png.BitWriter.writeBits bwDistExtraStart distExtraTailBits
+        distExtraTailLen).flush
+      (by
+        have hk : distExtraLen ≤ distExtraTailLen := by
+          simp [distExtraTailLen]
+        exact Png.flush_size_writeBits_prefix bwDistExtraStart
+          distExtraTailBits distExtraLen distExtraTailLen hk)
+      (Png.bitPos_lt_8_writeBits bwDistExtraStart distExtraTailBits
+        distExtraLen
+        (Png.bitPos_lt_8_writeBits bwDistStart distTailBits 5
+          (Png.bitPos_lt_8_writeBits bwLenStart lenTailBits extraLen
+            (Png.bitPos_lt_8_writeBits bw bitsTot 9 hbit))))
+    Png.DynamicPayloadTransition spec br0 out brAfter out' := by
+  intro spec litLenCodes distCodes litBits distBits distExtraTailBits
+    distExtraTailLen distTailBits distTailLen lenTailBits lenTailLen
+    bitsTot lenTot bwLenStart bwDistStart bwDistExtraStart bwAll br0 brAfter
+  rcases Png.lz77TokenExpand?_match_some_spec (out := out) (out' := out')
+      (len := len) (distance := distance) hexpand with
+    ⟨hlenLo, hlenHi, _hdistLo, _hdistHi, _hdistOut, _hdistSome, _hcopyFast⟩
+  rcases Png.deflateLengthInfo_decodeLength_correct
+      hlenInfo hlenLo hlenHi with
+    ⟨_hsym, _hidxBase, _hidxExtra, _hextraLen, _hbaseLen, hbitsLenLt⟩
+  rcases Png.deflateDistanceInfo_decodeDistance_correct hdistInfo with
+    ⟨hdist, _hdistExtra, _hextraDist, _hbaseDist, hbitsDistLt⟩
+  have hlitBitsLt : litBits < 2 ^ 9 := by
+    have hbits :=
+      generatedDynamicLitLenCodesLz77_match_bits_lt_codeSpace_at
+        source target len distance htarget ht ⟨hlenLo, hlenHi⟩
+    simpa [litBits, litLenCodes, hlenInfo] using hbits
+  let distLengths :=
+    Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source)
+  have hdistSymLen : distSym < distLengths.size := by
+    have hsize : distLengths.size = 30 := by
+      simpa [distLengths] using
+        generatedDynamicDistLengthsLz77_size (Png.distSymbolFreqsLz77 source)
+    have hbaseSize : Png.distBases.size = 30 := by decide
+    omega
+  have hdistBitsLt : distBits < 2 ^ 5 := by
+    have hbits :=
+      generatedDynamicDistCodesLz77_bits_lt_codeSpace
+        (Png.distSymbolFreqsLz77 source) distSym hdistSymLen
+    simpa [distBits, distCodes, distLengths] using hbits
+  have hbwPrefix :
+      Png.BitWriter.writeBits bw bitsTot 9 =
+        Png.BitWriter.writeBits bw litBits 9 := by
+    simpa [bitsTot] using
+      Png.writeBits_or_shift_tail bw litBits lenTailBits 9 hlitBitsLt
+  have hbwAllLenTail :
+      bwAll =
+        Png.BitWriter.writeBits
+          (Png.BitWriter.writeBits bw bitsTot 9) lenTailBits lenTailLen := by
+    have hcat :=
+      Png.writeBits_concat bw litBits lenTailBits 9 lenTailLen hlitBitsLt
+    calc
+      bwAll = Png.BitWriter.writeBits bw bitsTot (9 + lenTailLen) := by
+          rfl
+      _ =
+          Png.BitWriter.writeBits (Png.BitWriter.writeBits bw litBits 9)
+            lenTailBits lenTailLen := by
+          simpa [bitsTot] using hcat
+      _ =
+          Png.BitWriter.writeBits
+            (Png.BitWriter.writeBits bw bitsTot 9) lenTailBits lenTailLen := by
+          rw [hbwPrefix]
+  let brLen := Png.BitWriter.readerAt bwLenStart bwAll.flush
+    (by
+      have hk : 9 ≤ lenTot := by simp [lenTot]
+      exact Png.flush_size_writeBits_prefix bw bitsTot 9 lenTot hk)
+    (Png.bitPos_lt_8_writeBits bw bitsTot 9 hbit)
+  have hbitLen : bwLenStart.bitPos < 8 := by
+    simpa [bwLenStart] using
+      Png.bitPos_lt_8_writeBits bw bitsTot 9 hbit
+  have hcurLen : bwLenStart.curClearAbove := by
+    simpa [bwLenStart] using
+      Png.curClearAbove_writeBits bw bitsTot 9 hbit hcur
+  have hdecodeSym :
+      spec.litLenTable.decode br0 = some (sym, brLen) := by
+    have hdecode0 :=
+      generatedDynamicLitLenTableLz77_decode_match_at_readerAt_writeBits
+        source target len distance bw lenTailBits lenTailLen
+        htarget ht ⟨hlenLo, hlenHi⟩ hbit hcur
+    simpa [spec, generatedDynamicTableSpecLz77, litLenCodes, litBits,
+      bitsTot, lenTot, bwAll, br0, brLen, hlenInfo] using hdecode0
+  have hbwLenPrefix :
+      Png.BitWriter.writeBits bwLenStart lenTailBits extraLen =
+        Png.BitWriter.writeBits bwLenStart extraBits extraLen := by
+    simpa [lenTailBits] using
+      Png.writeBits_or_shift_tail bwLenStart extraBits distTailBits
+        extraLen hbitsLenLt
+  have hbwAllDistTail :
+      bwAll =
+        Png.BitWriter.writeBits
+          (Png.BitWriter.writeBits bwLenStart lenTailBits extraLen)
+          distTailBits distTailLen := by
+    have hcat :=
+      Png.writeBits_concat bwLenStart extraBits distTailBits
+        extraLen distTailLen hbitsLenLt
+    calc
+      bwAll =
+          Png.BitWriter.writeBits bwLenStart lenTailBits lenTailLen :=
+            hbwAllLenTail
+      _ =
+          Png.BitWriter.writeBits
+            (Png.BitWriter.writeBits bwLenStart extraBits extraLen)
+            distTailBits distTailLen := by
+          simpa [lenTailBits, lenTailLen] using hcat
+      _ =
+          Png.BitWriter.writeBits
+            (Png.BitWriter.writeBits bwLenStart lenTailBits extraLen)
+            distTailBits distTailLen := by
+          rw [hbwLenPrefix]
+  let brDist := Png.BitWriter.readerAt bwDistStart bwAll.flush
+    (by
+      simpa [bwDistStart, hbwAllDistTail] using
+        Png.flush_size_writeBits_le
+          (bw := bwDistStart) (bits := distTailBits) (len := distTailLen))
+    (by
+      simpa [bwDistStart] using
+        Png.bitPos_lt_8_writeBits bwLenStart lenTailBits extraLen hbitLen)
+  have hdecodeLenEx :
+      ∃ hsym hbits,
+        Png.decodeLength sym brLen hsym hbits = (len, brDist) := by
+    have hdecode0 :=
+      generatedDynamicPayloadLz77Match_decodeLength_readerAt_writeBits
+        (bw := bwLenStart) (len := len) (sym := sym)
+        (extraBits := extraBits) (extraLen := extraLen)
+        (restBits := distTailBits) (restLen := distTailLen)
+        hlenInfo ⟨hlenLo, hlenHi⟩ hbitLen hcurLen
+    simpa [lenTailBits, lenTailLen, bwDistStart, brLen, brDist,
+      hbwAllLenTail, hbwAllDistTail] using hdecode0
+  have hbwDistPrefix :
+      Png.BitWriter.writeBits bwDistStart distTailBits 5 =
+        Png.BitWriter.writeBits bwDistStart distBits 5 := by
+    simpa [distTailBits] using
+      Png.writeBits_or_shift_tail bwDistStart distBits distExtraTailBits 5
+        hdistBitsLt
+  have hbwAllDistExtraTail :
+      bwAll =
+        Png.BitWriter.writeBits
+          (Png.BitWriter.writeBits bwDistStart distTailBits 5)
+          distExtraTailBits distExtraTailLen := by
+    have hcat :=
+      Png.writeBits_concat bwDistStart distBits distExtraTailBits
+        5 distExtraTailLen hdistBitsLt
+    calc
+      bwAll =
+          Png.BitWriter.writeBits bwDistStart distTailBits distTailLen :=
+            hbwAllDistTail
+      _ =
+          Png.BitWriter.writeBits
+            (Png.BitWriter.writeBits bwDistStart distBits 5)
+            distExtraTailBits distExtraTailLen := by
+          simpa [distTailBits, distTailLen] using hcat
+      _ =
+          Png.BitWriter.writeBits
+            (Png.BitWriter.writeBits bwDistStart distTailBits 5)
+            distExtraTailBits distExtraTailLen := by
+          rw [hbwDistPrefix]
+  let brCopy := Png.BitWriter.readerAt bwDistExtraStart bwAll.flush
+    (by
+      simpa [bwDistExtraStart, hbwAllDistExtraTail] using
+        Png.flush_size_writeBits_le
+          (bw := bwDistExtraStart) (bits := distExtraTailBits)
+          (len := distExtraTailLen))
+    (by
+      have hbitDistSym' : bwDistStart.bitPos < 8 := by
+        simpa [bwDistStart] using
+          Png.bitPos_lt_8_writeBits bwLenStart lenTailBits extraLen hbitLen
+      simpa [bwDistExtraStart] using
+        Png.bitPos_lt_8_writeBits bwDistStart distTailBits 5 hbitDistSym')
+  have hbitDistSym : bwDistStart.bitPos < 8 := by
+    simpa [bwDistStart] using
+      Png.bitPos_lt_8_writeBits bwLenStart lenTailBits extraLen hbitLen
+  have hcurDistSym : bwDistStart.curClearAbove := by
+    simpa [bwDistStart] using
+      Png.curClearAbove_writeBits bwLenStart lenTailBits extraLen
+        hbitLen hcurLen
+  have hdecodeDistSym :
+      spec.distTable.decode brDist = some (distSym, brCopy) := by
+    have hdecode0 :=
+      generatedDynamicDistTableLz77_decode_symbol_readerAt_writeBits
+        (freqs := Png.distSymbolFreqsLz77 source) (sym := distSym)
+        (bw := bwDistStart) (restBits := distExtraTailBits)
+        (restLen := distExtraTailLen) hdistSymLen hbitDistSym hcurDistSym
+    simpa [spec, generatedDynamicTableSpecLz77, distCodes, distLengths,
+      distBits, distTailBits, distTailLen, bwDistExtraStart, brDist, brCopy,
+      hbwAllDistTail, hbwAllDistExtraTail] using hdecode0
+  have hbitDist : bwDistExtraStart.bitPos < 8 := by
+    simpa [bwDistExtraStart] using
+      Png.bitPos_lt_8_writeBits bwDistStart distTailBits 5 hbitDistSym
+  have hcurDist : bwDistExtraStart.curClearAbove := by
+    simpa [bwDistExtraStart] using
+      Png.curClearAbove_writeBits bwDistStart distTailBits 5
+        hbitDistSym hcurDistSym
+  have hdecodeDistEx :
+      ∃ hdist hbitsD,
+        Png.decodeDistance distSym brCopy hdist hbitsD = (distance, brAfter) := by
+    have hdecode0 :=
+      generatedDynamicPayloadLz77Match_decodeDistance_readerAt_writeBits
+        (bw := bwDistExtraStart) (distance := distance) (distSym := distSym)
+        (distExtraBits := distExtraBits) (distExtraLen := distExtraLen)
+        (restBits := tailBits) (restLen := tailLen) hdistInfo
+        hbitDist hcurDist
+    simpa [distExtraTailBits, distExtraTailLen, brCopy, brAfter,
+      hbwAllDistExtraTail] using hdecode0
+  have hcopy : Png.copyDistance out distance len = some out' :=
+    Png.lz77TokenExpand?_match_some_copyDistance hexpand
+  exact dynamicPayloadTransition_lz77_copy_of_decodes
+    (spec := spec) (br0 := br0) (br1 := brLen) (br2 := brDist)
+    (br3 := brCopy) (br4 := brAfter) (out := out) (out' := out')
+    (len := len) (distance := distance) (sym := sym)
+    (extraBits := extraBits) (extraLen := extraLen) (distSym := distSym)
+    (distExtraBits := distExtraBits) (distExtraLen := distExtraLen)
+    hlenInfo hdistInfo ⟨hlenLo, hlenHi⟩
+    hdecodeSym hdecodeLenEx hdecodeDistSym hdecodeDistEx hcopy
+
 /-- Proof-facing name for the code-length array advertised by the generated
 dynamic LZ77 header. It mirrors the local `lengths` binding in the writer. -/
 def generatedDynamicHeaderCodeLengthsLz77
