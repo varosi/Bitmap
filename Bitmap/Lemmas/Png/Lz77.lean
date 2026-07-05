@@ -702,6 +702,123 @@ lemma lz77TokenExpand?_match_some_copyDistance
     ⟨_, _, _, _, _, _, hcopy⟩
   simpa [copyDistance] using hcopy
 
+/-- Token validity facts needed by fixed-Huffman LZ77 payload proofs: literals
+are always valid, while matches need a DEFLATE length and encodable distance. -/
+def Lz77TokenFixedValid : Lz77Token → Prop
+  | .literal _ => True
+  | .match len distance =>
+      3 ≤ len ∧ len ≤ 258 ∧ ∃ info, deflateDistanceInfo? distance = some info
+
+/-- A fixed-valid LZ77 token has a proof-facing fixed-Huffman bit encoding. -/
+lemma fixedLz77TokenBits?_some_of_fixed_valid
+    {token : Lz77Token} (hvalid : Lz77TokenFixedValid token) :
+    ∃ bits, fixedLz77TokenBits? token = some bits := by
+  cases hbits : fixedLz77TokenBits? token with
+  | some bits =>
+      exact ⟨bits, rfl⟩
+  | none =>
+      cases token
+      · simp [fixedLz77TokenBits?] at hbits
+      · rcases hvalid with ⟨_, _, ⟨info, hinfo⟩⟩
+        rcases info with ⟨sym, extraBits, extraLen⟩
+        simp [fixedLz77TokenBits?, fixedLz77MatchBits?, hinfo] at hbits
+
+/-- Successful expansion validates every remaining token for fixed-Huffman LZ77
+emission. This separates round-trip validity from greedy optimality. -/
+lemma deflateTokensExpandLz77From?_fixed_valid
+    (tokens : Array Lz77Token) :
+    ∀ i out out',
+      deflateTokensExpandLz77From? tokens i out = some out' →
+      ∀ j, (hij : i ≤ j) → (hj : j < tokens.size) →
+        Lz77TokenFixedValid (tokens[j]'hj) := by
+  classical
+  have hk :
+      ∀ k, ∀ i out out',
+        tokens.size - i = k →
+        deflateTokensExpandLz77From? tokens i out = some out' →
+        ∀ j, (hij : i ≤ j) → (hj : j < tokens.size) →
+          Lz77TokenFixedValid (tokens[j]'hj) := by
+    intro k
+    induction k with
+    | zero =>
+        intro i out out' hk _hexpand j hij hj
+        omega
+    | succ k ih =>
+        intro i out out' hk hexpand j hij hj
+        have hi : i < tokens.size := by omega
+        rw [deflateTokensExpandLz77From?] at hexpand
+        simp [hi] at hexpand
+        cases hstep : lz77TokenExpand? out (tokens[i]'hi) with
+        | none =>
+            simp [hstep] at hexpand
+        | some outNext =>
+            simp [hstep] at hexpand
+            by_cases hji : j = i
+            · subst j
+              cases htok : tokens[i]'hi
+              · simp [Lz77TokenFixedValid]
+              ·
+                  have hspec := lz77TokenExpand?_match_some_spec
+                    (out := out) (out' := outNext) (by simpa [htok] using hstep)
+                  rcases hspec with ⟨hlenLo, hlenHi, _, _, _, hinfo, _⟩
+                  exact ⟨hlenLo, hlenHi, hinfo⟩
+            · have hkTail : tokens.size - (i + 1) = k := by omega
+              have hijTail : i + 1 ≤ j :=
+                Nat.succ_le_of_lt (Nat.lt_of_le_of_ne hij (by
+                  intro h
+                  exact hji h.symm))
+              exact ih (i + 1) outNext out' hkTail hexpand j hijTail hj
+  intro i out out' hexpand
+  exact hk (tokens.size - i) i out out' rfl hexpand
+
+/-- If every remaining token is fixed-valid, the proof-facing fixed-Huffman
+payload plus EOB bitstream exists from that point. -/
+lemma fixedLz77PayloadBitsEobFrom?_some_of_fixed_valid
+    (tokens : Array Lz77Token) :
+    ∀ i,
+      (∀ j, (hij : i ≤ j) → (hj : j < tokens.size) →
+        Lz77TokenFixedValid (tokens[j]'hj)) →
+      ∃ bits, fixedLz77PayloadBitsEobFrom? tokens i = some bits := by
+  classical
+  have hk :
+      ∀ k, ∀ i,
+        tokens.size - i = k →
+        (∀ j, (hij : i ≤ j) → (hj : j < tokens.size) →
+          Lz77TokenFixedValid (tokens[j]'hj)) →
+        ∃ bits, fixedLz77PayloadBitsEobFrom? tokens i = some bits := by
+    intro k
+    induction k with
+    | zero =>
+        intro i hk _hvalid
+        have hnot : ¬ i < tokens.size := by omega
+        rw [fixedLz77PayloadBitsEobFrom?]
+        simp [hnot]
+    | succ k ih =>
+        intro i hk hvalid
+        have hi : i < tokens.size := by omega
+        rcases fixedLz77TokenBits?_some_of_fixed_valid (hvalid i (by omega) hi) with
+          ⟨head, hhead⟩
+        have hvalidTail :
+            ∀ j, (hij : i + 1 ≤ j) → (hj : j < tokens.size) →
+              Lz77TokenFixedValid (tokens[j]'hj) := by
+          intro j hij hj
+          exact hvalid j (by omega) hj
+        have hkTail : tokens.size - (i + 1) = k := by omega
+        rcases ih (i + 1) hkTail hvalidTail with ⟨tail, htail⟩
+        rw [fixedLz77PayloadBitsEobFrom?]
+        simp [hi, hhead, htail]
+  intro i hvalid
+  exact hk (tokens.size - i) i rfl hvalid
+
+/-- Successful token expansion is enough to produce the proof-facing fixed
+payload bitstream used by fixed LZ77 encoder correctness. -/
+lemma fixedLz77PayloadBitsEobFrom?_some_of_expand
+    {tokens : Array Lz77Token} {i : Nat} {out out' : ByteArray}
+    (hexpand : deflateTokensExpandLz77From? tokens i out = some out') :
+    ∃ bits, fixedLz77PayloadBitsEobFrom? tokens i = some bits := by
+  have hvalid := deflateTokensExpandLz77From?_fixed_valid tokens i out out' hexpand
+  exact fixedLz77PayloadBitsEobFrom?_some_of_fixed_valid tokens i hvalid
+
 end Png
 
 end Bitmaps
