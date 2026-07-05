@@ -1,5 +1,6 @@
 import Bitmap.Lemmas.Png.DynamicBlockProofsLoop
 import Bitmap.Lemmas.Png.DynamicEncoderPayload
+import Bitmap.Lemmas.Png.Lz77Dynamic
 import Bitmap.Lemmas.Png.DynamicBlockProofsSpec
 import Bitmap.Lemmas.Png.DynamicBlockProofsSpecConcrete
 import Bitmap.Lemmas.Png.EncodeDecodeBase
@@ -629,7 +630,7 @@ lemma zlibDecompressStored_zlibCompressDynamic_none (raw : ByteArray)
   have hdeflated : bytes.extract 2 (bytes.size - 4) = deflateDynamic raw := by
     simpa [bytes] using zlibCompressDynamic_extract_deflated raw
   have hinflate : inflateStored (bytes.extract 2 (bytes.size - 4)) = none := by
-    simpa [hdeflated, deflateDynamic] using inflateStored_deflateDynamicFullFast_none raw
+    simpa [hdeflated, deflateDynamic] using inflateStored_deflateDynamicLz77_none raw
   have hmod : ((u8 0x78).toNat <<< 8 + (u8 0x01).toNat) % 31 = 0 := by
     decide
   have hbtype : (u8 0x78 &&& (0x0F : UInt8)) = 8 := by

@@ -1197,6 +1197,2170 @@ lemma writeDynamicPayloadLz77_deflateTokensLz77_eq_writeBits
         simpa [source] using htarget))
     bw
 
+/-- The generated LZ77 literal/length table keeps the EOB symbol in bounds.
+This is the positive-entry witness used by dynamic table construction. -/
+lemma generatedDynamicLitLenLengthsLz77_eob_inBounds
+    (source : Array Png.Lz77Token) :
+    256 <
+      (Png.generatedDynamicLitLenLengths
+        (Png.litLenSymbolFreqsLz77 source)).size := by
+  simp [generatedDynamicLitLenLengths_size, litLenSymbolFreqsLz77_size]
+
+/-- The generated LZ77 literal/length table assigns EOB a positive length,
+because the LZ77 frequency builder always increments the EOB bucket. -/
+lemma generatedDynamicLitLenLengthsLz77_eob_pos
+    (source : Array Png.Lz77Token) :
+    0 <
+      (Png.generatedDynamicLitLenLengths
+        (Png.litLenSymbolFreqsLz77 source))[256]'
+          (generatedDynamicLitLenLengthsLz77_eob_inBounds source) := by
+  let freqs := Png.litLenSymbolFreqsLz77 source
+  let lengths := Png.generatedDynamicLitLenLengths freqs
+  have hidx : 256 < freqs.size := by
+    simpa [freqs, litLenSymbolFreqsLz77_size]
+  have hpos : 0 < freqs[256]! := by
+    simpa [freqs] using litLenSymbolFreqsLz77_eob_pos source
+  have hiff :=
+    generatedDynamicLitLenLengths_get!_pos_iff freqs 256 hidx
+  have hposBang : 0 < lengths[256]! := by
+    simpa [lengths] using hiff.mpr hpos
+  have hidxLengths : 256 < lengths.size := by
+    simpa [lengths, generatedDynamicLitLenLengths_size] using hidx
+  rwa [getElem!_pos lengths 256 hidxLengths] at hposBang
+
+/-- The generated LZ77 literal/length table assigns EOB the concrete nine-bit
+code length. This fixes the max-code-length lower bound for `mkHuffman`. -/
+lemma generatedDynamicLitLenLengthsLz77_eob_eq_nine
+    (source : Array Png.Lz77Token) :
+    (Png.generatedDynamicLitLenLengths
+      (Png.litLenSymbolFreqsLz77 source))[256]'
+        (generatedDynamicLitLenLengthsLz77_eob_inBounds source) = 9 := by
+  let freqs := Png.litLenSymbolFreqsLz77 source
+  let lengths := Png.generatedDynamicLitLenLengths freqs
+  have hidx : 256 < lengths.size := by
+    simpa [lengths] using generatedDynamicLitLenLengthsLz77_eob_inBounds source
+  have hpos : 0 < lengths[256]'hidx := by
+    simpa [lengths] using generatedDynamicLitLenLengthsLz77_eob_pos source
+  have hiff :=
+    generatedDynamicLitLenLengths_getElem_pos_iff_eq_nine freqs 256 hidx
+  simpa [lengths] using hiff.mp hpos
+
+/-- Generated LZ77 literal/length tables scan to exactly the uniform nine-bit
+code length. This is the LZ77 source-specific max scan fact for `mkHuffman`. -/
+lemma maxCodeLenAux_generatedDynamicLitLenLengthsLz77_eq_codeLen
+    (source : Array Png.Lz77Token) :
+    Png.maxCodeLenAux
+        (Png.generatedDynamicLitLenLengths
+          (Png.litLenSymbolFreqsLz77 source)) 0 0 =
+      Png.generatedDynamicLitLenCodeLen := by
+  let lengths :=
+    Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source)
+  have hidx : 256 < lengths.size := by
+    simpa [lengths] using generatedDynamicLitLenLengthsLz77_eob_inBounds source
+  have hentry : lengths[256] = Png.generatedDynamicLitLenCodeLen := by
+    have heq := generatedDynamicLitLenLengthsLz77_eob_eq_nine source
+    simpa [lengths, Png.generatedDynamicLitLenCodeLen] using heq
+  have hle :
+      Png.maxCodeLenAux lengths 0 0 ≤ Png.generatedDynamicLitLenCodeLen := by
+    simpa [lengths] using
+      maxCodeLenAux_generatedDynamicLitLenLengths_le_codeLen
+        (Png.litLenSymbolFreqsLz77 source) 0 0
+        (by simp [Png.generatedDynamicLitLenCodeLen])
+  have hge :
+      Png.generatedDynamicLitLenCodeLen ≤ Png.maxCodeLenAux lengths 0 0 := by
+    simpa [hentry] using getElem_le_maxCodeLenAux lengths 0 0 256 (by decide) hidx
+  exact le_antisymm hle hge
+
+/-- Generated LZ77 literal/length tables have strictly fewer entries than the
+nine-bit code space. This is the non-oversubscription size side. -/
+lemma generatedDynamicLitLenLengthsLz77_size_lt_codeSpace
+    (source : Array Png.Lz77Token) :
+    (Png.generatedDynamicLitLenLengths
+      (Png.litLenSymbolFreqsLz77 source)).size <
+        2 ^ Png.generatedDynamicLitLenCodeLen := by
+  simp [generatedDynamicLitLenLengths_size, litLenSymbolFreqsLz77_size,
+    Png.generatedDynamicLitLenCodeLen]
+
+/-- Generated LZ77 literal/length counts make the canonical scanned max code
+start at zero. This adapts the generic generated next-code fact to LZ77. -/
+lemma nextCodesAux_generatedDynamicLitLenLengthsLz77_get!_scannedMax_eq_zero
+    (source : Array Png.Lz77Token) :
+    let lengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source)
+    let maxLen := Png.maxCodeLenAux lengths 0 0
+    let count :=
+      Png.countCodeLengthsAux lengths 0 (Array.replicate (maxLen + 1) 0)
+    let nextCode0 := Array.replicate (maxLen + 1) 0
+    let nextCode := (Png.nextCodesAux count maxLen 1 0 nextCode0).2
+    nextCode[maxLen]! = 0 := by
+  intro lengths maxLen count nextCode0 nextCode
+  have hmax :
+      maxLen = Png.generatedDynamicLitLenCodeLen := by
+    simpa [lengths, maxLen] using
+      maxCodeLenAux_generatedDynamicLitLenLengthsLz77_eq_codeLen source
+  simpa [lengths, maxLen, count, nextCode0, nextCode, hmax] using
+    nextCodesAux_generatedDynamicLitLenLengths_get!_codeLen_eq_zero
+      (Png.litLenSymbolFreqsLz77 source)
+
+/-- LZ77 generated literal/length lengths are accepted by `mkHuffman`.
+This names the successful table construction for later payload replay. -/
+lemma mkHuffman_generatedDynamicLitLenLengthsLz77_isSome
+    (source : Array Png.Lz77Token) :
+    (Png.mkHuffman
+      (Png.generatedDynamicLitLenLengths
+        (Png.litLenSymbolFreqsLz77 source))).isSome = true := by
+  let lengths :=
+    Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source)
+  let maxLen := Png.maxCodeLenAux lengths 0 0
+  let count := Png.countCodeLengthsAux lengths 0 (Array.replicate (maxLen + 1) 0)
+  let nextCode0 : Array Nat := Array.replicate (maxLen + 1) 0
+  let nextCode := (Png.nextCodesAux count maxLen 1 0 nextCode0).2
+  let codeLen := Png.generatedDynamicLitLenCodeLen
+  have hmax : maxLen = codeLen := by
+    simpa [lengths, maxLen, codeLen] using
+      maxCodeLenAux_generatedDynamicLitLenLengthsLz77_eq_codeLen source
+  have hmaxNe : ¬ maxLen = 0 := by
+    rw [hmax]
+    exact Nat.ne_of_gt (by simpa [codeLen] using generatedDynamicLitLenCodeLen_pos)
+  have hnextSize : nextCode.size = nextCode0.size := by
+    simpa [nextCode] using nextCodesAux_size count maxLen 1 0 nextCode0
+  have hnextIdx : codeLen < nextCode.size := by
+    rw [hnextSize]
+    simp [nextCode0, hmax, codeLen]
+  have htableIdx : codeLen < (Png.huffmanEmptyTable maxLen).size := by
+    simp [huffmanEmptyTable_size, hmax, codeLen]
+  have hrow :
+      (Png.huffmanEmptyTable maxLen)[codeLen]!.size = 1 <<< codeLen := by
+    exact huffmanEmptyTable_get!_size maxLen codeLen (by simp [hmax])
+      (by simpa [codeLen] using generatedDynamicLitLenCodeLen_pos)
+  have hnextZero : nextCode[codeLen]! = 0 := by
+    have hscanned :=
+      nextCodesAux_generatedDynamicLitLenLengthsLz77_get!_scannedMax_eq_zero source
+    simpa [lengths, maxLen, count, nextCode0, nextCode, codeLen, hmax] using hscanned
+  have hsizeLt : lengths.size < 1 <<< codeLen := by
+    have hlt := generatedDynamicLitLenLengthsLz77_size_lt_codeSpace source
+    simpa [lengths, codeLen, Nat.shiftLeft_eq] using hlt
+  have hbudget : nextCode[codeLen]! + (lengths.size - 0) ≤ 1 <<< codeLen := by
+    rw [hnextZero]
+    omega
+  have hshape :
+      ∀ j (hj : j < lengths.size), 0 ≤ j →
+        0 < lengths[j] → lengths[j] = codeLen := by
+    intro j hj _hle hpos
+    have hnine :
+        lengths[j] = 9 := by
+      simpa [lengths] using
+        (generatedDynamicLitLenLengths_getElem_pos_iff_eq_nine
+          (Png.litLenSymbolFreqsLz77 source) j (by simpa [lengths] using hj)).mp hpos
+    simpa [codeLen, generatedDynamicLitLenCodeLen_eq_nine] using hnine
+  have hfill :
+      (Png.fillHuffmanTableAux lengths 0 nextCode
+        (Png.huffmanEmptyTable maxLen)).isSome = true :=
+    fillHuffmanTableAux_uniform_isSome lengths 0 codeLen nextCode
+      (Png.huffmanEmptyTable maxLen) hshape hnextIdx htableIdx hrow hbudget
+  obtain ⟨table, hfillEq⟩ :
+      ∃ table,
+        Png.fillHuffmanTableAux lengths 0 nextCode
+          (Png.huffmanEmptyTable maxLen) = some table := by
+    cases h :
+        Png.fillHuffmanTableAux lengths 0 nextCode
+          (Png.huffmanEmptyTable maxLen) with
+    | none =>
+        simp [h] at hfill
+    | some table =>
+        exact ⟨table, rfl⟩
+  change (Png.mkHuffman lengths).isSome = true
+  simp [Png.mkHuffman, maxLen, count, nextCode0, nextCode, hmaxNe, hfillEq]
+
+/-- `mkHuffman` produces the named LZ77 generated literal/length Huffman
+table. This gives later lemmas a stable table name. -/
+def generatedDynamicLitLenTableLz77
+    (source : Array Png.Lz77Token) : Png.Huffman :=
+  match Png.mkHuffman
+      (Png.generatedDynamicLitLenLengths
+        (Png.litLenSymbolFreqsLz77 source)) with
+  | some table => table
+  | none => { maxLen := 0, table := #[] }
+
+/-- The LZ77 generated literal/length table name unfolds to the successful
+runtime `mkHuffman` result. -/
+lemma mkHuffman_generatedDynamicLitLenLengthsLz77_eq
+    (source : Array Png.Lz77Token) :
+    Png.mkHuffman
+        (Png.generatedDynamicLitLenLengths
+          (Png.litLenSymbolFreqsLz77 source)) =
+      some (generatedDynamicLitLenTableLz77 source) := by
+  have hsome :=
+    mkHuffman_generatedDynamicLitLenLengthsLz77_isSome source
+  cases h :
+      Png.mkHuffman
+        (Png.generatedDynamicLitLenLengths
+          (Png.litLenSymbolFreqsLz77 source)) with
+  | none =>
+      simp [h] at hsome
+  | some table =>
+      simp [generatedDynamicLitLenTableLz77, h]
+
+/-- Proof-only projection from full LZ77 tokens to the legacy distance-1 token
+shape. It preserves exactly the literal/length symbols and discards distance. -/
+def lz77LitLenMirrorToken : Png.Lz77Token → Png.DeflateToken
+  | .literal b => .literal b
+  | .match len _distance => .matchDist1 len
+
+/-- Proof-only token stream used to reuse legacy literal/length dynamic-table
+lemmas. It mirrors literals and match lengths while ignoring match distances. -/
+def lz77LitLenMirrorTokens
+    (tokens : Array Png.Lz77Token) : Array Png.DeflateToken :=
+  Array.ofFn fun idx : Fin tokens.size =>
+    lz77LitLenMirrorToken tokens[idx]
+
+/-- The proof-only literal/length mirror has the same number of tokens as the
+full LZ77 source stream. -/
+lemma lz77LitLenMirrorTokens_size
+    (tokens : Array Png.Lz77Token) :
+    (lz77LitLenMirrorTokens tokens).size = tokens.size := by
+  simp [lz77LitLenMirrorTokens]
+
+/-- Indexing the literal/length mirror is the same as projecting the indexed
+LZ77 token. This is the bridge for reusing legacy token-indexed lemmas. -/
+lemma lz77LitLenMirrorTokens_get
+    (tokens : Array Png.Lz77Token) (idx : Nat) (hidx : idx < tokens.size) :
+    (lz77LitLenMirrorTokens tokens)[idx]'
+        (by simpa [lz77LitLenMirrorTokens_size] using hidx) =
+      lz77LitLenMirrorToken (tokens[idx]'hidx) := by
+  simp [lz77LitLenMirrorTokens]
+
+/-- Literal/length frequency scanning is unchanged by the proof-only mirror.
+This lets LZ77 generated literal/length tables reuse the legacy table proofs. -/
+lemma litLenSymbolFreqs_lz77LitLenMirrorTokensAux
+    (tokens : Array Png.Lz77Token) (i : Nat) (freqs : Array Nat) :
+    Png.litLenSymbolFreqsAux (lz77LitLenMirrorTokens tokens) i freqs =
+      Png.litLenSymbolFreqsLz77Aux tokens i freqs := by
+  rw [Png.litLenSymbolFreqsAux.eq_1, Png.litLenSymbolFreqsLz77Aux.eq_1]
+  by_cases h : i < tokens.size
+  · have hmirror : i < (lz77LitLenMirrorTokens tokens).size := by
+      simpa [lz77LitLenMirrorTokens_size] using h
+    cases htok : tokens[i]'h with
+    | literal b =>
+        have hget :
+            (lz77LitLenMirrorTokens tokens)[i]'hmirror =
+              Png.DeflateToken.literal b := by
+          simpa [lz77LitLenMirrorToken, htok] using
+            lz77LitLenMirrorTokens_get tokens i h
+        have hrec :=
+          litLenSymbolFreqs_lz77LitLenMirrorTokensAux tokens (i + 1)
+            (Png.incrementNatAt freqs b.toNat)
+        simpa [h, hmirror, hget, htok] using hrec
+    | «match» len distance =>
+        have hget :
+            (lz77LitLenMirrorTokens tokens)[i]'hmirror =
+              Png.DeflateToken.matchDist1 len := by
+          simpa [lz77LitLenMirrorToken, htok] using
+            lz77LitLenMirrorTokens_get tokens i h
+        have hrec :=
+          litLenSymbolFreqs_lz77LitLenMirrorTokensAux tokens (i + 1)
+            (Png.incrementNatAt freqs (Png.deflateLengthInfo len).1)
+        simpa [h, hmirror, hget, htok, Png.deflateLengthInfo] using hrec
+  · have hmirror : ¬ i < (lz77LitLenMirrorTokens tokens).size := by
+      simpa [lz77LitLenMirrorTokens_size] using h
+    simp [h, hmirror]
+termination_by tokens.size - i
+decreasing_by
+  all_goals
+    have hlt : i < tokens.size := h
+    exact Nat.sub_lt_sub_left (k := i) (m := tokens.size) (n := i + 1)
+      hlt (Nat.lt_succ_self i)
+
+/-- Completed literal/length frequency tables are unchanged by the proof-only
+mirror, including the final EOB increment. -/
+lemma litLenSymbolFreqs_lz77LitLenMirrorTokens
+    (tokens : Array Png.Lz77Token) :
+    Png.litLenSymbolFreqs (lz77LitLenMirrorTokens tokens) =
+      Png.litLenSymbolFreqsLz77 tokens := by
+  simp [Png.litLenSymbolFreqs, Png.litLenSymbolFreqsLz77,
+    litLenSymbolFreqs_lz77LitLenMirrorTokensAux]
+
+/-- The LZ77 generated literal/length Huffman table is the legacy generated
+table for the proof-only literal/length mirror. -/
+lemma generatedDynamicLitLenTableLz77_eq_lz77LitLenMirrorTokens
+    (source : Array Png.Lz77Token) :
+    generatedDynamicLitLenTableLz77 source =
+      generatedDynamicLitLenTable (lz77LitLenMirrorTokens source) := by
+  have hold :
+      Png.mkHuffman
+          (Png.generatedDynamicLitLenLengths
+            (Png.litLenSymbolFreqsLz77 source)) =
+        some (generatedDynamicLitLenTable (lz77LitLenMirrorTokens source)) := by
+    simpa [litLenSymbolFreqs_lz77LitLenMirrorTokens source] using
+      mkHuffman_generatedDynamicLitLenLengths_eq
+        (lz77LitLenMirrorTokens source)
+  have hlz :=
+    mkHuffman_generatedDynamicLitLenLengthsLz77_eq source
+  rw [hlz] at hold
+  simpa using hold
+
+/-- A generated LZ77 literal token's literal/length code decodes through the
+LZ77 generated table by reusing the legacy mirror table proof. -/
+lemma generatedDynamicLitLenTableLz77_decode_literal_at_readerAt_writeBits
+    (source : Array Png.Lz77Token) (target : Nat) (b : UInt8)
+    (bw : Png.BitWriter) (restBits restLen : Nat)
+    (htarget : target < source.size)
+    (ht : source[target]'htarget = Png.Lz77Token.literal b)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let lengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source)
+    let codes := Png.canonicalRevCodesFromLengths lengths
+    let bitsTot := codes[b.toNat]!.1 ||| (restBits <<< 9)
+    let lenTot := 9 + restLen
+    let bw' := Png.BitWriter.writeBits bw bitsTot lenTot
+    let br0 := Png.BitWriter.readerAt bw bw'.flush
+      (Png.flush_size_writeBits_le bw bitsTot lenTot) hbit
+    let br9 := Png.BitWriter.readerAt (Png.BitWriter.writeBits bw bitsTot 9) bw'.flush
+      (by
+        have hk : 9 ≤ lenTot := by omega
+        simpa [lenTot] using
+          (Png.flush_size_writeBits_prefix bw bitsTot 9 lenTot hk))
+      (Png.bitPos_lt_8_writeBits bw bitsTot 9 hbit)
+    (generatedDynamicLitLenTableLz77 source).decode br0 =
+      some (b.toNat, br9) := by
+  intro lengths codes bitsTot lenTot bw' br0 br9
+  let mirror := lz77LitLenMirrorTokens source
+  have htargetMirror : target < mirror.size := by
+    simpa [mirror, lz77LitLenMirrorTokens_size] using htarget
+  have htMirror : mirror[target]'htargetMirror = Png.DeflateToken.literal b := by
+    simpa [mirror, lz77LitLenMirrorToken, ht] using
+      lz77LitLenMirrorTokens_get source target htarget
+  have hdecode :=
+    generatedDynamicLitLenTable_decode_literal_at_readerAt_writeBits
+      (tokens := mirror) (target := target) (b := b) (bw := bw)
+      (restBits := restBits) (restLen := restLen)
+      htargetMirror htMirror hbit hcur
+  simpa [mirror, litLenSymbolFreqs_lz77LitLenMirrorTokens,
+    generatedDynamicLitLenTableLz77_eq_lz77LitLenMirrorTokens,
+    lengths, codes, bitsTot, lenTot, bw', br0, br9] using hdecode
+
+/-- A generated LZ77 match token's length symbol decodes through the LZ77
+generated table. Distance decoding is handled by separate distance-table lemmas. -/
+lemma generatedDynamicLitLenTableLz77_decode_match_at_readerAt_writeBits
+    (source : Array Png.Lz77Token) (target len distance : Nat)
+    (bw : Png.BitWriter) (restBits restLen : Nat)
+    (htarget : target < source.size)
+    (ht : source[target]'htarget = Png.Lz77Token.match len distance)
+    (hlen : 3 ≤ len ∧ len ≤ 258)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let lengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source)
+    let codes := Png.canonicalRevCodesFromLengths lengths
+    let sym := (Png.deflateLengthInfo len).1
+    let bitsTot := codes[sym]!.1 ||| (restBits <<< 9)
+    let lenTot := 9 + restLen
+    let bw' := Png.BitWriter.writeBits bw bitsTot lenTot
+    let br0 := Png.BitWriter.readerAt bw bw'.flush
+      (Png.flush_size_writeBits_le bw bitsTot lenTot) hbit
+    let br9 := Png.BitWriter.readerAt (Png.BitWriter.writeBits bw bitsTot 9) bw'.flush
+      (by
+        have hk : 9 ≤ lenTot := by omega
+        simpa [lenTot] using
+          (Png.flush_size_writeBits_prefix bw bitsTot 9 lenTot hk))
+      (Png.bitPos_lt_8_writeBits bw bitsTot 9 hbit)
+    (generatedDynamicLitLenTableLz77 source).decode br0 = some (sym, br9) := by
+  intro lengths codes sym bitsTot lenTot bw' br0 br9
+  let mirror := lz77LitLenMirrorTokens source
+  have htargetMirror : target < mirror.size := by
+    simpa [mirror, lz77LitLenMirrorTokens_size] using htarget
+  have htMirror : mirror[target]'htargetMirror = Png.DeflateToken.matchDist1 len := by
+    simpa [mirror, lz77LitLenMirrorToken, ht] using
+      lz77LitLenMirrorTokens_get source target htarget
+  have hdecode :=
+    generatedDynamicLitLenTable_decode_match_at_readerAt_writeBits
+      (tokens := mirror) (target := target) (len := len) (bw := bw)
+      (restBits := restBits) (restLen := restLen)
+      htargetMirror htMirror hlen hbit hcur
+  simpa [mirror, Png.deflateLengthInfo,
+    litLenSymbolFreqs_lz77LitLenMirrorTokens,
+    generatedDynamicLitLenTableLz77_eq_lz77LitLenMirrorTokens,
+    lengths, codes, sym, bitsTot, lenTot, bw', br0, br9] using hdecode
+
+/-- The generated LZ77 EOB literal/length code decodes through the LZ77 table.
+This is the terminal literal/length decode step for LZ77 dynamic payload traces. -/
+lemma generatedDynamicLitLenTableLz77_decode_eob_readerAt_writeBits
+    (source : Array Png.Lz77Token)
+    (bw : Png.BitWriter) (restBits restLen : Nat)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let lengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source)
+    let codes := Png.canonicalRevCodesFromLengths lengths
+    let bitsTot := codes[256]!.1 ||| (restBits <<< 9)
+    let lenTot := 9 + restLen
+    let bw' := Png.BitWriter.writeBits bw bitsTot lenTot
+    let br0 := Png.BitWriter.readerAt bw bw'.flush
+      (Png.flush_size_writeBits_le bw bitsTot lenTot) hbit
+    let br9 := Png.BitWriter.readerAt (Png.BitWriter.writeBits bw bitsTot 9) bw'.flush
+      (by
+        have hk : 9 ≤ lenTot := by omega
+        simpa [lenTot] using
+          (Png.flush_size_writeBits_prefix bw bitsTot 9 lenTot hk))
+      (Png.bitPos_lt_8_writeBits bw bitsTot 9 hbit)
+    (generatedDynamicLitLenTableLz77 source).decode br0 = some (256, br9) := by
+  intro lengths codes bitsTot lenTot bw' br0 br9
+  let mirror := lz77LitLenMirrorTokens source
+  have hdecode :=
+    generatedDynamicLitLenTable_decode_eob_readerAt_writeBits
+      (tokens := mirror) (bw := bw) (restBits := restBits)
+      (restLen := restLen) hbit hcur
+  simpa [mirror, litLenSymbolFreqs_lz77LitLenMirrorTokens,
+    generatedDynamicLitLenTableLz77_eq_lz77LitLenMirrorTokens,
+    lengths, codes, bitsTot, lenTot, bw', br0, br9] using hdecode
+
+/-- LZ77 dynamic distance code-length arrays obey the DEFLATE 15-bit bound.
+The v1 encoder advertises a uniform five-bit table for all distance symbols. -/
+lemma generatedDynamicDistLengthsLz77_entries_le_15
+    (freqs : Array Nat) :
+    ArrayEntriesLe (Png.generatedDynamicDistLengthsLz77 freqs) 15 := by
+  intro idx hidx
+  have hlen : (Png.generatedDynamicDistLengthsLz77 freqs)[idx]! = 5 := by
+    exact generatedDynamicDistLengthsLz77_get!_eq_five freqs idx hidx
+  rw [getElem!_pos (Png.generatedDynamicDistLengthsLz77 freqs) idx hidx] at hlen
+  omega
+
+/-- Named dynamic distance Huffman table for v1 LZ77 blocks. It is built from
+the uniform 30-symbol, five-bit distance length array advertised by the encoder. -/
+def generatedDynamicDistTableLz77 : Png.Huffman :=
+  match Png.mkHuffman (Array.replicate 30 5) with
+  | some table => table
+  | none => Png.emptyHuffman
+
+/-- The v1 LZ77 generated distance lengths build the named five-bit table.
+This packages the runtime `mkHuffman` result for later payload replay. -/
+lemma mkHuffman_generatedDynamicDistLengthsLz77_eq
+    (freqs : Array Nat) :
+    Png.mkHuffman (Png.generatedDynamicDistLengthsLz77 freqs) =
+      some generatedDynamicDistTableLz77 := by
+  unfold Png.generatedDynamicDistLengthsLz77 generatedDynamicDistTableLz77
+  native_decide
+
+/-- Runtime dynamic distance-table construction accepts the v1 LZ77 distance
+lengths and returns the named generated table. -/
+lemma buildDynamicDistTable_generatedDynamicDistLengthsLz77_eq
+    (freqs : Array Nat) :
+    Png.buildDynamicDistTable (Png.generatedDynamicDistLengthsLz77 freqs) =
+      some generatedDynamicDistTableLz77 := by
+  simp [Png.buildDynamicDistTable,
+    mkHuffman_generatedDynamicDistLengthsLz77_eq freqs]
+
+/-- The v1 LZ77 generated distance table has five-bit maximum code length. -/
+lemma generatedDynamicDistTableLz77_maxLen :
+    generatedDynamicDistTableLz77.maxLen = 5 := by
+  native_decide
+
+/-- The v1 LZ77 generated distance table has rows zero through five. -/
+lemma generatedDynamicDistTableLz77_table_size :
+    generatedDynamicDistTableLz77.table.size = 6 := by
+  native_decide
+
+/-- The v1 LZ77 generated distance table's final row has the full five-bit
+code-space width. -/
+lemma generatedDynamicDistTableLz77_row5_size :
+    generatedDynamicDistTableLz77.table[5]!.size = 1 <<< 5 := by
+  native_decide
+
+/-- Rows shorter than five bits in the LZ77 generated distance table keep their
+initialized widths. These rows cannot resolve a distance symbol. -/
+lemma generatedDynamicDistTableLz77_short_row_size
+    (rowIdx : Nat) (hrowPos : 0 < rowIdx) (hrowLt : rowIdx < 5) :
+    generatedDynamicDistTableLz77.table[rowIdx]!.size = 1 <<< rowIdx := by
+  have hcases :
+      rowIdx = 1 ∨ rowIdx = 2 ∨ rowIdx = 3 ∨ rowIdx = 4 := by
+    omega
+  rcases hcases with rfl | rfl | rfl | rfl <;> native_decide
+
+/-- Rows shorter than five bits in the LZ77 generated distance table contain no
+symbols. Huffman decoding must continue until row five. -/
+lemma generatedDynamicDistTableLz77_short_row_get_none
+    (rowIdx code : Nat) (hrowPos : 0 < rowIdx) (hrowLt : rowIdx < 5)
+    (hcode : code < generatedDynamicDistTableLz77.table[rowIdx]!.size) :
+    generatedDynamicDistTableLz77.table[rowIdx]![code]! = none := by
+  have hcases :
+      rowIdx = 1 ∨ rowIdx = 2 ∨ rowIdx = 3 ∨ rowIdx = 4 := by
+    omega
+  rcases hcases with rfl | rfl | rfl | rfl
+  · have hrow :
+        generatedDynamicDistTableLz77.table[1]! =
+          Array.replicate (1 <<< 1) (none : Option Nat) := by
+      native_decide
+    have hcodeRep :
+        code < (Array.replicate (1 <<< 1) (none : Option Nat)).size := by
+      simpa [hrow] using hcode
+    rw [hrow]
+    rw [getElem!_pos
+      (Array.replicate (1 <<< 1) (none : Option Nat)) code hcodeRep]
+    simp
+  · have hrow :
+        generatedDynamicDistTableLz77.table[2]! =
+          Array.replicate (1 <<< 2) (none : Option Nat) := by
+      native_decide
+    have hcodeRep :
+        code < (Array.replicate (1 <<< 2) (none : Option Nat)).size := by
+      simpa [hrow] using hcode
+    rw [hrow]
+    rw [getElem!_pos
+      (Array.replicate (1 <<< 2) (none : Option Nat)) code hcodeRep]
+    simp
+  · have hrow :
+        generatedDynamicDistTableLz77.table[3]! =
+          Array.replicate (1 <<< 3) (none : Option Nat) := by
+      native_decide
+    have hcodeRep :
+        code < (Array.replicate (1 <<< 3) (none : Option Nat)).size := by
+      simpa [hrow] using hcode
+    rw [hrow]
+    rw [getElem!_pos
+      (Array.replicate (1 <<< 3) (none : Option Nat)) code hcodeRep]
+    simp
+  · have hrow :
+        generatedDynamicDistTableLz77.table[4]! =
+          Array.replicate (1 <<< 4) (none : Option Nat) := by
+      native_decide
+    have hcodeRep :
+        code < (Array.replicate (1 <<< 4) (none : Option Nat)).size := by
+      simpa [hrow] using hcode
+    rw [hrow]
+    rw [getElem!_pos
+      (Array.replicate (1 <<< 4) (none : Option Nat)) code hcodeRep]
+    simp
+
+/-- The LZ77 generated distance table maps every positive generated canonical
+five-bit distance code back to its distance symbol. -/
+lemma generatedDynamicDistTableLz77_lookup_generated_code
+    (freqs : Array Nat) (sym : Nat)
+    (hsym : sym < (Png.generatedDynamicDistLengthsLz77 freqs).size) :
+    let lengths := Png.generatedDynamicDistLengthsLz77 freqs
+    let codes := Png.canonicalRevCodesFromLengths lengths
+    generatedDynamicDistTableLz77.table[5]![codes[sym]!.1]! =
+      some sym := by
+  intro lengths codes
+  have hmk :
+      Png.mkHuffman lengths = some generatedDynamicDistTableLz77 := by
+    simpa [lengths] using mkHuffman_generatedDynamicDistLengthsLz77_eq freqs
+  have hmax :
+      Png.maxCodeLenAux lengths 0 0 = 5 := by
+    simpa [lengths, Png.generatedDynamicDistLengthsLz77] using
+      (show Png.maxCodeLenAux (Array.replicate 30 5) 0 0 = 5 by
+        native_decide)
+  let count := Png.countCodeLengthsAux lengths 0 (Array.replicate (5 + 1) 0)
+  let nextCode0 : Array Nat := Array.replicate (5 + 1) 0
+  let nextCode := (Png.nextCodesAux count 5 1 0 nextCode0).2
+  let init := Png.huffmanEmptyTable 5
+  have hmk' :
+      (match Png.fillHuffmanTableAux lengths 0 nextCode init with
+      | none => none
+      | some table => some ({ maxLen := 5, table := table } : Png.Huffman)) =
+        some generatedDynamicDistTableLz77 := by
+    simpa [Png.mkHuffman, lengths, hmax, count, nextCode0, nextCode, init]
+      using hmk
+  cases hfill : Png.fillHuffmanTableAux lengths 0 nextCode init with
+  | none =>
+      simp [hfill] at hmk'
+  | some table =>
+      have hshape :
+          ∀ j (hj : j < lengths.size), 0 ≤ j →
+            0 < lengths[j] → lengths[j] = 5 := by
+        intro j hj _hle _hpos
+        have hlen : lengths[j]! = 5 := by
+          simpa [lengths] using
+            generatedDynamicDistLengthsLz77_get!_eq_five freqs j
+              (by simpa [lengths] using hj)
+        rw [getElem!_pos lengths j hj] at hlen
+        exact hlen
+      have hnextSize : nextCode.size = nextCode0.size := by
+        simpa [nextCode] using nextCodesAux_size count 5 1 0 nextCode0
+      have hnextIdx : 5 < nextCode.size := by
+        rw [hnextSize]
+        simp [nextCode0]
+      have htableIdx : 5 < init.size := by
+        simp [init, huffmanEmptyTable_size]
+      have hrow : init[5]!.size = 1 <<< 5 := by
+        exact huffmanEmptyTable_get!_size 5 5 le_rfl (by decide)
+      have hnextZero : nextCode[5]! = 0 := by
+        simpa [lengths, count, nextCode0, nextCode,
+          Png.generatedDynamicDistLengthsLz77] using
+          (show
+            (Png.nextCodesAux
+              (Png.countCodeLengthsAux (Array.replicate 30 5) 0
+                (Array.replicate (5 + 1) 0))
+              5 1 0 (Array.replicate (5 + 1) 0)).2[5]! = 0 by
+              native_decide)
+      have hbudget : nextCode[5]! + (lengths.size - 0) ≤ 1 <<< 5 := by
+        rw [hnextZero]
+        simp [lengths, Png.generatedDynamicDistLengthsLz77]
+      have hposTarget : 0 < lengths[sym] := by
+        have hlen : lengths[sym]! = 5 := by
+          simpa [lengths] using
+            generatedDynamicDistLengthsLz77_get!_eq_five freqs sym
+              (by simpa [lengths] using hsym)
+        rw [getElem!_pos lengths sym (by simpa [lengths] using hsym)] at hlen
+        omega
+      have hlookup :=
+        fillHuffmanTableAux_uniform_lookup_of_canonical_at
+          lengths 0 5 nextCode init table
+          (Array.replicate lengths.size (0, 0)) sym hshape
+          hnextIdx htableIdx hrow hbudget
+          (by simpa [lengths] using hsym) (Nat.zero_le sym) (by simp)
+          hposTarget hfill
+      simp [hfill] at hmk'
+      rw [← hmk']
+      simpa [codes, Png.canonicalRevCodesFromLengths, lengths, count,
+        nextCode0, nextCode, hmax] using hlookup
+
+/-- Appending later payload bits after a generated five-bit distance code
+preserves row-five lookup in the LZ77 generated distance table. -/
+lemma generatedDynamicDistTableLz77_prefix5_row_some
+    (freqs : Array Nat) (sym restBits : Nat)
+    (hsym : sym < (Png.generatedDynamicDistLengthsLz77 freqs).size) :
+    let lengths := Png.generatedDynamicDistLengthsLz77 freqs
+    let codes := Png.canonicalRevCodesFromLengths lengths
+    let bitsTot := codes[sym]!.1 ||| (restBits <<< 5)
+    generatedDynamicDistTableLz77.table[5]![bitsTot % 2 ^ 5]! =
+      some sym := by
+  intro lengths codes bitsTot
+  have hlookup :=
+    generatedDynamicDistTableLz77_lookup_generated_code freqs sym hsym
+  have hbits :
+      codes[sym]!.1 < 2 ^ 5 := by
+    simpa [lengths, codes] using
+      generatedDynamicDistCodesLz77_bits_lt_codeSpace freqs sym hsym
+  have hmod :
+      (codes[sym]!.1 ||| (restBits <<< 5)) % 2 ^ 5 =
+        codes[sym]!.1 := by
+    have h :=
+      Png.mod_two_pow_or_shift
+        (a := codes[sym]!.1) (b := restBits) (k := 5) (len := 5) le_rfl
+    have hmodCode : codes[sym]!.1 % 2 ^ 5 = codes[sym]!.1 :=
+      Nat.mod_eq_of_lt hbits
+    simpa [hmodCode] using h
+  simpa [lengths, codes, bitsTot, hmod] using hlookup
+
+/-- Any LZ77 generated distance prefix shorter than five bits is unresolved.
+This is the packed-stream row fact used by the distance decoder replay. -/
+lemma generatedDynamicDistTableLz77_prefix_row_none
+    (bitsTot rowIdx : Nat) (hrowPos : 0 < rowIdx) (hrowLt : rowIdx < 5) :
+    generatedDynamicDistTableLz77.table[rowIdx]![bitsTot % 2 ^ rowIdx]! =
+      none := by
+  have hsize :=
+    generatedDynamicDistTableLz77_short_row_size rowIdx hrowPos hrowLt
+  have hcode :
+      bitsTot % 2 ^ rowIdx <
+        generatedDynamicDistTableLz77.table[rowIdx]!.size := by
+    have hpow : 0 < 2 ^ rowIdx := Nat.pow_pos (by decide : 0 < (2 : Nat))
+    have hmod : bitsTot % 2 ^ rowIdx < 2 ^ rowIdx := Nat.mod_lt bitsTot hpow
+    simpa [hsize, Nat.shiftLeft_eq] using hmod
+  exact generatedDynamicDistTableLz77_short_row_get_none rowIdx
+    (bitsTot % 2 ^ rowIdx) hrowPos hrowLt hcode
+
+/-- Short LZ77 distance prefixes fit in their internal decode rows. This gives
+`decodeFuel` the array-bound proof for rows one through four. -/
+lemma generatedDynamicDistTableLz77_prefix_code_lt_row_size
+    (bitsTot rowIdx : Nat) (hrowPos : 0 < rowIdx) (hrowLt : rowIdx < 5)
+    (htable : rowIdx < generatedDynamicDistTableLz77.table.size) :
+    bitsTot % 2 ^ rowIdx <
+      (Array.getInternal generatedDynamicDistTableLz77.table rowIdx htable).size := by
+  have hrowGet :
+      generatedDynamicDistTableLz77.table[rowIdx]! =
+        Array.getInternal generatedDynamicDistTableLz77.table rowIdx htable := by
+    rw [getElem!_pos generatedDynamicDistTableLz77.table rowIdx htable]
+    rfl
+  have hsize :=
+    generatedDynamicDistTableLz77_short_row_size rowIdx hrowPos hrowLt
+  have hlt : bitsTot % 2 ^ rowIdx < 2 ^ rowIdx :=
+    Nat.mod_lt bitsTot (Nat.pow_pos (by decide : 0 < (2 : Nat)))
+  rw [← hrowGet]
+  simpa [hsize, Nat.shiftLeft_eq] using hlt
+
+/-- A generated LZ77 five-bit distance prefix fits in row five. This supplies
+the final-row bound before the successful `decodeFuel` step. -/
+lemma generatedDynamicDistTableLz77_prefix5_code_lt_row_size
+    (bitsTot : Nat)
+    (htable : 5 < generatedDynamicDistTableLz77.table.size) :
+    bitsTot % 2 ^ 5 <
+      (Array.getInternal generatedDynamicDistTableLz77.table 5 htable).size := by
+  have hrowGet :
+      generatedDynamicDistTableLz77.table[5]! =
+        Array.getInternal generatedDynamicDistTableLz77.table 5 htable := by
+    rw [getElem!_pos generatedDynamicDistTableLz77.table 5 htable]
+    rfl
+  have hlt : bitsTot % 2 ^ 5 < 1 <<< 5 := by
+    simpa [Nat.shiftLeft_eq] using
+      Nat.mod_lt bitsTot (by decide : 0 < 2 ^ 5)
+  rw [← hrowGet]
+  simpa [generatedDynamicDistTableLz77_row5_size] using hlt
+
+/-- Internal-row form of unresolved LZ77 distance prefixes for rows shorter
+than five bits. -/
+lemma generatedDynamicDistTableLz77_prefix_row_none_internal
+    (bitsTot rowIdx : Nat) (hrowPos : 0 < rowIdx) (hrowLt : rowIdx < 5)
+    (htable : rowIdx < generatedDynamicDistTableLz77.table.size)
+    (hcode :
+      bitsTot % 2 ^ rowIdx <
+        (Array.getInternal generatedDynamicDistTableLz77.table rowIdx htable).size) :
+    Array.getInternal
+      (Array.getInternal generatedDynamicDistTableLz77.table rowIdx htable)
+      (bitsTot % 2 ^ rowIdx) hcode = none := by
+  have hrowGet :
+      generatedDynamicDistTableLz77.table[rowIdx]! =
+        Array.getInternal generatedDynamicDistTableLz77.table rowIdx htable := by
+    rw [getElem!_pos generatedDynamicDistTableLz77.table rowIdx htable]
+    rfl
+  have hentry :
+      generatedDynamicDistTableLz77.table[rowIdx]![bitsTot % 2 ^ rowIdx]! =
+        Array.getInternal
+          (Array.getInternal generatedDynamicDistTableLz77.table rowIdx htable)
+          (bitsTot % 2 ^ rowIdx) hcode := by
+    rw [hrowGet]
+    rw [getElem!_pos
+      (Array.getInternal generatedDynamicDistTableLz77.table rowIdx htable)
+      (bitsTot % 2 ^ rowIdx) hcode]
+    rfl
+  have hp :=
+    generatedDynamicDistTableLz77_prefix_row_none bitsTot rowIdx hrowPos hrowLt
+  rw [hentry] at hp
+  exact hp
+
+/-- Internal-row form of a successful LZ77 distance row-five lookup. -/
+lemma generatedDynamicDistTableLz77_prefix5_row_some_internal
+    (bitsTot sym : Nat)
+    (hrow5 :
+      generatedDynamicDistTableLz77.table[5]![bitsTot % 2 ^ 5]! = some sym)
+    (htable : 5 < generatedDynamicDistTableLz77.table.size)
+    (hcode :
+      bitsTot % 2 ^ 5 <
+        (Array.getInternal generatedDynamicDistTableLz77.table 5 htable).size) :
+    Array.getInternal
+      (Array.getInternal generatedDynamicDistTableLz77.table 5 htable)
+      (bitsTot % 2 ^ 5) hcode = some sym := by
+  have hrowGet :
+      generatedDynamicDistTableLz77.table[5]! =
+        Array.getInternal generatedDynamicDistTableLz77.table 5 htable := by
+    rw [getElem!_pos generatedDynamicDistTableLz77.table 5 htable]
+    rfl
+  have hentry :
+      generatedDynamicDistTableLz77.table[5]![bitsTot % 2 ^ 5]! =
+        Array.getInternal
+          (Array.getInternal generatedDynamicDistTableLz77.table 5 htable)
+          (bitsTot % 2 ^ 5) hcode := by
+    rw [hrowGet]
+    rw [getElem!_pos
+      (Array.getInternal generatedDynamicDistTableLz77.table 5 htable)
+      (bitsTot % 2 ^ 5) hcode]
+    rfl
+  rw [hentry] at hrow5
+  exact hrow5
+
+set_option maxRecDepth 100000 in
+set_option maxHeartbeats 2500000 in
+/-- Decodes a generated five-bit LZ77 distance code from a writer-built stream.
+This is the dynamic-distance counterpart of the literal/length decode bridge. -/
+lemma generatedDynamicDistTableLz77_decode_readerAt_writeBits_core
+    (bw : Png.BitWriter) (bitsTot restLen sym : Nat)
+    (hrow5 :
+      generatedDynamicDistTableLz77.table[5]![bitsTot % 2 ^ 5]! = some sym)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let lenTot := 5 + restLen
+    let bw' := Png.BitWriter.writeBits bw bitsTot lenTot
+    let br0 := Png.BitWriter.readerAt bw bw'.flush
+      (Png.flush_size_writeBits_le bw bitsTot lenTot) hbit
+    let br5 := Png.BitWriter.readerAt (Png.BitWriter.writeBits bw bitsTot 5) bw'.flush
+      (by
+        have hk : 5 ≤ lenTot := by omega
+        simpa [lenTot] using
+          (Png.flush_size_writeBits_prefix bw bitsTot 5 lenTot hk))
+      (Png.bitPos_lt_8_writeBits bw bitsTot 5 hbit)
+    generatedDynamicDistTableLz77.decode br0 = some (sym, br5) := by
+  let lenTot := 5 + restLen
+  let bw' := Png.BitWriter.writeBits bw bitsTot lenTot
+  let bw1 := Png.BitWriter.writeBits bw bitsTot 1
+  let bw2 := Png.BitWriter.writeBits bw bitsTot 2
+  let bw3 := Png.BitWriter.writeBits bw bitsTot 3
+  let bw4 := Png.BitWriter.writeBits bw bitsTot 4
+  let bw5 := Png.BitWriter.writeBits bw bitsTot 5
+  let br0 := Png.BitWriter.readerAt bw bw'.flush
+    (Png.flush_size_writeBits_le bw bitsTot lenTot) hbit
+  let br1 := Png.BitWriter.readerAt bw1 bw'.flush
+    (by
+      have hk : 1 ≤ lenTot := by omega
+      simpa [bw', lenTot] using
+        (Png.flush_size_writeBits_prefix bw bitsTot 1 lenTot hk))
+    (Png.bitPos_lt_8_writeBits bw bitsTot 1 hbit)
+  let br2 := Png.BitWriter.readerAt bw2 bw'.flush
+    (by
+      have hk : 2 ≤ lenTot := by omega
+      simpa [bw', lenTot] using
+        (Png.flush_size_writeBits_prefix bw bitsTot 2 lenTot hk))
+    (Png.bitPos_lt_8_writeBits bw bitsTot 2 hbit)
+  let br3 := Png.BitWriter.readerAt bw3 bw'.flush
+    (by
+      have hk : 3 ≤ lenTot := by omega
+      simpa [bw', lenTot] using
+        (Png.flush_size_writeBits_prefix bw bitsTot 3 lenTot hk))
+    (Png.bitPos_lt_8_writeBits bw bitsTot 3 hbit)
+  let br4 := Png.BitWriter.readerAt bw4 bw'.flush
+    (by
+      have hk : 4 ≤ lenTot := by omega
+      simpa [bw', lenTot] using
+        (Png.flush_size_writeBits_prefix bw bitsTot 4 lenTot hk))
+    (Png.bitPos_lt_8_writeBits bw bitsTot 4 hbit)
+  let br5 := Png.BitWriter.readerAt bw5 bw'.flush
+    (by
+      have hk : 5 ≤ lenTot := by omega
+      simpa [bw', lenTot] using
+        (Png.flush_size_writeBits_prefix bw bitsTot 5 lenTot hk))
+    (Png.bitPos_lt_8_writeBits bw bitsTot 5 hbit)
+  have hbit1 : bw1.bitPos < 8 := by
+    simpa [bw1] using Png.bitPos_lt_8_writeBits bw bitsTot 1 hbit
+  have hbit2 : bw2.bitPos < 8 := by
+    simpa [bw2] using Png.bitPos_lt_8_writeBits bw bitsTot 2 hbit
+  have hbit3 : bw3.bitPos < 8 := by
+    simpa [bw3] using Png.bitPos_lt_8_writeBits bw bitsTot 3 hbit
+  have hbit4 : bw4.bitPos < 8 := by
+    simpa [bw4] using Png.bitPos_lt_8_writeBits bw bitsTot 4 hbit
+  have hcur1 : bw1.curClearAbove := by
+    simpa [bw1] using Png.curClearAbove_writeBits bw bitsTot 1 hbit hcur
+  have hcur2 : bw2.curClearAbove := by
+    simpa [bw2] using Png.curClearAbove_writeBits bw bitsTot 2 hbit hcur
+  have hcur3 : bw3.curClearAbove := by
+    simpa [bw3] using Png.curClearAbove_writeBits bw bitsTot 3 hbit hcur
+  have hcur4 : bw4.curClearAbove := by
+    simpa [bw4] using Png.curClearAbove_writeBits bw bitsTot 4 hbit hcur
+  have hsplit1 : bw' = Png.BitWriter.writeBits bw1 (bitsTot >>> 1) (lenTot - 1) := by
+    have hk : 1 + (lenTot - 1) = lenTot := by omega
+    simpa [bw', bw1, hk] using
+      (Png.writeBits_split bw bitsTot 1 (lenTot - 1))
+  have hsplit2 : bw' = Png.BitWriter.writeBits bw2 (bitsTot >>> 2) (lenTot - 2) := by
+    have hk : 2 + (lenTot - 2) = lenTot := by omega
+    simpa [bw', bw2, hk] using
+      (Png.writeBits_split bw bitsTot 2 (lenTot - 2))
+  have hsplit3 : bw' = Png.BitWriter.writeBits bw3 (bitsTot >>> 3) (lenTot - 3) := by
+    have hk : 3 + (lenTot - 3) = lenTot := by omega
+    simpa [bw', bw3, hk] using
+      (Png.writeBits_split bw bitsTot 3 (lenTot - 3))
+  have hsplit4 : bw' = Png.BitWriter.writeBits bw4 (bitsTot >>> 4) (lenTot - 4) := by
+    have hk : 4 + (lenTot - 4) = lenTot := by omega
+    simpa [bw', bw4, hk] using
+      (Png.writeBits_split bw bitsTot 4 (lenTot - 4))
+  have hbound0 : br0.bitIndex + 1 ≤ br0.data.size * 8 := by
+    simpa [br0, bw', lenTot] using
+      (Png.readerAt_writeBits_bound (bw := bw) (bits := bitsTot) (len := lenTot)
+        (k := 1) (by omega) hbit)
+  have hbound1 : br1.bitIndex + 1 ≤ br1.data.size * 8 := by
+    simpa [br1, bw', hsplit1, lenTot] using
+      (Png.readerAt_writeBits_bound (bw := bw1) (bits := bitsTot >>> 1)
+        (len := lenTot - 1) (k := 1) (by omega) hbit1)
+  have hbound2 : br2.bitIndex + 1 ≤ br2.data.size * 8 := by
+    simpa [br2, bw', hsplit2, lenTot] using
+      (Png.readerAt_writeBits_bound (bw := bw2) (bits := bitsTot >>> 2)
+        (len := lenTot - 2) (k := 1) (by omega) hbit2)
+  have hbound3 : br3.bitIndex + 1 ≤ br3.data.size * 8 := by
+    simpa [br3, bw', hsplit3, lenTot] using
+      (Png.readerAt_writeBits_bound (bw := bw3) (bits := bitsTot >>> 3)
+        (len := lenTot - 3) (k := 1) (by omega) hbit3)
+  have hbound4 : br4.bitIndex + 1 ≤ br4.data.size * 8 := by
+    simpa [br4, bw', hsplit4, lenTot] using
+      (Png.readerAt_writeBits_bound (bw := bw4) (bits := bitsTot >>> 4)
+        (len := lenTot - 4) (k := 1) (by omega) hbit4)
+  have hread0 : br0.readBit = (bitsTot % 2, br1) := by
+    simpa [br0, br1, bw', lenTot] using
+      (Png.readBit_readerAt_writeBits (bw := bw) (bits := bitsTot)
+        (len := lenTot) hbit hcur (by omega))
+  have hbw2 : Png.BitWriter.writeBit bw1 ((bitsTot >>> 1) % 2) = bw2 := by
+    simp [bw1, bw2, Png.BitWriter.writeBits]
+  have hread1 : br1.readBit = ((bitsTot >>> 1) % 2, br2) := by
+    simpa [br1, br2, bw', hsplit1, hbw2, lenTot] using
+      (Png.readBit_readerAt_writeBits
+        (bw := bw1) (bits := bitsTot >>> 1) (len := lenTot - 1)
+        hbit1 hcur1 (by omega))
+  have hshift2 : bitsTot >>> 1 >>> 1 = bitsTot >>> 2 := by
+    simpa using (Nat.shiftRight_add bitsTot 1 1)
+  have hbw3 : Png.BitWriter.writeBit bw2 ((bitsTot >>> 2) % 2) = bw3 := by
+    simp [bw2, bw3, Png.BitWriter.writeBits, hshift2]
+  have hread2 : br2.readBit = ((bitsTot >>> 2) % 2, br3) := by
+    simpa [br2, br3, bw', hsplit2, hbw3, lenTot] using
+      (Png.readBit_readerAt_writeBits
+        (bw := bw2) (bits := bitsTot >>> 2) (len := lenTot - 2)
+        hbit2 hcur2 (by omega))
+  have hshift3 : bitsTot >>> 1 >>> 1 >>> 1 = bitsTot >>> 3 := by
+    calc
+      bitsTot >>> 1 >>> 1 >>> 1 = bitsTot >>> 2 >>> 1 := by simp [hshift2]
+      _ = bitsTot >>> 3 := by simpa using (Nat.shiftRight_add bitsTot 2 1)
+  have hbw4 : Png.BitWriter.writeBit bw3 ((bitsTot >>> 3) % 2) = bw4 := by
+    simp [bw3, bw4, Png.BitWriter.writeBits, hshift3]
+  have hread3 : br3.readBit = ((bitsTot >>> 3) % 2, br4) := by
+    simpa [br3, br4, bw', hsplit3, hbw4, lenTot] using
+      (Png.readBit_readerAt_writeBits
+        (bw := bw3) (bits := bitsTot >>> 3) (len := lenTot - 3)
+        hbit3 hcur3 (by omega))
+  have hshift4 : bitsTot >>> 1 >>> 1 >>> 1 >>> 1 = bitsTot >>> 4 := by
+    calc
+      bitsTot >>> 1 >>> 1 >>> 1 >>> 1 = bitsTot >>> 3 >>> 1 := by simp [hshift3]
+      _ = bitsTot >>> 4 := by simpa using (Nat.shiftRight_add bitsTot 3 1)
+  have hbw5 : Png.BitWriter.writeBit bw4 ((bitsTot >>> 4) % 2) = bw5 := by
+    simp [bw4, bw5, Png.BitWriter.writeBits, hshift4]
+  have hread4 : br4.readBit = ((bitsTot >>> 4) % 2, br5) := by
+    simpa [br4, br5, bw', hsplit4, hbw5, lenTot] using
+      (Png.readBit_readerAt_writeBits
+        (bw := bw4) (bits := bitsTot >>> 4) (len := lenTot - 4)
+        hbit4 hcur4 (by omega))
+  have hprefix2 :
+      bitsTot % 2 ||| (((bitsTot >>> 1) % 2) <<< 1) = bitsTot % 2 ^ 2 := by
+    simpa using (Png.mod_two_pow_decomp_high bitsTot 1).symm
+  have hprefix3 :
+      bitsTot % 2 ^ 2 ||| (((bitsTot >>> 2) % 2) <<< 2) = bitsTot % 2 ^ 3 := by
+    simpa using (Png.mod_two_pow_decomp_high bitsTot 2).symm
+  have hprefix4 :
+      bitsTot % 2 ^ 3 ||| (((bitsTot >>> 3) % 2) <<< 3) = bitsTot % 2 ^ 4 := by
+    simpa using (Png.mod_two_pow_decomp_high bitsTot 3).symm
+  have hprefix5 :
+      bitsTot % 2 ^ 4 ||| (((bitsTot >>> 4) % 2) <<< 4) = bitsTot % 2 ^ 5 := by
+    simpa using (Png.mod_two_pow_decomp_high bitsTot 4).symm
+  have htable1 : 1 < generatedDynamicDistTableLz77.table.size := by
+    rw [generatedDynamicDistTableLz77_table_size]
+    decide
+  have htable2 : 2 < generatedDynamicDistTableLz77.table.size := by
+    rw [generatedDynamicDistTableLz77_table_size]
+    decide
+  have htable3 : 3 < generatedDynamicDistTableLz77.table.size := by
+    rw [generatedDynamicDistTableLz77_table_size]
+    decide
+  have htable4 : 4 < generatedDynamicDistTableLz77.table.size := by
+    rw [generatedDynamicDistTableLz77_table_size]
+    decide
+  have htable5 : 5 < generatedDynamicDistTableLz77.table.size := by
+    rw [generatedDynamicDistTableLz77_table_size]
+    decide
+  have hcode1 : bitsTot % 2 <
+      (Array.getInternal generatedDynamicDistTableLz77.table 1 htable1).size :=
+    generatedDynamicDistTableLz77_prefix_code_lt_row_size bitsTot 1
+      (by decide) (by decide) htable1
+  have hcode2 : bitsTot % 2 ^ 2 <
+      (Array.getInternal generatedDynamicDistTableLz77.table 2 htable2).size :=
+    generatedDynamicDistTableLz77_prefix_code_lt_row_size bitsTot 2
+      (by decide) (by decide) htable2
+  have hcode3 : bitsTot % 2 ^ 3 <
+      (Array.getInternal generatedDynamicDistTableLz77.table 3 htable3).size :=
+    generatedDynamicDistTableLz77_prefix_code_lt_row_size bitsTot 3
+      (by decide) (by decide) htable3
+  have hcode4 : bitsTot % 2 ^ 4 <
+      (Array.getInternal generatedDynamicDistTableLz77.table 4 htable4).size :=
+    generatedDynamicDistTableLz77_prefix_code_lt_row_size bitsTot 4
+      (by decide) (by decide) htable4
+  have hcode5 : bitsTot % 2 ^ 5 <
+      (Array.getInternal generatedDynamicDistTableLz77.table 5 htable5).size :=
+    generatedDynamicDistTableLz77_prefix5_code_lt_row_size bitsTot htable5
+  have hrow1 :
+      Array.getInternal (Array.getInternal generatedDynamicDistTableLz77.table 1 htable1)
+        (bitsTot % 2) hcode1 = none :=
+    generatedDynamicDistTableLz77_prefix_row_none_internal bitsTot 1
+      (by decide) (by decide) htable1 hcode1
+  have hrow2 :
+      Array.getInternal (Array.getInternal generatedDynamicDistTableLz77.table 2 htable2)
+        (bitsTot % 2 ^ 2) hcode2 = none :=
+    generatedDynamicDistTableLz77_prefix_row_none_internal bitsTot 2
+      (by decide) (by decide) htable2 hcode2
+  have hrow3 :
+      Array.getInternal (Array.getInternal generatedDynamicDistTableLz77.table 3 htable3)
+        (bitsTot % 2 ^ 3) hcode3 = none :=
+    generatedDynamicDistTableLz77_prefix_row_none_internal bitsTot 3
+      (by decide) (by decide) htable3 hcode3
+  have hrow4 :
+      Array.getInternal (Array.getInternal generatedDynamicDistTableLz77.table 4 htable4)
+        (bitsTot % 2 ^ 4) hcode4 = none :=
+    generatedDynamicDistTableLz77_prefix_row_none_internal bitsTot 4
+      (by decide) (by decide) htable4 hcode4
+  have hrow5' :
+      Array.getInternal (Array.getInternal generatedDynamicDistTableLz77.table 5 htable5)
+        (bitsTot % 2 ^ 5) hcode5 = some sym :=
+    generatedDynamicDistTableLz77_prefix5_row_some_internal
+      bitsTot sym hrow5 htable5 hcode5
+  have hbr0 : br0.bytePos < br0.data.size := by
+    exact Png.bytePos_lt_of_bitIndex_lt_dataBits br0 (by omega)
+  have hbr4 : br4.bytePos < br4.data.size := by
+    exact Png.bytePos_lt_of_bitIndex_lt_dataBits br4 (by omega)
+  have hstep0 :
+      generatedDynamicDistTableLz77.decode br0 =
+        Png.Huffman.decodeFuel generatedDynamicDistTableLz77 4 (bitsTot % 2) 1 br1 := by
+    have hcode1' :
+        0 ||| ((bitsTot % 2) <<< 0) <
+          (Array.getInternal generatedDynamicDistTableLz77.table 1 htable1).size := by
+      simpa using hcode1
+    have hrow1' :
+        Array.getInternal
+          (Array.getInternal generatedDynamicDistTableLz77.table 1 htable1)
+          (0 ||| ((bitsTot % 2) <<< 0)) hcode1' = none := by
+      simpa using hrow1
+    unfold Png.Huffman.decode
+    rw [generatedDynamicDistTableLz77_maxLen]
+    simpa [hread0] using
+      (Png.Huffman.decodeFuel_step_none (h := generatedDynamicDistTableLz77)
+        (fuel := 4) (code := 0) (len := 0) (br := br0) (br' := br1)
+        (bit := bitsTot % 2) (hbyte := hbr0) (hread := hread0)
+        (htable := htable1) (hcode := hcode1') (hrow := hrow1'))
+  have hstep1 :
+      Png.Huffman.decodeFuel generatedDynamicDistTableLz77 4 (bitsTot % 2) 1 br1 =
+        Png.Huffman.decodeFuel generatedDynamicDistTableLz77 3 (bitsTot % 2 ^ 2) 2 br2 := by
+    have hcode' :
+        bitsTot % 2 ||| (((bitsTot >>> 1) % 2) <<< 1) <
+          (Array.getInternal generatedDynamicDistTableLz77.table 2 htable2).size := by
+      simpa [hprefix2] using hcode2
+    have hrow'' :
+        Array.getInternal
+          (Array.getInternal generatedDynamicDistTableLz77.table 2 htable2)
+          (bitsTot % 2 ||| (((bitsTot >>> 1) % 2) <<< 1)) hcode' = none := by
+      simpa [hprefix2] using hrow2
+    simpa [hprefix2] using
+      (Png.Huffman.decodeFuel_step_none (h := generatedDynamicDistTableLz77)
+        (fuel := 3) (code := bitsTot % 2) (len := 1)
+        (br := br1) (br' := br2) (bit := (bitsTot >>> 1) % 2)
+        (hbyte := Png.bytePos_lt_of_bitIndex_lt_dataBits br1 (by omega))
+        (hread := hread1) (htable := htable2) (hcode := hcode') (hrow := hrow''))
+  have hstep2 :
+      Png.Huffman.decodeFuel generatedDynamicDistTableLz77 3 (bitsTot % 2 ^ 2) 2 br2 =
+        Png.Huffman.decodeFuel generatedDynamicDistTableLz77 2 (bitsTot % 2 ^ 3) 3 br3 := by
+    have hcode' :
+        bitsTot % 2 ^ 2 ||| (((bitsTot >>> 2) % 2) <<< 2) <
+          (Array.getInternal generatedDynamicDistTableLz77.table 3 htable3).size := by
+      simpa [hprefix3] using hcode3
+    have hrow'' :
+        Array.getInternal
+          (Array.getInternal generatedDynamicDistTableLz77.table 3 htable3)
+          (bitsTot % 2 ^ 2 ||| (((bitsTot >>> 2) % 2) <<< 2)) hcode' = none := by
+      simpa [hprefix3] using hrow3
+    simpa [hprefix3] using
+      (Png.Huffman.decodeFuel_step_none (h := generatedDynamicDistTableLz77)
+        (fuel := 2) (code := bitsTot % 2 ^ 2) (len := 2)
+        (br := br2) (br' := br3) (bit := (bitsTot >>> 2) % 2)
+        (hbyte := Png.bytePos_lt_of_bitIndex_lt_dataBits br2 (by omega))
+        (hread := hread2) (htable := htable3) (hcode := hcode') (hrow := hrow''))
+  have hstep3 :
+      Png.Huffman.decodeFuel generatedDynamicDistTableLz77 2 (bitsTot % 2 ^ 3) 3 br3 =
+        Png.Huffman.decodeFuel generatedDynamicDistTableLz77 1 (bitsTot % 2 ^ 4) 4 br4 := by
+    have hcode' :
+        bitsTot % 2 ^ 3 ||| (((bitsTot >>> 3) % 2) <<< 3) <
+          (Array.getInternal generatedDynamicDistTableLz77.table 4 htable4).size := by
+      simpa [hprefix4] using hcode4
+    have hrow'' :
+        Array.getInternal
+          (Array.getInternal generatedDynamicDistTableLz77.table 4 htable4)
+          (bitsTot % 2 ^ 3 ||| (((bitsTot >>> 3) % 2) <<< 3)) hcode' = none := by
+      simpa [hprefix4] using hrow4
+    simpa [hprefix4] using
+      (Png.Huffman.decodeFuel_step_none (h := generatedDynamicDistTableLz77)
+        (fuel := 1) (code := bitsTot % 2 ^ 3) (len := 3)
+        (br := br3) (br' := br4) (bit := (bitsTot >>> 3) % 2)
+        (hbyte := Png.bytePos_lt_of_bitIndex_lt_dataBits br3 (by omega))
+        (hread := hread3) (htable := htable4) (hcode := hcode') (hrow := hrow''))
+  have hstep4 :
+      Png.Huffman.decodeFuel generatedDynamicDistTableLz77 1
+          (bitsTot % 2 ^ 4) 4 br4 =
+        some (sym, br5) := by
+    have hcode' :
+        bitsTot % 2 ^ 4 ||| (((bitsTot >>> 4) % 2) <<< 4) <
+          (Array.getInternal generatedDynamicDistTableLz77.table 5 htable5).size := by
+      simpa [hprefix5] using hcode5
+    have hrow'' :
+        Array.getInternal
+          (Array.getInternal generatedDynamicDistTableLz77.table 5 htable5)
+          (bitsTot % 2 ^ 4 ||| (((bitsTot >>> 4) % 2) <<< 4)) hcode' = some sym := by
+      simpa [hprefix5] using hrow5'
+    simpa [hprefix5] using
+      (Png.Huffman.decodeFuel_step_some (h := generatedDynamicDistTableLz77)
+        (fuel := 0) (code := bitsTot % 2 ^ 4) (len := 4)
+        (br := br4) (br' := br5) (bit := (bitsTot >>> 4) % 2)
+        (sym := sym) (hbyte := hbr4) (hread := hread4)
+        (htable := htable5) (hcode := hcode') (hrow := hrow''))
+  calc
+    generatedDynamicDistTableLz77.decode br0 =
+        Png.Huffman.decodeFuel generatedDynamicDistTableLz77 4
+          (bitsTot % 2) 1 br1 := hstep0
+    _ = Png.Huffman.decodeFuel generatedDynamicDistTableLz77 3
+          (bitsTot % 2 ^ 2) 2 br2 := hstep1
+    _ = Png.Huffman.decodeFuel generatedDynamicDistTableLz77 2
+          (bitsTot % 2 ^ 3) 3 br3 := hstep2
+    _ = Png.Huffman.decodeFuel generatedDynamicDistTableLz77 1
+          (bitsTot % 2 ^ 4) 4 br4 := hstep3
+    _ = some (sym, br5) := hstep4
+
+/-- A generated LZ77 dynamic distance code decodes to its distance symbol from
+the same writer-built payload stream. -/
+lemma generatedDynamicDistTableLz77_decode_symbol_readerAt_writeBits
+    (freqs : Array Nat) (sym : Nat)
+    (bw : Png.BitWriter) (restBits restLen : Nat)
+    (hsym : sym < (Png.generatedDynamicDistLengthsLz77 freqs).size)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let lengths := Png.generatedDynamicDistLengthsLz77 freqs
+    let codes := Png.canonicalRevCodesFromLengths lengths
+    let bitsTot := codes[sym]!.1 ||| (restBits <<< 5)
+    let lenTot := 5 + restLen
+    let bw' := Png.BitWriter.writeBits bw bitsTot lenTot
+    let br0 := Png.BitWriter.readerAt bw bw'.flush
+      (Png.flush_size_writeBits_le bw bitsTot lenTot) hbit
+    let br5 := Png.BitWriter.readerAt (Png.BitWriter.writeBits bw bitsTot 5) bw'.flush
+      (by
+        have hk : 5 ≤ lenTot := by omega
+        simpa [lenTot] using
+          (Png.flush_size_writeBits_prefix bw bitsTot 5 lenTot hk))
+      (Png.bitPos_lt_8_writeBits bw bitsTot 5 hbit)
+    generatedDynamicDistTableLz77.decode br0 = some (sym, br5) := by
+  intro lengths codes bitsTot lenTot bw' br0 br5
+  have hrow5 :
+      generatedDynamicDistTableLz77.table[5]![bitsTot % 2 ^ 5]! =
+        some sym := by
+    simpa [lengths, codes, bitsTot] using
+      generatedDynamicDistTableLz77_prefix5_row_some freqs sym restBits hsym
+  simpa [bitsTot, lenTot, bw', br0, br5] using
+    generatedDynamicDistTableLz77_decode_readerAt_writeBits_core
+      bw bitsTot restLen sym hrow5 hbit hcur
+
+/-- The generated LZ77 dynamic table spec packages the exact literal/length and
+distance Huffman tables reconstructed from the generated header. -/
+def generatedDynamicTableSpecLz77
+    (source : Array Png.Lz77Token) : Png.DynamicTableSpec :=
+  let litLenLengths :=
+    Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source)
+  let distLengths :=
+    Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source)
+  { litLenLengths := litLenLengths
+    distLengths := distLengths
+    litLenTable := generatedDynamicLitLenTableLz77 source
+    distTable := generatedDynamicDistTableLz77 }
+
+/-- Validating the generated LZ77 length arrays yields the named generated
+dynamic table spec. This is the parser boundary bridge for LZ77 blocks. -/
+lemma generatedDynamicTableSpecLz77_ofLengths?_eq_named
+    (source : Array Png.Lz77Token) :
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source)
+    let distLengths :=
+      Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source)
+    Png.DynamicTableSpec.ofLengths? litLenLengths distLengths =
+      some (generatedDynamicTableSpecLz77 source) := by
+  intro litLenLengths distLengths
+  have hlit :
+      Png.mkHuffman litLenLengths =
+        some (generatedDynamicLitLenTableLz77 source) := by
+    simpa [litLenLengths] using
+      mkHuffman_generatedDynamicLitLenLengthsLz77_eq source
+  have hdist :
+      Png.buildDynamicDistTable distLengths =
+        some generatedDynamicDistTableLz77 := by
+    simpa [distLengths] using
+      buildDynamicDistTable_generatedDynamicDistLengthsLz77_eq
+        (Png.distSymbolFreqsLz77 source)
+  simpa [generatedDynamicTableSpecLz77, litLenLengths, distLengths] using
+    Png.DynamicTableSpec.ofLengths?_mk (hlit := hlit) (hdist := hdist)
+
+/-- Generated LZ77 EOB codes have the uniform nine-bit literal/length width.
+This converts generated code tables into the payload bit length used for EOB. -/
+lemma generatedDynamicLitLenCodesLz77_eob_len_eq_nine
+    (source : Array Png.Lz77Token) :
+    let lengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source)
+    let codes := Png.canonicalRevCodesFromLengths lengths
+    codes[256]!.2 = 9 := by
+  intro lengths codes
+  have hsym : 256 < lengths.size := by
+    simpa [lengths] using generatedDynamicLitLenLengthsLz77_eob_inBounds source
+  have hpos : 0 < lengths[256]! := by
+    have hposChecked :=
+      generatedDynamicLitLenLengthsLz77_eob_pos source
+    simpa [lengths, getElem!_pos lengths 256 hsym] using hposChecked
+  have hcodeLen :=
+    canonicalRevCodesFromLengths_get!_snd_of_pos lengths 256 hsym hpos
+  have hentry : lengths[256]! = 9 := by
+    have heq := generatedDynamicLitLenLengthsLz77_eob_eq_nine source
+    simpa [lengths, getElem!_pos lengths 256 hsym] using heq
+  simpa [codes, hentry] using hcodeLen
+
+/-- The generated LZ77 EOB payload bit length is nine bits. This matches the
+generated literal/length table decode replay. -/
+lemma dynamicPayloadLz77EobBitLen_generated_eq_nine
+    (source : Array Png.Lz77Token) :
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source))
+    dynamicPayloadLz77EobBitLen litLenCodes = 9 := by
+  intro litLenCodes
+  simpa [dynamicPayloadLz77EobBitLen, litLenCodes] using
+    generatedDynamicLitLenCodesLz77_eob_len_eq_nine source
+
+/-- Generated LZ77 literal codes have the uniform nine-bit literal/length width
+at each literal token emitted by the source stream. -/
+lemma generatedDynamicLitLenCodesLz77_literal_len_eq_nine_at
+    (source : Array Png.Lz77Token) (target : Nat) (b : UInt8)
+    (htarget : target < source.size)
+    (ht : source[target]'htarget = Png.Lz77Token.literal b) :
+    let lengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source)
+    let codes := Png.canonicalRevCodesFromLengths lengths
+    codes[b.toNat]!.2 = 9 := by
+  intro lengths codes
+  have hsym : b.toNat < lengths.size := by
+    have hb : b.toNat < 256 := UInt8.toNat_lt b
+    have hsize : lengths.size = 286 := by
+      simp [lengths, generatedDynamicLitLenLengths_size,
+        litLenSymbolFreqsLz77_size]
+    omega
+  have hpos : 0 < lengths[b.toNat]! := by
+    simpa [lengths] using
+      generatedDynamicLitLenLengthsLz77_literal_pos_at
+        source target b htarget ht
+  have hcodeLen :=
+    canonicalRevCodesFromLengths_get!_snd_of_pos lengths b.toNat hsym hpos
+  have hnine :
+      lengths[b.toNat]! = 9 := by
+    have hposChecked : 0 < lengths[b.toNat] := by
+      simpa [getElem!_pos lengths b.toNat hsym] using hpos
+    have hiff :=
+      generatedDynamicLitLenLengths_getElem_pos_iff_eq_nine
+        (Png.litLenSymbolFreqsLz77 source) b.toNat hsym
+    have hchecked := hiff.mp hposChecked
+    simpa [getElem!_pos lengths b.toNat hsym] using hchecked
+  simpa [codes, hnine] using hcodeLen
+
+/-- A generated LZ77 literal payload token has nine literal/length bits. This
+specializes the token bit-length view to literal transitions. -/
+lemma dynamicPayloadLz77TokenBitLen_generated_literal_eq_nine_at
+    (source : Array Png.Lz77Token) (target : Nat) (b : UInt8)
+    (htarget : target < source.size)
+    (ht : source[target]'htarget = Png.Lz77Token.literal b) :
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source))
+    let distCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source))
+    dynamicPayloadLz77TokenBitLen litLenCodes distCodes
+      (Png.Lz77Token.literal b) = 9 := by
+  intro litLenCodes distCodes
+  simpa [dynamicPayloadLz77TokenBitLen, litLenCodes, distCodes] using
+    generatedDynamicLitLenCodesLz77_literal_len_eq_nine_at
+      source target b htarget ht
+
+/-- Generated LZ77 match codes have the uniform nine-bit literal/length width
+at each match token emitted by the source stream. -/
+lemma generatedDynamicLitLenCodesLz77_match_len_eq_nine_at
+    (source : Array Png.Lz77Token) (target len distance : Nat)
+    (htarget : target < source.size)
+    (ht : source[target]'htarget = Png.Lz77Token.match len distance)
+    (hlen : 3 ≤ len ∧ len ≤ 258) :
+    let lengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source)
+    let codes := Png.canonicalRevCodesFromLengths lengths
+    codes[(Png.deflateLengthInfo len).1]!.2 = 9 := by
+  intro lengths codes
+  let sym := (Png.deflateLengthInfo len).1
+  have hsym : sym < lengths.size := by
+    have hsym' := fixedLenMatchInfo_sym_lt_286 len hlen
+    have hsize : lengths.size = 286 := by
+      simp [lengths, generatedDynamicLitLenLengths_size,
+        litLenSymbolFreqsLz77_size]
+    have hsym'' : sym < 286 := by
+      simpa [sym, Png.deflateLengthInfo] using hsym'
+    omega
+  have hpos : 0 < lengths[sym]! := by
+    simpa [lengths, sym] using
+      generatedDynamicLitLenLengthsLz77_match_pos_at
+        source target len distance htarget ht hlen
+  have hcodeLen :=
+    canonicalRevCodesFromLengths_get!_snd_of_pos lengths sym hsym hpos
+  have hnine :
+      lengths[sym]! = 9 := by
+    have hposChecked : 0 < lengths[sym] := by
+      simpa [getElem!_pos lengths sym hsym] using hpos
+    have hiff :=
+      generatedDynamicLitLenLengths_getElem_pos_iff_eq_nine
+        (Png.litLenSymbolFreqsLz77 source) sym hsym
+    have hchecked := hiff.mp hposChecked
+    simpa [getElem!_pos lengths sym hsym] using hchecked
+  simpa [codes, sym, hnine] using hcodeLen
+
+/-- Generated LZ77 match literal/length code bits fit in the uniform nine-bit
+width. Match transition proofs use this to peel the first field off the
+writer-built payload stream. -/
+lemma generatedDynamicLitLenCodesLz77_match_bits_lt_codeSpace_at
+    (source : Array Png.Lz77Token) (target len distance : Nat)
+    (htarget : target < source.size)
+    (ht : source[target]'htarget = Png.Lz77Token.match len distance)
+    (hlen : 3 ≤ len ∧ len ≤ 258) :
+    let lengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source)
+    let codes := Png.canonicalRevCodesFromLengths lengths
+    codes[(Png.deflateLengthInfo len).1]!.1 < 2 ^ 9 := by
+  intro lengths codes
+  let sym := (Png.deflateLengthInfo len).1
+  have hsym : sym < lengths.size := by
+    have hsym' := fixedLenMatchInfo_sym_lt_286 len hlen
+    have hsize : lengths.size = 286 := by
+      simp [lengths, generatedDynamicLitLenLengths_size,
+        litLenSymbolFreqsLz77_size]
+    have hsym'' : sym < 286 := by
+      simpa [sym, Png.deflateLengthInfo] using hsym'
+    omega
+  have hpos : 0 < lengths[sym]! := by
+    simpa [lengths, sym] using
+      generatedDynamicLitLenLengthsLz77_match_pos_at
+        source target len distance htarget ht hlen
+  have hbits :=
+    canonicalRevCodesFromLengths_get!_fst_lt_pow_snd_of_pos
+      lengths sym hsym hpos
+  have hlen9 :
+      codes[sym]!.2 = 9 := by
+    simpa [lengths, codes, sym] using
+      generatedDynamicLitLenCodesLz77_match_len_eq_nine_at
+        source target len distance htarget ht hlen
+  simpa [codes, sym, hlen9] using hbits
+
+/-- A generated LZ77 match payload token has the expected dynamic payload
+width: nine literal/length bits, length extra bits, a five-bit distance code,
+and distance extra bits. -/
+lemma dynamicPayloadLz77TokenBitLen_generated_match_eq
+    (source : Array Png.Lz77Token) (target len distance : Nat)
+    (htarget : target < source.size)
+    (ht : source[target]'htarget = Png.Lz77Token.match len distance)
+    (hlen : 3 ≤ len ∧ len ≤ 258)
+    {sym extraBits extraLen distSym distExtraBits distExtraLen : Nat}
+    (hlenInfo : Png.deflateLengthInfo len = (sym, extraBits, extraLen))
+    (hdistInfo :
+      Png.deflateDistanceInfo? distance =
+        some (distSym, distExtraBits, distExtraLen)) :
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source))
+    let distCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source))
+    dynamicPayloadLz77TokenBitLen litLenCodes distCodes
+      (Png.Lz77Token.match len distance) =
+        9 + extraLen + 5 + distExtraLen := by
+  intro litLenCodes distCodes
+  have hlitLen :
+      litLenCodes[sym]!.2 = 9 := by
+    have h :=
+      generatedDynamicLitLenCodesLz77_match_len_eq_nine_at
+        source target len distance htarget ht hlen
+    simpa [litLenCodes, hlenInfo] using h
+  have hdistSpec :=
+    Png.deflateDistanceInfo_decodeDistance_correct hdistInfo
+  rcases hdistSpec with ⟨hdistSym, _hdistExtra, _hextraDist, _hbase, _hbits⟩
+  have hdistSymLen :
+      distSym <
+        (Png.generatedDynamicDistLengthsLz77
+          (Png.distSymbolFreqsLz77 source)).size := by
+    have hsize :
+        (Png.generatedDynamicDistLengthsLz77
+          (Png.distSymbolFreqsLz77 source)).size = 30 := by
+      simpa using
+        generatedDynamicDistLengthsLz77_size
+          (Png.distSymbolFreqsLz77 source)
+    have hbaseSize : Png.distBases.size = 30 := by decide
+    omega
+  have hdistLen :
+      distCodes[distSym]!.2 = 5 := by
+    simpa [distCodes] using
+      generatedDynamicDistCodesLz77_len_eq_five
+        (Png.distSymbolFreqsLz77 source) distSym hdistSymLen
+  simpa [dynamicPayloadLz77TokenBitLen, hlenInfo, hdistInfo, litLenCodes,
+    distCodes, hlitLen, hdistLen, Nat.add_assoc]
+
+/-- The length-extra field emitted for an LZ77 match decodes back to the match
+length and advances the reader past exactly those extra bits. -/
+lemma generatedDynamicPayloadLz77Match_decodeLength_readerAt_writeBits
+    (bw : Png.BitWriter)
+    (len sym extraBits extraLen restBits restLen : Nat)
+    (hlenInfo : Png.deflateLengthInfo len = (sym, extraBits, extraLen))
+    (hlen : 3 ≤ len ∧ len ≤ 258)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let bitsTot := extraBits ||| (restBits <<< extraLen)
+    let lenTot := extraLen + restLen
+    let bw' := Png.BitWriter.writeBits bw bitsTot lenTot
+    let br := Png.BitWriter.readerAt bw bw'.flush
+      (Png.flush_size_writeBits_le bw bitsTot lenTot) hbit
+    let br' := Png.BitWriter.readerAt
+      (Png.BitWriter.writeBits bw bitsTot extraLen) bw'.flush
+      (by
+        have hk : extraLen ≤ lenTot := by omega
+        simpa [lenTot] using
+          Png.flush_size_writeBits_prefix bw bitsTot extraLen lenTot hk)
+      (Png.bitPos_lt_8_writeBits bw bitsTot extraLen hbit)
+    ∃ hsym hbits, Png.decodeLength sym br hsym hbits = (len, br') := by
+  intro bitsTot lenTot bw' br br'
+  rcases Png.deflateLengthInfo_decodeLength_correct hlenInfo hlen.1 hlen.2 with
+    ⟨hsym, hidxBase, hidxExtra, hextra, hbase, hbitsLt⟩
+  refine ⟨hsym, ?_, ?_⟩
+  · have hread :=
+      Png.readerAt_writeBits_bound (bw := bw) (bits := bitsTot)
+        (len := lenTot) (k := extraLen) (hk := by omega) hbit
+    have hcanon :
+        Png.lengthExtra[sym - 257]'(by
+          have hidxle : sym - 257 ≤ 28 := by omega
+          have hidxlt : sym - 257 < 29 := Nat.lt_succ_of_le hidxle
+          have hsize : Png.lengthExtra.size = 29 := by decide
+          simpa [hsize] using hidxlt) = extraLen := by
+      calc
+        Png.lengthExtra[sym - 257]'(by
+          have hidxle : sym - 257 ≤ 28 := by omega
+          have hidxlt : sym - 257 < 29 := Nat.lt_succ_of_le hidxle
+          have hsize : Png.lengthExtra.size = 29 := by decide
+          simpa [hsize] using hidxlt) =
+            Array.getInternal Png.lengthExtra (sym - 257)
+              (by
+                have hidxle : sym - 257 ≤ 28 := by omega
+                have hidxlt : sym - 257 < 29 := Nat.lt_succ_of_le hidxle
+                have hsize : Png.lengthExtra.size = 29 := by decide
+                simpa [hsize] using hidxlt) := rfl
+        _ = Array.getInternal Png.lengthExtra (sym - 257) hidxExtra := by
+              congr
+        _ = extraLen := by simpa using hextra.symm
+    simpa [br, bw', lenTot, hcanon] using hread
+  · have hdecode :=
+      Png.decodeLength_readerAt_writeBits_prefix (bw := bw) (sym := sym)
+        (extraBits := extraBits) (extraLen := extraLen)
+        (restBits := restBits) (restLen := restLen) (lenOut := len)
+        (hsym := hsym) (hidxBase := hidxBase) (hidxExtra := hidxExtra)
+        (hextra := hextra) (hbase := hbase) (hbitsLt := hbitsLt)
+        (hbit := hbit) (hcur := hcur)
+    simpa [bitsTot, lenTot, bw', br, br'] using hdecode
+
+/-- The distance-extra field emitted for an LZ77 match decodes back to the
+match distance and advances the reader past exactly those extra bits. -/
+lemma generatedDynamicPayloadLz77Match_decodeDistance_readerAt_writeBits
+    (bw : Png.BitWriter)
+    (distance distSym distExtraBits distExtraLen restBits restLen : Nat)
+    (hdistInfo :
+      Png.deflateDistanceInfo? distance =
+        some (distSym, distExtraBits, distExtraLen))
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let bitsTot := distExtraBits ||| (restBits <<< distExtraLen)
+    let lenTot := distExtraLen + restLen
+    let bw' := Png.BitWriter.writeBits bw bitsTot lenTot
+    let br := Png.BitWriter.readerAt bw bw'.flush
+      (Png.flush_size_writeBits_le bw bitsTot lenTot) hbit
+    let br' := Png.BitWriter.readerAt
+      (Png.BitWriter.writeBits bw bitsTot distExtraLen) bw'.flush
+      (by
+        have hk : distExtraLen ≤ lenTot := by omega
+        simpa [lenTot] using
+          Png.flush_size_writeBits_prefix bw bitsTot distExtraLen lenTot hk)
+      (Png.bitPos_lt_8_writeBits bw bitsTot distExtraLen hbit)
+    ∃ hdist hbits,
+      Png.decodeDistance distSym br hdist hbits = (distance, br') := by
+  intro bitsTot lenTot bw' br br'
+  rcases Png.deflateDistanceInfo_decodeDistance_correct hdistInfo with
+    ⟨hdist, hdistExtra, hextra, hbase, hbitsLt⟩
+  refine ⟨hdist, ?_, ?_⟩
+  · have hread :=
+      Png.readerAt_writeBits_bound (bw := bw) (bits := bitsTot)
+        (len := lenTot) (k := distExtraLen) (hk := by omega) hbit
+    have hcanon :
+        Png.distExtra[distSym]'(by
+          have hDistExtraSize : Png.distExtra.size = 30 := by decide
+          have hDistBasesSize : Png.distBases.size = 30 := by decide
+          simpa [hDistExtraSize, hDistBasesSize] using hdist) = distExtraLen := by
+      calc
+        Png.distExtra[distSym]'(by
+          have hDistExtraSize : Png.distExtra.size = 30 := by decide
+          have hDistBasesSize : Png.distBases.size = 30 := by decide
+          simpa [hDistExtraSize, hDistBasesSize] using hdist) =
+            Array.getInternal Png.distExtra distSym
+              (by
+                have hDistExtraSize : Png.distExtra.size = 30 := by decide
+                have hDistBasesSize : Png.distBases.size = 30 := by decide
+                simpa [hDistExtraSize, hDistBasesSize] using hdist) := rfl
+        _ = Array.getInternal Png.distExtra distSym hdistExtra := by
+              congr
+        _ = distExtraLen := by simpa using hextra.symm
+    simpa [br, bw', lenTot, hcanon] using hread
+  · have hdecode :=
+      Png.decodeDistance_readerAt_writeBits_prefix (bw := bw) (sym := distSym)
+        (extraBits := distExtraBits) (extraLen := distExtraLen)
+        (restBits := restBits) (restLen := restLen) (distance := distance)
+        (hdist := hdist) (hdistExtra := hdistExtra) (hextra := hextra)
+        (hbase := hbase) (hbitsLt := hbitsLt)
+        (hbit := hbit) (hcur := hcur)
+    simpa [bitsTot, lenTot, bw', br, br'] using hdecode
+
+/-- Packages arbitrary-distance generated dynamic match decodes into the
+generic dynamic-payload copy transition. This separates semantic validity from
+the bitstream reader arithmetic. -/
+lemma dynamicPayloadTransition_lz77_copy_of_decodes
+    (spec : Png.DynamicTableSpec)
+    (br0 br1 br2 br3 br4 : Png.BitReader)
+    (out out' : ByteArray)
+    (len distance sym extraBits extraLen distSym distExtraBits distExtraLen : Nat)
+    (hlenInfo : Png.deflateLengthInfo len = (sym, extraBits, extraLen))
+    (hdistInfo :
+      Png.deflateDistanceInfo? distance =
+        some (distSym, distExtraBits, distExtraLen))
+    (hlen : 3 ≤ len ∧ len ≤ 258)
+    (hdecodeSym : spec.litLenTable.decode br0 = some (sym, br1))
+    (hdecodeLenEx :
+      ∃ hsym hbits,
+        Png.decodeLength sym br1 hsym hbits = (len, br2))
+    (hdecodeDistSym : spec.distTable.decode br2 = some (distSym, br3))
+    (hdecodeDistEx :
+      ∃ hdist hbitsD,
+        Png.decodeDistance distSym br3 hdist hbitsD = (distance, br4))
+    (hcopy : Png.copyDistance out distance len = some out') :
+    Png.DynamicPayloadTransition spec br0 out br4 out' := by
+  rcases hdecodeLenEx with ⟨hsymLen, hbitsLen, hdecodeLen⟩
+  rcases hdecodeDistEx with ⟨hdistDecode, hbitsD, hdecodeDist⟩
+  rcases Png.deflateLengthInfo_decodeLength_correct hlenInfo hlen.1 hlen.2 with
+    ⟨_hsymInfo, _hidxBase, hidxExtra, hextraLen, _hbaseLen, _hbitsLenLt⟩
+  rcases Png.deflateDistanceInfo_decodeDistance_correct hdistInfo with
+    ⟨hdist, hdistExtra, hextraDist, _hbaseDist, _hbitsDistLt⟩
+  have hnotLit : ¬ sym < 256 := by
+    have hs := hsymLen
+    omega
+  have hnotEob : (sym == 256) = false := by
+    cases hbeq : (sym == 256) with
+    | false => simpa using hbeq
+    | true =>
+        have hs : sym = 256 := by simpa using hbeq
+        omega
+  have hextra :
+      extraLen =
+        Array.getInternal Png.lengthExtra (sym - 257) (by
+          have hidxle : sym - 257 ≤ 28 := by omega
+          have hidxlt : sym - 257 < 29 := Nat.lt_succ_of_le hidxle
+          have hsize : Png.lengthExtra.size = 29 := by decide
+          simpa [hsize] using hidxlt) := by
+    calc
+      extraLen = Array.getInternal Png.lengthExtra (sym - 257) hidxExtra := hextraLen
+      _ = Array.getInternal Png.lengthExtra (sym - 257) (by
+            have hidxle : sym - 257 ≤ 28 := by omega
+            have hidxlt : sym - 257 < 29 := Nat.lt_succ_of_le hidxle
+            have hsize : Png.lengthExtra.size = 29 := by decide
+            simpa [hsize] using hidxlt) := by
+          congr
+  have hextraD :
+      distExtraLen =
+        Array.getInternal Png.distExtra distSym (by
+          have hDistExtraSize : Png.distExtra.size = 30 := by decide
+          have hDistBasesSize : Png.distBases.size = 30 := by decide
+          simpa [hDistExtraSize, hDistBasesSize] using hdist) := by
+    calc
+      distExtraLen = Array.getInternal Png.distExtra distSym hdistExtra := hextraDist
+      _ = Array.getInternal Png.distExtra distSym (by
+            have hDistExtraSize : Png.distExtra.size = 30 := by decide
+            have hDistBasesSize : Png.distBases.size = 30 := by decide
+            simpa [hDistExtraSize, hDistBasesSize] using hdist) := by
+          congr
+  exact Png.DynamicPayloadTransition.copy
+    (spec := spec) (br := br0) (out := out)
+    (sym := sym) (extra := extraLen) (len := len)
+    (distSym := distSym) (extraD := distExtraLen) (distance := distance)
+    (br' := br1) (br'' := br2) (br''' := br3)
+    (br'''' := br4) (out' := out')
+    hdecodeSym hnotLit hnotEob hsymLen hextra
+    (by simpa [hextra] using hbitsLen)
+    (by simpa using hdecodeLen)
+    hdecodeDistSym hdist hextraD
+    (by simpa [hextraD] using hbitsD)
+    (by simpa using hdecodeDist)
+    hcopy
+
+/-- The generated LZ77 payload EOB code produces a terminal dynamic-payload
+finish step through the generated LZ77 literal/length table. -/
+lemma generatedDynamicPayloadLz77Eob_finish_readerAt_writeBits
+    (source : Array Png.Lz77Token) (bw : Png.BitWriter)
+    (out : ByteArray) (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let spec := generatedDynamicTableSpecLz77 source
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source))
+    let bits := dynamicPayloadLz77EobBits litLenCodes
+    let len := dynamicPayloadLz77EobBitLen litLenCodes
+    let bw' := Png.BitWriter.writeBits bw bits len
+    let br0 := Png.BitWriter.readerAt bw bw'.flush
+      (Png.flush_size_writeBits_le bw bits len) hbit
+    let br' := Png.BitWriter.readerAt (Png.BitWriter.writeBits bw bits len)
+      bw'.flush
+      (by
+        simpa [bw'] using
+          (le_rfl : (Png.BitWriter.writeBits bw bits len).flush.size ≤
+            (Png.BitWriter.writeBits bw bits len).flush.size))
+      (Png.bitPos_lt_8_writeBits bw bits len hbit)
+    Png.DynamicPayloadFinish spec br0 out br' := by
+  intro spec litLenCodes bits len bw' br0 br'
+  have hlen : len = 9 := by
+    simpa [len, litLenCodes] using
+      dynamicPayloadLz77EobBitLen_generated_eq_nine source
+  have hdecode :
+      (generatedDynamicLitLenTableLz77 source).decode br0 =
+        some (256, br') := by
+    have h :=
+      generatedDynamicLitLenTableLz77_decode_eob_readerAt_writeBits
+        source bw 0 0 hbit hcur
+    simpa [br0, br', bw', bits, len, litLenCodes, dynamicPayloadLz77EobBits,
+      hlen] using h
+  exact Png.DynamicPayloadFinish.eob
+    (spec := spec) (br := br0) (out := out)
+    (sym := 256) (br' := br') (by simpa [spec, generatedDynamicTableSpecLz77] using hdecode)
+    (by decide) (by decide)
+
+/-- A generated LZ77 literal payload token produces one validated dynamic
+payload literal transition through the generated LZ77 table spec. -/
+lemma generatedDynamicPayloadLz77Literal_transition_readerAt_writeBits
+    (source : Array Png.Lz77Token) (target : Nat) (b : UInt8)
+    (bw : Png.BitWriter) (out : ByteArray) (tailBits tailLen : Nat)
+    (htarget : target < source.size)
+    (ht : source[target]'htarget = Png.Lz77Token.literal b)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let spec := generatedDynamicTableSpecLz77 source
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source))
+    let distCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source))
+    let bits := dynamicPayloadLz77TokenBits litLenCodes distCodes
+      (Png.Lz77Token.literal b)
+    let len := dynamicPayloadLz77TokenBitLen litLenCodes distCodes
+      (Png.Lz77Token.literal b)
+    let bitsTot := bits ||| (tailBits <<< len)
+    let lenTot := len + tailLen
+    let bw' := Png.BitWriter.writeBits bw bitsTot lenTot
+    let br0 := Png.BitWriter.readerAt bw bw'.flush
+      (Png.flush_size_writeBits_le bw bitsTot lenTot) hbit
+    let br' := Png.BitWriter.readerAt (Png.BitWriter.writeBits bw bitsTot len)
+      bw'.flush
+      (by
+        have hk : len ≤ lenTot := by omega
+        simpa [lenTot] using
+          (Png.flush_size_writeBits_prefix bw bitsTot len lenTot hk))
+      (Png.bitPos_lt_8_writeBits bw bitsTot len hbit)
+    Png.DynamicPayloadTransition spec br0 out br'
+      (out.push (Png.u8 b.toNat)) := by
+  intro spec litLenCodes distCodes bits len bitsTot lenTot bw' br0 br'
+  have hlen : len = 9 := by
+    simpa [len, litLenCodes, distCodes] using
+      dynamicPayloadLz77TokenBitLen_generated_literal_eq_nine_at
+        source target b htarget ht
+  have hdecode :
+      (generatedDynamicLitLenTableLz77 source).decode br0 =
+        some (b.toNat, br') := by
+    have h :=
+      generatedDynamicLitLenTableLz77_decode_literal_at_readerAt_writeBits
+        source target b bw tailBits tailLen htarget ht hbit hcur
+    simpa [br0, br', bw', bits, len, bitsTot, lenTot, litLenCodes,
+      distCodes, dynamicPayloadLz77TokenBits, hlen] using h
+  have hsym : b.toNat < 256 := UInt8.toNat_lt b
+  exact Png.DynamicPayloadTransition.literal
+    (spec := spec) (br := br0) (out := out)
+    (sym := b.toNat) (br' := br') (by simpa [spec, generatedDynamicTableSpecLz77] using hdecode)
+    hsym
+/-- Proof-facing name for the code-length array advertised by the generated
+dynamic LZ77 header. It mirrors the local `lengths` binding in the writer. -/
+def generatedDynamicHeaderCodeLengthsLz77
+    (source : Array Png.Lz77Token) : Array Nat :=
+  let litLenLengths :=
+    Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source)
+  let distLengths :=
+    Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source)
+  let litLenCount := Png.generatedDynamicLitLenCount litLenLengths
+  let distCount := Png.generatedDynamicDistCount distLengths
+  (litLenLengths.extract 0 litLenCount) ++
+    (distLengths.extract 0 distCount)
+
+/-- Every generated LZ77 header code-length entry is a valid DEFLATE code
+length. This supplies the header writer replay with bounded literal tokens. -/
+lemma generatedDynamicHeaderCodeLengthsLz77_entries_le_15
+    (source : Array Png.Lz77Token) :
+    ArrayEntriesLe (generatedDynamicHeaderCodeLengthsLz77 source) 15 := by
+  unfold generatedDynamicHeaderCodeLengthsLz77
+  apply arrayEntriesLe_append
+  · apply arrayEntriesLe_extract
+    exact generatedDynamicLitLenLengths_entries_le_15
+      (Png.litLenSymbolFreqsLz77 source)
+  · apply arrayEntriesLe_extract
+    exact generatedDynamicDistLengthsLz77_entries_le_15
+      (Png.distSymbolFreqsLz77 source)
+
+/-- The generated LZ77 dynamic header writer is its fixed prefix followed by
+the literal code-length token stream for the advertised length tables. -/
+lemma writeGeneratedDynamicHeaderLz77_eq_prefix_writeBits
+    (bw : Png.BitWriter) (source : Array Png.Lz77Token) :
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source)
+    let distLengths :=
+      Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source)
+    let lengths := generatedDynamicHeaderCodeLengthsLz77 source
+    let codeTokens := Png.codeLenLiteralTokensOfLengths lengths
+    let prefixBits :=
+      Png.generatedDynamicHeaderPrefixBits
+        (Png.generatedDynamicLitLenCount litLenLengths)
+        (Png.generatedDynamicDistCount distLengths)
+    Png.writeGeneratedDynamicHeader bw litLenLengths distLengths =
+      Png.BitWriter.writeBits
+        (Png.BitWriter.writeBits bw prefixBits Png.generatedDynamicHeaderPrefixLen)
+        (codeLenTokenStreamBits codeTokens.toList)
+        (codeLenTokenStreamLen codeTokens.toList) := by
+  intro litLenLengths distLengths lengths codeTokens prefixBits
+  have hlengths : ArrayEntriesLe lengths 15 := by
+    simpa [lengths] using
+      generatedDynamicHeaderCodeLengthsLz77_entries_le_15 source
+  have htail :=
+    writeDynamicCodeLengths_generated_eq_writeBits
+      (bw := Png.BitWriter.writeBits bw prefixBits Png.generatedDynamicHeaderPrefixLen)
+      (lengths := lengths) hlengths
+  simpa [Png.writeGeneratedDynamicHeader, litLenLengths, distLengths, lengths,
+    codeTokens, prefixBits, generatedDynamicHeaderCodeLengthsLz77] using htail
+
+/-- The generated LZ77 dynamic header writer is equivalent to one packed bit
+stream. This normal form lets later proofs concatenate header and payload. -/
+lemma writeGeneratedDynamicHeaderLz77_eq_writeBits
+    (bw : Png.BitWriter) (source : Array Png.Lz77Token) :
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source)
+    let distLengths :=
+      Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source)
+    let lengths := generatedDynamicHeaderCodeLengthsLz77 source
+    let codeTokens := Png.codeLenLiteralTokensOfLengths lengths
+    let prefixBits :=
+      Png.generatedDynamicHeaderPrefixBits
+        (Png.generatedDynamicLitLenCount litLenLengths)
+        (Png.generatedDynamicDistCount distLengths)
+    Png.writeGeneratedDynamicHeader bw litLenLengths distLengths =
+      Png.BitWriter.writeBits bw
+        (prefixBits |||
+          (codeLenTokenStreamBits codeTokens.toList <<<
+            Png.generatedDynamicHeaderPrefixLen))
+        (Png.generatedDynamicHeaderPrefixLen +
+          codeLenTokenStreamLen codeTokens.toList) := by
+  intro litLenLengths distLengths lengths codeTokens prefixBits
+  have hprefix :=
+    writeGeneratedDynamicHeaderLz77_eq_prefix_writeBits
+      (bw := bw) (source := source)
+  have hprefixBits :
+      prefixBits < 2 ^ Png.generatedDynamicHeaderPrefixLen := by
+    simpa [prefixBits, Png.generatedDynamicLitLenCount,
+      Png.generatedDynamicDistCount] using
+      (show Png.generatedDynamicHeaderPrefixBits 286 30 <
+          2 ^ Png.generatedDynamicHeaderPrefixLen by
+        native_decide)
+  have hconcat :=
+    Png.writeBits_concat bw prefixBits
+      (codeLenTokenStreamBits codeTokens.toList)
+      Png.generatedDynamicHeaderPrefixLen
+      (codeLenTokenStreamLen codeTokens.toList)
+      hprefixBits
+  simpa [litLenLengths, distLengths, lengths, codeTokens, prefixBits]
+    using hprefix.trans hconcat.symm
+
+/-- The packed generated LZ77 dynamic header fits in its advertised width.
+This is the code-space bound needed when appending the payload bits. -/
+lemma generatedDynamicHeaderBitsLz77_lt_codeSpace
+    (source : Array Png.Lz77Token) :
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source)
+    let distLengths :=
+      Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source)
+    let lengths := generatedDynamicHeaderCodeLengthsLz77 source
+    let codeTokens := Png.codeLenLiteralTokensOfLengths lengths
+    let prefixBits :=
+      Png.generatedDynamicHeaderPrefixBits
+        (Png.generatedDynamicLitLenCount litLenLengths)
+        (Png.generatedDynamicDistCount distLengths)
+    let headerBits :=
+      prefixBits |||
+        (codeLenTokenStreamBits codeTokens.toList <<<
+          Png.generatedDynamicHeaderPrefixLen)
+    let headerLen :=
+      Png.generatedDynamicHeaderPrefixLen +
+        codeLenTokenStreamLen codeTokens.toList
+    headerBits < 2 ^ headerLen := by
+  intro litLenLengths distLengths lengths codeTokens prefixBits headerBits headerLen
+  have hvalid : ∀ token ∈ codeTokens.toList, CodeLenTokenValid token := by
+    exact codeLenTokensValid_toList
+      (by
+        simpa [lengths, codeTokens] using
+          codeLenLiteralTokensOfLengths_valid lengths
+            (by
+              simpa [lengths] using
+                generatedDynamicHeaderCodeLengthsLz77_entries_le_15 source))
+  have hprefixBits :
+      prefixBits < 2 ^ Png.generatedDynamicHeaderPrefixLen := by
+    simpa [prefixBits, Png.generatedDynamicLitLenCount,
+      Png.generatedDynamicDistCount] using
+      (show Png.generatedDynamicHeaderPrefixBits 286 30 <
+          2 ^ Png.generatedDynamicHeaderPrefixLen by
+        native_decide)
+  have htokenBits :
+      codeLenTokenStreamBits codeTokens.toList <
+        2 ^ codeLenTokenStreamLen codeTokens.toList :=
+    codeLenTokenStreamBits_lt_codeSpace codeTokens.toList hvalid
+  have htokenShift :
+      codeLenTokenStreamBits codeTokens.toList <<<
+          Png.generatedDynamicHeaderPrefixLen <
+        2 ^ headerLen := by
+    rw [Nat.shiftLeft_eq]
+    have hmul :
+        codeLenTokenStreamBits codeTokens.toList *
+            2 ^ Png.generatedDynamicHeaderPrefixLen <
+          2 ^ codeLenTokenStreamLen codeTokens.toList *
+            2 ^ Png.generatedDynamicHeaderPrefixLen :=
+      (Nat.mul_lt_mul_right
+        (Nat.two_pow_pos Png.generatedDynamicHeaderPrefixLen)).mpr htokenBits
+    simpa [headerLen, Nat.pow_add, Nat.mul_comm, Nat.mul_left_comm,
+      Nat.mul_assoc, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using hmul
+  have hprefixWide :
+      prefixBits < 2 ^ headerLen := by
+    exact lt_of_lt_of_le hprefixBits
+      (Nat.pow_le_pow_right (by decide : 0 < 2) (by
+        simp [headerLen]))
+  simpa [headerBits] using Nat.or_lt_two_pow hprefixWide htokenShift
+
+/-- Writing arbitrary suffix bits after the generated LZ77 dynamic header is
+the same as writing one packed header-plus-suffix stream. -/
+lemma writeGeneratedDynamicHeaderLz77_rest_eq_writeBits
+    (bw : Png.BitWriter) (source : Array Png.Lz77Token)
+    (restBits restLen : Nat) :
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source)
+    let distLengths :=
+      Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source)
+    let lengths := generatedDynamicHeaderCodeLengthsLz77 source
+    let codeTokens := Png.codeLenLiteralTokensOfLengths lengths
+    let prefixBits :=
+      Png.generatedDynamicHeaderPrefixBits
+        (Png.generatedDynamicLitLenCount litLenLengths)
+        (Png.generatedDynamicDistCount distLengths)
+    let headerBits :=
+      prefixBits |||
+        (codeLenTokenStreamBits codeTokens.toList <<<
+          Png.generatedDynamicHeaderPrefixLen)
+    let headerLen :=
+      Png.generatedDynamicHeaderPrefixLen +
+        codeLenTokenStreamLen codeTokens.toList
+    Png.BitWriter.writeBits
+        (Png.writeGeneratedDynamicHeader bw litLenLengths distLengths)
+        restBits restLen =
+      Png.BitWriter.writeBits bw
+        (headerBits ||| (restBits <<< headerLen))
+        (headerLen + restLen) := by
+  intro litLenLengths distLengths lengths codeTokens prefixBits headerBits headerLen
+  have hheader :=
+    writeGeneratedDynamicHeaderLz77_eq_writeBits (bw := bw) (source := source)
+  have hheader' :
+      Png.writeGeneratedDynamicHeader bw litLenLengths distLengths =
+        Png.BitWriter.writeBits bw headerBits headerLen := by
+    simpa [litLenLengths, distLengths, lengths, codeTokens, prefixBits,
+      headerBits, headerLen] using hheader
+  have hheaderBits :
+      headerBits < 2 ^ headerLen := by
+    simpa [litLenLengths, distLengths, lengths, codeTokens, prefixBits,
+      headerBits, headerLen] using
+      generatedDynamicHeaderBitsLz77_lt_codeSpace source
+  have hconcat :=
+    Png.writeBits_concat bw headerBits restBits headerLen restLen hheaderBits
+  simpa [hheader', headerBits, headerLen] using hconcat.symm
+
+/-- The public LZ77 dynamic encoder is its generated header followed by the
+packed generated dynamic LZ77 payload bitstream. -/
+lemma deflateDynamicLz77_eq_payloadBitsWriter (raw : ByteArray) :
+    let source := Png.deflateTokensLz77 raw
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source)
+    let distLengths :=
+      Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source)
+    let litLenCodes := Png.canonicalRevCodesFromLengths litLenLengths
+    let distCodes := Png.canonicalRevCodesFromLengths distLengths
+    let bw0 := Png.BitWriter.empty
+    let bw1 := bw0.writeBits 1 1
+    let bw2 := bw1.writeBits 2 2
+    let bw3 := Png.writeGeneratedDynamicHeader bw2 litLenLengths distLengths
+    let payloadBits :=
+      dynamicPayloadLz77StreamBits litLenCodes distCodes source.toList
+    let payloadLen :=
+      dynamicPayloadLz77StreamLen litLenCodes distCodes source.toList
+    Png.deflateDynamicLz77 raw =
+      (Png.BitWriter.writeBits bw3 payloadBits payloadLen).flush := by
+  intro source litLenLengths distLengths litLenCodes distCodes bw0 bw1 bw2
+    bw3 payloadBits payloadLen
+  have hpayload :=
+    writeDynamicPayloadLz77_deflateTokensLz77_eq_writeBits raw bw3
+  have hpayload' :
+      Png.writeDynamicPayloadLz77 bw3 source litLenCodes distCodes =
+        Png.BitWriter.writeBits bw3 payloadBits payloadLen := by
+    simpa [source, litLenLengths, distLengths, litLenCodes, distCodes,
+      payloadBits, payloadLen] using hpayload
+  simpa [Png.deflateDynamicLz77, source, litLenLengths, distLengths,
+    litLenCodes, distCodes, bw0, bw1, bw2, bw3, payloadBits, payloadLen,
+    hpayload']
+
+/-- The public LZ77 dynamic encoder's generated header and payload collapse
+to one packed suffix after the three-bit final-dynamic block tag. -/
+lemma deflateDynamicLz77_eq_blockSuffixWriter (raw : ByteArray) :
+    let source := Png.deflateTokensLz77 raw
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source)
+    let distLengths :=
+      Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source)
+    let litLenCodes := Png.canonicalRevCodesFromLengths litLenLengths
+    let distCodes := Png.canonicalRevCodesFromLengths distLengths
+    let lengths := generatedDynamicHeaderCodeLengthsLz77 source
+    let codeTokens := Png.codeLenLiteralTokensOfLengths lengths
+    let prefixBits :=
+      Png.generatedDynamicHeaderPrefixBits
+        (Png.generatedDynamicLitLenCount litLenLengths)
+        (Png.generatedDynamicDistCount distLengths)
+    let headerBits :=
+      prefixBits |||
+        (codeLenTokenStreamBits codeTokens.toList <<<
+          Png.generatedDynamicHeaderPrefixLen)
+    let headerLen :=
+      Png.generatedDynamicHeaderPrefixLen +
+        codeLenTokenStreamLen codeTokens.toList
+    let payloadBits :=
+      dynamicPayloadLz77StreamBits litLenCodes distCodes source.toList
+    let payloadLen :=
+      dynamicPayloadLz77StreamLen litLenCodes distCodes source.toList
+    let suffixBits := headerBits ||| (payloadBits <<< headerLen)
+    let suffixLen := headerLen + payloadLen
+    let bw0 := Png.BitWriter.empty
+    let bw1 := bw0.writeBits 1 1
+    let bw2 := bw1.writeBits 2 2
+    Png.deflateDynamicLz77 raw =
+      (Png.BitWriter.writeBits bw2 suffixBits suffixLen).flush := by
+  intro source litLenLengths distLengths litLenCodes distCodes lengths
+    codeTokens prefixBits headerBits headerLen payloadBits payloadLen
+    suffixBits suffixLen bw0 bw1 bw2
+  have hpayload :=
+    deflateDynamicLz77_eq_payloadBitsWriter raw
+  have hrest :=
+    writeGeneratedDynamicHeaderLz77_rest_eq_writeBits
+      (bw := bw2) (source := source) (restBits := payloadBits)
+      (restLen := payloadLen)
+  have hrest' :
+      Png.BitWriter.writeBits
+          (Png.writeGeneratedDynamicHeader bw2 litLenLengths distLengths)
+          payloadBits payloadLen =
+        Png.BitWriter.writeBits bw2 suffixBits suffixLen := by
+    simpa [source, litLenLengths, distLengths, lengths, codeTokens,
+      prefixBits, headerBits, headerLen, payloadBits, payloadLen,
+      suffixBits, suffixLen] using hrest
+  simpa [source, litLenLengths, distLengths, litLenCodes, distCodes, bw0,
+    bw1, bw2, payloadBits, payloadLen, suffixBits, suffixLen, hrest']
+    using hpayload
+
+/-- The public LZ77 dynamic encoder is one packed final dynamic block
+bitstream. This is the writer shape needed by top-level decode proofs. -/
+lemma deflateDynamicLz77_eq_collapsedWriter (raw : ByteArray) :
+    let source := Png.deflateTokensLz77 raw
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source)
+    let distLengths :=
+      Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source)
+    let litLenCodes := Png.canonicalRevCodesFromLengths litLenLengths
+    let distCodes := Png.canonicalRevCodesFromLengths distLengths
+    let lengths := generatedDynamicHeaderCodeLengthsLz77 source
+    let codeTokens := Png.codeLenLiteralTokensOfLengths lengths
+    let prefixBits :=
+      Png.generatedDynamicHeaderPrefixBits
+        (Png.generatedDynamicLitLenCount litLenLengths)
+        (Png.generatedDynamicDistCount distLengths)
+    let headerBits :=
+      prefixBits |||
+        (codeLenTokenStreamBits codeTokens.toList <<<
+          Png.generatedDynamicHeaderPrefixLen)
+    let headerLen :=
+      Png.generatedDynamicHeaderPrefixLen +
+        codeLenTokenStreamLen codeTokens.toList
+    let payloadBits :=
+      dynamicPayloadLz77StreamBits litLenCodes distCodes source.toList
+    let payloadLen :=
+      dynamicPayloadLz77StreamLen litLenCodes distCodes source.toList
+    let suffixBits := headerBits ||| (payloadBits <<< headerLen)
+    let suffixLen := headerLen + payloadLen
+    let streamBitsFull := 5 ||| (suffixBits <<< 3)
+    let streamLenFull := 3 + suffixLen
+    Png.deflateDynamicLz77 raw =
+      (Png.BitWriter.writeBits Png.BitWriter.empty
+        streamBitsFull streamLenFull).flush := by
+  intro source litLenLengths distLengths litLenCodes distCodes lengths
+    codeTokens prefixBits headerBits headerLen payloadBits payloadLen
+    suffixBits suffixLen streamBitsFull streamLenFull
+  let bw0 := Png.BitWriter.empty
+  let bw1 := bw0.writeBits 1 1
+  let bw2 := bw1.writeBits 2 2
+  have hblock :=
+    deflateDynamicLz77_eq_blockSuffixWriter raw
+  have htag :
+      bw2 = Png.BitWriter.writeBits bw0 5 3 := by
+    have h :=
+      Png.writeBits_concat bw0 1 2 1 2 (by decide : 1 < 2 ^ 1)
+    simpa [bw0, bw1, bw2, Nat.add_comm] using h.symm
+  have hcollapse :
+      Png.BitWriter.writeBits bw2 suffixBits suffixLen =
+        Png.BitWriter.writeBits Png.BitWriter.empty
+          streamBitsFull streamLenFull := by
+    have h :=
+      Png.writeBits_concat Png.BitWriter.empty 5 suffixBits 3 suffixLen
+        (by decide : 5 < 2 ^ 3)
+    simpa [bw0, htag, streamBitsFull, streamLenFull] using h.symm
+  calc
+    Png.deflateDynamicLz77 raw =
+        (Png.BitWriter.writeBits bw2 suffixBits suffixLen).flush := by
+          simpa [source, litLenLengths, distLengths, litLenCodes, distCodes,
+            lengths, codeTokens, prefixBits, headerBits, headerLen,
+            payloadBits, payloadLen, suffixBits, suffixLen, bw0, bw1, bw2]
+            using hblock
+    _ = (Png.BitWriter.writeBits Png.BitWriter.empty
+          streamBitsFull streamLenFull).flush := by
+          simp [hcollapse]
+
+set_option maxRecDepth 400000 in
+set_option maxHeartbeats 6000000 in
+/-- Stored-only inflation rejects the public LZ77 dynamic stream because its
+first block is dynamic, not stored. This discharges zlib fallback ordering. -/
+lemma inflateStored_deflateDynamicLz77_none (raw : ByteArray) :
+    Png.inflateStored (Png.deflateDynamicLz77 raw) = none := by
+  let source := Png.deflateTokensLz77 raw
+  let litLenLengths :=
+    Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source)
+  let distLengths :=
+    Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source)
+  let litLenCodes := Png.canonicalRevCodesFromLengths litLenLengths
+  let distCodes := Png.canonicalRevCodesFromLengths distLengths
+  let lengths := generatedDynamicHeaderCodeLengthsLz77 source
+  let codeTokens := Png.codeLenLiteralTokensOfLengths lengths
+  let prefixBits :=
+    Png.generatedDynamicHeaderPrefixBits
+      (Png.generatedDynamicLitLenCount litLenLengths)
+      (Png.generatedDynamicDistCount distLengths)
+  let headerBits :=
+    prefixBits |||
+      (codeLenTokenStreamBits codeTokens.toList <<<
+        Png.generatedDynamicHeaderPrefixLen)
+  let headerLen :=
+    Png.generatedDynamicHeaderPrefixLen +
+      codeLenTokenStreamLen codeTokens.toList
+  let payloadBits :=
+    dynamicPayloadLz77StreamBits litLenCodes distCodes source.toList
+  let payloadLen :=
+    dynamicPayloadLz77StreamLen litLenCodes distCodes source.toList
+  let suffixBits := headerBits ||| (payloadBits <<< headerLen)
+  let suffixLen := headerLen + payloadLen
+  let streamBitsFull := 5 ||| (suffixBits <<< 3)
+  let streamLenFull := 3 + suffixLen
+  let hdr0 := Png.BitWriter.empty
+  let collapsedWriter := Png.BitWriter.writeBits hdr0 streamBitsFull streamLenFull
+  let streamReader0 : Png.BitReader := {
+    data := collapsedWriter.flush
+    bytePos := 0
+    bitPos := 0
+    hpos := by exact Nat.zero_le _
+    hend := by intro _; rfl
+    hbit := by decide
+  }
+  have hdata :
+      Png.deflateDynamicLz77 raw = collapsedWriter.flush := by
+    simpa [source, litLenLengths, distLengths, litLenCodes, distCodes,
+      lengths, codeTokens, prefixBits, headerBits, headerLen, payloadBits,
+      payloadLen, suffixBits, suffixLen, streamBitsFull, streamLenFull,
+      hdr0, collapsedWriter] using
+      deflateDynamicLz77_eq_collapsedWriter raw
+  have hread0 : streamReader0.bitIndex + 3 ≤ streamReader0.data.size * 8 := by
+    simpa [streamReader0, Png.BitWriter.readerAt, hdr0, Png.BitWriter.empty,
+      collapsedWriter] using
+      (Png.readerAt_writeBits_bound (bw := hdr0) (bits := streamBitsFull)
+        (len := streamLenFull) (k := 3) (hk := by omega)
+        (hbit := by decide))
+  have hread :
+      streamReader0.readBits 3 hread0 =
+        (5,
+          Png.BitWriter.readerAt (Png.BitWriter.writeBits hdr0 5 3)
+            (Png.BitWriter.writeBits (Png.BitWriter.writeBits hdr0 5 3)
+              suffixBits suffixLen).flush
+            (Png.flush_size_writeBits_le (Png.BitWriter.writeBits hdr0 5 3)
+              suffixBits suffixLen)
+            (by
+              simpa using Png.bitPos_lt_8_writeBits hdr0 5 3 (by decide))) := by
+    simpa [source, litLenLengths, distLengths, litLenCodes, distCodes,
+      lengths, codeTokens, prefixBits, headerBits, headerLen, payloadBits,
+      payloadLen, suffixBits, suffixLen, streamBitsFull, streamLenFull,
+      hdr0, collapsedWriter, streamReader0] using
+      finalDynamicReader0_readBits3 suffixBits suffixLen
+  have hreadAux :
+      streamReader0.readBits 3 hread0 = streamReader0.readBitsAux 3 := by
+    simpa [Png.BitReader.readBits] using
+      (Png.readBitsFastU32_eq_readBitsAux (br := streamReader0) (n := 3)
+        (h := hread0))
+  have hpos : 0 < collapsedWriter.flush.size := by
+    have : 3 ≤ collapsedWriter.flush.size * 8 := by
+      simpa [streamReader0] using hread0
+    by_contra hzero
+    have hsize0 : collapsedWriter.flush.size = 0 := Nat.eq_zero_of_not_pos hzero
+    omega
+  have haux :
+      streamReader0.readBitsAux 3 =
+        (((collapsedWriter.flush.get 0 hpos).toNat >>> 0) % 2 ^ 3,
+          { data := collapsedWriter.flush
+            bytePos := 0
+            bitPos := 3
+            hpos := by exact Nat.zero_le _
+            hend := by
+              intro hEq
+              have : False := by
+                simp [hEq] at hpos
+              exact False.elim this
+            hbit := by decide }) := by
+    simpa [streamReader0] using
+      (Png.readBitsAux_within_byte_lt (br := streamReader0) (n := 3)
+        (hspan := by simp [streamReader0]) (hlt := hpos))
+  have hmod :
+      ((collapsedWriter.flush.get 0 hpos).toNat % 2 ^ 3) = 5 := by
+    have hreadFst : (streamReader0.readBits 3 hread0).1 = 5 := by
+      simpa using congrArg Prod.fst hread
+    have hauxFst :
+        (streamReader0.readBitsAux 3).1 =
+          ((collapsedWriter.flush.get 0 hpos).toNat % 2 ^ 3) := by
+      simpa using congrArg Prod.fst haux
+    calc
+      (collapsedWriter.flush.get 0 hpos).toNat % 2 ^ 3 =
+          (streamReader0.readBitsAux 3).1 := hauxFst.symm
+      _ = (streamReader0.readBits 3 hread0).1 := by
+        simp [hreadAux]
+      _ = 5 := hreadFst
+  have hbit2mod :
+      (((collapsedWriter.flush.get 0 hpos).toNat % 2 ^ 3).testBit 2) =
+        true := by
+    rw [hmod]
+    decide
+  have hbit2 : ((collapsedWriter.flush.get 0 hpos).toNat).testBit 2 = true := by
+    have hbit2mod' := hbit2mod
+    rw [Nat.testBit_mod_two_pow] at hbit2mod'
+    simpa using hbit2mod'
+  let header := collapsedWriter.flush.get 0 hpos
+  have hmaskedBit : (((header.toNat >>> 1) &&& 3).testBit 1) = true := by
+    simp [header, hbit2, Nat.testBit_shiftRight]
+    decide
+  have hbtypeNat : ((header.toNat >>> 1) &&& 3) ≠ 0 := by
+    intro hzero
+    have : (((header.toNat >>> 1) &&& 3).testBit 1) = false := by
+      simp [hzero]
+    rw [hmaskedBit] at this
+    cases this
+  have hbtype : ((header >>> 1) &&& (0x03 : UInt8)) ≠ 0 := by
+    intro h0
+    have h0' : (header.toNat >>> 1) &&& 3 = 0 := by
+      have h0' := congrArg UInt8.toNat h0
+      simpa [UInt8.toNat_and, UInt8.toNat_shiftRight] using h0'
+    exact hbtypeNat h0'
+  have hauxNone : Png.inflateStoredAux collapsedWriter.flush hpos = none := by
+    unfold Png.inflateStoredAux
+    simp [header, hbtype]
+  have hstored : Png.inflateStored collapsedWriter.flush = none := by
+    simp [Png.inflateStored, hpos, hauxNone]
+  simpa [hdata] using hstored
+
 end Lemmas
 
 end Bitmaps
