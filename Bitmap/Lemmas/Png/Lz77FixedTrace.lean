@@ -707,6 +707,395 @@ lemma fixedLz77PayloadTrace_step_match_parts_readerAt_writeBits
       distExtraTail, distSymTail, lenTail, bits, bwAll, bwSym, bwLen,
       bwDistSym, bwNext, br0, brNext] using hstep) (hrest := hrest)
 
+set_option maxRecDepth 200000 in
+set_option maxHeartbeats 6000000 in
+/-- A successful fixed LZ77 token expansion has a matching fixed-payload decode
+trace for the proof-facing payload bits plus EOB. This is the array-level bridge
+from token expansion to the fixed-block decoder spec. -/
+lemma fixedLz77PayloadTraceFrom_readerAt_writeBits
+    (tokens : Array Lz77Token) :
+    ∀ i bw out outFinal bits,
+      deflateTokensExpandLz77From? tokens i out = some outFinal →
+      fixedLz77PayloadBitsEobFrom? tokens i = some bits →
+      (hbit : bw.bitPos < 8) → bw.curClearAbove →
+      let bwAll := BitWriter.writeBits bw bits.1 bits.2
+      let br0 := BitWriter.readerAt bw bwAll.flush
+        (flush_size_writeBits_le bw bits.1 bits.2) hbit
+      let brEnd := BitWriter.readerAt bwAll bwAll.flush (by rfl)
+        (bitPos_lt_8_writeBits bw bits.1 bits.2 hbit)
+      FixedPayloadTrace (tokens.size - i + 1) br0 out brEnd outFinal := by
+  classical
+  have hk :
+      ∀ k, ∀ i bw out outFinal bits,
+        tokens.size - i = k →
+        deflateTokensExpandLz77From? tokens i out = some outFinal →
+        fixedLz77PayloadBitsEobFrom? tokens i = some bits →
+        (hbit : bw.bitPos < 8) → bw.curClearAbove →
+        let bwAll := BitWriter.writeBits bw bits.1 bits.2
+        let br0 := BitWriter.readerAt bw bwAll.flush
+          (flush_size_writeBits_le bw bits.1 bits.2) hbit
+        let brEnd := BitWriter.readerAt bwAll bwAll.flush (by rfl)
+          (bitPos_lt_8_writeBits bw bits.1 bits.2 hbit)
+        FixedPayloadTrace (tokens.size - i + 1) br0 out brEnd outFinal := by
+    intro k
+    induction k with
+    | zero =>
+        intro i bw out outFinal bits hk hexpand hbits hbit hcur
+        have hnot : ¬ i < tokens.size := by omega
+        rw [deflateTokensExpandLz77From?] at hexpand
+        simp [hnot] at hexpand
+        rw [fixedLz77PayloadBitsEobFrom?] at hbits
+        simp [hnot] at hbits
+        cases hexpand
+        cases hbits
+        intro bwAll br0 brEnd
+        have htrace :=
+          fixedLz77PayloadTrace_eob_readerAt_writeBits
+            (bw := bw) (out := out) hbit hcur
+        simpa [bwAll, br0, brEnd, hk] using htrace
+    | succ k ih =>
+        intro i bw out outFinal bits hk hexpand hbits hbit hcur
+        have hi : i < tokens.size := by omega
+        rw [deflateTokensExpandLz77From?] at hexpand
+        simp [hi] at hexpand
+        rw [fixedLz77PayloadBitsEobFrom?] at hbits
+        simp [hi] at hbits
+        cases hstep : lz77TokenExpand? out (tokens[i]'hi) with
+        | none =>
+            simp [hstep] at hexpand
+        | some outNext =>
+            simp [hstep] at hexpand
+            cases htokBits : fixedLz77TokenBits? (tokens[i]'hi) with
+            | none =>
+                simp [htokBits] at hbits
+            | some head =>
+                simp [htokBits] at hbits
+                cases htailBits : fixedLz77PayloadBitsEobFrom? tokens (i + 1) with
+                | none =>
+                    simp [htailBits] at hbits
+                | some tail =>
+                    simp [htailBits] at hbits
+                    cases hbits
+                    have hkTail : tokens.size - (i + 1) = k := by omega
+                    have hstepToken :
+                        lz77TokenExpand? out (tokens[i]'hi) = some outNext := hstep
+                    cases htok : tokens[i]'hi with
+                    | literal b =>
+                        simp [fixedLz77TokenBits?, htok] at htokBits
+                        cases htokBits
+                        have hstepLit :
+                            lz77TokenExpand? out (.literal b) = some outNext := by
+                          simpa [htok] using hstepToken
+                        simp [lz77TokenExpand?] at hstepLit
+                        cases hstepLit
+                        let headLit := fixedLz77LiteralBits b
+                        let bitsAll := lz77BitPairAppend headLit tail
+                        let bwNext := BitWriter.writeBits bw bitsAll.1 headLit.2
+                        have hbitNext : bwNext.bitPos < 8 := by
+                          exact bitPos_lt_8_writeBits bw bitsAll.1 headLit.2 hbit
+                        have hcurNext : bwNext.curClearAbove := by
+                          exact curClearAbove_writeBits bw bitsAll.1 headLit.2 hbit hcur
+                        have hheadLt : headLit.1 < 2 ^ headLit.2 := by
+                          simpa [headLit] using fixedLz77LiteralBits_bits_lt b
+                        have hbwNext :
+                            bwNext = BitWriter.writeBits bw headLit.1 headLit.2 := by
+                          dsimp [bwNext, bitsAll]
+                          exact writeBits_or_shift_tail bw headLit.1 tail.1 headLit.2 hheadLt
+                        have hbwAll :
+                            BitWriter.writeBits bw bitsAll.1 bitsAll.2 =
+                              BitWriter.writeBits bwNext tail.1 tail.2 := by
+                          calc
+                            BitWriter.writeBits bw bitsAll.1 bitsAll.2 =
+                                BitWriter.writeBits
+                                  (BitWriter.writeBits bw headLit.1 headLit.2)
+                                  tail.1 tail.2 := by
+                                simpa [bitsAll] using
+                                  (lz77BitPairAppend_writeBits (bw := bw)
+                                    (head := headLit) (tail := tail) hheadLt)
+                            _ = BitWriter.writeBits bwNext tail.1 tail.2 := by
+                                rw [hbwNext]
+                        have hrest :=
+                          ih (i + 1) bwNext (out.push b) outFinal tail hkTail
+                            hexpand htailBits hbitNext hcurNext
+                        have hrest' :
+                            let bwTail := BitWriter.writeBits bwNext tail.1 tail.2
+                            let brTail0 := BitWriter.readerAt bwNext bwTail.flush
+                              (flush_size_writeBits_le bwNext tail.1 tail.2) hbitNext
+                            let brTailEnd := BitWriter.readerAt bwTail bwTail.flush (by rfl)
+                              (bitPos_lt_8_writeBits bwNext tail.1 tail.2 hbitNext)
+                            FixedPayloadTrace (tokens.size - (i + 1) + 1)
+                              brTail0 (out.push b) brTailEnd outFinal := hrest
+                        intro bwAll br0 brEnd
+                        have hrestForStep :
+                            let brNext := BitWriter.readerAt
+                              (BitWriter.writeBits bw bitsAll.1 headLit.2)
+                              bwAll.flush
+                              (by
+                                have hkPrefix : headLit.2 ≤ bitsAll.2 := by
+                                  simp [bitsAll, lz77BitPairAppend]
+                                exact flush_size_writeBits_prefix bw bitsAll.1
+                                  headLit.2 bitsAll.2 hkPrefix)
+                              (bitPos_lt_8_writeBits bw bitsAll.1 headLit.2 hbit)
+                            FixedPayloadTrace (tokens.size - (i + 1) + 1)
+                              brNext (out.push b) brEnd outFinal := by
+                          simpa [bwAll, brEnd, bwNext, hbwAll, bitsAll, headLit]
+                            using hrest'
+                        have hstepTrace :=
+                          fixedLz77PayloadTrace_step_literal_readerAt_writeBits
+                            (bw := bw) (out := out) (outFinal := outFinal)
+                            (b := b) (tail := tail)
+                            (steps := tokens.size - (i + 1) + 1)
+                            (brAfter := brEnd) hbit hcur
+                        have hres := hstepTrace (by
+                          simpa [headLit, bitsAll, bwAll, br0] using hrestForStep)
+                        have hsteps :
+                            tokens.size - (i + 1) + 2 = tokens.size - i + 1 := by
+                          omega
+                        simpa [bitsAll, headLit, br0, bwAll, hsteps] using hres
+                    | «match» len distance =>
+                        have hstepMatch :
+                            lz77TokenExpand? out (.match len distance) = some outNext := by
+                          simpa [htok] using hstepToken
+                        rcases hlenInfo : deflateLengthInfo len with
+                          ⟨sym, extraBits, extraLen⟩
+                        cases hdistInfo : deflateDistanceInfo? distance with
+                        | none =>
+                            simp [fixedLz77TokenBits?, fixedLz77MatchBits?, htok,
+                              hdistInfo] at htokBits
+                        | some distInfo =>
+                            rcases distInfo with ⟨distSym, distExtraBits, distExtraLen⟩
+                            simp [fixedLz77TokenBits?, fixedLz77MatchBits?, htok,
+                              hlenInfo, hdistInfo] at htokBits
+                            cases htokBits
+                            let codeLen := fixedLitLenCode sym
+                            let symBits : Nat × Nat :=
+                              (reverseBits codeLen.1 codeLen.2, codeLen.2)
+                            let lenExtraBits : Nat × Nat := (extraBits, extraLen)
+                            let distSymBits : Nat × Nat := (reverseBits distSym 5, 5)
+                            let distExtraPair : Nat × Nat :=
+                              (distExtraBits, distExtraLen)
+                            let distExtraTail := lz77BitPairAppend distExtraPair tail
+                            let distSymTail := lz77BitPairAppend distSymBits distExtraTail
+                            let lenTail := lz77BitPairAppend lenExtraBits distSymTail
+                            let bitsMatch := lz77BitPairAppend symBits lenTail
+                            let bwSym := BitWriter.writeBits bw bitsMatch.1 symBits.2
+                            let bwLen :=
+                              BitWriter.writeBits bwSym lenTail.1 lenExtraBits.2
+                            let bwDistSym :=
+                              BitWriter.writeBits bwLen distSymTail.1 distSymBits.2
+                            let bwNext :=
+                              BitWriter.writeBits bwDistSym distExtraTail.1 distExtraPair.2
+                            have hbitSym : bwSym.bitPos < 8 := by
+                              exact bitPos_lt_8_writeBits bw bitsMatch.1 symBits.2 hbit
+                            have hbitLen : bwLen.bitPos < 8 := by
+                              exact bitPos_lt_8_writeBits bwSym lenTail.1
+                                lenExtraBits.2 hbitSym
+                            have hbitDistSym : bwDistSym.bitPos < 8 := by
+                              exact bitPos_lt_8_writeBits bwLen distSymTail.1
+                                distSymBits.2 hbitLen
+                            have hbitNext : bwNext.bitPos < 8 := by
+                              exact bitPos_lt_8_writeBits bwDistSym distExtraTail.1
+                                distExtraPair.2 hbitDistSym
+                            have hcurSym : bwSym.curClearAbove := by
+                              exact curClearAbove_writeBits bw bitsMatch.1 symBits.2
+                                hbit hcur
+                            have hcurLen : bwLen.curClearAbove := by
+                              exact curClearAbove_writeBits bwSym lenTail.1
+                                lenExtraBits.2 hbitSym hcurSym
+                            have hcurDistSym : bwDistSym.curClearAbove := by
+                              exact curClearAbove_writeBits bwLen distSymTail.1
+                                distSymBits.2 hbitLen hcurLen
+                            have hcurNext : bwNext.curClearAbove := by
+                              exact curClearAbove_writeBits bwDistSym distExtraTail.1
+                                distExtraPair.2 hbitDistSym hcurDistSym
+                            rcases lz77TokenExpand?_match_some_spec
+                                (out := out) (out' := outNext)
+                                (len := len) (distance := distance) hstepMatch with
+                              ⟨hlenLo, hlenHi, _, _, _, _, _⟩
+                            rcases deflateLengthInfo_decodeLength_correct
+                                hlenInfo hlenLo hlenHi with
+                              ⟨_, _, _, _, _, hbitsLenLt⟩
+                            rcases deflateDistanceInfo_decodeDistance_correct
+                                hdistInfo with
+                              ⟨_, _, _, _, hbitsDistLt⟩
+                            have hsymBitsLt : symBits.1 < 2 ^ symBits.2 := by
+                              simp [symBits, reverseBits_lt]
+                            have hlenExtraBitsLt :
+                                lenExtraBits.1 < 2 ^ lenExtraBits.2 := by
+                              simpa [lenExtraBits] using hbitsLenLt
+                            have hdistSymBitsLt :
+                                distSymBits.1 < 2 ^ distSymBits.2 := by
+                              simpa [distSymBits] using (reverseBits_lt distSym 5)
+                            have hdistExtraBitsLt :
+                                distExtraPair.1 < 2 ^ distExtraPair.2 := by
+                              simpa [distExtraPair] using hbitsDistLt
+                            have hbwSymOnly :
+                                bwSym = BitWriter.writeBits bw symBits.1 symBits.2 := by
+                              dsimp [bwSym, bitsMatch]
+                              exact writeBits_or_shift_tail bw symBits.1 lenTail.1
+                                symBits.2 hsymBitsLt
+                            have hbwAllLen :
+                                BitWriter.writeBits bw bitsMatch.1 bitsMatch.2 =
+                                  BitWriter.writeBits bwSym lenTail.1 lenTail.2 := by
+                              calc
+                                BitWriter.writeBits bw bitsMatch.1 bitsMatch.2 =
+                                    BitWriter.writeBits
+                                      (BitWriter.writeBits bw symBits.1 symBits.2)
+                                      lenTail.1 lenTail.2 := by
+                                    simpa [bitsMatch] using
+                                      (lz77BitPairAppend_writeBits (bw := bw)
+                                        (head := symBits) (tail := lenTail)
+                                        hsymBitsLt)
+                                _ = BitWriter.writeBits bwSym lenTail.1 lenTail.2 := by
+                                    rw [hbwSymOnly]
+                            have hbwLenOnly :
+                                bwLen =
+                                  BitWriter.writeBits bwSym lenExtraBits.1
+                                    lenExtraBits.2 := by
+                              dsimp [bwLen, lenTail]
+                              exact writeBits_or_shift_tail bwSym lenExtraBits.1
+                                distSymTail.1 lenExtraBits.2 hlenExtraBitsLt
+                            have hbwAllDist :
+                                BitWriter.writeBits bw bitsMatch.1 bitsMatch.2 =
+                                  BitWriter.writeBits bwLen distSymTail.1
+                                    distSymTail.2 := by
+                              calc
+                                BitWriter.writeBits bw bitsMatch.1 bitsMatch.2 =
+                                    BitWriter.writeBits bwSym lenTail.1 lenTail.2 :=
+                                      hbwAllLen
+                                _ =
+                                    BitWriter.writeBits
+                                      (BitWriter.writeBits bwSym lenExtraBits.1
+                                        lenExtraBits.2)
+                                      distSymTail.1 distSymTail.2 := by
+                                    simpa [lenTail] using
+                                      (lz77BitPairAppend_writeBits (bw := bwSym)
+                                        (head := lenExtraBits) (tail := distSymTail)
+                                        hlenExtraBitsLt)
+                                _ = BitWriter.writeBits bwLen distSymTail.1
+                                      distSymTail.2 := by
+                                    rw [hbwLenOnly]
+                            have hbwDistSymOnly :
+                                bwDistSym =
+                                  BitWriter.writeBits bwLen distSymBits.1
+                                    distSymBits.2 := by
+                              dsimp [bwDistSym, distSymTail]
+                              exact writeBits_or_shift_tail bwLen distSymBits.1
+                                distExtraTail.1 distSymBits.2 hdistSymBitsLt
+                            have hbwAllDistExtra :
+                                BitWriter.writeBits bw bitsMatch.1 bitsMatch.2 =
+                                  BitWriter.writeBits bwDistSym distExtraTail.1
+                                    distExtraTail.2 := by
+                              calc
+                                BitWriter.writeBits bw bitsMatch.1 bitsMatch.2 =
+                                    BitWriter.writeBits bwLen distSymTail.1
+                                      distSymTail.2 := hbwAllDist
+                                _ =
+                                    BitWriter.writeBits
+                                      (BitWriter.writeBits bwLen distSymBits.1
+                                        distSymBits.2)
+                                      distExtraTail.1 distExtraTail.2 := by
+                                    simpa [distSymTail] using
+                                      (lz77BitPairAppend_writeBits (bw := bwLen)
+                                        (head := distSymBits) (tail := distExtraTail)
+                                        hdistSymBitsLt)
+                                _ = BitWriter.writeBits bwDistSym distExtraTail.1
+                                      distExtraTail.2 := by
+                                    rw [hbwDistSymOnly]
+                            have hbwNextOnly :
+                                bwNext =
+                                  BitWriter.writeBits bwDistSym distExtraPair.1
+                                    distExtraPair.2 := by
+                              dsimp [bwNext, distExtraTail]
+                              exact writeBits_or_shift_tail bwDistSym
+                                distExtraPair.1 tail.1 distExtraPair.2
+                                hdistExtraBitsLt
+                            have hbwAll :
+                                BitWriter.writeBits bw bitsMatch.1 bitsMatch.2 =
+                                  BitWriter.writeBits bwNext tail.1 tail.2 := by
+                              calc
+                                BitWriter.writeBits bw bitsMatch.1 bitsMatch.2 =
+                                    BitWriter.writeBits bwDistSym distExtraTail.1
+                                      distExtraTail.2 := hbwAllDistExtra
+                                _ =
+                                    BitWriter.writeBits
+                                      (BitWriter.writeBits bwDistSym
+                                        distExtraPair.1 distExtraPair.2)
+                                      tail.1 tail.2 := by
+                                    simpa [distExtraTail] using
+                                      (lz77BitPairAppend_writeBits
+                                        (bw := bwDistSym) (head := distExtraPair)
+                                        (tail := tail) hdistExtraBitsLt)
+                                _ = BitWriter.writeBits bwNext tail.1 tail.2 := by
+                                    rw [hbwNextOnly]
+                            have hrest :=
+                              ih (i + 1) bwNext outNext outFinal tail hkTail
+                                hexpand htailBits hbitNext hcurNext
+                            have hrest' :
+                                let bwTail := BitWriter.writeBits bwNext tail.1 tail.2
+                                let brTail0 := BitWriter.readerAt bwNext bwTail.flush
+                                  (flush_size_writeBits_le bwNext tail.1 tail.2) hbitNext
+                                let brTailEnd := BitWriter.readerAt bwTail bwTail.flush
+                                  (by rfl)
+                                  (bitPos_lt_8_writeBits bwNext tail.1 tail.2 hbitNext)
+                                FixedPayloadTrace (tokens.size - (i + 1) + 1)
+                                  brTail0 outNext brTailEnd outFinal := hrest
+                            intro bwAll br0 brEnd
+                            have hrestForStep :
+                                let brNext := BitWriter.readerAt bwNext bwAll.flush
+                                  (by
+                                    have hk3 : distExtraPair.2 ≤ distExtraTail.2 := by
+                                      simp [distExtraTail, lz77BitPairAppend]
+                                    have hflush3 :=
+                                      flush_size_writeBits_prefix bwDistSym
+                                        distExtraTail.1 distExtraPair.2
+                                        distExtraTail.2 hk3
+                                    have hwriteAll :
+                                        bwAll =
+                                          BitWriter.writeBits bwDistSym
+                                            distExtraTail.1 distExtraTail.2 := by
+                                      simpa [bwAll, bitsMatch, codeLen, symBits,
+                                        lenExtraBits, distSymBits, distExtraPair,
+                                        lenTail, distSymTail, distExtraTail,
+                                        lz77BitPairAppend_assoc]
+                                        using hbwAllDistExtra
+                                    have hflushAll :
+                                        (BitWriter.writeBits bwDistSym
+                                          distExtraTail.1 distExtraTail.2).flush.size ≤
+                                          bwAll.flush.size := by
+                                      simp [hwriteAll]
+                                    exact Nat.le_trans hflush3 hflushAll)
+                                  hbitNext
+                                FixedPayloadTrace (tokens.size - (i + 1) + 1)
+                                  brNext outNext brEnd outFinal := by
+                              simpa [bwAll, brEnd, hbwAll, bitsMatch, codeLen,
+                                symBits, lenExtraBits, distSymBits, distExtraPair,
+                                lenTail, distSymTail, distExtraTail,
+                                lz77BitPairAppend_assoc] using hrest'
+                            have hstepTrace :=
+                              fixedLz77PayloadTrace_step_match_parts_readerAt_writeBits
+                                (bw := bw) (out := out) (outNext := outNext)
+                                (outFinal := outFinal) (len := len)
+                                (distance := distance) (sym := sym)
+                                (extraBits := extraBits) (extraLen := extraLen)
+                                (distSym := distSym) (distExtraBits := distExtraBits)
+                                (distExtraLen := distExtraLen) (tail := tail)
+                                (steps := tokens.size - (i + 1) + 1)
+                                (brAfter := brEnd) hlenInfo hdistInfo hstepMatch
+                                hbit hcur
+                            have hres := hstepTrace (by
+                              simpa [codeLen, symBits, lenExtraBits, distSymBits,
+                                distExtraPair, distExtraTail, distSymTail, lenTail,
+                                bitsMatch, bwSym, bwLen, bwDistSym, bwNext, bwAll,
+                                br0, lz77BitPairAppend_assoc] using hrestForStep)
+                            have hsteps :
+                                tokens.size - (i + 1) + 2 = tokens.size - i + 1 := by
+                              omega
+                            simpa [bitsMatch, lz77BitPairAppend_assoc, br0, bwAll,
+                              hsteps] using hres
+  intro i bw out outFinal bits hexpand hbits hbit hcur
+  exact hk (tokens.size - i) i bw out outFinal bits rfl hexpand hbits hbit hcur
+
 end Png
 
 end Bitmaps
