@@ -874,6 +874,35 @@ lemma deflateFixedLz77_eq_writeBits_of_payloadBits
   simpa [deflateFixedLz77, tokens, bw0, bw1, bw2, writeFixedPayloadLz77]
     using hflush.symm
 
+/-- Public fixed compression is the LZ77 fixed encoder, so the same proof-facing
+payload bit theorem applies to `deflateFixed`. -/
+lemma deflateFixed_eq_writeBits_of_lz77_payloadBits
+    (raw : ByteArray) {bits : Nat × Nat}
+    (hbits : fixedLz77PayloadBitsEob? (deflateTokensLz77 raw) = some bits)
+    (hexpand : deflateTokensExpandLz77? (deflateTokensLz77 raw) = some raw) :
+    deflateFixed raw =
+      let bw0 := BitWriter.empty
+      let bw1 := BitWriter.writeBits bw0 1 1
+      let bw2 := BitWriter.writeBits bw1 1 2
+      (BitWriter.writeBits bw2 bits.1 bits.2).flush := by
+  simpa [deflateFixed] using
+    deflateFixedLz77_eq_writeBits_of_payloadBits raw hbits hexpand
+
+/-- If the public LZ77 tokens expand to the input, then their fixed-Huffman
+proof-facing payload bitstream exists. -/
+lemma fixedLz77PayloadBitsEob?_some_of_public_expand
+    (raw : ByteArray)
+    (hexpand : deflateTokensExpandLz77? (deflateTokensLz77 raw) = some raw) :
+    ∃ bits, fixedLz77PayloadBitsEob? (deflateTokensLz77 raw) = some bits := by
+  have hexpandFrom :
+      deflateTokensExpandLz77From? (deflateTokensLz77 raw) 0 ByteArray.empty =
+        some raw := by
+    simpa [deflateTokensExpandLz77?] using hexpand
+  simpa [fixedLz77PayloadBitsEob?] using
+    fixedLz77PayloadBitsEobFrom?_some_of_expand
+      (tokens := deflateTokensLz77 raw) (i := 0)
+      (out := ByteArray.empty) (out' := raw) hexpandFrom
+
 end Png
 
 end Bitmaps
