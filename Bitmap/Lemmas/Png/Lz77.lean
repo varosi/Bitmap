@@ -359,6 +359,140 @@ lemma fixedLz77TokenBits?_writeBits
     simp [fixedLz77LiteralBits]
   · exact fixedLz77MatchBits?_writeBits bw hbits hlenValid.1 hlenValid.2
 
+/-- The proof-facing fixed LZ77 payload bitstream writes the same bytes as the
+runtime fixed LZ77 payload writer, followed by the fixed end-of-block code. -/
+lemma fixedLz77PayloadBitsEobFrom?_writeBits
+    (tokens : Array Lz77Token) :
+    ∀ i bw bits,
+      fixedLz77PayloadBitsEobFrom? tokens i = some bits →
+      (∀ j, (hij : i ≤ j) → (hj : j < tokens.size) →
+        match tokens[j]'hj with
+        | .literal _ => True
+        | .match len _ => 3 ≤ len ∧ len ≤ 258) →
+      BitWriter.writeBits bw bits.1 bits.2 =
+        let bwPayload := writeFixedPayloadLz77From bw tokens i
+        let eob := fixedLitLenCode 256
+        BitWriter.writeBits bwPayload (reverseBits eob.1 eob.2) eob.2 := by
+  classical
+  have hk :
+      ∀ k, ∀ i bw bits,
+        tokens.size - i = k →
+        fixedLz77PayloadBitsEobFrom? tokens i = some bits →
+        (∀ j, (hij : i ≤ j) → (hj : j < tokens.size) →
+          match tokens[j]'hj with
+          | .literal _ => True
+          | .match len _ => 3 ≤ len ∧ len ≤ 258) →
+        BitWriter.writeBits bw bits.1 bits.2 =
+          let bwPayload := writeFixedPayloadLz77From bw tokens i
+          let eob := fixedLitLenCode 256
+          BitWriter.writeBits bwPayload (reverseBits eob.1 eob.2) eob.2 := by
+    intro k
+    induction k with
+    | zero =>
+        intro i bw bits hk hbits _hvalid
+        have hnot : ¬ i < tokens.size := by omega
+        simp [fixedLz77PayloadBitsEobFrom?, writeFixedPayloadLz77From, hnot] at hbits ⊢
+        cases hbits
+        rfl
+    | succ k ih =>
+        intro i bw bits hk hbits hvalid
+        have hi : i < tokens.size := by omega
+        rw [fixedLz77PayloadBitsEobFrom?] at hbits
+        simp [hi] at hbits
+        cases htokBits : fixedLz77TokenBits? (tokens[i]'hi) with
+        | none =>
+            simp [htokBits] at hbits
+        | some head =>
+            simp [htokBits] at hbits
+            cases htailBits : fixedLz77PayloadBitsEobFrom? tokens (i + 1) with
+            | none =>
+                simp [htailBits] at hbits
+            | some tail =>
+                simp [htailBits] at hbits
+                cases hbits
+                have hheadValid :
+                    match tokens[i]'hi with
+                    | .literal _ => True
+                    | .match len _ => 3 ≤ len ∧ len ≤ 258 :=
+                  hvalid i (by omega) hi
+                have hheadLt : head.1 < 2 ^ head.2 := by
+                  cases htok : tokens[i]'hi <;>
+                    simp [fixedLz77TokenBits?, htok] at htokBits hheadValid ⊢
+                  · cases htokBits
+                    exact fixedLz77LiteralBits_bits_lt _
+                  · exact fixedLz77MatchBits?_some_bits_lt htokBits
+                      hheadValid.1 hheadValid.2
+                have hheadWrite :
+                    BitWriter.writeBits bw head.1 head.2 =
+                      match tokens[i]'hi with
+                      | .literal b => BitWriter.writeFixedLiteralFast bw b
+                      | .match len distance => BitWriter.writeFixedMatchFast bw len distance := by
+                  cases htok : tokens[i]'hi <;>
+                    simp [fixedLz77TokenBits?, htok] at htokBits hheadValid ⊢
+                  · cases htokBits
+                    simp [fixedLz77LiteralBits]
+                  · exact fixedLz77MatchBits?_writeBits bw htokBits
+                      hheadValid.1 hheadValid.2
+                have hwriterStep :
+                    writeFixedPayloadLz77From bw tokens i =
+                      writeFixedPayloadLz77From
+                        (match tokens[i]'hi with
+                        | .literal b => BitWriter.writeFixedLiteralFast bw b
+                        | .match len distance => BitWriter.writeFixedMatchFast bw len distance)
+                        tokens (i + 1) := by
+                  rw [writeFixedPayloadLz77From]
+                  simp [hi]
+                  rfl
+                have hvalidTail :
+                    ∀ j, (hij : i + 1 ≤ j) → (hj : j < tokens.size) →
+                      match tokens[j]'hj with
+                      | .literal _ => True
+                      | .match len _ => 3 ≤ len ∧ len ≤ 258 := by
+                  intro j hij hj
+                  exact hvalid j (by omega) hj
+                have hkTail : tokens.size - (i + 1) = k := by omega
+                have hrec :=
+                  ih (i + 1) (BitWriter.writeBits bw head.1 head.2) tail
+                    hkTail htailBits hvalidTail
+                have hpayloadEq :
+                    writeFixedPayloadLz77From (BitWriter.writeBits bw head.1 head.2)
+                        tokens (i + 1) =
+                      writeFixedPayloadLz77From
+                        (match tokens[i]'hi with
+                        | .literal b => BitWriter.writeFixedLiteralFast bw b
+                        | .match len distance => BitWriter.writeFixedMatchFast bw len distance)
+                        tokens (i + 1) := by
+                  rw [hheadWrite]
+                calc
+                  BitWriter.writeBits bw (lz77BitPairAppend head tail).1
+                      (lz77BitPairAppend head tail).2 =
+                    BitWriter.writeBits (BitWriter.writeBits bw head.1 head.2)
+                        tail.1 tail.2 := by
+                      exact lz77BitPairAppend_writeBits bw hheadLt
+                  _ =
+                    (let bwPayload :=
+                        writeFixedPayloadLz77From (BitWriter.writeBits bw head.1 head.2)
+                          tokens (i + 1)
+                     let eob := fixedLitLenCode 256
+                     BitWriter.writeBits bwPayload (reverseBits eob.1 eob.2) eob.2) := hrec
+                  _ =
+                      (let bwPayload :=
+                          writeFixedPayloadLz77From
+                            (match tokens[i]'hi with
+                            | .literal b => BitWriter.writeFixedLiteralFast bw b
+                            | .match len distance => BitWriter.writeFixedMatchFast bw len distance)
+                            tokens (i + 1)
+                     let eob := fixedLitLenCode 256
+                     BitWriter.writeBits bwPayload (reverseBits eob.1 eob.2) eob.2) := by
+                      rw [hpayloadEq]
+                    _ =
+                      (let bwPayload := writeFixedPayloadLz77From bw tokens i
+                       let eob := fixedLitLenCode 256
+                       BitWriter.writeBits bwPayload (reverseBits eob.1 eob.2) eob.2) := by
+                        rw [← hwriterStep]
+  intro i bw bits hbits hvalid
+  exact hk (tokens.size - i) i bw bits rfl hbits hvalid
+
 /-- Successful distance metadata can be used with the decoder's internal
 array proofs, avoiding repeated `get!` coercion in payload proofs. -/
 lemma deflateDistanceInfo?_some_spec_internal
