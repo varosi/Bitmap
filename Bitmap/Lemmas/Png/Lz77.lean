@@ -111,6 +111,20 @@ lemma deflateLengthInfo_spec_internal (len : Nat) (hlo : 3 ≤ len) (hhi : len �
               extraBits < 2 ^ extraLen := by
   simpa [deflateLengthInfo] using fixedLenMatchInfo_spec_internal len hlo hhi
 
+/-- The encoder's length symbol and extra bits describe exactly the original
+valid match length in the decoder's length tables. -/
+lemma deflateLengthInfo_decodeLength_correct
+    {len sym extraBits extraLen : Nat}
+    (hinfo : deflateLengthInfo len = (sym, extraBits, extraLen))
+    (hlo : 3 ≤ len) (hhi : len ≤ 258) :
+    ∃ _hsym : 257 ≤ sym ∧ sym ≤ 285,
+      ∃ hidxBase : sym - 257 < lengthBases.size,
+        ∃ hidxExtra : sym - 257 < lengthExtra.size,
+          extraLen = Array.getInternal lengthExtra (sym - 257) hidxExtra ∧
+          Array.getInternal lengthBases (sym - 257) hidxBase + extraBits = len ∧
+          extraBits < 2 ^ extraLen := by
+  simpa [hinfo] using deflateLengthInfo_spec_internal len hlo hhi
+
 /-- Successful distance-table search returns metadata that agrees with the
 DEFLATE distance decoder tables. This isolates the recursive search proof. -/
 lemma deflateDistanceInfoSearch_some_spec_get!
@@ -359,6 +373,131 @@ lemma fixedLz77TokenBits?_writeBits
     simp [fixedLz77LiteralBits]
   · exact fixedLz77MatchBits?_writeBits bw hbits hlenValid.1 hlenValid.2
 
+/-- Successful fixed-Huffman match proof bits contain at least one bit. This
+supplies the per-token progress needed by payload trace fuel bounds. -/
+lemma fixedLz77MatchBits?_some_len_pos
+    {len distance : Nat} {bits : Nat × Nat}
+    (hbits : fixedLz77MatchBits? len distance = some bits)
+    (hlenLo : 3 ≤ len) (hlenHi : len ≤ 258) :
+    1 ≤ bits.2 := by
+  classical
+  unfold fixedLz77MatchBits? at hbits
+  rcases hlenInfo : deflateLengthInfo len with ⟨sym, extraBits, extraLen⟩
+  simp [hlenInfo] at hbits
+  rcases hdistInfo : deflateDistanceInfo? distance with
+    _ | ⟨distSym, distExtraBits, distExtraLen⟩
+  · simp [hdistInfo] at hbits
+  · simp [hdistInfo] at hbits
+    cases hbits
+    let codeLen := fixedLitLenCode sym
+    let symBits : Nat × Nat := (reverseBits codeLen.1 codeLen.2, codeLen.2)
+    let lenExtraBits : Nat × Nat := (extraBits, extraLen)
+    let distSymBits : Nat × Nat := (reverseBits distSym 5, 5)
+    let distExtra : Nat × Nat := (distExtraBits, distExtraLen)
+    have hlenSpec :
+        ∃ _hsym : 257 ≤ sym ∧ sym ≤ 285,
+          ∃ hidxBase : sym - 257 < lengthBases.size,
+            ∃ hidxExtra : sym - 257 < lengthExtra.size,
+              extraLen = Array.getInternal lengthExtra (sym - 257) hidxExtra ∧
+              Array.getInternal lengthBases (sym - 257) hidxBase + extraBits = len ∧
+              extraBits < 2 ^ extraLen := by
+      simpa [hlenInfo] using deflateLengthInfo_spec_internal len hlenLo hlenHi
+    have hsymLt : sym < 288 := by
+      rcases hlenSpec with ⟨hsym, _, _, _, _, _⟩
+      omega
+    have hcode : 1 ≤ codeLen.2 := fixedLitLenCode_len_pos sym hsymLt
+    simp [lz77BitPairAppend]
+    omega
+
+/-- Successful fixed-Huffman token proof bits contain at least one bit. Payload
+fuel accounting uses this to bound trace steps by encoded payload length. -/
+lemma fixedLz77TokenBits?_some_len_pos
+    {token : Lz77Token} {bits : Nat × Nat}
+    (hbits : fixedLz77TokenBits? token = some bits)
+    (hlenValid :
+      match token with
+      | .literal _ => True
+      | .match len _ => 3 ≤ len ∧ len ≤ 258) :
+    1 ≤ bits.2 := by
+  cases token <;> simp [fixedLz77TokenBits?] at hbits hlenValid ⊢
+  · cases hbits
+    simpa [fixedLz77LiteralBits] using
+      fixedLitLenCode_len_pos (UInt8.toNat _) (lt_trans (UInt8.toNat_lt _) (by decide))
+  · exact fixedLz77MatchBits?_some_len_pos hbits hlenValid.1 hlenValid.2
+
+/-- A successfully generated fixed LZ77 payload bitstream is long enough to
+fuel one decoder trace step per remaining token plus the final EOB step. -/
+lemma fixedLz77PayloadBitsEobFrom?_steps_le_bits_len
+    (tokens : Array Lz77Token) :
+    ∀ i bits,
+      fixedLz77PayloadBitsEobFrom? tokens i = some bits →
+      (∀ j, (hij : i ≤ j) → (hj : j < tokens.size) →
+        match tokens[j]'hj with
+        | .literal _ => True
+        | .match len _ => 3 ≤ len ∧ len ≤ 258) →
+      tokens.size - i + 1 ≤ bits.2 + 1 := by
+  classical
+  have hk :
+      ∀ k, ∀ i bits,
+        tokens.size - i = k →
+        fixedLz77PayloadBitsEobFrom? tokens i = some bits →
+        (∀ j, (hij : i ≤ j) → (hj : j < tokens.size) →
+          match tokens[j]'hj with
+          | .literal _ => True
+          | .match len _ => 3 ≤ len ∧ len ≤ 258) →
+        tokens.size - i + 1 ≤ bits.2 + 1 := by
+    intro k
+    induction k with
+    | zero =>
+        intro i bits hk hbits _hvalid
+        have hnot : ¬ i < tokens.size := by omega
+        simp [fixedLz77PayloadBitsEobFrom?, hnot] at hbits
+        cases hbits
+        omega
+    | succ k ih =>
+        intro i bits hk hbits hvalid
+        have hi : i < tokens.size := by omega
+        rw [fixedLz77PayloadBitsEobFrom?] at hbits
+        simp [hi] at hbits
+        cases htokBits : fixedLz77TokenBits? (tokens[i]'hi) with
+        | none =>
+            simp [htokBits] at hbits
+        | some head =>
+            simp [htokBits] at hbits
+            cases htailBits : fixedLz77PayloadBitsEobFrom? tokens (i + 1) with
+            | none =>
+                simp [htailBits] at hbits
+            | some tail =>
+                simp [htailBits] at hbits
+                cases hbits
+                have hheadValid :
+                    match tokens[i]'hi with
+                    | .literal _ => True
+                    | .match len _ => 3 ≤ len ∧ len ≤ 258 :=
+                  hvalid i (by omega) hi
+                have hheadPos : 1 ≤ head.2 := by
+                  cases htok : tokens[i]'hi <;>
+                    simp [fixedLz77TokenBits?, htok] at htokBits hheadValid ⊢
+                  · cases htokBits
+                    simpa [fixedLz77LiteralBits] using
+                      fixedLitLenCode_len_pos (UInt8.toNat _)
+                        (lt_trans (UInt8.toNat_lt _) (by decide))
+                  · exact fixedLz77MatchBits?_some_len_pos htokBits
+                      hheadValid.1 hheadValid.2
+                have hvalidTail :
+                    ∀ j, (hij : i + 1 ≤ j) → (hj : j < tokens.size) →
+                      match tokens[j]'hj with
+                      | .literal _ => True
+                      | .match len _ => 3 ≤ len ∧ len ≤ 258 := by
+                  intro j hij hj
+                  exact hvalid j (by omega) hj
+                have hkTail : tokens.size - (i + 1) = k := by omega
+                have hrec := ih (i + 1) tail hkTail htailBits hvalidTail
+                simp [lz77BitPairAppend]
+                omega
+  intro i bits hbits hvalid
+  exact hk (tokens.size - i) i bits rfl hbits hvalid
+
 /-- The proof-facing fixed LZ77 payload bitstream writes the same bytes as the
 runtime fixed LZ77 payload writer, followed by the fixed end-of-block code. -/
 lemma fixedLz77PayloadBitsEobFrom?_writeBits
@@ -521,6 +660,18 @@ lemma deflateDistanceInfo?_some_spec_internal
       Array.getInternal distBases sym hdist + extraBits =
           distBases[sym]! + extraBits := by rw [hbaseInternal]
       _ = distance := hbaseGet
+
+/-- The encoder's distance symbol and extra bits describe exactly the original
+distance in the decoder's distance tables. -/
+lemma deflateDistanceInfo_decodeDistance_correct
+    {distance sym extraBits extraLen : Nat}
+    (hinfo : deflateDistanceInfo? distance = some (sym, extraBits, extraLen)) :
+    ∃ hdist : sym < distBases.size,
+      ∃ hdistExtra : sym < distExtra.size,
+        extraLen = Array.getInternal distExtra sym hdistExtra ∧
+        Array.getInternal distBases sym hdist + extraBits = distance ∧
+        extraBits < 2 ^ extraLen := by
+  exact deflateDistanceInfo?_some_spec_internal hinfo
 
 /-- The distance extra bits written after a DEFLATE distance symbol decode
 back to the advertised distance and leave the reader after those bits. -/
