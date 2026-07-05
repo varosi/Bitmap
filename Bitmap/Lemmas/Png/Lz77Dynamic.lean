@@ -4365,6 +4365,63 @@ lemma deflateDynamicLz77_eq_collapsedWriter (raw : ByteArray) :
           streamBitsFull streamLenFull).flush := by
           simp [hcollapse]
 
+/-- Splits the packed generated LZ77 dynamic suffix at the generated-header
+boundary. The block proof uses this to reuse the payload decoder theorem after
+the runtime header parser has advanced to the payload start. -/
+lemma generatedDynamicPayloadLz77PrefixWriter_eq_suffixWriter
+    (source : Array Png.Lz77Token) (hdrHeader : Png.BitWriter) :
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source)
+    let distLengths :=
+      Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source)
+    let litLenCodes := Png.canonicalRevCodesFromLengths litLenLengths
+    let distCodes := Png.canonicalRevCodesFromLengths distLengths
+    let lengths := generatedDynamicHeaderCodeLengthsLz77 source
+    let codeTokens := Png.codeLenLiteralTokensOfLengths lengths
+    let prefixBits :=
+      Png.generatedDynamicHeaderPrefixBits
+        (Png.generatedDynamicLitLenCount litLenLengths)
+        (Png.generatedDynamicDistCount distLengths)
+    let headerBits :=
+      prefixBits |||
+        (codeLenTokenStreamBits codeTokens.toList <<<
+          Png.generatedDynamicHeaderPrefixLen)
+    let headerLen :=
+      Png.generatedDynamicHeaderPrefixLen +
+        codeLenTokenStreamLen codeTokens.toList
+    let payloadBits :=
+      dynamicPayloadLz77StreamBits litLenCodes distCodes source.toList
+    let payloadLen :=
+      dynamicPayloadLz77StreamLen litLenCodes distCodes source.toList
+    let suffixBits := headerBits ||| (payloadBits <<< headerLen)
+    let suffixLen := headerLen + payloadLen
+    let bwPayloadStart :=
+      Png.BitWriter.writeBits hdrHeader suffixBits headerLen
+    let bwPayloadAll :=
+      Png.BitWriter.writeBits bwPayloadStart payloadBits payloadLen
+    let suffixWriter :=
+      Png.BitWriter.writeBits hdrHeader suffixBits suffixLen
+    bwPayloadAll = suffixWriter := by
+  intro litLenLengths distLengths litLenCodes distCodes lengths codeTokens
+    prefixBits headerBits headerLen payloadBits payloadLen suffixBits
+    suffixLen bwPayloadStart bwPayloadAll suffixWriter
+  have hheaderBits :
+      headerBits < 2 ^ headerLen := by
+    simpa [litLenLengths, distLengths, lengths, codeTokens, prefixBits,
+      headerBits, headerLen] using
+      generatedDynamicHeaderBitsLz77_lt_codeSpace source
+  have hprefix :
+      bwPayloadStart =
+        Png.BitWriter.writeBits hdrHeader headerBits headerLen := by
+    simpa [bwPayloadStart, suffixBits] using
+      Png.writeBits_or_shift_tail hdrHeader headerBits payloadBits
+        headerLen hheaderBits
+  have hconcat :=
+    Png.writeBits_concat hdrHeader headerBits payloadBits headerLen
+      payloadLen hheaderBits
+  simpa [bwPayloadAll, bwPayloadStart, suffixWriter, suffixBits, suffixLen,
+    hprefix] using hconcat.symm
+
 set_option maxRecDepth 400000 in
 set_option maxHeartbeats 6000000 in
 /-- Stored-only inflation rejects the public LZ77 dynamic stream because its
