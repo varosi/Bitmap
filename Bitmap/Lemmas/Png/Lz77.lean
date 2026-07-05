@@ -245,6 +245,120 @@ lemma fixedLz77MatchBits?_some_bits_lt
     simpa [symBits, lenExtraBits, distSymBits, distExtra, codeLen]
       using htail3
 
+/-- Writing proof-facing fixed match bits is the runtime full-distance fixed
+match writer, for valid match lengths and encodable distances. -/
+lemma fixedLz77MatchBits?_writeBits
+    (bw : BitWriter) {len distance : Nat} {bits : Nat × Nat}
+    (hbits : fixedLz77MatchBits? len distance = some bits)
+    (hlenLo : 3 ≤ len) (hlenHi : len ≤ 258) :
+    BitWriter.writeBits bw bits.1 bits.2 =
+      BitWriter.writeFixedMatchFast bw len distance := by
+  classical
+  unfold fixedLz77MatchBits? at hbits
+  rcases hlenInfo : deflateLengthInfo len with ⟨sym, extraBits, extraLen⟩
+  simp [hlenInfo] at hbits
+  rcases hdistInfo : deflateDistanceInfo? distance with
+    _ | ⟨distSym, distExtraBits, distExtraLen⟩
+  · simp [hdistInfo] at hbits
+  · simp [hdistInfo] at hbits
+    cases hbits
+    let codeLen := fixedLitLenCode sym
+    let symBits : Nat × Nat := (reverseBits codeLen.1 codeLen.2, codeLen.2)
+    let lenExtraBits : Nat × Nat := (extraBits, extraLen)
+    let distSymBits : Nat × Nat := (reverseBits distSym 5, 5)
+    let distExtra : Nat × Nat := (distExtraBits, distExtraLen)
+    have hlenSpec :
+        ∃ _hsym : 257 ≤ sym ∧ sym ≤ 285,
+          ∃ hidxBase : sym - 257 < lengthBases.size,
+            ∃ hidxExtra : sym - 257 < lengthExtra.size,
+              extraLen = Array.getInternal lengthExtra (sym - 257) hidxExtra ∧
+              Array.getInternal lengthBases (sym - 257) hidxBase + extraBits = len ∧
+              extraBits < 2 ^ extraLen := by
+      simpa [hlenInfo] using deflateLengthInfo_spec_internal len hlenLo hlenHi
+    rcases hlenSpec with ⟨hsym, _, _, _, _, hlenExtraLt⟩
+    have hsymBits : symBits.1 < 2 ^ symBits.2 := by
+      simpa [symBits, codeLen] using reverseBits_lt codeLen.1 codeLen.2
+    have hlenExtra : lenExtraBits.1 < 2 ^ lenExtraBits.2 := by
+      simpa [lenExtraBits] using hlenExtraLt
+    have hdistSpec := deflateDistanceInfo?_some_spec_get! hdistInfo
+    have hdistSymBits : distSymBits.1 < 2 ^ distSymBits.2 := by
+      simpa [distSymBits] using reverseBits_lt distSym 5
+    have hdistExtra : distExtra.1 < 2 ^ distExtra.2 := by
+      rcases hdistSpec with ⟨_, _, _, hbitsLt⟩
+      simpa [distExtra] using hbitsLt
+    have hrevCode :
+        fixedLitLenRevCodeFast sym = (reverseBits codeLen.1 codeLen.2, codeLen.2) := by
+      have hsymLt : sym < 288 := by omega
+      simpa [codeLen] using fixedLitLenRevCodeFast_eq sym hsymLt
+    calc
+      BitWriter.writeBits bw
+          (lz77BitPairAppend symBits
+            (lz77BitPairAppend lenExtraBits (lz77BitPairAppend distSymBits distExtra))).1
+          (lz77BitPairAppend symBits
+            (lz77BitPairAppend lenExtraBits (lz77BitPairAppend distSymBits distExtra))).2
+          =
+        BitWriter.writeBits (BitWriter.writeBits bw symBits.1 symBits.2)
+          (lz77BitPairAppend lenExtraBits (lz77BitPairAppend distSymBits distExtra)).1
+          (lz77BitPairAppend lenExtraBits (lz77BitPairAppend distSymBits distExtra)).2 := by
+            exact lz77BitPairAppend_writeBits bw hsymBits
+      _ =
+        BitWriter.writeBits
+          (BitWriter.writeBits (BitWriter.writeBits bw symBits.1 symBits.2)
+            lenExtraBits.1 lenExtraBits.2)
+          (lz77BitPairAppend distSymBits distExtra).1
+          (lz77BitPairAppend distSymBits distExtra).2 := by
+            exact lz77BitPairAppend_writeBits
+              (BitWriter.writeBits bw symBits.1 symBits.2) hlenExtra
+      _ =
+        BitWriter.writeBits
+          (BitWriter.writeBits
+            (BitWriter.writeBits
+              (BitWriter.writeBits bw symBits.1 symBits.2)
+              lenExtraBits.1 lenExtraBits.2)
+            distSymBits.1 distSymBits.2)
+          distExtra.1 distExtra.2 := by
+            exact lz77BitPairAppend_writeBits
+              (BitWriter.writeBits
+                (BitWriter.writeBits bw symBits.1 symBits.2)
+                lenExtraBits.1 lenExtraBits.2) hdistSymBits
+      _ = BitWriter.writeFixedMatchFast bw len distance := by
+            simp [BitWriter.writeFixedMatchFast, writeBitsFast_eq_writeBits,
+              hlenInfo, hdistInfo, hrevCode, symBits, lenExtraBits, distSymBits,
+              distExtra, codeLen]
+
+/-- Token-level fixed LZ77 proof bits fit when any match token has a valid
+DEFLATE match length. -/
+lemma fixedLz77TokenBits?_some_bits_lt
+    {token : Lz77Token} {bits : Nat × Nat}
+    (hbits : fixedLz77TokenBits? token = some bits)
+    (hlenValid :
+      match token with
+      | .literal _ => True
+      | .match len _ => 3 ≤ len ∧ len ≤ 258) :
+    bits.1 < 2 ^ bits.2 := by
+  cases token <;> simp [fixedLz77TokenBits?] at hbits hlenValid ⊢
+  · cases hbits
+    exact fixedLz77LiteralBits_bits_lt _
+  · exact fixedLz77MatchBits?_some_bits_lt hbits hlenValid.1 hlenValid.2
+
+/-- Token-level fixed LZ77 proof bits write through to the corresponding
+runtime fixed payload writer for that token. -/
+lemma fixedLz77TokenBits?_writeBits
+    (bw : BitWriter) {token : Lz77Token} {bits : Nat × Nat}
+    (hbits : fixedLz77TokenBits? token = some bits)
+    (hlenValid :
+      match token with
+      | .literal _ => True
+      | .match len _ => 3 ≤ len ∧ len ≤ 258) :
+    BitWriter.writeBits bw bits.1 bits.2 =
+      match token with
+      | .literal b => BitWriter.writeFixedLiteralFast bw b
+      | .match len distance => BitWriter.writeFixedMatchFast bw len distance := by
+  cases token <;> simp [fixedLz77TokenBits?] at hbits hlenValid ⊢
+  · cases hbits
+    simp [fixedLz77LiteralBits]
+  · exact fixedLz77MatchBits?_writeBits bw hbits hlenValid.1 hlenValid.2
+
 /-- Successful distance metadata can be used with the decoder's internal
 array proofs, avoiding repeated `get!` coercion in payload proofs. -/
 lemma deflateDistanceInfo?_some_spec_internal
