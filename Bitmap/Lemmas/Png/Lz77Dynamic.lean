@@ -4032,6 +4032,104 @@ lemma generatedDynamicHeaderCodeLengthsLz77_entries_le_15
     exact generatedDynamicDistLengthsLz77_entries_le_15
       (Png.distSymbolFreqsLz77 source)
 
+/-- The generated LZ77 header code-length buffer is the full literal/length
+table followed by the full v1 30-symbol distance table. This is parser
+bookkeeping for generated full dynamic headers. -/
+lemma generatedDynamicHeaderCodeLengthsLz77_eq_full
+    (source : Array Png.Lz77Token) :
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source)
+    let distLengths :=
+      Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source)
+    generatedDynamicHeaderCodeLengthsLz77 source = litLenLengths ++ distLengths := by
+  intro litLenLengths distLengths
+  have hlitSize : litLenLengths.size = 286 := by
+    simp [litLenLengths, generatedDynamicLitLenLengths_size,
+      litLenSymbolFreqsLz77_size]
+  have hdistSize : distLengths.size = 30 := by
+    simpa [distLengths] using
+      generatedDynamicDistLengthsLz77_size (Png.distSymbolFreqsLz77 source)
+  have hlitExtract :
+      litLenLengths.extract 0 286 = litLenLengths := by
+    rw [← hlitSize]
+    exact array_extract_zero_size litLenLengths
+  have hdistExtract :
+      distLengths.extract 0 30 = distLengths := by
+    rw [← hdistSize]
+    exact array_extract_zero_size distLengths
+  simp [generatedDynamicHeaderCodeLengthsLz77, litLenLengths, distLengths,
+    Png.generatedDynamicLitLenCount, Png.generatedDynamicDistCount,
+    hlitExtract, hdistExtract]
+
+/-- The generated LZ77 header buffer contains exactly the parser's full
+literal/length and distance entry count. This feeds the length-size check in
+dynamic table reconstruction. -/
+lemma generatedDynamicHeaderCodeLengthsLz77_size_full
+    (source : Array Png.Lz77Token) :
+    (generatedDynamicHeaderCodeLengthsLz77 source).size = 286 + 30 := by
+  let litLenLengths :=
+    Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source)
+  let distLengths :=
+    Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source)
+  have hfull :
+      generatedDynamicHeaderCodeLengthsLz77 source = litLenLengths ++ distLengths := by
+    simpa [litLenLengths, distLengths] using
+      generatedDynamicHeaderCodeLengthsLz77_eq_full source
+  have hlitSize : litLenLengths.size = 286 := by
+    simp [litLenLengths, generatedDynamicLitLenLengths_size,
+      litLenSymbolFreqsLz77_size]
+  have hdistSize : distLengths.size = 30 := by
+    simpa [distLengths] using
+      generatedDynamicDistLengthsLz77_size (Png.distSymbolFreqsLz77 source)
+  simp [hfull, hlitSize, hdistSize]
+
+/-- Extracting the literal/length prefix from the generated LZ77 header buffer
+recovers the generated literal/length table. This matches the parser's `HLIT`
+split for full generated headers. -/
+lemma generatedDynamicHeaderCodeLengthsLz77_extract_lit_full
+    (source : Array Png.Lz77Token) :
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source)
+    (generatedDynamicHeaderCodeLengthsLz77 source).extract 0 286 =
+      litLenLengths := by
+  intro litLenLengths
+  let distLengths :=
+    Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source)
+  have hfull :
+      generatedDynamicHeaderCodeLengthsLz77 source = litLenLengths ++ distLengths := by
+    simpa [litLenLengths, distLengths] using
+      generatedDynamicHeaderCodeLengthsLz77_eq_full source
+  have hlitSize : litLenLengths.size = 286 := by
+    simp [litLenLengths, generatedDynamicLitLenLengths_size,
+      litLenSymbolFreqsLz77_size]
+  rw [hfull]
+  simp [hlitSize]
+
+/-- Extracting the distance suffix from the generated LZ77 header buffer
+recovers the generated v1 distance table. This matches the parser's `HDIST`
+split for full generated headers. -/
+lemma generatedDynamicHeaderCodeLengthsLz77_extract_dist_full
+    (source : Array Png.Lz77Token) :
+    let distLengths :=
+      Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source)
+    (generatedDynamicHeaderCodeLengthsLz77 source).extract 286 (286 + 30) =
+      distLengths := by
+  intro distLengths
+  let litLenLengths :=
+    Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source)
+  have hfull :
+      generatedDynamicHeaderCodeLengthsLz77 source = litLenLengths ++ distLengths := by
+    simpa [litLenLengths, distLengths] using
+      generatedDynamicHeaderCodeLengthsLz77_eq_full source
+  have hlitSize : litLenLengths.size = 286 := by
+    simp [litLenLengths, generatedDynamicLitLenLengths_size,
+      litLenSymbolFreqsLz77_size]
+  have hdistSize : distLengths.size = 30 := by
+    simpa [distLengths] using
+      generatedDynamicDistLengthsLz77_size (Png.distSymbolFreqsLz77 source)
+  rw [hfull]
+  simp [hlitSize, hdistSize]
+
 /-- The generated LZ77 dynamic header writer is its fixed prefix followed by
 the literal code-length token stream for the advertised length tables. -/
 lemma writeGeneratedDynamicHeaderLz77_eq_prefix_writeBits
@@ -4421,6 +4519,652 @@ lemma generatedDynamicPayloadLz77PrefixWriter_eq_suffixWriter
       payloadLen hheaderBits
   simpa [bwPayloadAll, bwPayloadStart, suffixWriter, suffixBits, suffixLen,
     hprefix] using hconcat.symm
+
+set_option maxRecDepth 200000 in
+set_option maxHeartbeats 5000000 in
+/-- Replays the generated LZ77 header's literal code-length token stream with
+any runtime fuel large enough for the generated tokens and completion check.
+This is the length-reader bridge used by the dynamic-table parser. -/
+lemma readDynamicTablesLengthsFuel_generatedHeaderLz77LiteralAnyFuel_readerAt_writeBits
+    (bw : Png.BitWriter) (source : Array Png.Lz77Token)
+    (fuel restBits restLen : Nat)
+    (hfuel :
+      (Png.codeLenLiteralTokensOfLengths
+        (generatedDynamicHeaderCodeLengthsLz77 source)).toList.length + 1 ≤ fuel)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let lengths := generatedDynamicHeaderCodeLengthsLz77 source
+    let codeTokens := Png.codeLenLiteralTokensOfLengths lengths
+    let bitsTot := codeLenTokenStreamBits codeTokens.toList |||
+      (restBits <<< codeLenTokenStreamLen codeTokens.toList)
+    let lenTot := codeLenTokenStreamLen codeTokens.toList + restLen
+    let bw' := Png.BitWriter.writeBits bw bitsTot lenTot
+    let br := Png.BitWriter.readerAt bw bw'.flush
+      (Png.flush_size_writeBits_le bw bitsTot lenTot) hbit
+    let brAfter := Png.BitWriter.readerAt
+      (Png.BitWriter.writeBits bw bitsTot
+        (codeLenTokenStreamLen codeTokens.toList))
+      bw'.flush
+      (by
+        have hk : codeLenTokenStreamLen codeTokens.toList ≤ lenTot := by omega
+        simpa [lenTot] using
+          (Png.flush_size_writeBits_prefix bw bitsTot
+            (codeLenTokenStreamLen codeTokens.toList) lenTot hk))
+      (Png.bitPos_lt_8_writeBits bw bitsTot
+        (codeLenTokenStreamLen codeTokens.toList) hbit)
+    Png.readDynamicTablesLengthsFuel fuel lengths.size
+        generatedCodeLenHuffman br #[] =
+      some (lengths, brAfter) := by
+  intro lengths codeTokens bitsTot lenTot bw' br brAfter
+  have hvalid : ∀ token ∈ codeTokens.toList, CodeLenTokenValid token := by
+    exact codeLenTokensValid_toList
+      (by
+        simpa [lengths, codeTokens] using
+          codeLenLiteralTokensOfLengths_valid lengths
+            (by
+              simpa [lengths] using
+                generatedDynamicHeaderCodeLengthsLz77_entries_le_15 source))
+  have hexpand :
+      codeLenTokensExpandList? codeTokens.toList #[] = some lengths := by
+    simpa [lengths, codeTokens] using
+      codeLenLiteralTokensOfLengths_expandList lengths
+  have hcount :
+      codeLenTokenListOutputCount codeTokens.toList = lengths.size := by
+    simpa [codeTokens] using
+      codeLenLiteralTokensOfLengths_outputCount lengths
+  have hfuel' : codeTokens.toList.length + 1 ≤ fuel := by
+    simpa [lengths, codeTokens] using hfuel
+  have hcore :=
+    readDynamicTablesLengthsFuel_codeLenTokenStream_anyFuel_readerAt_writeBits
+      (bw := bw) (tokens := codeTokens.toList)
+      (fuel := fuel) (restBits := restBits) (restLen := restLen)
+      (lengths := #[]) (lengths' := lengths)
+      hvalid hexpand hfuel' hbit hcur
+  simpa [bitsTot, lenTot, bw', br, brAfter, hcount]
+    using hcore
+
+/-- Proof-local mirror of the parser tail after the generated code-length-code
+table has been read for an LZ77 generated header. It fixes the full 286+30
+shape before rebuilding the literal/length and distance tables. -/
+private def finishGeneratedDynamicTablesAfterCodeLenLengthsLz77
+    (br : Png.BitReader) : Option (Png.Huffman × Png.Huffman × Png.BitReader) := do
+  let total := 286 + 30
+  let lengths0 : Array Nat := Array.mkEmpty total
+  let (lengths, brNext) ←
+    Png.readDynamicTablesLengthsFuel (br.data.size * 8 + 1)
+      total generatedCodeLenHuffman br lengths0
+  if lengths.size != total then
+    none
+  let litLenLengths := lengths.extract 0 286
+  let distLengths := lengths.extract 286 (286 + 30)
+  let litLenTable ← Png.mkHuffman litLenLengths
+  let distTable ← Png.buildDynamicDistTable distLengths
+  return (litLenTable, distTable, brNext)
+
+/-- Proof-local mirror of `readDynamicTables` after `HLIT`, `HDIST`, and
+`HCLEN` have been read for an LZ77 generated header. -/
+private def readGeneratedDynamicTablesAfterHeaderLz77
+    (br : Png.BitReader) : Option (Png.Huffman × Png.Huffman × Png.BitReader) := do
+  let r ←
+    forIn (List.range' 0 Png.codeLenOrder.size)
+        ((⟨br, Array.replicate 19 0⟩ : MProd Png.BitReader (Array Nat)))
+        (fun i r =>
+          if h : r.fst.bitIndex + 3 ≤ r.fst.data.size * 8 then
+            some
+              (ForInStep.yield
+                ⟨(r.fst.readBits 3 h).snd,
+                  r.snd.setIfInBounds Png.codeLenOrder[i]! (r.fst.readBits 3 h).fst⟩)
+          else
+            none)
+  let brCur := r.fst
+  let codeLenLengths := r.snd
+  let codeLenTable ← Png.mkHuffman codeLenLengths
+  let total := 286 + 30
+  let lengths0 : Array Nat := Array.mkEmpty total
+  let (lengths, brNext) ←
+    Png.readDynamicTablesLengthsFuel (brCur.data.size * 8 + 1)
+      total codeLenTable brCur lengths0
+  if lengths.size != total then
+    none
+  let litLenLengths := lengths.extract 0 286
+  let distLengths := lengths.extract 286 (286 + 30)
+  let litLenTable ← Png.mkHuffman litLenLengths
+  let distTable ← Png.buildDynamicDistTable distLengths
+  return (litLenTable, distTable, brNext)
+
+/-- Once the generated LZ77 code-length-code table has been replayed, the
+after-header parser mirror reduces to the generated LZ77 parser tail. -/
+private lemma readGeneratedDynamicTablesAfterHeaderLz77_eq_finish
+    {br brNext : Png.BitReader}
+    (hread :
+      readGeneratedCodeLenLengths19 br =
+        some (generatedCodeLenLengthsFilled, brNext))
+    (hmk :
+      Png.mkHuffman generatedCodeLenLengthsFilled =
+        some generatedCodeLenHuffman) :
+    readGeneratedDynamicTablesAfterHeaderLz77 br =
+      finishGeneratedDynamicTablesAfterCodeLenLengthsLz77 brNext := by
+  unfold readGeneratedDynamicTablesAfterHeaderLz77
+    finishGeneratedDynamicTablesAfterCodeLenLengthsLz77
+  rw [readGeneratedCodeLenLengths19_eq_forIn_mprod br]
+  simp [hread, hmk]
+
+set_option maxRecDepth 200000 in
+set_option maxHeartbeats 5000000 in
+/-- Replays the generated LZ77 parser tail after the helper code-length-code
+table has been reconstructed. It proves the generic dynamic table builder
+recovers the generated LZ77 literal/length and distance tables. -/
+lemma finishGeneratedDynamicTablesAfterCodeLenLengthsLz77_readerAt_writeBits
+    (bw : Png.BitWriter) (source : Array Png.Lz77Token)
+    (restBits restLen : Nat)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let lengths := generatedDynamicHeaderCodeLengthsLz77 source
+    let codeTokens := Png.codeLenLiteralTokensOfLengths lengths
+    let bitsTot := codeLenTokenStreamBits codeTokens.toList |||
+      (restBits <<< codeLenTokenStreamLen codeTokens.toList)
+    let lenTot := codeLenTokenStreamLen codeTokens.toList + restLen
+    let bw' := Png.BitWriter.writeBits bw bitsTot lenTot
+    let br := Png.BitWriter.readerAt bw bw'.flush
+      (Png.flush_size_writeBits_le bw bitsTot lenTot) hbit
+    let brAfter := Png.BitWriter.readerAt
+      (Png.BitWriter.writeBits bw bitsTot
+        (codeLenTokenStreamLen codeTokens.toList))
+      bw'.flush
+      (by
+        have hk : codeLenTokenStreamLen codeTokens.toList ≤ lenTot := by omega
+        simpa [lenTot] using
+          (Png.flush_size_writeBits_prefix bw bitsTot
+            (codeLenTokenStreamLen codeTokens.toList) lenTot hk))
+      (Png.bitPos_lt_8_writeBits bw bitsTot
+        (codeLenTokenStreamLen codeTokens.toList) hbit)
+    finishGeneratedDynamicTablesAfterCodeLenLengthsLz77 br =
+      some ((generatedDynamicTableSpecLz77 source).litLenTable,
+        (generatedDynamicTableSpecLz77 source).distTable, brAfter) := by
+  intro lengths codeTokens bitsTot lenTot bw' br brAfter
+  let litLenLengths :=
+    Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source)
+  let distLengths :=
+    Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source)
+  have hlitMk :
+      Png.mkHuffman litLenLengths =
+        some (generatedDynamicTableSpecLz77 source).litLenTable := by
+    simpa [generatedDynamicTableSpecLz77, litLenLengths] using
+      mkHuffman_generatedDynamicLitLenLengthsLz77_eq source
+  have hdistBuild :
+      Png.buildDynamicDistTable distLengths =
+        some (generatedDynamicTableSpecLz77 source).distTable := by
+    simpa [generatedDynamicTableSpecLz77, distLengths] using
+      buildDynamicDistTable_generatedDynamicDistLengthsLz77_eq
+        (Png.distSymbolFreqsLz77 source)
+  have hlengthsSize : lengths.size = 286 + 30 := by
+    simpa [lengths] using
+      generatedDynamicHeaderCodeLengthsLz77_size_full source
+  have hlitExtract : lengths.extract 0 286 = litLenLengths := by
+    simpa [lengths, litLenLengths] using
+      generatedDynamicHeaderCodeLengthsLz77_extract_lit_full source
+  have hdistExtract : lengths.extract 286 (286 + 30) = distLengths := by
+    simpa [lengths, distLengths] using
+      generatedDynamicHeaderCodeLengthsLz77_extract_dist_full source
+  have hfuel : codeTokens.toList.length + 1 ≤ br.data.size * 8 + 1 := by
+    have hflush :
+        bw'.flush.size * 8 ≥ bw'.bitCount := by
+      exact Png.flush_size_mul_ge_bitCount (bw := bw')
+        (hbit := Png.bitPos_lt_8_writeBits bw bitsTot lenTot hbit)
+    have hcount :
+        codeTokens.toList.length ≤ bw'.bitCount := by
+      have htokens :=
+        codeLenTokenStreamLen_ge_length codeTokens.toList
+      have htokensArray :
+          codeTokens.size ≤ codeLenTokenStreamLen codeTokens.toList := by
+        simpa using htokens
+      rw [Png.bitCount_writeBits]
+      simp [bw', lenTot]
+      omega
+    have hdata : br.data.size = bw'.flush.size := by
+      rfl
+    have hsize : codeTokens.toList.length ≤ br.data.size * 8 := by
+      calc
+        codeTokens.toList.length ≤ bw'.bitCount := hcount
+        _ ≤ bw'.flush.size * 8 := by omega
+        _ = br.data.size * 8 := by simp [hdata]
+    exact Nat.succ_le_succ hsize
+  have hreadLengths :=
+    readDynamicTablesLengthsFuel_generatedHeaderLz77LiteralAnyFuel_readerAt_writeBits
+      (bw := bw) (source := source) (fuel := br.data.size * 8 + 1)
+      (restBits := restBits) (restLen := restLen)
+      (by simpa [lengths, codeTokens] using hfuel) hbit hcur
+  have hreadLengths' :
+      Png.readDynamicTablesLengthsFuel (br.data.size * 8 + 1)
+          (286 + 30) generatedCodeLenHuffman br #[] =
+        some (lengths, brAfter) := by
+    simpa [litLenLengths, distLengths, lengths, codeTokens, bitsTot, lenTot,
+      bw', br, brAfter, hlengthsSize] using hreadLengths
+  unfold finishGeneratedDynamicTablesAfterCodeLenLengthsLz77
+  dsimp
+  rw [hreadLengths']
+  simp [Option.bind, hlengthsSize, hlitExtract, hdistExtract, hlitMk,
+    hdistBuild]
+
+set_option maxRecDepth 200000 in
+set_option maxHeartbeats 5000000 in
+/-- Replays the generated LZ77 after-header parser from the reader positioned
+after `HLIT`, `HDIST`, and `HCLEN`. It consumes the all-five helper table,
+then the generated LZ77 literal code-length stream. -/
+lemma readGeneratedDynamicTablesAfterHeaderLz77_readerAt_writeBits
+    (bw : Png.BitWriter) (source : Array Png.Lz77Token)
+    (restBits restLen : Nat)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let lengths := generatedDynamicHeaderCodeLengthsLz77 source
+    let codeTokens := Png.codeLenLiteralTokensOfLengths lengths
+    let codeBits := codeLenTokenStreamBits codeTokens.toList
+    let codeLen := codeLenTokenStreamLen codeTokens.toList
+    let restAfterPrefixBits := codeBits ||| (restBits <<< codeLen)
+    let restAfterPrefixLen := codeLen + restLen
+    let prefixBits := Png.generatedDynamicHeaderPrefixBits 286 30
+    let bitsTot := prefixBits |||
+      (restAfterPrefixBits <<< Png.generatedDynamicHeaderPrefixLen)
+    let lenTot := Png.generatedDynamicHeaderPrefixLen + restAfterPrefixLen
+    let bw' := Png.BitWriter.writeBits bw bitsTot lenTot
+    let br14 := Png.BitWriter.readerAt
+      (Png.BitWriter.writeBits bw bitsTot 14) bw'.flush
+      (by
+        have hk : 14 ≤ lenTot := by
+          have hprefix : 14 ≤ Png.generatedDynamicHeaderPrefixLen :=
+            generatedDynamicHeaderPrefixLen_ge_14
+          omega
+        simpa [bw', lenTot] using
+          Png.flush_size_writeBits_prefix bw bitsTot 14 lenTot hk)
+      (Png.bitPos_lt_8_writeBits bw bitsTot 14 hbit)
+    let brAfter := Png.BitWriter.readerAt
+      (Png.BitWriter.writeBits bw bitsTot
+        (Png.generatedDynamicHeaderPrefixLen + codeLen))
+      bw'.flush
+      (by
+        have hk : Png.generatedDynamicHeaderPrefixLen + codeLen ≤ lenTot := by
+          simp [lenTot, restAfterPrefixLen]
+        simpa [bw', lenTot] using
+          Png.flush_size_writeBits_prefix bw bitsTot
+            (Png.generatedDynamicHeaderPrefixLen + codeLen) lenTot hk)
+      (Png.bitPos_lt_8_writeBits bw bitsTot
+        (Png.generatedDynamicHeaderPrefixLen + codeLen) hbit)
+    readGeneratedDynamicTablesAfterHeaderLz77 br14 =
+      some ((generatedDynamicTableSpecLz77 source).litLenTable,
+        (generatedDynamicTableSpecLz77 source).distTable, brAfter) := by
+  intro lengths codeTokens codeBits codeLen
+    restAfterPrefixBits restAfterPrefixLen prefixBits bitsTot lenTot bw' br14 brAfter
+  let bwPrefix :=
+    Png.BitWriter.writeBits bw bitsTot Png.generatedDynamicHeaderPrefixLen
+  let bwTail := Png.BitWriter.writeBits bwPrefix restAfterPrefixBits restAfterPrefixLen
+  let brAfterPrefix := Png.BitWriter.readerAt bwPrefix bw'.flush
+    (by
+      have hk : Png.generatedDynamicHeaderPrefixLen ≤ lenTot := by
+        simp [lenTot]
+      simpa [bw', lenTot, bwPrefix] using
+        Png.flush_size_writeBits_prefix bw bitsTot
+          Png.generatedDynamicHeaderPrefixLen lenTot hk)
+    (Png.bitPos_lt_8_writeBits bw bitsTot
+      Png.generatedDynamicHeaderPrefixLen hbit)
+  have hprefixBits :
+      prefixBits < 2 ^ Png.generatedDynamicHeaderPrefixLen := by
+    simpa [prefixBits] using
+      (show Png.generatedDynamicHeaderPrefixBits 286 30 <
+          2 ^ Png.generatedDynamicHeaderPrefixLen by
+        native_decide)
+  have hprefixWriter :
+      bwPrefix = Png.BitWriter.writeBits bw prefixBits
+          Png.generatedDynamicHeaderPrefixLen := by
+    simpa [bwPrefix, bitsTot] using
+      (Png.writeBits_or_shift_tail
+        (bw := bw) (bits := prefixBits) (tailBits := restAfterPrefixBits)
+        (len := Png.generatedDynamicHeaderPrefixLen) hprefixBits)
+  have hbwTail : bw' = bwTail := by
+    have hconcat :=
+      Png.writeBits_concat bw prefixBits restAfterPrefixBits
+        Png.generatedDynamicHeaderPrefixLen restAfterPrefixLen hprefixBits
+    simpa [bw', bwTail, bitsTot, lenTot, bwPrefix, hprefixWriter]
+      using hconcat
+  have htailFlush : bw'.flush = bwTail.flush := congrArg Png.BitWriter.flush hbwTail
+  have hreadCodeLenRaw :=
+    readGeneratedCodeLenLengths19_readerAt_writeBits
+      (bw := bw) (restBits := restAfterPrefixBits)
+      (restLen := restAfterPrefixLen) hbit hcur
+  have hreadCodeLen :
+      readGeneratedCodeLenLengths19 br14 =
+        some (generatedCodeLenLengthsFilled, brAfterPrefix) := by
+    simpa [generatedCodeLenReaderAt, br14, brAfterPrefix, prefixBits, bitsTot,
+      lenTot, bw', bwPrefix, generatedDynamicHeaderPrefixLen_eq,
+      codeLenOrder_size, Nat.mul_comm, Nat.mul_left_comm, Nat.mul_assoc]
+      using hreadCodeLenRaw
+  have hbitPrefix : bwPrefix.bitPos < 8 := by
+    exact Png.bitPos_lt_8_writeBits bw bitsTot
+      Png.generatedDynamicHeaderPrefixLen hbit
+  have hcurPrefix : bwPrefix.curClearAbove := by
+    exact Png.curClearAbove_writeBits bw bitsTot
+      Png.generatedDynamicHeaderPrefixLen hbit hcur
+  have hfinish :=
+    finishGeneratedDynamicTablesAfterCodeLenLengthsLz77_readerAt_writeBits
+      (bw := bwPrefix) (source := source)
+      (restBits := restBits) (restLen := restLen)
+      hbitPrefix hcurPrefix
+  let brFinish := Png.BitWriter.readerAt bwPrefix bwTail.flush
+    (Png.flush_size_writeBits_le bwPrefix restAfterPrefixBits restAfterPrefixLen)
+    hbitPrefix
+  let brAfterFinish := Png.BitWriter.readerAt
+    (Png.BitWriter.writeBits bwPrefix restAfterPrefixBits codeLen)
+    bwTail.flush
+    (by
+      have hk : codeLen ≤ restAfterPrefixLen := by
+        simp [restAfterPrefixLen]
+      simpa [bwTail, restAfterPrefixLen, codeLen, restAfterPrefixBits] using
+        Png.flush_size_writeBits_prefix bwPrefix restAfterPrefixBits
+          codeLen restAfterPrefixLen hk)
+    (Png.bitPos_lt_8_writeBits bwPrefix restAfterPrefixBits codeLen hbitPrefix)
+  have hbrFinishEq : brAfterPrefix = brFinish := by
+    refine readerAt_eq_of_eqs_generated rfl htailFlush _ _ _ _
+  have hshiftTail : bitsTot >>> Png.generatedDynamicHeaderPrefixLen =
+      restAfterPrefixBits := by
+    simpa [bitsTot] using
+      (Png.shiftRight_or_shiftLeft prefixBits restAfterPrefixBits
+        Png.generatedDynamicHeaderPrefixLen hprefixBits)
+  have hafterWriter :
+      Png.BitWriter.writeBits bwPrefix restAfterPrefixBits codeLen =
+        Png.BitWriter.writeBits bw bitsTot
+          (Png.generatedDynamicHeaderPrefixLen + codeLen) := by
+    have hsplit :=
+      Png.writeBits_split bw bitsTot Png.generatedDynamicHeaderPrefixLen codeLen
+    simpa [bwPrefix, hshiftTail] using hsplit.symm
+  have hbrAfterEq : brAfterFinish = brAfter := by
+    refine readerAt_eq_of_eqs_generated hafterWriter htailFlush.symm _ _ _ _
+  have hafterHeader :
+      readGeneratedDynamicTablesAfterHeaderLz77 br14 =
+        finishGeneratedDynamicTablesAfterCodeLenLengthsLz77 brAfterPrefix :=
+    readGeneratedDynamicTablesAfterHeaderLz77_eq_finish
+      hreadCodeLen mkHuffman_generatedCodeLenLengthsFilled_eq
+  have hfinish' :
+      finishGeneratedDynamicTablesAfterCodeLenLengthsLz77 brAfterPrefix =
+        some ((generatedDynamicTableSpecLz77 source).litLenTable,
+          (generatedDynamicTableSpecLz77 source).distTable, brAfter) := by
+    rw [hbrFinishEq]
+    simpa [lengths, codeTokens, codeBits, codeLen,
+      restAfterPrefixBits, restAfterPrefixLen, bwTail, brFinish,
+      brAfterFinish, hbrAfterEq] using hfinish
+  rw [hafterHeader]
+  exact hfinish'
+
+set_option maxRecDepth 200000 in
+set_option maxHeartbeats 5000000 in
+/-- Replays the full generic dynamic-table parser on the generated LZ77
+dynamic header stream. This is the parser boundary before payload decoding. -/
+lemma readDynamicTables_generatedHeaderLz77_readerAt_writeBits
+    (bw : Png.BitWriter) (source : Array Png.Lz77Token)
+    (restBits restLen : Nat)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let lengths := generatedDynamicHeaderCodeLengthsLz77 source
+    let codeTokens := Png.codeLenLiteralTokensOfLengths lengths
+    let codeBits := codeLenTokenStreamBits codeTokens.toList
+    let codeLen := codeLenTokenStreamLen codeTokens.toList
+    let restAfterPrefixBits := codeBits ||| (restBits <<< codeLen)
+    let restAfterPrefixLen := codeLen + restLen
+    let prefixBits := Png.generatedDynamicHeaderPrefixBits 286 30
+    let bitsTot := prefixBits |||
+      (restAfterPrefixBits <<< Png.generatedDynamicHeaderPrefixLen)
+    let lenTot := Png.generatedDynamicHeaderPrefixLen + restAfterPrefixLen
+    let bw' := Png.BitWriter.writeBits bw bitsTot lenTot
+    let br := Png.BitWriter.readerAt bw bw'.flush
+      (Png.flush_size_writeBits_le bw bitsTot lenTot) hbit
+    let brAfter := Png.BitWriter.readerAt
+      (Png.BitWriter.writeBits bw bitsTot
+        (Png.generatedDynamicHeaderPrefixLen + codeLen))
+      bw'.flush
+      (by
+        have hk : Png.generatedDynamicHeaderPrefixLen + codeLen ≤ lenTot := by
+          simp [lenTot, restAfterPrefixLen]
+        simpa [bw', lenTot] using
+          Png.flush_size_writeBits_prefix bw bitsTot
+            (Png.generatedDynamicHeaderPrefixLen + codeLen) lenTot hk)
+      (Png.bitPos_lt_8_writeBits bw bitsTot
+        (Png.generatedDynamicHeaderPrefixLen + codeLen) hbit)
+    Png.readDynamicTables br =
+      some ((generatedDynamicTableSpecLz77 source).litLenTable,
+        (generatedDynamicTableSpecLz77 source).distTable, brAfter) := by
+  intro lengths codeTokens codeBits codeLen
+    restAfterPrefixBits restAfterPrefixLen prefixBits bitsTot lenTot bw' br brAfter
+  let br5 := Png.BitWriter.readerAt (Png.BitWriter.writeBits bw bitsTot 5) bw'.flush
+    (by
+      have hk : 5 ≤ lenTot := by
+        have hprefix : 5 ≤ Png.generatedDynamicHeaderPrefixLen :=
+          generatedDynamicHeaderPrefixLen_ge_5
+        omega
+      simpa [bw', lenTot] using
+        Png.flush_size_writeBits_prefix bw bitsTot 5 lenTot hk)
+    (Png.bitPos_lt_8_writeBits bw bitsTot 5 hbit)
+  let br10 := Png.BitWriter.readerAt (Png.BitWriter.writeBits bw bitsTot 10) bw'.flush
+    (by
+      have hk : 10 ≤ lenTot := by
+        have hprefix : 10 ≤ Png.generatedDynamicHeaderPrefixLen :=
+          generatedDynamicHeaderPrefixLen_ge_10
+        omega
+      simpa [bw', lenTot] using
+        Png.flush_size_writeBits_prefix bw bitsTot 10 lenTot hk)
+    (Png.bitPos_lt_8_writeBits bw bitsTot 10 hbit)
+  let br14 := Png.BitWriter.readerAt (Png.BitWriter.writeBits bw bitsTot 14) bw'.flush
+    (by
+      have hk : 14 ≤ lenTot := by
+        have hprefix : 14 ≤ Png.generatedDynamicHeaderPrefixLen :=
+          generatedDynamicHeaderPrefixLen_ge_14
+        omega
+      simpa [bw', lenTot] using
+        Png.flush_size_writeBits_prefix bw bitsTot 14 lenTot hk)
+    (Png.bitPos_lt_8_writeBits bw bitsTot 14 hbit)
+  have hreadHlit :
+      br.readBits 5
+          (by
+            have hk : 5 ≤ lenTot := by
+              have hprefix : 5 ≤ Png.generatedDynamicHeaderPrefixLen :=
+                generatedDynamicHeaderPrefixLen_ge_5
+              omega
+            simpa [br, bw', lenTot] using
+              (Png.readerAt_writeBits_bound (bw := bw) (bits := bitsTot)
+                (len := lenTot) (k := 5) hk hbit)) =
+        (29, br5) := by
+    simpa [prefixBits, bitsTot, lenTot, bw', br, br5]
+      using
+        readGeneratedDynamicHeader_hlit_readerAt_writeBits
+          (bw := bw) (restBits := restAfterPrefixBits)
+          (restLen := restAfterPrefixLen) hbit hcur
+  have hreadHdist :
+      br5.readBits 5
+          (by
+            have hk : 5 ≤ lenTot - 5 := by
+              have hprefix : 5 ≤ Png.generatedDynamicHeaderPrefixLen - 5 :=
+                generatedDynamicHeaderPrefixLen_sub5_ge_5
+              omega
+            simpa [br5, bw', lenTot] using
+              (readerAt_writeBits_shift_bound_generated
+                (bw := bw) (bits := bitsTot) (len := lenTot)
+                (skip := 5) (k := 5)
+                (by
+                  have hprefix : 5 ≤ Png.generatedDynamicHeaderPrefixLen :=
+                    generatedDynamicHeaderPrefixLen_ge_5
+                  omega)
+                hk hbit)) =
+        (29, br10) := by
+    simpa [prefixBits, bitsTot, lenTot, bw', br5, br10]
+      using
+        readGeneratedDynamicHeader_hdist_readerAt_writeBits
+          (bw := bw) (restBits := restAfterPrefixBits)
+          (restLen := restAfterPrefixLen) hbit hcur
+  have hreadHclen :
+      br10.readBits 4
+          (by
+            have hk : 4 ≤ lenTot - 10 := by
+              have hprefix : 4 ≤ Png.generatedDynamicHeaderPrefixLen - 10 :=
+                generatedDynamicHeaderPrefixLen_sub10_ge_4
+              omega
+            simpa [br10, bw', lenTot] using
+              (readerAt_writeBits_shift_bound_generated
+                (bw := bw) (bits := bitsTot) (len := lenTot)
+                (skip := 10) (k := 4)
+                (by
+                  have hprefix : 10 ≤ Png.generatedDynamicHeaderPrefixLen :=
+                    generatedDynamicHeaderPrefixLen_ge_10
+                  omega)
+                hk hbit)) =
+        (15, br14) := by
+    simpa [prefixBits, bitsTot, lenTot, bw', br10, br14]
+      using
+        readGeneratedDynamicHeader_hclen_readerAt_writeBits
+          (bw := bw) (restBits := restAfterPrefixBits)
+          (restLen := restAfterPrefixLen) hbit hcur
+  have hafterHeader :=
+    readGeneratedDynamicTablesAfterHeaderLz77_readerAt_writeBits
+      (bw := bw) (source := source)
+      (restBits := restBits) (restLen := restLen) hbit hcur
+  have hcondHlit : br.bitIndex + 5 ≤ br.data.size * 8 := by
+    have hk : 5 ≤ lenTot := by
+      have hprefix : 5 ≤ Png.generatedDynamicHeaderPrefixLen :=
+        generatedDynamicHeaderPrefixLen_ge_5
+      omega
+    simpa [br, bw', lenTot] using
+      (Png.readerAt_writeBits_bound (bw := bw) (bits := bitsTot)
+        (len := lenTot) (k := 5) hk hbit)
+  have hreadHlit' :
+      br.readBits 5 hcondHlit = (29, br5) := by
+    simpa [Png.readBits_proof_irrel] using hreadHlit
+  have hcondHdist : br5.bitIndex + 5 ≤ br5.data.size * 8 := by
+    have hk : 5 ≤ lenTot - 5 := by
+      have hprefix : 5 ≤ Png.generatedDynamicHeaderPrefixLen - 5 :=
+        generatedDynamicHeaderPrefixLen_sub5_ge_5
+      omega
+    simpa [br5, bw', lenTot] using
+      (readerAt_writeBits_shift_bound_generated
+        (bw := bw) (bits := bitsTot) (len := lenTot)
+        (skip := 5) (k := 5)
+        (by
+          have hprefix : 5 ≤ Png.generatedDynamicHeaderPrefixLen :=
+            generatedDynamicHeaderPrefixLen_ge_5
+          omega)
+        hk hbit)
+  have hreadHdist' :
+      br5.readBits 5 hcondHdist = (29, br10) := by
+    simpa [Png.readBits_proof_irrel] using hreadHdist
+  have hcondHclen : br10.bitIndex + 4 ≤ br10.data.size * 8 := by
+    have hk : 4 ≤ lenTot - 10 := by
+      have hprefix : 4 ≤ Png.generatedDynamicHeaderPrefixLen - 10 :=
+        generatedDynamicHeaderPrefixLen_sub10_ge_4
+      omega
+    simpa [br10, bw', lenTot] using
+      (readerAt_writeBits_shift_bound_generated
+        (bw := bw) (bits := bitsTot) (len := lenTot)
+        (skip := 10) (k := 4)
+        (by
+          have hprefix : 10 ≤ Png.generatedDynamicHeaderPrefixLen :=
+            generatedDynamicHeaderPrefixLen_ge_10
+          omega)
+        hk hbit)
+  have hreadHclen' :
+      br10.readBits 4 hcondHclen = (15, br14) := by
+    simpa [Png.readBits_proof_irrel] using hreadHclen
+  unfold Png.readDynamicTables
+  simp [hcondHlit, hreadHlit', hcondHdist, hreadHdist', hcondHclen,
+    hreadHclen', Option.bind]
+  simpa [readGeneratedDynamicTablesAfterHeaderLz77, readGeneratedCodeLenLengths19,
+    Png.codeLenOrder, lengths, codeTokens,
+    codeBits, codeLen, restAfterPrefixBits, restAfterPrefixLen, prefixBits,
+    bitsTot, lenTot, bw', br14, brAfter, Option.bind] using hafterHeader
+
+set_option maxRecDepth 200000 in
+set_option maxHeartbeats 5000000 in
+/-- Parses the generated LZ77 dynamic header from the packed suffix and lands
+on the payload start. This connects `readDynamicTables` with the generated
+LZ77 table package used by payload replay. -/
+lemma readDynamicTables_generatedDynamicLz77Suffix_readerAt_writeBits
+    (source : Array Png.Lz77Token) (hdrHeader : Png.BitWriter)
+    (hbit : hdrHeader.bitPos < 8) (hcur : hdrHeader.curClearAbove) :
+    let litLenLengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source)
+    let distLengths :=
+      Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source)
+    let litLenCodes := Png.canonicalRevCodesFromLengths litLenLengths
+    let distCodes := Png.canonicalRevCodesFromLengths distLengths
+    let lengths := generatedDynamicHeaderCodeLengthsLz77 source
+    let codeTokens := Png.codeLenLiteralTokensOfLengths lengths
+    let prefixBits :=
+      Png.generatedDynamicHeaderPrefixBits
+        (Png.generatedDynamicLitLenCount litLenLengths)
+        (Png.generatedDynamicDistCount distLengths)
+    let headerBits :=
+      prefixBits |||
+        (codeLenTokenStreamBits codeTokens.toList <<<
+          Png.generatedDynamicHeaderPrefixLen)
+    let headerLen :=
+      Png.generatedDynamicHeaderPrefixLen +
+        codeLenTokenStreamLen codeTokens.toList
+    let payloadBits :=
+      dynamicPayloadLz77StreamBits litLenCodes distCodes source.toList
+    let payloadLen :=
+      dynamicPayloadLz77StreamLen litLenCodes distCodes source.toList
+    let suffixBits := headerBits ||| (payloadBits <<< headerLen)
+    let suffixLen := headerLen + payloadLen
+    let suffixWriter :=
+      Png.BitWriter.writeBits hdrHeader suffixBits suffixLen
+    let streamReaderHeader := Png.BitWriter.readerAt hdrHeader
+      suffixWriter.flush
+      (Png.flush_size_writeBits_le hdrHeader suffixBits suffixLen)
+      hbit
+    let bwPayloadStart :=
+      Png.BitWriter.writeBits hdrHeader suffixBits headerLen
+    let brPayload := Png.BitWriter.readerAt bwPayloadStart
+      suffixWriter.flush
+      (by
+        have hk : headerLen ≤ suffixLen := by omega
+        simpa [bwPayloadStart, suffixWriter, suffixLen] using
+          Png.flush_size_writeBits_prefix hdrHeader suffixBits
+            headerLen suffixLen hk)
+      (Png.bitPos_lt_8_writeBits hdrHeader suffixBits headerLen hbit)
+    Png.readDynamicTables streamReaderHeader =
+      some ((generatedDynamicTableSpecLz77 source).litLenTable,
+        (generatedDynamicTableSpecLz77 source).distTable, brPayload) := by
+  intro litLenLengths distLengths litLenCodes distCodes lengths codeTokens
+    prefixBits headerBits headerLen payloadBits payloadLen suffixBits
+    suffixLen suffixWriter streamReaderHeader bwPayloadStart brPayload
+  have htables :=
+    readDynamicTables_generatedHeaderLz77_readerAt_writeBits
+      (bw := hdrHeader) (source := source)
+      (restBits := payloadBits) (restLen := payloadLen)
+      hbit hcur
+  let codeBits := codeLenTokenStreamBits codeTokens.toList
+  let codeLen := codeLenTokenStreamLen codeTokens.toList
+  let restAfterPrefixBits := codeBits ||| (payloadBits <<< codeLen)
+  let restAfterPrefixLen := codeLen + payloadLen
+  let parserBits := Png.generatedDynamicHeaderPrefixBits 286 30 |||
+    (restAfterPrefixBits <<< Png.generatedDynamicHeaderPrefixLen)
+  let parserLen := Png.generatedDynamicHeaderPrefixLen + restAfterPrefixLen
+  have hbitsEq : parserBits = suffixBits := by
+    have hshiftPayload :
+        (payloadBits <<< codeLen) <<< Png.generatedDynamicHeaderPrefixLen =
+          payloadBits <<<
+            (Png.generatedDynamicHeaderPrefixLen + codeLen) := by
+      calc
+        (payloadBits <<< codeLen) <<< Png.generatedDynamicHeaderPrefixLen =
+            payloadBits <<<
+              (codeLen + Png.generatedDynamicHeaderPrefixLen) := by
+              simp [Nat.shiftLeft_eq, Nat.pow_add, Nat.mul_assoc,
+                Nat.mul_comm, Nat.mul_left_comm]
+        _ = payloadBits <<<
+              (Png.generatedDynamicHeaderPrefixLen + codeLen) := by
+              rw [Nat.add_comm]
+    simp [parserBits, restAfterPrefixBits, codeBits, codeLen, suffixBits,
+      headerBits, headerLen, prefixBits, Png.generatedDynamicLitLenCount,
+      Png.generatedDynamicDistCount, Nat.or_assoc, Nat.shiftLeft_or_distrib,
+      hshiftPayload, Nat.add_comm, Nat.add_left_comm, Nat.add_assoc]
+  have hlenEq : parserLen = suffixLen := by
+    simp [parserLen, restAfterPrefixLen, codeLen, suffixLen, headerLen,
+      Nat.add_comm, Nat.add_left_comm, Nat.add_assoc]
+  simpa [litLenLengths, distLengths, lengths, codeTokens, prefixBits,
+    headerBits, headerLen, payloadBits, payloadLen, suffixBits, suffixLen,
+    suffixWriter, streamReaderHeader, bwPayloadStart, brPayload,
+    codeBits, codeLen, restAfterPrefixBits, restAfterPrefixLen,
+    parserBits, parserLen, hbitsEq, hlenEq] using htables
 
 set_option maxRecDepth 400000 in
 set_option maxHeartbeats 6000000 in
