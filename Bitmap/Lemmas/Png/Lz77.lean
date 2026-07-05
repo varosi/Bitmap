@@ -819,6 +819,31 @@ lemma fixedLz77PayloadBitsEobFrom?_some_of_expand
   have hvalid := deflateTokensExpandLz77From?_fixed_valid tokens i out out' hexpand
   exact fixedLz77PayloadBitsEobFrom?_some_of_fixed_valid tokens i hvalid
 
+/-- Successful LZ77 expansion supplies the match-length validity needed to
+relate proof-facing fixed payload bits to the runtime fixed payload writer. -/
+lemma fixedLz77PayloadBitsEobFrom?_writeBits_of_expand
+    {tokens : Array Lz77Token} {i : Nat} {out out' : ByteArray}
+    {bits : Nat × Nat} (bw : BitWriter)
+    (hexpand : deflateTokensExpandLz77From? tokens i out = some out')
+    (hbits : fixedLz77PayloadBitsEobFrom? tokens i = some bits) :
+    BitWriter.writeBits bw bits.1 bits.2 =
+      let bwPayload := writeFixedPayloadLz77From bw tokens i
+      let eob := fixedLitLenCode 256
+      BitWriter.writeBits bwPayload (reverseBits eob.1 eob.2) eob.2 := by
+  have hvalidFixed := deflateTokensExpandLz77From?_fixed_valid tokens i out out' hexpand
+  have hvalidLen :
+      ∀ j, (hij : i ≤ j) → (hj : j < tokens.size) →
+        match tokens[j]'hj with
+        | .literal _ => True
+        | .match len _ => 3 ≤ len ∧ len ≤ 258 := by
+    intro j hij hj
+    have hv := hvalidFixed j hij hj
+    cases htok : tokens[j]'hj
+    · trivial
+    · simp [Lz77TokenFixedValid, htok] at hv
+      exact ⟨hv.1, hv.2.1⟩
+  exact fixedLz77PayloadBitsEobFrom?_writeBits tokens i bw bits hbits hvalidLen
+
 end Png
 
 end Bitmaps
