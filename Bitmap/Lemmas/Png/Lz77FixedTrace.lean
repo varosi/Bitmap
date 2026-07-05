@@ -29,6 +29,26 @@ lemma fixedLz77PayloadFinish_eob_readerAt_writeBits
   exact FixedPayloadFinish.eob (sym := 256) (br' := brEnd)
     hdecode (by decide) (by decide)
 
+/-- The empty fixed LZ77 payload trace consists only of the fixed-Huffman EOB
+symbol. This is the recursive trace builder's base case. -/
+lemma fixedLz77PayloadTrace_eob_readerAt_writeBits
+    (bw : BitWriter) (out : ByteArray)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let eob := fixedLitLenCode 256
+    let bits : Nat × Nat := (reverseBits eob.1 eob.2, eob.2)
+    let bwAll := BitWriter.writeBits bw bits.1 bits.2
+    let br0 := BitWriter.readerAt bw bwAll.flush
+      (flush_size_writeBits_le bw bits.1 bits.2) hbit
+    let brEnd := BitWriter.readerAt bwAll bwAll.flush (by rfl)
+      (bitPos_lt_8_writeBits bw bits.1 bits.2 hbit)
+    FixedPayloadTrace 1 br0 out brEnd out := by
+  intro eob bits bwAll br0 brEnd
+  have hfinish :=
+    fixedLz77PayloadFinish_eob_readerAt_writeBits
+      (bw := bw) (out := out) hbit hcur
+  exact FixedPayloadTrace.finish (hfinish := by
+    simpa [eob, bits, bwAll, br0, brEnd] using hfinish)
+
 /-- A fixed-Huffman literal LZ77 token decodes as one fixed payload literal
 transition. Later payload traces use this as the literal step case. -/
 lemma fixedLz77PayloadTransition_literal_readerAt_writeBits
@@ -61,6 +81,32 @@ lemma fixedLz77PayloadTransition_literal_readerAt_writeBits
   have hstep := FixedPayloadTransition.literal (br := br0) (out := out)
     (sym := b.toNat) (br' := brNext) hdecode (by simpa using UInt8.toNat_lt b)
   simpa [hb] using hstep
+
+/-- Prepends one literal-token transition to an existing fixed LZ77 payload
+trace. The recursive full-payload trace builder uses this for literal tokens. -/
+lemma fixedLz77PayloadTrace_step_literal_readerAt_writeBits
+    (bw : BitWriter) (out outFinal : ByteArray) (b : UInt8) (tail : Nat × Nat)
+    (steps : Nat) (brAfter : BitReader)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let head := fixedLz77LiteralBits b
+    let bits := lz77BitPairAppend head tail
+    let bwAll := BitWriter.writeBits bw bits.1 bits.2
+    let br0 := BitWriter.readerAt bw bwAll.flush
+      (flush_size_writeBits_le bw bits.1 bits.2) hbit
+    let brNext := BitWriter.readerAt (BitWriter.writeBits bw bits.1 head.2) bwAll.flush
+      (by
+        have hk : head.2 ≤ bits.2 := by
+          simp [bits, lz77BitPairAppend]
+        exact flush_size_writeBits_prefix bw bits.1 head.2 bits.2 hk)
+      (bitPos_lt_8_writeBits bw bits.1 head.2 hbit)
+    FixedPayloadTrace steps brNext (out.push b) brAfter outFinal →
+      FixedPayloadTrace (steps + 1) br0 out brAfter outFinal := by
+  intro head bits bwAll br0 brNext hrest
+  have hstep :=
+    fixedLz77PayloadTransition_literal_readerAt_writeBits
+      (bw := bw) (out := out) (b := b) (tail := tail) hbit hcur
+  exact FixedPayloadTrace.step (hstep := by
+    simpa [head, bits, bwAll, br0, brNext] using hstep) (hrest := hrest)
 
 end Png
 
