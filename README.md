@@ -2,6 +2,8 @@
 
 Lean 4 bitmap image utilities with verified PNG encode/decode support, plus a small widget for visualization.
 
+Current library version: `0.7.0`.
+
 The widget accepts the supported 8-bit bitmap formats and displays 16-bit bitmap
 formats by downsampling each channel to its high byte for browser canvas output.
 Packed 1-bit grayscale bitmaps are expanded to 8-bit grayscale for display, and
@@ -222,10 +224,12 @@ public generated dynamic encoder is proved end-to-end through the runtime
 `readDynamicTables` and generic dynamic payload decoder path; the older
 fixed-shaped dynamic helper remains regression coverage.
 
-The planned full-LZ77 encoder proof is a round-trip correctness proof for the
-streams the encoder emits: every emitted match is valid, and decoding the
-generated fixed or dynamic DEFLATE payload reconstructs the original bytes. It
-does not initially prove that the greedy matcher chooses the globally smallest
+The full-LZ77 encoder proof is a round-trip correctness proof for the streams
+the encoder emits: every emitted match is valid, and decoding the generated
+fixed or dynamic DEFLATE payload reconstructs the original bytes. The public
+fixed and dynamic zlib wrappers are now proved through the greedy LZ77 encoder
+paths (`zlibDecompress_zlibCompressFixed`, `zlibDecompress_zlibCompressDynamic`).
+This does not prove that the greedy matcher chooses the globally smallest
 compressed representation. Future compression-ratio work can add lazy matching,
 which looks one byte ahead before committing to a match, and optimal parsing,
 which chooses a lowest-cost literal/match sequence for the whole stream.
@@ -237,9 +241,22 @@ The proof-level dynamic table boundary delegates bit-level header parsing to
 repeat overflow shape, literal-only zero-distance blocks, LZ77 matches, and dynamic
 multi-block fixtures.
 
-### LZ77 encoder proof roadmap
+### LZ77 encoder proof status
 
-Good next theorem targets for full-LZ77 encoding:
+The current greedy LZ77 proof path includes:
+
+- `deflateTokensExpandLz77_deflateTokensLz77`: expanding the emitted token
+  stream reconstructs the raw input.
+- `zlibDecompress_zlibCompressFixed`: public fixed-Huffman zlib output decodes
+  to the original raw bytes through the LZ77 token path.
+- `zlibDecompress_zlibCompressDynamic`: public generated dynamic-Huffman zlib
+  output decodes to the original raw bytes through the LZ77 token path.
+- Generated dynamic LZ77 header and payload bridge lemmas, including
+  `readDynamicTables_generatedDynamicLz77Suffix_readerAt_writeBits`,
+  `decodeCompressedBlock_deflateTokensLz77Payload_suffix_readerAt_writeBits`,
+  and `zlibDecompressLoop_deflateDynamicLz77`.
+
+Good next theorem targets for stronger LZ77 specifications:
 
 - `deflateDistanceInfo_decodeDistance_correct`: encoded distance symbol and
   extra bits decode back to the original distance.
@@ -249,15 +266,10 @@ Good next theorem targets for full-LZ77 encoding:
   bytes described by the LZ77 back-reference, including overlap.
 - `deflateTokensLz77_valid`: every emitted match has `3 ≤ len ≤ 258`,
   `1 ≤ distance ≤ 32768`, and `distance ≤ current output size`.
-- `deflateTokensExpand_deflateTokensLz77`: expanding the token stream
-  reconstructs the raw input.
 - `writeFixedPayload_lz77_decode_correct`: fixed-Huffman payload written from
   valid LZ77 tokens decodes to token expansion.
 - `writeDynamicPayload_lz77_decode_correct`: generated dynamic-Huffman payload
   written from valid LZ77 tokens decodes to token expansion.
-- `zlibDecompress_zlibCompressFixed_lz77` and
-  `zlibDecompress_zlibCompressDynamic_lz77`: public compressed zlib wrappers
-  decode to the original raw bytes.
 
 Future optional theorem targets:
 
