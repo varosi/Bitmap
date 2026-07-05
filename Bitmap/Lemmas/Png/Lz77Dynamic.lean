@@ -3488,6 +3488,78 @@ def lz77TokensExpandList? (out : ByteArray) :
       | some out' => lz77TokensExpandList? out' tokens
       | none => none
 
+/-- Expanding the suffix of an array-backed LZ77 token stream is the same as
+expanding the corresponding dropped `toList` suffix. This connects runtime
+array recursion to the proof-facing list trace. -/
+lemma lz77TokensExpandList?_drop_eq_deflateTokensExpandLz77From?
+    (tokens : Array Png.Lz77Token) :
+    ∀ i out,
+      lz77TokensExpandList? out (tokens.toList.drop i) =
+        Png.deflateTokensExpandLz77From? tokens i out := by
+  classical
+  have hk :
+      ∀ k, ∀ i out,
+        tokens.size - i = k →
+        lz77TokensExpandList? out (tokens.toList.drop i) =
+          Png.deflateTokensExpandLz77From? tokens i out := by
+    intro k
+    induction k with
+    | zero =>
+        intro i out hk
+        have hnot : ¬ i < tokens.size := by omega
+        have hle : tokens.toList.length ≤ i := by
+          simpa using Nat.le_of_not_gt hnot
+        have hdrop : tokens.toList.drop i = [] :=
+          List.drop_eq_nil_of_le hle
+        rw [Png.deflateTokensExpandLz77From?]
+        simp [hnot, hdrop, lz77TokensExpandList?]
+    | succ k ih =>
+        intro i out hk
+        have hi : i < tokens.size := by omega
+        have hlist : i < tokens.toList.length := by
+          simpa using hi
+        have hget : tokens.toList[i]'hlist = tokens[i]'hi := by
+          simp
+        have hdrop :
+            tokens.toList.drop i =
+              tokens[i]'hi :: tokens.toList.drop (i + 1) := by
+          calc
+            tokens.toList.drop i =
+                tokens.toList[i]'hlist :: tokens.toList.drop (i + 1) :=
+                  List.drop_eq_getElem_cons hlist
+            _ = tokens[i]'hi :: tokens.toList.drop (i + 1) := by
+                  rw [hget]
+        rw [Png.deflateTokensExpandLz77From?]
+        simp [hi, hdrop, lz77TokensExpandList?]
+        cases hstep : Png.lz77TokenExpand? out (tokens[i]'hi) with
+        | none =>
+            simp [hstep]
+        | some outNext =>
+            simp [hstep]
+            have hkTail : tokens.size - (i + 1) = k := by omega
+            exact ih (i + 1) outNext hkTail
+  intro i out
+  exact hk (tokens.size - i) i out rfl
+
+/-- The public greedy LZ77 token stream expands through the proof-facing list
+expander to the original raw bytes. -/
+lemma lz77TokensExpandList_deflateTokensLz77 (raw : ByteArray) :
+    lz77TokensExpandList? ByteArray.empty
+        (Png.deflateTokensLz77 raw).toList = some raw := by
+  have hlist :=
+    lz77TokensExpandList?_drop_eq_deflateTokensExpandLz77From?
+      (Png.deflateTokensLz77 raw) 0 ByteArray.empty
+  have hexpand :=
+    deflateTokensExpandLz77_deflateTokensLz77 raw
+  calc
+    lz77TokensExpandList? ByteArray.empty
+        (Png.deflateTokensLz77 raw).toList =
+        Png.deflateTokensExpandLz77From? (Png.deflateTokensLz77 raw)
+          0 ByteArray.empty := by
+          simpa using hlist
+    _ = some raw := by
+          simpa [Png.deflateTokensExpandLz77?] using hexpand
+
 set_option maxRecDepth 250000 in
 set_option maxHeartbeats 6000000 in
 /-- Replays a generated dynamic LZ77 payload-token list through the generic
@@ -3893,6 +3965,45 @@ lemma decodeCompressedBlock_generatedDynamicPayloadLz77_readerAt_writeBits
   have hfuel : source.toList.length + 1 ≤ br0.data.size * 8 + 1 := by
     omega
   exact Png.decodeCompressedBlock_of_trace htrace' hfuel
+
+/-- Payload decoder specialization for the public generated LZ77 tokenizer:
+decoding the generated dynamic payload reconstructs the original raw bytes. -/
+lemma decodeCompressedBlock_deflateTokensLz77Payload_readerAt_writeBits
+    (raw : ByteArray) (bw : Png.BitWriter)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let source := Png.deflateTokensLz77 raw
+    let spec := generatedDynamicTableSpecLz77 source
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source))
+    let distCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source))
+    let bits := dynamicPayloadLz77StreamBits litLenCodes distCodes source.toList
+    let len := dynamicPayloadLz77StreamLen litLenCodes distCodes source.toList
+    let bwAll := Png.BitWriter.writeBits bw bits len
+    let br0 := Png.BitWriter.readerAt bw bwAll.flush
+      (Png.flush_size_writeBits_le bw bits len) hbit
+    let brAfter := Png.BitWriter.readerAt
+      (Png.BitWriter.writeBits bw bits len) bwAll.flush
+      (by
+        simpa [bwAll] using
+          (le_rfl : (Png.BitWriter.writeBits bw bits len).flush.size ≤
+            (Png.BitWriter.writeBits bw bits len).flush.size))
+      (Png.bitPos_lt_8_writeBits bw bits len hbit)
+    Png.decodeCompressedBlock spec.litLenTable spec.distTable br0
+      ByteArray.empty = some (brAfter, raw) := by
+  intro source spec litLenCodes distCodes bits len bwAll br0 brAfter
+  have hdecode :=
+    decodeCompressedBlock_generatedDynamicPayloadLz77_readerAt_writeBits
+      (source := source) (raw := raw)
+      (hvalid := by
+        simpa [source] using deflateTokensLz77_fixed_valid raw)
+      (hexpand := by
+        simpa [source] using lz77TokensExpandList_deflateTokensLz77 raw)
+      (bw := bw) hbit hcur
+  simpa [source, spec, litLenCodes, distCodes, bits, len, bwAll, br0,
+    brAfter] using hdecode
 
 /-- Proof-facing name for the code-length array advertised by the generated
 dynamic LZ77 header. It mirrors the local `lengths` binding in the writer. -/
