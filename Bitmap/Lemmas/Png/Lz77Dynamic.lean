@@ -3209,6 +3209,691 @@ lemma generatedDynamicPayloadLz77Match_manual_transition_readerAt_writeBits
     hlenInfo hdistInfo ⟨hlenLo, hlenHi⟩
     hdecodeSym hdecodeLenEx hdecodeDistSym hdecodeDistEx hcopy
 
+set_option maxRecDepth 250000 in
+set_option maxHeartbeats 6000000 in
+/-- Runtime-shaped generated dynamic LZ77 match-token bits produce one
+generic dynamic-payload copy transition. This bridges the packed token stream
+to the split length/distance replay lemma. -/
+lemma generatedDynamicPayloadLz77Match_transition_readerAt_writeBits
+    (source : Array Png.Lz77Token) (target : Nat)
+    (bw : Png.BitWriter) (out out' : ByteArray)
+    (len distance sym extraBits extraLen distSym distExtraBits distExtraLen : Nat)
+    (tailBits tailLen : Nat)
+    (htarget : target < source.size)
+    (ht : source[target]'htarget = Png.Lz77Token.match len distance)
+    (hlenInfo : Png.deflateLengthInfo len = (sym, extraBits, extraLen))
+    (hdistInfo :
+      Png.deflateDistanceInfo? distance =
+        some (distSym, distExtraBits, distExtraLen))
+    (hexpand : Png.lz77TokenExpand? out (.match len distance) = some out')
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let spec := generatedDynamicTableSpecLz77 source
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source))
+    let distCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source))
+    let bits :=
+      dynamicPayloadLz77TokenBits litLenCodes distCodes
+        (Png.Lz77Token.match len distance)
+    let tokenLen :=
+      dynamicPayloadLz77TokenBitLen litLenCodes distCodes
+        (Png.Lz77Token.match len distance)
+    let bitsTot := bits ||| (tailBits <<< tokenLen)
+    let lenTot := tokenLen + tailLen
+    let bwAll := Png.BitWriter.writeBits bw bitsTot lenTot
+    let br0 := Png.BitWriter.readerAt bw bwAll.flush
+      (Png.flush_size_writeBits_le bw bitsTot lenTot) hbit
+    let brAfter := Png.BitWriter.readerAt
+      (Png.BitWriter.writeBits bw bitsTot tokenLen) bwAll.flush
+      (by
+        have hk : tokenLen ≤ lenTot := by omega
+        simpa [lenTot] using
+          Png.flush_size_writeBits_prefix bw bitsTot tokenLen lenTot hk)
+      (Png.bitPos_lt_8_writeBits bw bitsTot tokenLen hbit)
+    Png.DynamicPayloadTransition spec br0 out brAfter out' := by
+  intro spec litLenCodes distCodes bits tokenLen bitsTot lenTot bwAll br0
+    brAfter
+  rcases Png.lz77TokenExpand?_match_some_spec (out := out) (out' := out')
+      (len := len) (distance := distance) hexpand with
+    ⟨hlenLo, hlenHi, _hdistLo, _hdistHi, _hdistOut, _hdistSome, _hcopyFast⟩
+  rcases Png.deflateLengthInfo_decodeLength_correct
+      hlenInfo hlenLo hlenHi with
+    ⟨_hsym, _hidxBase, _hidxExtra, _hextraLen, _hbaseLen, hbitsLenLt⟩
+  rcases Png.deflateDistanceInfo_decodeDistance_correct hdistInfo with
+    ⟨hdist, _hdistExtra, _hextraDist, _hbaseDist, hbitsDistLt⟩
+  let litBits := litLenCodes[sym]!.1
+  let distBits := distCodes[distSym]!.1
+  let distExtraTailBits := distExtraBits ||| (tailBits <<< distExtraLen)
+  let distExtraTailLen := distExtraLen + tailLen
+  let distTailBits := distBits ||| (distExtraTailBits <<< 5)
+  let distTailLen := 5 + distExtraTailLen
+  let lenTailBits := extraBits ||| (distTailBits <<< extraLen)
+  let lenTailLen := extraLen + distTailLen
+  let manualBitsTot := litBits ||| (lenTailBits <<< 9)
+  let manualLenTot := 9 + lenTailLen
+  let bwManualAll := Png.BitWriter.writeBits bw manualBitsTot manualLenTot
+  let bwLenStart := Png.BitWriter.writeBits bw manualBitsTot 9
+  let bwDistStart := Png.BitWriter.writeBits bwLenStart lenTailBits extraLen
+  let bwDistExtraStart := Png.BitWriter.writeBits bwDistStart distTailBits 5
+  let manualAllAfter :=
+    Png.BitWriter.writeBits bwDistExtraStart distExtraTailBits distExtraTailLen
+  let brAfterSeq := Png.BitWriter.readerAt
+    (Png.BitWriter.writeBits bwDistExtraStart distExtraTailBits distExtraLen)
+    manualAllAfter.flush
+    (by
+      have hk : distExtraLen ≤ distExtraTailLen := by
+        simp [distExtraTailLen]
+      exact Png.flush_size_writeBits_prefix bwDistExtraStart
+        distExtraTailBits distExtraLen distExtraTailLen hk)
+    (Png.bitPos_lt_8_writeBits bwDistExtraStart distExtraTailBits
+      distExtraLen
+      (Png.bitPos_lt_8_writeBits bwDistStart distTailBits 5
+        (Png.bitPos_lt_8_writeBits bwLenStart lenTailBits extraLen
+          (Png.bitPos_lt_8_writeBits bw manualBitsTot 9 hbit))))
+  have hbitsShape : bitsTot = manualBitsTot := by
+    have h :=
+      dynamicPayloadLz77TokenBits_generated_match_tail_eq
+        source target len distance htarget ht ⟨hlenLo, hlenHi⟩
+        hlenInfo hdistInfo tailBits
+    simpa [bitsTot, bits, tokenLen, litLenCodes, distCodes, litBits,
+      distBits, distExtraTailBits, distTailBits, lenTailBits,
+      manualBitsTot] using h
+  have hlenShape : lenTot = manualLenTot := by
+    have h :=
+      dynamicPayloadLz77TokenBitLen_generated_match_tail_eq
+        source target len distance htarget ht ⟨hlenLo, hlenHi⟩
+        hlenInfo hdistInfo tailLen
+    simpa [lenTot, tokenLen, litLenCodes, distCodes, distExtraTailLen,
+      distTailLen, lenTailLen, manualLenTot, Nat.add_assoc] using h
+  have htokenLen :
+      tokenLen = 9 + extraLen + 5 + distExtraLen := by
+    have h :=
+      dynamicPayloadLz77TokenBitLen_generated_match_eq
+        source target len distance htarget ht ⟨hlenLo, hlenHi⟩
+        hlenInfo hdistInfo
+    simpa [tokenLen, litLenCodes, distCodes, Nat.add_assoc] using h
+  have hlitBitsLt : litBits < 2 ^ 9 := by
+    have hbits :=
+      generatedDynamicLitLenCodesLz77_match_bits_lt_codeSpace_at
+        source target len distance htarget ht ⟨hlenLo, hlenHi⟩
+    simpa [litBits, litLenCodes, hlenInfo] using hbits
+  let distLengths :=
+    Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source)
+  have hdistSymLen : distSym < distLengths.size := by
+    have hsize : distLengths.size = 30 := by
+      simpa [distLengths] using
+        generatedDynamicDistLengthsLz77_size (Png.distSymbolFreqsLz77 source)
+    have hbaseSize : Png.distBases.size = 30 := by decide
+    omega
+  have hdistBitsLt : distBits < 2 ^ 5 := by
+    have hbits :=
+      generatedDynamicDistCodesLz77_bits_lt_codeSpace
+        (Png.distSymbolFreqsLz77 source) distSym hdistSymLen
+    simpa [distBits, distCodes, distLengths] using hbits
+  have hbwLenStartPrefix :
+      bwLenStart = Png.BitWriter.writeBits bw litBits 9 := by
+    simpa [bwLenStart, manualBitsTot] using
+      Png.writeBits_or_shift_tail bw litBits lenTailBits 9 hlitBitsLt
+  have hbwManualAllLenTail :
+      bwManualAll =
+        Png.BitWriter.writeBits bwLenStart lenTailBits lenTailLen := by
+    have hcat :=
+      Png.writeBits_concat bw litBits lenTailBits 9 lenTailLen hlitBitsLt
+    simpa [bwManualAll, manualBitsTot, manualLenTot, bwLenStart,
+      hbwLenStartPrefix] using hcat
+  have hbwDistStartPrefix :
+      bwDistStart =
+        Png.BitWriter.writeBits bwLenStart extraBits extraLen := by
+    simpa [bwDistStart, lenTailBits] using
+      Png.writeBits_or_shift_tail bwLenStart extraBits distTailBits
+        extraLen hbitsLenLt
+  have hbwManualAllDistTail :
+      bwManualAll =
+        Png.BitWriter.writeBits bwDistStart distTailBits distTailLen := by
+    have hcat :=
+      Png.writeBits_concat bwLenStart extraBits distTailBits
+        extraLen distTailLen hbitsLenLt
+    calc
+      bwManualAll =
+          Png.BitWriter.writeBits bwLenStart lenTailBits lenTailLen :=
+            hbwManualAllLenTail
+      _ =
+          Png.BitWriter.writeBits
+            (Png.BitWriter.writeBits bwLenStart extraBits extraLen)
+            distTailBits distTailLen := by
+          simpa [lenTailBits, lenTailLen] using hcat
+      _ = Png.BitWriter.writeBits bwDistStart distTailBits distTailLen := by
+          rw [hbwDistStartPrefix]
+  have hbwDistExtraStartPrefix :
+      bwDistExtraStart =
+        Png.BitWriter.writeBits bwDistStart distBits 5 := by
+    simpa [bwDistExtraStart, distTailBits] using
+      Png.writeBits_or_shift_tail bwDistStart distBits distExtraTailBits 5
+        hdistBitsLt
+  have hbwManualAllDistExtraTail :
+      bwManualAll = manualAllAfter := by
+    have hcat :=
+      Png.writeBits_concat bwDistStart distBits distExtraTailBits
+        5 distExtraTailLen hdistBitsLt
+    calc
+      bwManualAll =
+          Png.BitWriter.writeBits bwDistStart distTailBits distTailLen :=
+            hbwManualAllDistTail
+      _ =
+          Png.BitWriter.writeBits
+            (Png.BitWriter.writeBits bwDistStart distBits 5)
+            distExtraTailBits distExtraTailLen := by
+          simpa [distTailBits, distTailLen] using hcat
+      _ = manualAllAfter := by
+          simp [manualAllAfter, hbwDistExtraStartPrefix]
+  have hwriterLit :
+      Png.BitWriter.writeBits bw manualBitsTot
+          (9 + (extraLen + (5 + distExtraLen))) =
+        Png.BitWriter.writeBits bwLenStart lenTailBits
+          (extraLen + (5 + distExtraLen)) := by
+    have hcat :=
+      Png.writeBits_concat bw litBits lenTailBits 9
+        (extraLen + (5 + distExtraLen)) hlitBitsLt
+    simpa [manualBitsTot, bwLenStart, hbwLenStartPrefix,
+      Nat.add_assoc] using hcat
+  have hwriterLen :
+      Png.BitWriter.writeBits bwLenStart lenTailBits
+          (extraLen + (5 + distExtraLen)) =
+        Png.BitWriter.writeBits bwDistStart distTailBits
+          (5 + distExtraLen) := by
+    have hcat :=
+      Png.writeBits_concat bwLenStart extraBits distTailBits
+        extraLen (5 + distExtraLen) hbitsLenLt
+    calc
+      Png.BitWriter.writeBits bwLenStart lenTailBits
+          (extraLen + (5 + distExtraLen)) =
+          Png.BitWriter.writeBits
+            (Png.BitWriter.writeBits bwLenStart extraBits extraLen)
+            distTailBits (5 + distExtraLen) := by
+          simpa [lenTailBits] using hcat
+      _ = Png.BitWriter.writeBits bwDistStart distTailBits
+          (5 + distExtraLen) := by
+          rw [hbwDistStartPrefix]
+  have hwriterDist :
+      Png.BitWriter.writeBits bwDistStart distTailBits (5 + distExtraLen) =
+        Png.BitWriter.writeBits bwDistExtraStart distExtraTailBits
+          distExtraLen := by
+    have hcat :=
+      Png.writeBits_concat bwDistStart distBits distExtraTailBits
+        5 distExtraLen hdistBitsLt
+    calc
+      Png.BitWriter.writeBits bwDistStart distTailBits (5 + distExtraLen) =
+          Png.BitWriter.writeBits
+            (Png.BitWriter.writeBits bwDistStart distBits 5)
+            distExtraTailBits distExtraLen := by
+          simpa [distTailBits] using hcat
+      _ =
+          Png.BitWriter.writeBits bwDistExtraStart distExtraTailBits
+            distExtraLen := by
+          rw [hbwDistExtraStartPrefix]
+  have hwriterPrefix :
+      Png.BitWriter.writeBits bw bitsTot tokenLen =
+        Png.BitWriter.writeBits bwDistExtraStart distExtraTailBits
+          distExtraLen := by
+    calc
+      Png.BitWriter.writeBits bw bitsTot tokenLen =
+          Png.BitWriter.writeBits bw manualBitsTot
+            (9 + (extraLen + (5 + distExtraLen))) := by
+          simp [hbitsShape, htokenLen, Nat.add_assoc]
+      _ =
+          Png.BitWriter.writeBits bwLenStart lenTailBits
+            (extraLen + (5 + distExtraLen)) := hwriterLit
+      _ =
+          Png.BitWriter.writeBits bwDistStart distTailBits
+            (5 + distExtraLen) := hwriterLen
+      _ =
+          Png.BitWriter.writeBits bwDistExtraStart distExtraTailBits
+            distExtraLen := hwriterDist
+  have hfullPublicManual : bwAll = manualAllAfter := by
+    calc
+      bwAll = bwManualAll := by
+          simp [bwAll, bitsTot, lenTot, hbitsShape, hlenShape,
+            bwManualAll, manualBitsTot, manualLenTot]
+      _ = manualAllAfter := hbwManualAllDistExtraTail
+  have hbrAfterEq : brAfterSeq = brAfter := by
+    refine readerAt_eq_of_eqs hwriterPrefix.symm ?_ _ _ _ _
+    exact (congrArg Png.BitWriter.flush hfullPublicManual).symm
+  have hmanual :=
+    generatedDynamicPayloadLz77Match_manual_transition_readerAt_writeBits
+      (source := source) (target := target) (bw := bw) (out := out)
+      (out' := out') (len := len) (distance := distance) (sym := sym)
+      (extraBits := extraBits) (extraLen := extraLen) (distSym := distSym)
+      (distExtraBits := distExtraBits) (distExtraLen := distExtraLen)
+      (tailBits := tailBits) (tailLen := tailLen)
+      htarget ht hlenInfo hdistInfo hexpand hbit hcur
+  have hmanualSeq :
+      Png.DynamicPayloadTransition spec br0 out brAfterSeq out' := by
+    simpa [spec, litLenCodes, distCodes, litBits, distBits,
+      distExtraTailBits, distExtraTailLen, distTailBits, distTailLen,
+      lenTailBits, lenTailLen, manualBitsTot, manualLenTot, bwManualAll,
+      bwLenStart, bwDistStart, bwDistExtraStart, manualAllAfter,
+      brAfterSeq, bits, tokenLen, bitsTot, lenTot, bwAll, br0,
+      hbitsShape, hlenShape] using hmanual
+  simpa [hbrAfterEq] using hmanualSeq
+
+/-- Proof-facing expansion of an LZ77 token list. It mirrors the array
+expander while giving payload trace proofs structural recursion on lists. -/
+def lz77TokensExpandList? (out : ByteArray) :
+    List Png.Lz77Token → Option ByteArray
+  | [] => some out
+  | token :: tokens =>
+      match Png.lz77TokenExpand? out token with
+      | some out' => lz77TokensExpandList? out' tokens
+      | none => none
+
+set_option maxRecDepth 250000 in
+set_option maxHeartbeats 6000000 in
+/-- Replays a generated dynamic LZ77 payload-token list through the generic
+dynamic-Huffman payload trace. This is the recursive bridge from emitted
+LZ77 token bits to decoded output bytes. -/
+lemma generatedDynamicPayloadLz77TraceList_readerAt_writeBits
+    (source : Array Png.Lz77Token) (tokens : List Png.Lz77Token)
+    (hmember :
+      ∀ token ∈ tokens, ∃ target, ∃ htarget : target < source.size,
+        source[target]'htarget = token)
+    (out outFinal : ByteArray)
+    (hexpand : lz77TokensExpandList? out tokens = some outFinal)
+    (bw : Png.BitWriter)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let spec := generatedDynamicTableSpecLz77 source
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source))
+    let distCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source))
+    let bits := dynamicPayloadLz77StreamBits litLenCodes distCodes tokens
+    let len := dynamicPayloadLz77StreamLen litLenCodes distCodes tokens
+    let bwAll := Png.BitWriter.writeBits bw bits len
+    let br0 := Png.BitWriter.readerAt bw bwAll.flush
+      (Png.flush_size_writeBits_le bw bits len) hbit
+    let brAfter := Png.BitWriter.readerAt (Png.BitWriter.writeBits bw bits len)
+      bwAll.flush
+      (by
+        simpa [bwAll] using
+          (le_rfl : (Png.BitWriter.writeBits bw bits len).flush.size ≤
+            (Png.BitWriter.writeBits bw bits len).flush.size))
+      (Png.bitPos_lt_8_writeBits bw bits len hbit)
+    Png.DynamicPayloadTrace spec (tokens.length + 1) br0 out brAfter
+      outFinal := by
+  revert hmember out outFinal bw
+  induction tokens with
+  | nil =>
+      intro _hmember out outFinal hexpand bw hbit hcur spec litLenCodes
+        distCodes bits len bwAll br0 brAfter
+      simp [lz77TokensExpandList?] at hexpand
+      subst outFinal
+      have htrace :=
+        generatedDynamicPayloadLz77Eob_finish_readerAt_writeBits
+          (source := source) (bw := bw) (out := out) hbit hcur
+      exact Png.DynamicPayloadTrace.finish (by
+        simpa [spec, litLenCodes, distCodes, bits, len, bwAll, br0,
+          brAfter, dynamicPayloadLz77StreamBits,
+          dynamicPayloadLz77StreamLen] using htrace)
+  | cons token tokens ih =>
+      intro hmember out outFinal hexpand bw hbit hcur spec litLenCodes
+        distCodes bits len bwAll br0 brAfter
+      have htailMember :
+          ∀ t ∈ tokens, ∃ target, ∃ htarget : target < source.size,
+            source[target]'htarget = t := by
+        intro t ht
+        exact hmember t (List.mem_cons_of_mem token ht)
+      let tokenBits := dynamicPayloadLz77TokenBits litLenCodes distCodes token
+      let tokenLen := dynamicPayloadLz77TokenBitLen litLenCodes distCodes token
+      let tailBits := dynamicPayloadLz77StreamBits litLenCodes distCodes tokens
+      let tailLen := dynamicPayloadLz77StreamLen litLenCodes distCodes tokens
+      let bwMid := Png.BitWriter.writeBits bw bits tokenLen
+      let brMid := Png.BitWriter.readerAt bwMid bwAll.flush
+        (by
+          have hk : tokenLen ≤ len := by
+            simp [len, dynamicPayloadLz77StreamLen, tokenLen, tailLen]
+          simpa [bwMid, bwAll] using
+            Png.flush_size_writeBits_prefix bw bits tokenLen len hk)
+        (Png.bitPos_lt_8_writeBits bw bits tokenLen hbit)
+      let bwTailAll :=
+        Png.BitWriter.writeBits
+          (Png.BitWriter.writeBits bw tokenBits tokenLen) tailBits tailLen
+      have hbitMid :
+          (Png.BitWriter.writeBits bw tokenBits tokenLen).bitPos < 8 :=
+        Png.bitPos_lt_8_writeBits bw tokenBits tokenLen hbit
+      have hcurMid :
+          (Png.BitWriter.writeBits bw tokenBits tokenLen).curClearAbove :=
+        Png.curClearAbove_writeBits bw tokenBits tokenLen hbit hcur
+      cases token with
+      | literal b =>
+          simp [lz77TokensExpandList?, Png.lz77TokenExpand?] at hexpand
+          rcases hmember (Png.Lz77Token.literal b) (by simp) with
+            ⟨target, htarget, ht⟩
+          have htokenBits :
+              tokenBits < 2 ^ tokenLen := by
+            simpa [litLenCodes, distCodes, tokenBits, tokenLen] using
+              dynamicPayloadLz77TokenBits_generated_literal_lt_codeSpace_at
+                source target b htarget ht
+          have hprefix :
+              bwMid = Png.BitWriter.writeBits bw tokenBits tokenLen := by
+            simpa [bwMid, bits, dynamicPayloadLz77StreamBits, tokenBits,
+              tokenLen, tailBits] using
+              Png.writeBits_or_shift_tail bw tokenBits tailBits tokenLen
+                htokenBits
+          have hconcat :
+              bwAll = bwTailAll := by
+            have h :=
+              Png.writeBits_concat bw tokenBits tailBits tokenLen tailLen
+                htokenBits
+            simpa [bwAll, bits, len, dynamicPayloadLz77StreamBits,
+              dynamicPayloadLz77StreamLen, tokenBits, tokenLen, tailBits,
+              tailLen, bwTailAll] using h
+          have hbrMidEq :
+              brMid =
+                Png.BitWriter.readerAt
+                  (Png.BitWriter.writeBits bw tokenBits tokenLen)
+                  bwTailAll.flush
+                  (Png.flush_size_writeBits_le
+                    (Png.BitWriter.writeBits bw tokenBits tokenLen)
+                    tailBits tailLen)
+                  hbitMid := by
+            refine readerAt_eq_of_eqs hprefix ?_ _ _ _ _
+            simpa [hconcat]
+          have hstep :=
+            generatedDynamicPayloadLz77Literal_transition_readerAt_writeBits
+              (source := source) (target := target) (b := b) (bw := bw)
+              (out := out) (tailBits := tailBits) (tailLen := tailLen)
+              htarget ht hbit hcur
+          have hstep' :
+              Png.DynamicPayloadTransition spec br0 out brMid
+                (out.push b) := by
+            simpa [spec, litLenCodes, distCodes, tokenBits, tokenLen,
+              tailBits, tailLen, bits, len, bwAll, br0, brMid,
+              dynamicPayloadLz77StreamBits, dynamicPayloadLz77StreamLen]
+              using hstep
+          have hrestRaw :=
+            ih htailMember (out.push b) outFinal hexpand
+              (Png.BitWriter.writeBits bw tokenBits tokenLen)
+              hbitMid hcurMid
+          have hrest :
+              Png.DynamicPayloadTrace spec (tokens.length + 1) brMid
+                (out.push b) brAfter outFinal := by
+            have hbrAfterEq :
+                Png.BitWriter.readerAt
+                    (Png.BitWriter.writeBits
+                      (Png.BitWriter.writeBits bw tokenBits tokenLen)
+                      tailBits tailLen)
+                    bwTailAll.flush
+                    (by
+                      simpa [bwTailAll] using
+                        (le_rfl :
+                          (Png.BitWriter.writeBits
+                            (Png.BitWriter.writeBits bw tokenBits tokenLen)
+                            tailBits tailLen).flush.size ≤
+                          (Png.BitWriter.writeBits
+                            (Png.BitWriter.writeBits bw tokenBits tokenLen)
+                            tailBits tailLen).flush.size))
+                    (Png.bitPos_lt_8_writeBits
+                      (Png.BitWriter.writeBits bw tokenBits tokenLen)
+                      tailBits tailLen hbitMid) = brAfter := by
+              refine readerAt_eq_of_eqs ?_ ?_ _ _ _ _
+              · simpa [bwAll, bwTailAll] using hconcat.symm
+              · simpa [bwAll, bwTailAll] using
+                  congrArg Png.BitWriter.flush hconcat.symm
+            have hrest' := hrestRaw
+            simpa [spec, litLenCodes, distCodes, tailBits, tailLen,
+              bwTailAll, hbrMidEq, hbrAfterEq] using hrest'
+          exact Png.DynamicPayloadTrace.step (hstep := hstep') (hrest := hrest)
+      | «match» matchLen distance =>
+          cases hstepToken :
+              Png.lz77TokenExpand? out (Png.Lz77Token.match matchLen distance) with
+          | none =>
+              simp [lz77TokensExpandList?, hstepToken] at hexpand
+          | some outNext =>
+              simp [lz77TokensExpandList?, hstepToken] at hexpand
+              rcases hmember (Png.Lz77Token.match matchLen distance) (by simp) with
+                ⟨target, htarget, ht⟩
+              rcases Png.lz77TokenExpand?_match_some_spec
+                  (out := out) (out' := outNext)
+                  (len := matchLen) (distance := distance) hstepToken with
+                ⟨hlenLo, hlenHi, _hdistLo, _hdistHi, _hdistOut,
+                  hinfoSome, _hcopyFast⟩
+              rcases hlenInfo : Png.deflateLengthInfo matchLen with
+                ⟨sym, extraBits, extraLen⟩
+              cases hdistInfo : Png.deflateDistanceInfo? distance with
+              | none =>
+                  rcases hinfoSome with ⟨info, hinfo⟩
+                  simp [hdistInfo] at hinfo
+              | some distInfo =>
+                  rcases distInfo with ⟨distSym, distExtraBits, distExtraLen⟩
+                  have htokenBits :
+                      tokenBits < 2 ^ tokenLen := by
+                    simpa [litLenCodes, distCodes, tokenBits, tokenLen] using
+                      dynamicPayloadLz77TokenBits_generated_match_lt_codeSpace_at
+                        source target matchLen distance htarget ht
+                        ⟨hlenLo, hlenHi⟩ hdistInfo
+                  have hprefix :
+                      bwMid = Png.BitWriter.writeBits bw tokenBits tokenLen := by
+                    simpa [bwMid, bits, dynamicPayloadLz77StreamBits, tokenBits,
+                      tokenLen, tailBits] using
+                      Png.writeBits_or_shift_tail bw tokenBits tailBits tokenLen
+                        htokenBits
+                  have hconcat :
+                      bwAll = bwTailAll := by
+                    have h :=
+                      Png.writeBits_concat bw tokenBits tailBits tokenLen tailLen
+                        htokenBits
+                    simpa [bwAll, bits, len, dynamicPayloadLz77StreamBits,
+                      dynamicPayloadLz77StreamLen, tokenBits, tokenLen, tailBits,
+                      tailLen, bwTailAll] using h
+                  have hbrMidEq :
+                      brMid =
+                        Png.BitWriter.readerAt
+                          (Png.BitWriter.writeBits bw tokenBits tokenLen)
+                          bwTailAll.flush
+                          (Png.flush_size_writeBits_le
+                            (Png.BitWriter.writeBits bw tokenBits tokenLen)
+                            tailBits tailLen)
+                          hbitMid := by
+                    refine readerAt_eq_of_eqs hprefix ?_ _ _ _ _
+                    simpa [hconcat]
+                  have hstep :=
+                    generatedDynamicPayloadLz77Match_transition_readerAt_writeBits
+                      (source := source) (target := target) (bw := bw)
+                      (out := out) (out' := outNext) (len := matchLen)
+                      (distance := distance) (sym := sym)
+                      (extraBits := extraBits) (extraLen := extraLen)
+                      (distSym := distSym) (distExtraBits := distExtraBits)
+                      (distExtraLen := distExtraLen)
+                      (tailBits := tailBits) (tailLen := tailLen)
+                      htarget ht hlenInfo hdistInfo hstepToken hbit hcur
+                  have hstep' :
+                      Png.DynamicPayloadTransition spec br0 out brMid
+                        outNext := by
+                    simpa [spec, litLenCodes, distCodes, tokenBits, tokenLen,
+                      tailBits, tailLen, bits, len, bwAll, br0, brMid,
+                      dynamicPayloadLz77StreamBits,
+                      dynamicPayloadLz77StreamLen] using hstep
+                  have hrestRaw :=
+                    ih htailMember outNext outFinal hexpand
+                      (Png.BitWriter.writeBits bw tokenBits tokenLen)
+                      hbitMid hcurMid
+                  have hrest :
+                      Png.DynamicPayloadTrace spec (tokens.length + 1) brMid
+                        outNext brAfter outFinal := by
+                    have hbrAfterEq :
+                        Png.BitWriter.readerAt
+                            (Png.BitWriter.writeBits
+                              (Png.BitWriter.writeBits bw tokenBits tokenLen)
+                              tailBits tailLen)
+                            bwTailAll.flush
+                            (by
+                              simpa [bwTailAll] using
+                                (le_rfl :
+                                  (Png.BitWriter.writeBits
+                                    (Png.BitWriter.writeBits bw tokenBits tokenLen)
+                                    tailBits tailLen).flush.size ≤
+                                  (Png.BitWriter.writeBits
+                                    (Png.BitWriter.writeBits bw tokenBits tokenLen)
+                                    tailBits tailLen).flush.size))
+                            (Png.bitPos_lt_8_writeBits
+                              (Png.BitWriter.writeBits bw tokenBits tokenLen)
+                              tailBits tailLen hbitMid) = brAfter := by
+                      refine readerAt_eq_of_eqs ?_ ?_ _ _ _ _
+                      · simpa [bwAll, bwTailAll] using hconcat.symm
+                      · simpa [bwAll, bwTailAll] using
+                          congrArg Png.BitWriter.flush hconcat.symm
+                    have hrest' := hrestRaw
+                    simpa [spec, litLenCodes, distCodes, tailBits, tailLen,
+                      bwTailAll, hbrMidEq, hbrAfterEq] using hrest'
+                  exact Png.DynamicPayloadTrace.step
+                    (hstep := hstep') (hrest := hrest)
+
+/-- Generated dynamic LZ77 payload streams have at least one bit per replay
+step. This supplies the decoder-fuel bound for LZ77 token traces. -/
+lemma dynamicPayloadLz77StreamLen_generated_ge_steps
+    (source : Array Png.Lz77Token) (tokens : List Png.Lz77Token)
+    (hvalid :
+      ∀ target (htarget : target < source.size),
+        Png.Lz77TokenFixedValid (source[target]'htarget))
+    (hmember :
+      ∀ token ∈ tokens, ∃ target, ∃ htarget : target < source.size,
+        source[target]'htarget = token) :
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source))
+    let distCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source))
+    tokens.length + 1 ≤
+      dynamicPayloadLz77StreamLen litLenCodes distCodes tokens := by
+  induction tokens with
+  | nil =>
+      intro litLenCodes distCodes
+      have hlen : dynamicPayloadLz77EobBitLen litLenCodes = 9 := by
+        simpa [litLenCodes] using
+          dynamicPayloadLz77EobBitLen_generated_eq_nine source
+      change 1 ≤ dynamicPayloadLz77EobBitLen litLenCodes
+      rw [hlen]
+      decide
+  | cons token tokens ih =>
+      intro litLenCodes distCodes
+      have htailMember :
+          ∀ t ∈ tokens, ∃ target, ∃ htarget : target < source.size,
+            source[target]'htarget = t := by
+        intro t ht
+        exact hmember t (List.mem_cons_of_mem token ht)
+      have htail := ih htailMember
+      have htail' :
+          tokens.length + 1 ≤
+            dynamicPayloadLz77StreamLen litLenCodes distCodes tokens := by
+        simpa [litLenCodes, distCodes] using htail
+      have htokenLenPos :
+          1 ≤ dynamicPayloadLz77TokenBitLen litLenCodes distCodes token := by
+        cases token with
+        | literal b =>
+            rcases hmember (Png.Lz77Token.literal b) (by simp) with
+              ⟨target, htarget, ht⟩
+            have hlen :
+                dynamicPayloadLz77TokenBitLen litLenCodes distCodes
+                  (Png.Lz77Token.literal b) = 9 := by
+              simpa [litLenCodes, distCodes] using
+                dynamicPayloadLz77TokenBitLen_generated_literal_eq_nine_at
+                  source target b htarget ht
+            omega
+        | «match» len distance =>
+            rcases hmember (Png.Lz77Token.match len distance) (by simp) with
+              ⟨target, htarget, ht⟩
+            have hv := hvalid target htarget
+            simp [Png.Lz77TokenFixedValid, ht] at hv
+            rcases hv with ⟨hlenLo, hlenHi, hdistSome⟩
+            rcases hlenInfo : Png.deflateLengthInfo len with
+              ⟨sym, extraBits, extraLen⟩
+            cases hdistInfo : Png.deflateDistanceInfo? distance with
+            | none =>
+                rcases hdistSome with ⟨info, hinfo⟩
+                simp [hdistInfo] at hinfo
+            | some distInfo =>
+                rcases distInfo with ⟨distSym, distExtraBits, distExtraLen⟩
+                have hlen :
+                    dynamicPayloadLz77TokenBitLen litLenCodes distCodes
+                      (Png.Lz77Token.match len distance) =
+                        9 + extraLen + 5 + distExtraLen := by
+                  simpa [litLenCodes, distCodes, Nat.add_assoc] using
+                    dynamicPayloadLz77TokenBitLen_generated_match_eq
+                      source target len distance htarget ht
+                      ⟨hlenLo, hlenHi⟩ hlenInfo hdistInfo
+                omega
+      simp [dynamicPayloadLz77StreamLen]
+      omega
+
+set_option maxRecDepth 200000 in
+set_option maxHeartbeats 5000000 in
+/-- Generated dynamic LZ77 payload bits are accepted by the generic
+compressed-block decoder and produce the list expansion output. -/
+lemma decodeCompressedBlock_generatedDynamicPayloadLz77_readerAt_writeBits
+    (source : Array Png.Lz77Token) (raw : ByteArray)
+    (hvalid :
+      ∀ target (htarget : target < source.size),
+        Png.Lz77TokenFixedValid (source[target]'htarget))
+    (hexpand :
+      lz77TokensExpandList? ByteArray.empty source.toList = some raw)
+    (bw : Png.BitWriter)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let spec := generatedDynamicTableSpecLz77 source
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source))
+    let distCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source))
+    let bits := dynamicPayloadLz77StreamBits litLenCodes distCodes source.toList
+    let len := dynamicPayloadLz77StreamLen litLenCodes distCodes source.toList
+    let bwAll := Png.BitWriter.writeBits bw bits len
+    let br0 := Png.BitWriter.readerAt bw bwAll.flush
+      (Png.flush_size_writeBits_le bw bits len) hbit
+    let brAfter := Png.BitWriter.readerAt
+      (Png.BitWriter.writeBits bw bits len) bwAll.flush
+      (by
+        simpa [bwAll] using
+          (le_rfl : (Png.BitWriter.writeBits bw bits len).flush.size ≤
+            (Png.BitWriter.writeBits bw bits len).flush.size))
+      (Png.bitPos_lt_8_writeBits bw bits len hbit)
+    Png.decodeCompressedBlock spec.litLenTable spec.distTable br0
+      ByteArray.empty = some (brAfter, raw) := by
+  intro spec litLenCodes distCodes bits len bwAll br0 brAfter
+  have htrace :=
+    generatedDynamicPayloadLz77TraceList_readerAt_writeBits
+      (source := source) (tokens := source.toList)
+      (fun token hmem => lz77Token_mem_toList_index hmem)
+      (out := ByteArray.empty) (outFinal := raw) hexpand
+      (bw := bw) hbit hcur
+  have htrace' :
+      Png.DynamicPayloadTrace spec (source.toList.length + 1) br0
+        ByteArray.empty brAfter raw := by
+    simpa [spec, litLenCodes, distCodes, bits, len, bwAll, br0, brAfter]
+      using htrace
+  have hstepsLen :
+      source.toList.length + 1 ≤ len := by
+    have h :=
+      dynamicPayloadLz77StreamLen_generated_ge_steps
+        (source := source) (tokens := source.toList) hvalid
+        (fun token hmem => lz77Token_mem_toList_index hmem)
+    simpa [litLenCodes, distCodes, len] using h
+  have hlenLeData : len ≤ br0.data.size * 8 := by
+    have hlenLeBitCount : len ≤ bwAll.bitCount := by
+      have h := Nat.le_add_left len bw.bitCount
+      simpa [bwAll, Png.bitCount_writeBits, Nat.add_comm] using h
+    have hbitCountLe : bwAll.bitCount ≤ bwAll.flush.size * 8 :=
+      Png.flush_size_mul_ge_bitCount (bw := bwAll) (hbit := bwAll.hbit)
+    exact le_trans hlenLeBitCount
+      (by simpa [br0, Png.BitWriter.readerAt] using hbitCountLe)
+  have hfuel : source.toList.length + 1 ≤ br0.data.size * 8 + 1 := by
+    omega
+  exact Png.decodeCompressedBlock_of_trace htrace' hfuel
+
 /-- Proof-facing name for the code-length array advertised by the generated
 dynamic LZ77 header. It mirrors the local `lengths` binding in the writer. -/
 def generatedDynamicHeaderCodeLengthsLz77
