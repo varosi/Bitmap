@@ -840,9 +840,39 @@ lemma fixedLz77PayloadBitsEobFrom?_writeBits_of_expand
     have hv := hvalidFixed j hij hj
     cases htok : tokens[j]'hj
     · trivial
-    · simp [Lz77TokenFixedValid, htok] at hv
+    ·
+      simp [Lz77TokenFixedValid, htok] at hv
       exact ⟨hv.1, hv.2.1⟩
   exact fixedLz77PayloadBitsEobFrom?_writeBits tokens i bw bits hbits hvalidLen
+
+/-- Once the public LZ77 token stream is known to expand to `raw`, the fixed
+LZ77 encoder writes exactly the proof-facing payload bits after the fixed header. -/
+lemma deflateFixedLz77_eq_writeBits_of_payloadBits
+    (raw : ByteArray) {bits : Nat × Nat}
+    (hbits : fixedLz77PayloadBitsEob? (deflateTokensLz77 raw) = some bits)
+    (hexpand : deflateTokensExpandLz77? (deflateTokensLz77 raw) = some raw) :
+    deflateFixedLz77 raw =
+      let bw0 := BitWriter.empty
+      let bw1 := BitWriter.writeBits bw0 1 1
+      let bw2 := BitWriter.writeBits bw1 1 2
+      (BitWriter.writeBits bw2 bits.1 bits.2).flush := by
+  let tokens := deflateTokensLz77 raw
+  let bw0 := BitWriter.empty
+  let bw1 := BitWriter.writeBits bw0 1 1
+  let bw2 := BitWriter.writeBits bw1 1 2
+  have hexpandFrom :
+      deflateTokensExpandLz77From? tokens 0 ByteArray.empty = some raw := by
+    simpa [tokens, deflateTokensExpandLz77?] using hexpand
+  have hbitsFrom :
+      fixedLz77PayloadBitsEobFrom? tokens 0 = some bits := by
+    simpa [tokens, fixedLz77PayloadBitsEob?] using hbits
+  have hwrite :=
+    fixedLz77PayloadBitsEobFrom?_writeBits_of_expand
+      (tokens := tokens) (i := 0) (out := ByteArray.empty) (out' := raw)
+      (bits := bits) bw2 hexpandFrom hbitsFrom
+  have hflush := congrArg BitWriter.flush hwrite
+  simpa [deflateFixedLz77, tokens, bw0, bw1, bw2, writeFixedPayloadLz77]
+    using hflush.symm
 
 end Png
 
