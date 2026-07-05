@@ -5,8 +5,10 @@ import Bitmap.Lemmas.Png.Adam7
 import Bitmap.Lemmas.Png.Gray1
 import Bitmap.Lemmas.Png.EncodeFilter
 import Bitmap.Lemmas.Png.DynamicEncoder
+import Bitmap.Lemmas.Png.Lz77
 import Bitmap.Lemmas.Png.DynamicEncoderDecode
 import Bitmap.Lemmas.Png.DynamicEncoderPayload
+import Bitmap.Lemmas.Png.Lz77Dynamic
 import Bitmap.Lemmas.Png.FixedLiteral
 import Bitmap.Lemmas.Png.FixedBlock
 import Bitmap.Lemmas.Png.EncodeDecode

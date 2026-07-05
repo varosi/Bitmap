@@ -390,6 +390,119 @@ private def validateGeneratedDynamicEncoder : IO Unit := do
     (deterministicPrefix 96 ++ repeatBytes (byteArrayOfNats [90]) 400 ++ deterministicPrefix 96)
     true
 
+private def lz77HasDistance (tokens : Array Png.Lz77Token) (distance : Nat) : Bool :=
+  Id.run do
+    let mut found := false
+    for token in tokens do
+      match token with
+      | .literal _ => pure ()
+      | .match _ d =>
+          if d == distance then
+            found := true
+    return found
+
+private def lz77HasLongMatch (tokens : Array Png.Lz77Token) (len : Nat) : Bool :=
+  Id.run do
+    let mut found := false
+    for token in tokens do
+      match token with
+      | .literal _ => pure ()
+      | .match l _ =>
+          if l == len then
+            found := true
+    return found
+
+private def validateDeflateDistanceInfo : IO Unit := do
+  for distance in
+      #[1, 2, 3, 4, 5, 7, 9, 17, 33, 65, 129, 257, 513, 1025, 2049, 4097,
+        8193, 16385, 24577, 32768] do
+    match Png.deflateDistanceInfo? distance with
+    | some (sym, extraBits, extraLen) =>
+        let decoded := Png.deflateDistanceBases[sym]! + extraBits
+        if decoded != distance then
+          throw (IO.userError s!"distance info boundary {distance}: decoded {decoded}")
+        if extraBits >= (1 <<< extraLen) then
+          throw (IO.userError s!"distance info boundary {distance}: extra bits overflow")
+    | none =>
+        throw (IO.userError s!"distance info boundary {distance}: no encoding")
+  if Png.deflateDistanceInfo? 0 != none then
+    throw (IO.userError "distance info accepted distance 0")
+  if Png.deflateDistanceInfo? 32769 != none then
+    throw (IO.userError "distance info accepted distance beyond 32768")
+
+private def validateLz77TokensCase
+    (name : String) (raw : ByteArray) (check : Array Png.Lz77Token → IO Unit) : IO Unit := do
+  let tokens := Png.deflateTokensLz77 raw
+  match Png.deflateTokensExpandLz77? tokens with
+  | some raw' =>
+      if raw' != raw then
+        throw (IO.userError s!"lz77 tokenizer {name}: expansion mismatch")
+  | none =>
+      throw (IO.userError s!"lz77 tokenizer {name}: invalid token expansion")
+  check tokens
+
+private def validateLz77Tokenizer : IO Unit := do
+  validateLz77TokensCase "distance-1 repeated bytes"
+    (repeatBytes (byteArrayOfNats [65]) 600)
+    (fun tokens => do
+      if !lz77HasDistance tokens 1 then
+        throw (IO.userError "lz77 tokenizer repeated bytes: missing distance-1 match"))
+  validateLz77TokensCase "multi-byte distance"
+    (repeatBytes "ABCDEF".toUTF8 160)
+    (fun tokens => do
+      if !lz77HasDistance tokens 6 then
+        throw (IO.userError "lz77 tokenizer multi-byte: missing distance-6 match"))
+  validateLz77TokensCase "split long match"
+    (repeatBytes "ABCD".toUTF8 240)
+    (fun tokens => do
+      if !lz77HasLongMatch tokens 258 then
+        throw (IO.userError "lz77 tokenizer long match: missing 258-byte chunk"))
+  let boundaryRaw := "ABC".toUTF8 ++ repeatBytes (byteArrayOfNats [0]) 32765 ++ "ABC".toUTF8
+  validateLz77TokensCase "32k boundary"
+    boundaryRaw
+    (fun tokens => do
+      if !lz77HasDistance tokens 32768 then
+        throw (IO.userError "lz77 tokenizer boundary: missing distance 32768"))
+  let beyondRaw := "ABC".toUTF8 ++ repeatBytes (byteArrayOfNats [0]) 32766 ++ "ABC".toUTF8
+  validateLz77TokensCase "beyond 32k boundary"
+    beyondRaw
+    (fun tokens => do
+      if lz77HasDistance tokens 32769 then
+        throw (IO.userError "lz77 tokenizer boundary: used distance 32769"))
+  let tieRaw := "ABCXABCYABCZ".toUTF8
+  match Png.lz77FindBestInBucket tieRaw.data 8 #[0, 4] 2 0 0 with
+  | some (3, 4) => pure ()
+  | other =>
+      throw (IO.userError s!"lz77 nearest tie break failed: {repr other}")
+  let longestRaw := "ABCDABCXABCD".toUTF8
+  match Png.lz77FindBestInBucket longestRaw.data 8 #[4, 0] 2 0 0 with
+  | some (4, 8) => pure ()
+  | other =>
+      throw (IO.userError s!"lz77 longest match failed: {repr other}")
+
+private def validateLz77PublicRoundTrips : IO Unit := do
+  let rawSmall := repeatBytes "ABCDEF".toUTF8 200
+  let rawBoundary := "ABC".toUTF8 ++ repeatBytes (byteArrayOfNats [0]) 32765 ++ "ABC".toUTF8
+  for raw in #[rawSmall, rawBoundary] do
+    match zlibDecompressFixture (Png.zlibCompressFixed raw) with
+    | some raw' =>
+        if raw' != raw then
+          throw (IO.userError "lz77 fixed zlib round-trip mismatch")
+    | none =>
+        throw (IO.userError "lz77 fixed zlib round-trip failed")
+    match zlibDecompressFixture (Png.zlibCompressDynamic raw) with
+    | some raw' =>
+        if raw' != raw then
+          throw (IO.userError "lz77 dynamic zlib round-trip mismatch")
+    | none =>
+        throw (IO.userError "lz77 dynamic zlib round-trip failed")
+  match dynamicTablesFromDeflate? (Png.deflateDynamic rawSmall) with
+  | some (_, dist) =>
+      if dist.maxLen != 5 then
+        throw (IO.userError "lz77 dynamic block did not advertise 5-bit distance table")
+  | none =>
+      throw (IO.userError "lz77 dynamic block tables failed to parse")
+
 -- Decode PNG fixtures that use fixed-Huffman deflate blocks.
 private def pngDecodeFixedHuffmanFixtures : IO Unit := do
   let grayBytes <- IO.FS.readBinFile (testFixturePath "test_gray.png")
@@ -2106,6 +2219,9 @@ def run : IO Unit := do
   IO.println "png ancillary-chunk fixtures: ok"
   validateDynamicTableValidationBoundary
   validateGeneratedDynamicEncoder
+  validateDeflateDistanceInfo
+  validateLz77Tokenizer
+  validateLz77PublicRoundTrips
   validateDynamicZlibFixtures
   validateMalformedDynamicFixtures
   validateCopyDistanceFast

@@ -602,8 +602,13 @@ lemma deflateFixedFast_eq_spec (raw : ByteArray) :
   simp [haux]
 
 set_option maxHeartbeats 4000000 in
-lemma deflateFixed_eq_runFast (raw : ByteArray) :
-    deflateFixed raw = deflateFixedRunFast raw := by
+lemma deflateFixed_eq_lz77 (raw : ByteArray) :
+    deflateFixed raw = deflateFixedLz77 raw := by
+  rfl
+
+set_option maxHeartbeats 4000000 in
+lemma deflateFixedRunFast_eq_self (raw : ByteArray) :
+    deflateFixedRunFast raw = deflateFixedRunFast raw := by
   rfl
 
 set_option maxHeartbeats 4000000 in

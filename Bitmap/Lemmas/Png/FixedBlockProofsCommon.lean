@@ -78,10 +78,10 @@ lemma decodeDistance_zero (br : BitReader)
       hbits = (1, br) := by
   simp [decodeDistance, distBases, distExtra]
 
--- `copyDistance` dispatches to the optimized distance-1 path and does not fail on nonempty output.
+-- `copyDistance` uses the overlap-copy path and does not fail on nonempty output at distance 1.
 lemma copyDistance_one_ne_none (out : ByteArray) (len : Nat) (hout : 0 < out.size) :
     copyDistance out 1 len ≠ none := by
-  unfold copyDistance copyDistanceFast
+  unfold copyDistance lz77CopyDistanceFast
   have hbad : ¬ (1 = 0 ∨ 1 > out.size) := by
     intro h
     rcases h with h0 | hgt
@@ -238,10 +238,57 @@ lemma idRun_pushRange_eq_pushRepeat (out : ByteArray) (b : UInt8) (len : Nat) :
   simpa [Std.Legacy.Range.forIn_eq_forIn_range'] using
     (foldl_push_range'_eq_pushRepeat out b 0 len)
 
+/-- Distance-1 overlap copying repeatedly reads the last emitted byte, so it
+is extensionally the same as repeating the original last byte. -/
+lemma foldl_push_current_last_range'_eq_pushRepeat
+    (out : ByteArray) (start len : Nat) (hout : 0 < out.size) :
+    List.foldl
+        (fun acc _ => acc.push (acc.get! (acc.size - 1)))
+        out (List.range' start len 1) =
+      pushRepeat out (out.get! (out.size - 1)) len := by
+  induction len generalizing out start with
+  | zero =>
+      simp [pushRepeat]
+  | succ n ih =>
+      let b := out.get! (out.size - 1)
+      have hout' : 0 < (out.push b).size := by
+        simp [ByteArray.size_push]
+      have hlastPush : (out.push b).get! ((out.push b).size - 1) = b := by
+        simpa [b] using get!_last_push out b
+      have hlastPushAt : (out.push b).get! out.size = b := by
+        simpa [ByteArray.size_push] using hlastPush
+      calc
+        List.foldl
+            (fun acc _ => acc.push (acc.get! (acc.size - 1)))
+            out (List.range' start (n + 1) 1)
+            =
+          List.foldl
+            (fun acc _ => acc.push (acc.get! (acc.size - 1)))
+            (out.push b) (List.range' (start + 1) n 1) := by
+              simp [List.range'_succ, b]
+        _ = pushRepeat (out.push b) ((out.push b).get! ((out.push b).size - 1)) n := by
+              exact ih (out := out.push b) (start := start + 1) hout'
+        _ = pushRepeat (out.push b) b n := by
+              simp [hlastPushAt]
+        _ = pushRepeat out b (n + 1) := by
+              rfl
+
+lemma idRun_pushCurrentLastRange_eq_pushRepeat
+    (out : ByteArray) (len : Nat) (hout : 0 < out.size) :
+    (Id.run do
+      let mut result := out
+      for _ in [0:len] do
+        let idx := result.size - 1
+        let b := result.get! idx
+        result := result.push b
+      return result) = pushRepeat out (out.get! (out.size - 1)) len := by
+  simpa [Std.Legacy.Range.forIn_eq_forIn_range'] using
+    (foldl_push_current_last_range'_eq_pushRepeat out 0 len hout)
+
 lemma copyDistance_one_eq_pushRepeat (out : ByteArray) (len : Nat) (hout : 0 < out.size) :
     copyDistance out 1 len =
       some (pushRepeat out (out.get! (out.size - 1)) len) := by
-  unfold copyDistance copyDistanceFast
+  unfold copyDistance lz77CopyDistanceFast
   have hbad : ¬ (1 = 0 ∨ 1 > out.size) := by
     intro h
     rcases h with h0 | hgt
@@ -251,7 +298,7 @@ lemma copyDistance_one_eq_pushRepeat (out : ByteArray) (len : Nat) (hout : 0 < o
     intro he
     have hsize0 : out.size = 0 := by simpa [he]
     omega
-  have hloop := idRun_pushRange_eq_pushRepeat out (out.get! (out.size - 1)) len
+  have hloop := idRun_pushCurrentLastRange_eq_pushRepeat out len hout
   simpa [hbad, hne] using congrArg some hloop
 
 -- If the next five bits are zero, the fixed distance decoder reads symbol 0.
@@ -310,6 +357,79 @@ lemma decodeFixedDistanceSym_readerAt_writeBits_zero (bw : BitWriter) (restBits 
       simp [decodeFixedDistanceSym, hcond, hfast, hrev0]
     · exact (False.elim <| hcond hread5)
   simpa [bitsTot, lenTot, bw', br, br5] using hres
+
+/-- Decodes an arbitrary fixed-Huffman distance symbol that was just written
+LSB-first, leaving the reader positioned after the five distance bits. -/
+lemma decodeFixedDistanceSym_readerAt_writeBits_symbol
+    (bw : BitWriter) (distSym restBits restLen : Nat)
+    (hdistSym : distSym < 32)
+    (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
+    let symBits := reverseBits distSym 5
+    let bitsTot := symBits ||| (restBits <<< 5)
+    let lenTot := 5 + restLen
+    let bw' := BitWriter.writeBits bw bitsTot lenTot
+    let br := BitWriter.readerAt bw bw'.flush (flush_size_writeBits_le bw bitsTot lenTot) hbit
+    decodeFixedDistanceSym br =
+      some (distSym,
+        BitWriter.readerAt (BitWriter.writeBits bw bitsTot 5) bw'.flush
+          (by
+            have hk : 5 ≤ lenTot := by omega
+            simpa [lenTot] using (flush_size_writeBits_prefix bw bitsTot 5 lenTot hk))
+          (bitPos_lt_8_writeBits bw bitsTot 5 hbit)) := by
+  let symBits := reverseBits distSym 5
+  let bitsTot := symBits ||| (restBits <<< 5)
+  let lenTot := 5 + restLen
+  let bw' := BitWriter.writeBits bw bitsTot lenTot
+  let br := BitWriter.readerAt bw bw'.flush (flush_size_writeBits_le bw bitsTot lenTot) hbit
+  have hread5 : br.bitIndex + 5 ≤ br.data.size * 8 := by
+    simpa [br, bw', lenTot] using
+      (readerAt_writeBits_bound (bw := bw) (bits := bitsTot) (len := lenTot) (k := 5)
+        (hk := by omega) hbit)
+  let br5 :=
+    BitWriter.readerAt (BitWriter.writeBits bw bitsTot 5) bw'.flush
+      (by
+        have hk : 5 ≤ lenTot := by omega
+        simpa [bw', lenTot] using (flush_size_writeBits_prefix bw bitsTot 5 lenTot hk))
+      (bitPos_lt_8_writeBits bw bitsTot 5 hbit)
+  have hsymBitsLt : symBits < 2 ^ 5 := by
+    simpa [symBits] using reverseBits_lt distSym 5
+  have hreadBits :
+      br.readBits 5 hread5 = (bitsTot % 2 ^ 5, br5) := by
+    simpa [br, bw', br5, lenTot] using
+      (readBits_readerAt_writeBits_prefix (bw := bw) (bits := bitsTot) (len := lenTot) (k := 5)
+        (hk := by omega) (hbit := hbit) (hcur := hcur))
+  have hmod : bitsTot % 2 ^ 5 = symBits := by
+    have h := mod_two_pow_or_shift (a := symBits) (b := restBits) (k := 5) (len := 5)
+      (by decide : 5 ≤ 5)
+    have h' : bitsTot % 2 ^ 5 = symBits % 2 ^ 5 := by
+      simpa [bitsTot] using h
+    exact h'.trans (Nat.mod_eq_of_lt hsymBitsLt)
+  have hreadFast : br.readBitsFast 5 hread5 = (symBits, br5) := by
+    have hreadBits' : br.readBits 5 hread5 = (symBits, br5) := by
+      simpa [hmod] using hreadBits
+    simpa [readBitsFast_eq_readBits (br := br) (n := 5) (h := hread5)] using hreadBits'
+  have hreadFastAny :
+      ∀ h' : br.bitIndex + 5 ≤ br.data.size * 8,
+        br.readBitsFast 5 h' = (symBits, br5) := by
+    intro h'
+    have hreadEq : br.readBits 5 h' = br.readBits 5 hread5 := by
+      exact readBits_proof_irrel (br := br) (n := 5) (h1 := h') (h2 := hread5)
+    calc
+      br.readBitsFast 5 h' = br.readBits 5 h' := by
+        simp [readBitsFast_eq_readBits]
+      _ = br.readBits 5 hread5 := hreadEq
+      _ = (symBits, br5) := by
+        simpa [readBitsFast_eq_readBits (br := br) (n := 5) (h := hread5)] using hreadFast
+  have hdistPow : distSym < 2 ^ 5 := by
+    simpa using hdistSym
+  have hrev : reverseBits symBits 5 = distSym := by
+    simpa [symBits] using reverseBits_reverseBits distSym 5 hdistPow
+  have hres : decodeFixedDistanceSym br = some (distSym, br5) := by
+    by_cases hcond : br.bitIndex + 5 ≤ br.data.size * 8
+    · have hfast : br.readBitsFast 5 hcond = (symBits, br5) := hreadFastAny hcond
+      simp [decodeFixedDistanceSym, hcond, hfast, hrev]
+    · exact False.elim (hcond hread5)
+  simpa [symBits, bitsTot, lenTot, bw', br, br5] using hres
 
 lemma decodeFixedDistanceSym_zero_decodeDistance_zero_copyDistance_one_exists
     (bw : BitWriter) (restBits restLen matchLen : Nat) (out : ByteArray)

@@ -1,9 +1,12 @@
 import Bitmap.Lemmas.Png.EncodeDecodeBaseU32
 import Bitmap.Lemmas.Png.EncodeDecodeFixedZlib
 import Bitmap.Lemmas.Png.FixedBlockBase
+import Bitmap.Lemmas.Png.FixedBlockFastSlowBridge
 import Bitmap.Lemmas.Png.FixedBlockProofsCommon
 import Bitmap.Lemmas.Png.FixedBlockProofsRunEncode
 import Bitmap.Lemmas.Png.FixedBlockProofsScanDecode
+import Bitmap.Lemmas.Png.DynamicEncoder
+import Bitmap.Lemmas.Png.Lz77FixedTrace
 
 universe u
 
@@ -365,7 +368,11 @@ lemma zlibDecompress_zlibCompressFixed (raw : ByteArray)
   let hdr0 := BitWriter.empty
   let hdrBfinal := hdr0.writeBits 1 1
   let hdrHeader := hdrBfinal.writeBits 1 2
-  let payloadBits := fixedRunFastBitsEob raw.data 0
+  let tokens := deflateTokensLz77 raw
+  have hexpandPublic : deflateTokensExpandLz77? tokens = some raw := by
+    simpa [tokens] using deflateTokensExpandLz77_deflateTokensLz77 raw
+  rcases fixedLz77PayloadBitsEob?_some_of_public_expand raw hexpandPublic with
+    ⟨payloadBits, hpayloadBits⟩
   have hcur0 : hdr0.curClearAbove := curClearAbove_empty
   have hcur1 : hdrBfinal.curClearAbove := curClearAbove_writeBits hdr0 1 1 (by decide) hcur0
   have hcur2 : hdrHeader.curClearAbove := curClearAbove_writeBits hdrBfinal 1 2 (by decide) hcur1
@@ -373,10 +380,9 @@ lemma zlibDecompress_zlibCompressFixed (raw : ByteArray)
     exact bitPos_lt_8_writeBits hdrBfinal 1 2 (bitPos_lt_8_writeBits hdr0 1 1 (by decide))
   have hdeflateBits :
       deflateFixed raw = (BitWriter.writeBits hdrHeader payloadBits.1 payloadBits.2).flush := by
-    calc
-      deflateFixed raw = deflateFixedRunFast raw := deflateFixed_eq_runFast raw
-      _ = (BitWriter.writeBits hdrHeader payloadBits.1 payloadBits.2).flush := by
-            simpa [payloadBits] using deflateFixedRunFast_eq_writeBits raw
+    simpa [hdr0, hdrBfinal, hdrHeader] using
+      deflateFixed_eq_writeBits_of_lz77_payloadBits raw
+        (bits := payloadBits) hpayloadBits hexpandPublic
   -- Collapse the header bits into one write.
   let streamBits := 3 ||| (payloadBits.1 <<< 3)
   let streamLen := 3 + payloadBits.2
@@ -464,33 +470,74 @@ lemma zlibDecompress_zlibCompressFixed (raw : ByteArray)
     have hirrel : streamReader0.readBits 3 hread0 = streamReader0.readBits 3 hread0_at :=
       readBits_proof_irrel (br := streamReader0) (n := 3) hread0 hread0_at
     exact hirrel.trans h'br
-  have hrawOut : fixedRunFastOut raw.data 0 ByteArray.empty = raw := by
-    calc
-      fixedRunFastOut raw.data 0 ByteArray.empty
-          = byteArrayFromArray raw.data 0 ByteArray.empty :=
-            fixedRunFastOut_eq_byteArrayFromArray raw.data 0 ByteArray.empty
-      _ = raw := by simpa using byteArrayFromArray_empty (data := raw.data)
   let streamReaderFinal := BitWriter.readerAt
     (BitWriter.writeBits hdrHeader payloadBits.1 payloadBits.2)
     (BitWriter.writeBits hdrHeader payloadBits.1 payloadBits.2).flush
     (by rfl)
     (bitPos_lt_8_writeBits hdrHeader payloadBits.1 payloadBits.2 hbitHdr)
+  have hexpandFrom :
+      deflateTokensExpandLz77From? tokens 0 ByteArray.empty = some raw := by
+    simpa [tokens, deflateTokensExpandLz77?] using hexpandPublic
+  have hpayloadBitsFrom :
+      fixedLz77PayloadBitsEobFrom? tokens 0 = some payloadBits := by
+    simpa [tokens, fixedLz77PayloadBitsEob?] using hpayloadBits
+  have hpayloadTrace :
+      FixedPayloadTrace (tokens.size - 0 + 1) payloadReaderStart ByteArray.empty
+        streamReaderFinal raw := by
+    have htrace :=
+      Png.fixedLz77PayloadTraceFrom_readerAt_writeBits
+        (tokens := tokens) (i := 0) (bw := hdrHeader)
+        (out := ByteArray.empty) (outFinal := raw) (bits := payloadBits)
+        hexpandFrom hpayloadBitsFrom hbitHdr hcur2
+    simpa [payloadReaderStart, streamReaderFinal] using htrace
+  have hpayloadFuel :
+      tokens.size - 0 + 1 ≤ payloadReaderStart.data.size * 8 + 1 := by
+    have hvalidFixed :=
+      deflateTokensExpandLz77From?_fixed_valid tokens 0 ByteArray.empty raw hexpandFrom
+    have hvalidLen :
+        ∀ j, (hij : 0 ≤ j) → (hj : j < tokens.size) →
+          match tokens[j]'hj with
+          | .literal _ => True
+          | .match len _ => 3 ≤ len ∧ len ≤ 258 := by
+      intro j hij hj
+      cases htok : tokens[j]'hj
+      · trivial
+      ·
+          have hv := hvalidFixed j hij hj
+          simp [Lz77TokenFixedValid, htok] at hv
+          exact ⟨hv.1, hv.2.1⟩
+    have hstepsBits :=
+      fixedLz77PayloadBitsEobFrom?_steps_le_bits_len tokens 0 payloadBits
+        hpayloadBitsFrom hvalidLen
+    have hbitsWithHeaderBound :
+        hdrHeader.bitCount + payloadBits.2 ≤ payloadReaderStart.data.size * 8 := by
+      simpa [payloadReaderStart] using
+        (readerAt_writeBits_bound (bw := hdrHeader) (bits := payloadBits.1)
+          (len := payloadBits.2) (k := payloadBits.2) (hk := le_rfl)
+          (hbit := hbitHdr))
+    omega
   have hdecodeFast :
-      decodeFixedBlockFast payloadReaderStart ByteArray.empty =
+      decodeFixedBlockFast streamReaderHeader ByteArray.empty =
         some (streamReaderFinal, raw) := by
-    simpa [payloadReaderStart, payloadBits, streamReaderFinal, decodeFixedBlock, hrawOut,
-      fixedRunStartReader, fixedRunAfterReader, flushReader] using
-      (decodeFixedBlockFast_fixedRunFastBitsEob_readerAt_writeBits
-        (data := raw.data) (i := 0) (bw := hdrHeader) (out := ByteArray.empty)
-        (hbit := hbitHdr) (hcur := hcur2))
+    have hpayloadTraceHeader :
+        FixedPayloadTrace (tokens.size - 0 + 1) streamReaderHeader ByteArray.empty
+          streamReaderFinal raw := by
+      rw [hpayloadStart]
+      exact hpayloadTrace
+    have hpayloadFuelHeader :
+        tokens.size - 0 + 1 ≤ streamReaderHeader.data.size * 8 + 1 := by
+      rw [hpayloadStart]
+      exact hpayloadFuel
+    unfold decodeFixedBlockFast
+    rw [decodeFixedBlockFuelFast_eq_decodeFixedBlockFuel]
+    exact Png.decodeFixedBlockFuel_of_trace hpayloadTraceHeader hpayloadFuelHeader
   -- Evaluate the block decoder once.
   have hloop :
       zlibDecompressLoop streamReader0 ByteArray.empty =
         some (streamReaderFinal, raw) := by
     have hdecode' : decodeFixedBlock streamReaderHeader ByteArray.empty =
         some (streamReaderFinal, raw) := by
-      rw [hpayloadStart]
-      simpa [decodeFixedBlock, hrawOut] using hdecodeFast
+      simpa [decodeFixedBlock] using hdecodeFast
     -- Evaluate the loop body (bfinal = 1, btype = 1).
     have hbfinal : (3 % 2) = 1 := by decide
     have hbtype' : ((3 >>> 1) % 4) = 1 := by decide
