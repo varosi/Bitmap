@@ -343,6 +343,101 @@ lemma zlibDecompress_deflateDynamicFullFast (raw : ByteArray) :
     simpa [hposEq, readU32BE_proof_irrel] using hadler
   simp [hAdlerPos', hread, bytes]
 
+set_option maxRecDepth 200000 in
+set_option maxHeartbeats 8000000 in
+/-- Zlib decompression of the public LZ77 dynamic stream yields the original
+bytes. This is the zlib-envelope wrapper around the generated LZ77 dynamic
+block proof. -/
+lemma zlibDecompress_deflateDynamicLz77 (raw : ByteArray) :
+    zlibDecompress (zlibCompressOf (deflateDynamicLz77 raw) raw)
+      (by
+        exact le_trans (by decide : 2 ≤ 6)
+          (zlibCompressOf_size_ge (deflateDynamicLz77 raw) raw)) =
+      some raw := by
+  classical
+  let deflated := deflateDynamicLz77 raw
+  let bytes := zlibCompressOf deflated raw
+  have hmin : 6 ≤ bytes.size := by
+    simpa [bytes, deflated] using
+      zlibCompressOf_size_ge deflated raw
+  have h0 : 0 < bytes.size := lt_of_lt_of_le (by decide : 0 < 6) hmin
+  have h1 : 1 < bytes.size := lt_of_lt_of_le (by decide : 1 < 6) hmin
+  have h0' : 0 < bytes.size := h0
+  have h1' : 1 < bytes.size := h1
+  have hcmf' : bytes[0]'h0' = u8 0x78 := by
+    simpa [bytes, deflated] using
+      (zlibCompressOf_cmf_flg deflated raw).1
+  have hflg' : bytes[1]'h1' = u8 0x01 := by
+    simpa [bytes, deflated] using
+      (zlibCompressOf_cmf_flg deflated raw).2
+  have hcmf : bytes.get 0 h0 = u8 0x78 := by
+    have htmp : bytes.get 0 h0' = u8 0x78 := by
+      simpa [byteArray_get_eq_getElem] using hcmf'
+    simpa using htmp
+  have hflg : bytes.get 1 h1 = u8 0x01 := by
+    have htmp : bytes.get 1 h1' = u8 0x01 := by
+      simpa [byteArray_get_eq_getElem] using hflg'
+    simpa using htmp
+  have hdeflated : bytes.extract 2 (bytes.size - 4) = deflated := by
+    simpa [bytes, deflated] using
+      zlibCompressOf_extract_deflated deflated raw
+  have hAdlerPos : bytes.size - 4 + 3 < bytes.size := by
+    omega
+  have hadler : readU32BE bytes (bytes.size - 4) hAdlerPos =
+      (adler32 raw).toNat := by
+    have hextract :
+        bytes.extract (bytes.size - 4) (bytes.size - 4 + 4) =
+          u32be (adler32 raw).toNat := by
+      simpa [bytes, deflated] using
+        zlibCompressOf_extract_adler deflated raw
+    have hlt : (adler32 raw).toNat < 2 ^ 32 := by
+      simpa using (UInt32.toNat_lt (adler32 raw))
+    exact readU32BE_of_extract_eq (bytes := bytes) (pos := bytes.size - 4)
+      (n := (adler32 raw).toNat) (h := hAdlerPos) hextract hlt
+  let streamReader0 : BitReader := {
+    data := deflated
+    bytePos := 0
+    bitPos := 0
+    hpos := by exact Nat.zero_le _
+    hend := by intro _; rfl
+    hbit := by decide
+  }
+  obtain ⟨streamReaderFinal, hloop, hAlign⟩ :
+      ∃ brFinal,
+        zlibDecompressLoop streamReader0 ByteArray.empty =
+          some (brFinal, raw) ∧
+          brFinal.alignByte.bytePos = deflated.size := by
+    simpa [deflated, streamReader0] using
+      zlibDecompressLoop_deflateDynamicLz77 raw
+  have hmod : ((u8 0x78).toNat <<< 8 + (u8 0x01).toNat) % 31 = 0 := by
+    decide
+  have hbtype : (u8 0x78 &&& (0x0F : UInt8)) = 8 := by
+    decide
+  have hflg0 : (u8 0x01 &&& (0x20 : UInt8)) = 0 := by
+    decide
+  have hsizeZ : 2 ≤ bytes.size := by omega
+  change zlibDecompress bytes hsizeZ = some raw
+  unfold zlibDecompress
+  simp [bytes, hcmf, hflg, hmod, hbtype, hflg0, hdeflated]
+  rw [hloop]
+  have hsize : bytes.size = deflated.size + 6 := by
+    simpa [bytes, deflated] using
+      zlibCompressOf_size deflated raw
+  have hposEq :
+      streamReaderFinal.alignByte.bytePos + 2 = bytes.size - 4 := by
+    have : deflated.size + 2 = (deflated.size + 6) - 4 := by omega
+    simpa [hAlign, hsize, Nat.add_assoc, Nat.add_left_comm,
+      Nat.add_comm] using this
+  have hAdlerPos' :
+      streamReaderFinal.alignByte.bytePos + 2 + 3 < bytes.size := by
+    simpa [hposEq, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm]
+      using hAdlerPos
+  have hread :
+      readU32BE bytes (streamReaderFinal.alignByte.bytePos + 2)
+        hAdlerPos' = (adler32 raw).toNat := by
+    simpa [hposEq, readU32BE_proof_irrel] using hadler
+  simp [hAdlerPos', hread, bytes]
+
 set_option maxRecDepth 400000 in
 set_option maxHeartbeats 6000000 in
 /-- The real dynamic deflate stream starts with a non-stored block header, so
@@ -644,9 +739,8 @@ lemma zlibDecompressStored_zlibCompressDynamic_none (raw : ByteArray)
 lemma zlibDecompress_zlibCompressDynamic (raw : ByteArray)
     (hsize : 2 ≤ (zlibCompressDynamic raw).size) :
     zlibDecompress (zlibCompressDynamic raw) hsize = some raw := by
-  simpa [zlibCompressDynamic, zlibDynamicFullFastBytes, zlibCompressOf,
-    deflateDynamic, ByteArray.append_assoc] using
-    zlibDecompress_deflateDynamicFullFast raw
+  simpa [zlibCompressDynamic_eq, deflateDynamic] using
+    zlibDecompress_deflateDynamicLz77 raw
 
 end Lemmas
 
