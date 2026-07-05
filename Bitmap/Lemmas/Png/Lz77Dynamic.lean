@@ -1156,6 +1156,47 @@ lemma writeDynamicPayloadLz77_source_generated_eq_writeBits
           dynamicPayloadLz77TokenBits_generated_match_lt_codeSpace_at
             source target len distance htarget htok ⟨hlenLo, hlenHi⟩ hdistInfo
 
+/-- Public greedy LZ77 tokens are fixed-valid: every match has a DEFLATE
+length and encodable distance. This repackages the existing expansion proof
+for generated dynamic payload writers. -/
+lemma deflateTokensLz77_fixed_valid (raw : ByteArray) :
+    ∀ target (htarget : target < (Png.deflateTokensLz77 raw).size),
+      Png.Lz77TokenFixedValid ((Png.deflateTokensLz77 raw)[target]'htarget) := by
+  let tokens := Png.deflateTokensLz77 raw
+  have hexpand :
+      Png.deflateTokensExpandLz77From? tokens 0 ByteArray.empty = some raw := by
+    simpa [tokens, Png.deflateTokensExpandLz77?] using
+      deflateTokensExpandLz77_deflateTokensLz77 raw
+  intro target htarget
+  exact
+    Png.deflateTokensExpandLz77From?_fixed_valid tokens 0 ByteArray.empty raw
+      hexpand target (Nat.zero_le target) htarget
+
+/-- The public greedy LZ77 token stream writes exactly its generated dynamic
+payload bit stream. This is the payload-writing specialization used by the
+full dynamic encoder proof. -/
+lemma writeDynamicPayloadLz77_deflateTokensLz77_eq_writeBits
+    (raw : ByteArray) (bw : Png.BitWriter) :
+    let source := Png.deflateTokensLz77 raw
+    let litLenCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqsLz77 source))
+    let distCodes :=
+      Png.canonicalRevCodesFromLengths
+        (Png.generatedDynamicDistLengthsLz77 (Png.distSymbolFreqsLz77 source))
+    Png.writeDynamicPayloadLz77 bw source litLenCodes distCodes =
+      Png.BitWriter.writeBits bw
+        (dynamicPayloadLz77StreamBits litLenCodes distCodes source.toList)
+        (dynamicPayloadLz77StreamLen litLenCodes distCodes source.toList) := by
+  intro source litLenCodes distCodes
+  exact writeDynamicPayloadLz77_source_generated_eq_writeBits
+    source
+    (by
+      intro target htarget
+      simpa [source] using deflateTokensLz77_fixed_valid raw target (by
+        simpa [source] using htarget))
+    bw
+
 end Lemmas
 
 end Bitmaps
