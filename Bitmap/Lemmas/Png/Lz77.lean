@@ -86,6 +86,20 @@ lemma lz77BitPairAppend_writeBits (bw : BitWriter) {head tail : Nat × Nat}
   simpa [lz77BitPairAppend] using
     (writeBits_concat bw head.1 tail.1 head.2 tail.2 hhead)
 
+/-- Proof-facing bit-pair append is associative. This lets payload proofs
+rebracket token bits and the remaining tail without changing the stream. -/
+lemma lz77BitPairAppend_assoc (a b c : Nat × Nat) :
+    lz77BitPairAppend (lz77BitPairAppend a b) c =
+      lz77BitPairAppend a (lz77BitPairAppend b c) := by
+  cases a with
+  | mk aBits aLen =>
+      cases b with
+      | mk bBits bLen =>
+          cases c with
+          | mk cBits cLen =>
+              simp [lz77BitPairAppend, Nat.or_assoc, Nat.shiftLeft_or_distrib,
+                shiftLeft_shiftLeft, Nat.add_comm, Nat.add_left_comm]
+
 /-- Fixed-Huffman literal proof bits fit in their advertised code length. -/
 lemma fixedLz77LiteralBits_bits_lt (b : UInt8) :
     (fixedLz77LiteralBits b).1 < 2 ^ (fixedLz77LiteralBits b).2 := by
