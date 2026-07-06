@@ -218,6 +218,7 @@ This library has proofs about:
   `PaletteContainerSpec.parsePngSimple_eq_none`,
   `PaletteContainerSpec.parsePngSimpleWithMetadata_eq_none`,
   `PaletteContainerSpec.parsePngWithMetadata_accepts`,
+  `PaletteContainerSpec.parsePngForDecode_accepts`,
   `parsePlteData_accepts_palette2`,
   `parsePlteData_accepts_valid`,
   `parseTrnsData_accepts_paletteAlpha`,

@@ -905,6 +905,14 @@ theorem parsePngWithMetadata_accepts (s : PaletteContainerSpec)
   rw [hFuel]
   exact parsePngLoopFuelWithMetadata_accepts_with_extra s hIdatSize (s.bytes.size - 3)
 
+/-- `parsePngForDecode` accepts the indexed-palette scaffold.
+This is the parser wrapper used by the public indexed decode entrypoints. -/
+theorem parsePngForDecode_accepts (s : PaletteContainerSpec)
+    (hIdatSize : s.idatData.size < 2 ^ 32) :
+    parsePngForDecode s.bytes s.bytes_size_ge_8 = some (parsed s) := by
+  unfold parsePngForDecode
+  simp [parsePngSimpleWithMetadata_eq_none s, parsePngWithMetadata_accepts s hIdatSize]
+
 end PaletteContainerSpec
 
 end Lemmas
