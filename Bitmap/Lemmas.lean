@@ -9,6 +9,7 @@ import Bitmap.Lemmas.Png.PaletteContainerSpec
 import Bitmap.Lemmas.Png.PaletteRoundTrip
 import Bitmap.Lemmas.Png.PaletteContainerRoundTrip
 import Bitmap.Lemmas.Png.PaletteEncoderRoundTrip
+import Bitmap.Lemmas.Png.PalettePackedRoundTrip
 import Bitmap.Lemmas.Png.EncodeFilter
 import Bitmap.Lemmas.Png.DynamicEncoder
 import Bitmap.Lemmas.Png.Lz77

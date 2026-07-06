@@ -187,7 +187,8 @@ This library has proofs about:
   `encodeRawGray1_size`);
 - focused indexed-palette helper facts for PNG bit-depth validation, `PLTE`
   acceptance/rejection, palette `tRNS`/`bKGD` parsing, metadata chunk-order
-  acceptance, and checked encoder validation rejection paths
+  acceptance, checked encoder validation rejection paths, and packed 1/2/4-bit
+  public API round-trip examples
   (`pngColorTypeBitDepthSupported_palette1`,
   `pngColorTypeBitDepthSupported_palette2`,
   `pngColorTypeBitDepthSupported_palette4`,
@@ -232,6 +233,15 @@ This library has proofs about:
   `PaletteEncoderRoundTrip.decodeIndexedBitmap_encodeIndexedBitmapChecked_stored_8_256_data`,
   `PaletteEncoderRoundTrip.decodeIndexedBitmap_encodeIndexedBitmapChecked_fixed_8_256_data`,
   `PaletteEncoderRoundTrip.decodeIndexedBitmap_encodeIndexedBitmapChecked_dynamic_8_256_data`,
+  `PalettePackedRoundTrip.checked_stored_1bit_fixture_data`,
+  `PalettePackedRoundTrip.checked_fixed_1bit_fixture_data`,
+  `PalettePackedRoundTrip.checked_dynamic_1bit_fixture_data`,
+  `PalettePackedRoundTrip.checked_stored_2bit_fixture_data`,
+  `PalettePackedRoundTrip.checked_fixed_2bit_fixture_data`,
+  `PalettePackedRoundTrip.checked_dynamic_2bit_fixture_data`,
+  `PalettePackedRoundTrip.checked_stored_4bit_fixture_data`,
+  `PalettePackedRoundTrip.checked_fixed_4bit_fixture_data`,
+  `PalettePackedRoundTrip.checked_dynamic_4bit_fixture_data`,
   `PaletteValidation.encodeIndexedBitmapWithOptionsChecked_rejects_of_validate_error`,
   `PaletteValidation.validateIndexedBitmap_rejects_bad_bitDepth`,
   `PaletteValidation.validateIndexedBitmap_rejects_width_limit`,
