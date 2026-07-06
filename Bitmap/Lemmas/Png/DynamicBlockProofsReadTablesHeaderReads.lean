@@ -38,7 +38,9 @@ lemma readDynamicTables_hlit_readerAt_writeBits
         simpa [lenTot] using dynamicHeaderReadLen_ge_5 restLen
       simpa [bw', lenTot] using flush_size_writeBits_prefix bw bitsTot 5 lenTot hk)
     (bitPos_lt_8_writeBits bw bitsTot 5 hbit)
-  simpa [bitsTot, lenTot, bw', br, br5] using
+  simpa [bitsTot, lenTot, bw', br, br5, readTablesPrefixReader,
+    readTablesPrefixReader5, readTablesPrefixWriter, readTablesPrefixBits,
+    readTablesPrefixLen] using
     (readDynamicTablesPrefix_hlit_readerAt_writeBits
       (bw := bw) (restBits := restBits) (restLen := restLen) hbit hcur)
 
@@ -151,7 +153,9 @@ lemma readDynamicTables_hdist_readerAt_writeBits
         simpa [lenTot] using dynamicHeaderReadLen_ge_10 restLen
       simpa [bw', lenTot] using flush_size_writeBits_prefix bw bitsTot 10 lenTot hk)
     (bitPos_lt_8_writeBits bw bitsTot 10 hbit)
-  simpa [bitsTot, lenTot, bw', br5, br10] using
+  simpa [bitsTot, lenTot, bw', br5, br10, readTablesPrefixReader5,
+    readTablesPrefixReader10, readTablesPrefixWriter, readTablesPrefixBits,
+    readTablesPrefixLen] using
     (readDynamicTablesPrefix_hdist_readerAt_writeBits
       (bw := bw) (restBits := restBits) (restLen := restLen) hbit hcur)
 
@@ -266,7 +270,9 @@ lemma readDynamicTables_hclen_readerAt_writeBits
         simpa [lenTot] using dynamicHeaderReadLen_ge_14 restLen
       simpa [bw', lenTot] using flush_size_writeBits_prefix bw bitsTot 14 lenTot hk)
     (bitPos_lt_8_writeBits bw bitsTot 14 hbit)
-  simpa [bitsTot, lenTot, bw', bw14, br10, br14] using
+  simpa [bitsTot, lenTot, bw', bw14, br10, br14, readTablesPrefixReader10,
+    readTablesPrefixReader14, readTablesPrefixWriter14, readTablesPrefixWriter,
+    readTablesPrefixBits, readTablesPrefixLen] using
     (readDynamicTablesPrefix_hclen_readerAt_writeBits
       (bw := bw) (restBits := restBits) (restLen := restLen) hbit hcur)
 

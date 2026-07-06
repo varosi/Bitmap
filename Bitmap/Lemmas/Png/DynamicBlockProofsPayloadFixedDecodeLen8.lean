@@ -179,7 +179,7 @@ lemma fixedLitLenHuffman_decode_readerAt_writeBits_len8_core
   have hbr7 : br7.bytePos < br7.data.size := by
     exact bytePos_lt_of_bitIndex_lt_dataBits br7 (by omega)
   have hread0 : br0.readBit = (bitsTot % 2, br1) := by
-    simpa [br0, br1, bw', lenTot] using
+    simpa [br0, br1, bw1, bw', lenTot, BitWriter.writeBits] using
       (readBit_readerAt_writeBits (bw := bw) (bits := bitsTot) (len := lenTot) hbit hcur (by omega))
   have hbw2 : BitWriter.writeBit bw1 ((bitsTot >>> 1) % 2) = bw2 := by
     simp [bw1, bw2, BitWriter.writeBits]
@@ -188,7 +188,7 @@ lemma fixedLitLenHuffman_decode_readerAt_writeBits_len8_core
       (readBit_readerAt_writeBits
         (bw := bw1) (bits := bitsTot >>> 1) (len := lenTot - 1) hbit1 hcur1 (by omega))
   have hshift2 : bitsTot >>> 1 >>> 1 = bitsTot >>> 2 := by
-    simpa using (Nat.shiftRight_add bitsTot 1 1)
+    simpa using (Nat.shiftRight_add bitsTot 1 1).symm
   have hbw3 : BitWriter.writeBit bw2 ((bitsTot >>> 2) % 2) = bw3 := by
     simp [bw2, bw3, BitWriter.writeBits, hshift2]
   have hread2 : br2.readBit = ((bitsTot >>> 2) % 2, br3) := by
@@ -198,7 +198,7 @@ lemma fixedLitLenHuffman_decode_readerAt_writeBits_len8_core
   have hshift3 : bitsTot >>> 1 >>> 1 >>> 1 = bitsTot >>> 3 := by
     calc
       bitsTot >>> 1 >>> 1 >>> 1 = bitsTot >>> 2 >>> 1 := by simp [hshift2]
-      _ = bitsTot >>> 3 := by simpa using (Nat.shiftRight_add bitsTot 2 1)
+      _ = bitsTot >>> 3 := by simpa using (Nat.shiftRight_add bitsTot 2 1).symm
   have hbw4 : BitWriter.writeBit bw3 ((bitsTot >>> 3) % 2) = bw4 := by
     simp [bw3, bw4, BitWriter.writeBits, hshift3]
   have hread3 : br3.readBit = ((bitsTot >>> 3) % 2, br4) := by
@@ -208,7 +208,7 @@ lemma fixedLitLenHuffman_decode_readerAt_writeBits_len8_core
   have hshift4 : bitsTot >>> 1 >>> 1 >>> 1 >>> 1 = bitsTot >>> 4 := by
     calc
       bitsTot >>> 1 >>> 1 >>> 1 >>> 1 = bitsTot >>> 3 >>> 1 := by simp [hshift3]
-      _ = bitsTot >>> 4 := by simpa using (Nat.shiftRight_add bitsTot 3 1)
+      _ = bitsTot >>> 4 := by simpa using (Nat.shiftRight_add bitsTot 3 1).symm
   have hbw5 : BitWriter.writeBit bw4 ((bitsTot >>> 4) % 2) = bw5 := by
     simp [bw4, bw5, BitWriter.writeBits, hshift4]
   have hread4 : br4.readBit = ((bitsTot >>> 4) % 2, br5) := by
@@ -218,7 +218,7 @@ lemma fixedLitLenHuffman_decode_readerAt_writeBits_len8_core
   have hshift5 : bitsTot >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 = bitsTot >>> 5 := by
     calc
       bitsTot >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 = bitsTot >>> 4 >>> 1 := by simp [hshift4]
-      _ = bitsTot >>> 5 := by simpa using (Nat.shiftRight_add bitsTot 4 1)
+      _ = bitsTot >>> 5 := by simpa using (Nat.shiftRight_add bitsTot 4 1).symm
   have hbw6 : BitWriter.writeBit bw5 ((bitsTot >>> 5) % 2) = bw6 := by
     simp [bw5, bw6, BitWriter.writeBits, hshift5]
   have hread5 : br5.readBit = ((bitsTot >>> 5) % 2, br6) := by
@@ -228,7 +228,7 @@ lemma fixedLitLenHuffman_decode_readerAt_writeBits_len8_core
   have hshift6 : bitsTot >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 = bitsTot >>> 6 := by
     calc
       bitsTot >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 = bitsTot >>> 5 >>> 1 := by simp [hshift5]
-      _ = bitsTot >>> 6 := by simpa using (Nat.shiftRight_add bitsTot 5 1)
+      _ = bitsTot >>> 6 := by simpa using (Nat.shiftRight_add bitsTot 5 1).symm
   have hbw7 : BitWriter.writeBit bw6 ((bitsTot >>> 6) % 2) = bw7 := by
     simp [bw6, bw7, BitWriter.writeBits, hshift6]
   have hread6 : br6.readBit = ((bitsTot >>> 6) % 2, br7) := by
@@ -239,7 +239,7 @@ lemma fixedLitLenHuffman_decode_readerAt_writeBits_len8_core
     calc
       bitsTot >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 = bitsTot >>> 6 >>> 1 := by
         simp [hshift6]
-      _ = bitsTot >>> 7 := by simpa using (Nat.shiftRight_add bitsTot 6 1)
+      _ = bitsTot >>> 7 := by simpa using (Nat.shiftRight_add bitsTot 6 1).symm
   have hbw8 : BitWriter.writeBit bw7 ((bitsTot >>> 7) % 2) = bw8 := by
     simp [bw7, bw8, BitWriter.writeBits, hshift7]
   have hread7 : br7.readBit = ((bitsTot >>> 7) % 2, br8) := by
@@ -280,11 +280,11 @@ lemma fixedLitLenHuffman_decode_readerAt_writeBits_len8_core
       (Nat.mod_lt bitsTot (by decide : 0 < 2 ^ 6))
   have hcode7 : bitsTot % 2 ^ 7 <
       (Array.getInternal fixedLitLenHuffman.table 7 htable7).size := by
-    simpa [fixedLitLenHuffman, Nat.shiftLeft_eq] using
+    simpa [fixedLitLenHuffman, fixedLitLenRow7_size, Nat.shiftLeft_eq] using
       (Nat.mod_lt bitsTot (by decide : 0 < 2 ^ 7))
   have hcode8 : bitsTot % 2 ^ 8 <
       (Array.getInternal fixedLitLenHuffman.table 8 htable8).size := by
-    simpa [fixedLitLenHuffman, Nat.shiftLeft_eq] using
+    simpa [fixedLitLenHuffman, fixedLitLenRow8_size, Nat.shiftLeft_eq] using
       (Nat.mod_lt bitsTot (by decide : 0 < 2 ^ 8))
   have hrow1 :
       Array.getInternal (Array.getInternal fixedLitLenHuffman.table 1 htable1)
@@ -363,7 +363,7 @@ lemma fixedLitLenHuffman_decode_readerAt_writeBits_len8_core
           (0 ||| ((bitsTot % 2) <<< 0)) hcode1' = none := by
       simpa using hrow1
     unfold Huffman.decode
-    simpa [hread0] using
+    simpa [hread0, fixedLitLenHuffman] using
       (Huffman.decodeFuel_step_none (h := fixedLitLenHuffman) (fuel := 8) (code := 0) (len := 0)
         (br := br0) (br' := br1) (bit := bitsTot % 2)
         (hbyte := hbr0) (hread := hread0) (htable := htable1) (hcode := hcode1')

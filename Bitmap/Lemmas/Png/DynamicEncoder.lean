@@ -44,20 +44,41 @@ lemma deflateTokensExpandLz77LiteralFrom_eq_byteArrayFromArray
         have hdata : i < raw.data.size := by omega
         have htok : i < (Png.deflateTokensLz77Literal raw).size := by
           simpa [Png.deflateTokensLz77Literal] using hdata
+        let b := raw.data[i]'hdata
         have htokEq :
             (Png.deflateTokensLz77Literal raw)[i]'htok =
-              Png.Lz77Token.literal raw.data[i] := by
-          simp [Png.deflateTokensLz77Literal]
+              Png.Lz77Token.literal b := by
+          have htokData : i < raw.data.size := by
+            simpa [Png.deflateTokensLz77Literal] using htok
+          have hbyteTok : raw.data[i]'htokData = b := by
+            change raw.data[i]'htokData = raw.data[i]'hdata
+            exact Png.array_getElem_eq raw.data htokData hdata
+          simpa [Png.deflateTokensLz77Literal] using
+            congrArg Png.Lz77Token.literal hbyteTok
         have hraw : i < raw.size := by
           simpa [ByteArray.size_data] using hdata
         have hrec :
             Png.deflateTokensExpandLz77From? (Png.deflateTokensLz77Literal raw)
-                (i + 1) (out.push raw.data[i]) =
-              some (Png.byteArrayFromArray raw.data (i + 1) (out.push raw.data[i])) := by
-          exact ih (i + 1) (out.push raw.data[i]) (by omega) (Nat.succ_le_of_lt hdata)
+                (i + 1) (out.push b) =
+              some (Png.byteArrayFromArray raw.data (i + 1) (out.push b)) := by
+          exact ih (i + 1) (out.push b) (by omega) (Nat.succ_le_of_lt hdata)
+        have hba :
+            Png.byteArrayFromArray raw.data i out =
+              Png.byteArrayFromArray raw.data (i + 1) (out.push b) := by
+          have hbyte :
+              raw.data[i]'hraw =
+                b := by
+            change raw.data[i]'hraw = raw.data[i]'hdata
+            exact Png.array_getElem_eq raw.data hraw hdata
+          rw [Png.byteArrayFromArray_unfold]
+          simp only [ByteArray.size_data, hraw]
+          exact congrArg
+            (fun b => Png.byteArrayFromArray raw.data (i + 1) (out.push b))
+            hbyte
         rw [Png.deflateTokensExpandLz77From?.eq_1]
-        rw [Png.byteArrayFromArray_unfold]
-        simpa [htok, htokEq, Png.lz77TokenExpand?, hraw] using hrec
+        rw [hba]
+        simpa [htok, htokEq, Png.lz77TokenExpand?, hraw, b]
+          using hrec
   intro i out hi
   exact hk (raw.data.size - i) i out rfl hi
 
@@ -4045,6 +4066,32 @@ lemma codeLenTokensValid_push
       Array.getElem_push_eq
     simpa [hget] using htoken
 
+/-- Appending two generated code-length token arrays preserves validity.
+This avoids depending on version-specific lowering of small `for` loops. -/
+lemma codeLenTokensValid_append
+    {xs ys : Array Png.CodeLenToken}
+    (hxs : CodeLenTokensValid xs) (hys : CodeLenTokensValid ys) :
+    CodeLenTokensValid (xs ++ ys) := by
+  intro idx hidx
+  by_cases hleft : idx < xs.size
+  · rw [Array.getElem_append_left]
+    exact hxs idx hleft
+  · have hright : idx - xs.size < ys.size := by
+      have hle : xs.size ≤ idx := Nat.le_of_not_gt hleft
+      simp [Array.size_append] at hidx
+      omega
+    have hle : xs.size ≤ idx := Nat.le_of_not_gt hleft
+    rw [Array.getElem_append_right hle]
+    exact hys (idx - xs.size) hright
+
+/-- A small array of literal code-length tokens is valid when the repeated
+code length is in the DEFLATE code-length range. -/
+lemma codeLenLiteralRangeTokens_valid (len n : Nat) (hlen : len ≤ 15) :
+    CodeLenTokensValid
+      ((List.map (fun _ => Png.CodeLenToken.literal len) (List.range' 0 n)).toArray) := by
+  intro idx hidx
+  simpa [CodeLenTokenValid] using hlen
+
 /-- Zero-run token generation preserves token validity. This proves that the
 encoder only emits legal symbol-17 and symbol-18 repeat counts. -/
 lemma codeLenZeroRunTokensAux_valid
@@ -4092,10 +4139,9 @@ lemma codeLenZeroRunTokensAux_valid
           · simpa [Png.codeLenZeroRunTokensAux] using hvalid
           · simpa [Png.codeLenZeroRunTokensAux, CodeLenTokenValid] using
               codeLenTokensValid_push hvalid (by simp [CodeLenTokenValid])
-          · simpa [Png.codeLenZeroRunTokensAux, CodeLenTokenValid] using
-              codeLenTokensValid_push
-                (codeLenTokensValid_push hvalid (by simp [CodeLenTokenValid]))
-                (by simp [CodeLenTokenValid])
+          · have hlits := codeLenLiteralRangeTokens_valid 0 2 (by omega)
+            simpa [Png.codeLenZeroRunTokensAux] using
+              codeLenTokensValid_append hvalid hlits
 
 /-- Nonzero-run token generation preserves token validity when the repeated
 code length itself is a legal DEFLATE code length. -/
@@ -4134,16 +4180,12 @@ lemma codeLenNonzeroRunTokensAux_valid
         · simpa [Png.codeLenNonzeroRunTokensAux] using hvalid
         · simpa [Png.codeLenNonzeroRunTokensAux, CodeLenTokenValid] using
             codeLenTokensValid_push hvalid (by simpa [CodeLenTokenValid] using hlen)
-        · simpa [Png.codeLenNonzeroRunTokensAux, CodeLenTokenValid] using
-            codeLenTokensValid_push
-              (codeLenTokensValid_push hvalid (by simpa [CodeLenTokenValid] using hlen))
-              (by simpa [CodeLenTokenValid] using hlen)
-        · simpa [Png.codeLenNonzeroRunTokensAux, CodeLenTokenValid] using
-            codeLenTokensValid_push
-              (codeLenTokensValid_push
-                (codeLenTokensValid_push hvalid (by simpa [CodeLenTokenValid] using hlen))
-                (by simpa [CodeLenTokenValid] using hlen))
-              (by simpa [CodeLenTokenValid] using hlen)
+        · have hlits := codeLenLiteralRangeTokens_valid len 2 hlen
+          simpa [Png.codeLenNonzeroRunTokensAux] using
+            codeLenTokensValid_append hvalid hlits
+        · have hlits := codeLenLiteralRangeTokens_valid len 3 hlen
+          simpa [Png.codeLenNonzeroRunTokensAux] using
+            codeLenTokensValid_append hvalid hlits
 
 /-- Zero-run tokenization from an empty accumulator emits only valid
 code-length tokens. This is the exported zero-run validity fact. -/

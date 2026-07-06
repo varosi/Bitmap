@@ -82,7 +82,9 @@ private def dynamicCodeLenLoopBody (i : Nat) (r : BitReader × Array Nat) :
   else
     none
 
-private def dynamicCodeLenLoopBodyM (i : Nat) (r : MProd BitReader (Array Nat)) :
+/-- Source-state loop body used when unfolding the generated dynamic
+code-length table reader into the `MProd` form produced by `forIn`. -/
+def dynamicCodeLenLoopBodyM (i : Nat) (r : MProd BitReader (Array Nat)) :
     Option (ForInStep (MProd BitReader (Array Nat))) :=
   if h : r.fst.bitIndex + 3 ≤ r.fst.data.size * 8 then
     some
@@ -191,7 +193,7 @@ lemma readerAt_eq_of_eqs
   subst hdata
   apply BitReader.ext <;> simp [BitWriter.readerAt]
 
-  private lemma readBits_readerAt_writeBits_step
+private lemma readBits_readerAt_writeBits_step
     (bw : BitWriter) (n w restBits restLen : Nat)
     (hn : n < 2 ^ w) (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :
     let bitsTot := n ||| (restBits <<< w)
@@ -201,13 +203,13 @@ lemma readerAt_eq_of_eqs
     br.readBits w
         (by
           have hk : w ≤ lenTot := by omega
-          simpa [br, bw', lenTot] using
+          simpa [br, bw', lenTot, BitWriter.readerAt] using
             (readerAt_writeBits_bound (bw := bw) (bits := bitsTot) (len := lenTot) (k := w) hk hbit)) =
       (n,
         BitWriter.readerAt (BitWriter.writeBits bw bitsTot w) bw'.flush
           (by
             have hk : w ≤ lenTot := by omega
-            simpa [lenTot] using (flush_size_writeBits_prefix bw bitsTot w lenTot hk))
+            simpa [bw', lenTot] using (flush_size_writeBits_prefix bw bitsTot w lenTot hk))
           (bitPos_lt_8_writeBits bw bitsTot w hbit)) := by
   let bitsTot := n ||| (restBits <<< w)
   let lenTot := w + restLen
@@ -217,13 +219,13 @@ lemma readerAt_eq_of_eqs
       br.readBits w
           (by
             have hk : w ≤ lenTot := by omega
-            simpa [br, bw', lenTot] using
+            simpa [br, bw', lenTot, BitWriter.readerAt] using
               (readerAt_writeBits_bound (bw := bw) (bits := bitsTot) (len := lenTot) (k := w) hk hbit)) =
         (bitsTot % 2 ^ w,
           BitWriter.readerAt (BitWriter.writeBits bw bitsTot w) bw'.flush
             (by
               have hk : w ≤ lenTot := by omega
-              simpa [lenTot] using (flush_size_writeBits_prefix bw bitsTot w lenTot hk))
+              simpa [bw', lenTot] using (flush_size_writeBits_prefix bw bitsTot w lenTot hk))
             (bitPos_lt_8_writeBits bw bitsTot w hbit)) := by
     exact
       (readBits_readerAt_writeBits_prefix (bw := bw) (bits := bitsTot) (len := lenTot) (k := w)
@@ -233,7 +235,7 @@ lemma readerAt_eq_of_eqs
     have h :=
       mod_two_pow_or_shift (a := n) (b := restBits) (k := w) (len := w) (hk := le_rfl)
     simpa [bitsTot, Nat.mod_eq_of_lt hn] using h
-  simpa [bitsTot, lenTot, bw', br, hmod] using hread
+  simpa [bitsTot, lenTot, bw', br, BitWriter.readerAt, hmod] using hread
 
 /-- Extracts the low 5-bit HLIT field from the packed dynamic header prefix. -/
 lemma dynamicHeaderPrefixBits_low5 :
@@ -273,9 +275,13 @@ lemma dynamicHeaderReadBits_shift14 (restBits : Nat) :
         (a := 6) (b := tail) (len := 4) (by decide))
   calc
     dynamicHeaderReadBits restBits >>> 14
-        = ((dynamicHeaderReadBits restBits >>> 5) >>> 5) >>> 4 := by
-            simpa [Nat.add_assoc] using
-              (Nat.shiftRight_add (dynamicHeaderReadBits restBits) 10 4).symm
+        = (dynamicHeaderReadBits restBits >>> 10) >>> 4 := by
+            simpa using
+              (Nat.shiftRight_add (dynamicHeaderReadBits restBits) 10 4)
+    _ = ((dynamicHeaderReadBits restBits >>> 5) >>> 5) >>> 4 := by
+          simpa using
+            congrArg (fun x => x >>> 4)
+              (Nat.shiftRight_add (dynamicHeaderReadBits restBits) 5 5)
     _ = ((31 ||| ((31 ||| ((6 ||| (tail <<< 4)) <<< 5)) <<< 5)) >>> 5 >>> 5) >>> 4 := by
           simp [dynamicHeaderReadBits, tail]
     _ = ((31 ||| ((6 ||| (tail <<< 4)) <<< 5)) >>> 5) >>> 4 := by rw [h1]
@@ -1018,7 +1024,7 @@ lemma readDynamicCodeLenLengthsHead5_readerAt_writeBits
   have hread0 : read3Bits? br = some (0, br1) := by
     have hexpected : ((dynamicHeaderCodeLenLenBits % 2 ^ (0 + 3)) >>> 0) = 0 := by
       native_decide
-    simpa [bitsTot, br, bw', lenTot] using
+    simpa [bitsTot, br, br1, bw', lenTot, dynamicCodeLenLensReaderAt] using
       dynamicCodeLenLensReaderAt_step
         (bw := bw) (restBits := restBits) (restLen := restLen) (skip := 0) (expected := 0)
         (by simp [dynamicHeaderCodeLenLens_length]) hexpected hbit hcur
@@ -1169,7 +1175,7 @@ lemma readDynamicCodeLenLengths10_readerAt_writeBits
     unfold readDynamicCodeLenLengths10
     rw [hhead']
     simpa using htail'
-  simpa [bitsTot, lenTot, bw', br] using hgoal
+  simpa [bitsTot, lenTot, bw', br, readDynamicCodeLenLengths10] using hgoal
 
 set_option maxRecDepth 200000 in
 set_option maxHeartbeats 5000000 in
@@ -1225,7 +1231,8 @@ private lemma finishDynamicTablesAfterCodeLenLengths_readerAt_writeBits
             dynamicCodeLenSymsReaderAt bw restBits restLen (2 * dynamicHeaderCodeLenSyms.length)
               (by simpa using dynamicHeaderCodeLenSymsRestLen_ge_codeLenSyms restLen)
               hbit) := by
-    simpa [br, bw', bitsTot, lenTot, htotal] using hreadLengths
+    simpa [br, bw', bitsTot, lenTot, htotal, dynamicHeaderCodeLenSymsRestBits,
+      dynamicHeaderCodeLenSymsRestLen, dynamicCodeLenSymsReaderAt] using hreadLengths
   have hsize320 : (dynamicLitLenLengths ++ dynamicDistLengths).size = 320 := by
     simpa using htotal
   unfold finishDynamicTablesAfterCodeLenLengths

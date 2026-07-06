@@ -231,7 +231,7 @@ lemma decodeCompressedBlockFuel_step_literal_of_decodes_aux
       let extra := Array.getInternal lengthExtra idx hidxExtra
       if hbits : br'.bitIndex + extra ≤ br'.data.size * 8 then
         do
-          let (len, br'') := decodeLength sym br' hlen (by simpa using hbits)
+          let (len, br'') := decodeLength sym br' hlen (by simpa [extra, idx, array_getInternal_eq_getElem, array_getElem_eq] using hbits)
           let (distSym, br''') ← dist.decode br''
           if hdist : distSym < distBases.size then
             let extraD := Array.getInternal distExtra distSym (by
@@ -239,7 +239,7 @@ lemma decodeCompressedBlockFuel_step_literal_of_decodes_aux
               have hDistBasesSize : distBases.size = 30 := by decide
               simpa [hDistExtraSize, hDistBasesSize] using hdist)
             if hbitsD : br'''.bitIndex + extraD ≤ br'''.data.size * 8 then
-              let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa using hbitsD)
+              let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa [extraD, array_getInternal_eq_getElem, array_getElem_eq] using hbitsD)
               let out' ← copyDistance out distance len
               decodeCompressedBlockFuel fuel litLen dist br'''' out'
             else
@@ -393,7 +393,7 @@ lemma decodeCompressedBlockFuel_step_literal_of_decodes
       let extra := Array.getInternal lengthExtra idx hidxExtra
       if hbits : br'.bitIndex + extra ≤ br'.data.size * 8 then
         do
-          let (len, br'') := decodeLength sym br' hlen (by simpa using hbits)
+          let (len, br'') := decodeLength sym br' hlen (by simpa [extra, idx, array_getInternal_eq_getElem, array_getElem_eq] using hbits)
           let (distSym, br''') ← dist.decode br''
           if hdist : distSym < distBases.size then
             let extraD := Array.getInternal distExtra distSym (by
@@ -401,7 +401,7 @@ lemma decodeCompressedBlockFuel_step_literal_of_decodes
               have hDistBasesSize : distBases.size = 30 := by decide
               simpa [hDistExtraSize, hDistBasesSize] using hdist)
             if hbitsD : br'''.bitIndex + extraD ≤ br'''.data.size * 8 then
-              let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa using hbitsD)
+              let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa [extraD, array_getInternal_eq_getElem, array_getElem_eq] using hbitsD)
               let out' ← copyDistance out distance len
               decodeCompressedBlockFuel fuel litLen dist br'''' out'
             else
@@ -448,7 +448,7 @@ lemma decodeCompressedBlockFuel_step_eob_of_decodes
       let extra := Array.getInternal lengthExtra idx hidxExtra
       if hbits : br'.bitIndex + extra ≤ br'.data.size * 8 then
         do
-          let (len, br'') := decodeLength sym br' hlen (by simpa using hbits)
+          let (len, br'') := decodeLength sym br' hlen (by simpa [extra, idx, array_getInternal_eq_getElem, array_getElem_eq] using hbits)
           let (distSym, br''') ← dist.decode br''
           if hdist : distSym < distBases.size then
             let extraD := Array.getInternal distExtra distSym (by
@@ -456,7 +456,7 @@ lemma decodeCompressedBlockFuel_step_eob_of_decodes
               have hDistBasesSize : distBases.size = 30 := by decide
               simpa [hDistExtraSize, hDistBasesSize] using hdist)
             if hbitsD : br'''.bitIndex + extraD ≤ br'''.data.size * 8 then
-              let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa using hbitsD)
+              let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa [extraD, array_getInternal_eq_getElem, array_getElem_eq] using hbitsD)
               let out' ← copyDistance out distance len
               decodeCompressedBlockFuel fuel litLen dist br'''' out'
             else
@@ -501,7 +501,7 @@ lemma decodeCompressedBlockFuel_step_match_of_decodes
                 have hidxlt : sym - 257 < 29 := Nat.lt_succ_of_le hidxle
                 have hsize : lengthExtra.size = 29 := by decide
                 simpa [hsize] using hidxlt) ≤ br'.data.size * 8 := by
-            simpa [hextra] using hbits
+            simpa [hextra, array_getInternal_eq_getElem, array_getElem_eq] using hbits
           simpa using hbits') = (len, br''))
     (hdecodeDistSym : dist.decode br'' = some (distSym, br'''))
     (hdist : distSym < distBases.size)
@@ -520,7 +520,7 @@ lemma decodeCompressedBlockFuel_step_match_of_decodes
                 have hDistExtraSize : distExtra.size = 30 := by decide
                 have hDistBasesSize : distBases.size = 30 := by decide
                 simpa [hDistExtraSize, hDistBasesSize] using hdist) ≤ br'''.data.size * 8 := by
-            simpa [hextraD] using hbitsD
+            simpa [hextraD, array_getInternal_eq_getElem, array_getElem_eq] using hbitsD
           simpa using hbitsD') = (distance, br''''))
     (hcopy : copyDistance out distance len = some out') :
     decodeCompressedBlockFuel (fuel + 1) litLen dist br out =
@@ -548,7 +548,7 @@ lemma decodeCompressedBlockFuel_step_match_of_decodes
       let extra := Array.getInternal lengthExtra idx hidxExtra
       if hbits : br'.bitIndex + extra ≤ br'.data.size * 8 then
         do
-        let (len, br'') := decodeLength sym br' hlen (by simpa using hbits)
+        let (len, br'') := decodeLength sym br' hlen (by simpa [extra, idx, array_getInternal_eq_getElem, array_getElem_eq] using hbits)
         let (distSym, br''') ← dist.decode br''
         if hdist : distSym < distBases.size then
           let extraD := Array.getInternal distExtra distSym (by
@@ -557,7 +557,7 @@ lemma decodeCompressedBlockFuel_step_match_of_decodes
             simpa [hDistExtraSize, hDistBasesSize] using hdist)
           if hbitsD : br'''.bitIndex + extraD ≤ br'''.data.size * 8 then
             do
-              let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa using hbitsD)
+              let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa [extraD, array_getInternal_eq_getElem, array_getElem_eq] using hbitsD)
               let out' ← copyDistance out distance len
               decodeCompressedBlockFuel fuel litLen dist br'''' out'
           else
@@ -583,7 +583,7 @@ lemma decodeCompressedBlockFuel_step_match_of_decodes
        let extra := Array.getInternal lengthExtra idx hidxExtra
        if hbits : br'.bitIndex + extra ≤ br'.data.size * 8 then
          do
-           let (len, br'') := decodeLength sym br' hsym (by simpa using hbits)
+           let (len, br'') := decodeLength sym br' hsym (by simpa [extra, idx, array_getInternal_eq_getElem, array_getElem_eq] using hbits)
            let (distSym, br''') ← dist.decode br''
            if hdist : distSym < distBases.size then
              let extraD := Array.getInternal distExtra distSym (by
@@ -592,7 +592,7 @@ lemma decodeCompressedBlockFuel_step_match_of_decodes
                simpa [hDistExtraSize, hDistBasesSize] using hdist)
              if hbitsD : br'''.bitIndex + extraD ≤ br'''.data.size * 8 then
                do
-                 let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa using hbitsD)
+                 let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa [extraD, array_getInternal_eq_getElem, array_getElem_eq] using hbitsD)
                  let out' ← copyDistance out distance len
                  decodeCompressedBlockFuel fuel litLen dist br'''' out'
              else
@@ -603,7 +603,7 @@ lemma decodeCompressedBlockFuel_step_match_of_decodes
          none) =
       (if hbits : br'.bitIndex + extra ≤ br'.data.size * 8 then
         do
-          let (len, br'') := decodeLength sym br' hsym (by simpa [hextra] using hbits)
+          let (len, br'') := decodeLength sym br' hsym (by simpa [hextra, array_getInternal_eq_getElem, array_getElem_eq] using hbits)
           let (distSym, br''') ← dist.decode br''
           if hdist : distSym < distBases.size then
             let extraD := Array.getInternal distExtra distSym (by
@@ -612,7 +612,7 @@ lemma decodeCompressedBlockFuel_step_match_of_decodes
               simpa [hDistExtraSize, hDistBasesSize] using hdist)
             if hbitsD : br'''.bitIndex + extraD ≤ br'''.data.size * 8 then
               do
-                let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa using hbitsD)
+                let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa [extraD, array_getInternal_eq_getElem, array_getElem_eq] using hbitsD)
                 let out' ← copyDistance out distance len
                 decodeCompressedBlockFuel fuel litLen dist br'''' out'
             else
@@ -621,7 +621,7 @@ lemma decodeCompressedBlockFuel_step_match_of_decodes
             none
       else
         none) := by
-    simpa [hextra]
+    simpa [hextra, array_getInternal_eq_getElem, array_getElem_eq]
   rw [hLetExtra]
   rw [dif_pos hbits]
   rw [hdecodeLen]
@@ -639,7 +639,7 @@ lemma decodeCompressedBlockFuel_step_match_of_decodes
                 simpa [hDistExtraSize, hDistBasesSize] using hdist)
               if hbitsD : br'''.bitIndex + extraD ≤ br'''.data.size * 8 then
                 do
-                  let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa using hbitsD)
+                  let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa [extraD, array_getInternal_eq_getElem, array_getElem_eq] using hbitsD)
                   let out' ← copyDistance out distance len
                   decodeCompressedBlockFuel fuel litLen dist br'''' out'
               else
@@ -657,7 +657,7 @@ lemma decodeCompressedBlockFuel_step_match_of_decodes
               simpa [hDistExtraSize, hDistBasesSize] using hdist)
             if hbitsD : br'''.bitIndex + extraD ≤ br'''.data.size * 8 then
               do
-                let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa using hbitsD)
+                let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa [extraD, array_getInternal_eq_getElem, array_getElem_eq] using hbitsD)
                 let out' ← copyDistance out distance len
                 decodeCompressedBlockFuel fuel litLen dist br'''' out'
             else
@@ -678,7 +678,7 @@ lemma decodeCompressedBlockFuel_step_match_of_decodes
             simpa [hDistExtraSize, hDistBasesSize] using hdist)
           if hbitsD : br'''.bitIndex + extraD ≤ br'''.data.size * 8 then
             do
-              let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa using hbitsD)
+              let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa [extraD, array_getInternal_eq_getElem, array_getElem_eq] using hbitsD)
               let out' ← copyDistance out distance len
               decodeCompressedBlockFuel fuel litLen dist br'''' out'
           else
@@ -697,7 +697,7 @@ lemma decodeCompressedBlockFuel_step_match_of_decodes
             simpa [hDistExtraSize, hDistBasesSize] using hdist)
           if hbitsD : br'''.bitIndex + extraD ≤ br'''.data.size * 8 then
             do
-              let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa using hbitsD)
+              let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa [extraD, array_getInternal_eq_getElem, array_getElem_eq] using hbitsD)
               let out' ← copyDistance out distance len
               decodeCompressedBlockFuel fuel litLen dist br'''' out'
           else
@@ -711,7 +711,7 @@ lemma decodeCompressedBlockFuel_step_match_of_decodes
           simpa [hDistExtraSize, hDistBasesSize] using hdist)
         if hbitsD : br'''.bitIndex + extraD ≤ br'''.data.size * 8 then
           do
-            let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa using hbitsD)
+            let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa [extraD, array_getInternal_eq_getElem, array_getElem_eq] using hbitsD)
             let out' ← copyDistance out distance len
             decodeCompressedBlockFuel fuel litLen dist br'''' out'
         else
@@ -728,7 +728,7 @@ lemma decodeCompressedBlockFuel_step_match_of_decodes
         simpa [hDistExtraSize, hDistBasesSize] using hdist)
       if hbitsD : br'''.bitIndex + extraD ≤ br'''.data.size * 8 then
         do
-          let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa using hbitsD)
+          let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa [extraD, array_getInternal_eq_getElem, array_getElem_eq] using hbitsD)
           let out' ← copyDistance out distance len
           decodeCompressedBlockFuel fuel litLen dist br'''' out'
       else
@@ -743,19 +743,19 @@ lemma decodeCompressedBlockFuel_step_match_of_decodes
          simpa [hDistExtraSize, hDistBasesSize] using hdist)
        if hbitsD : br'''.bitIndex + extraD ≤ br'''.data.size * 8 then
          do
-           let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa using hbitsD)
+           let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa [extraD, array_getInternal_eq_getElem, array_getElem_eq] using hbitsD)
            let out' ← copyDistance out distance len
            decodeCompressedBlockFuel fuel litLen dist br'''' out'
        else
          none) =
       (if hbitsD : br'''.bitIndex + extraD ≤ br'''.data.size * 8 then
         do
-          let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa [hextraD] using hbitsD)
+          let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa [hextraD, array_getInternal_eq_getElem, array_getElem_eq] using hbitsD)
           let out' ← copyDistance out distance len
           decodeCompressedBlockFuel fuel litLen dist br'''' out'
       else
         none) := by
-    simpa [hextraD]
+    simpa [hextraD, array_getInternal_eq_getElem, array_getElem_eq]
   rw [hLetExtraD]
   rw [dif_pos hbitsD]
   rw [hdecodeDist]
@@ -888,6 +888,11 @@ lemma fixedLitLenHuffman_decode_eobNoTail
   let bw5 := BitWriter.writeBits bw 0 5
   let bw6 := BitWriter.writeBits bw 0 6
   let br0 := eobNoTailStartReader bw hbit
+  have heobAll : eobNoTailWriter bw = bwAll := by
+    have hcode : fixedLitLenCode 256 = (0, 7) := by
+      simpa using fixedLitLenCode_hi 256 (by decide) (by decide)
+    have hrev : reverseBits 0 7 = 0 := by native_decide
+    simpa [bwAll, eobNoTailWriter, hcode, hrev]
   have hsplit1 : bwAll = BitWriter.writeBits bw1 0 6 := by
     simpa [bwAll, bw1] using (writeBits_split bw 0 1 6)
   have hsplit2 : bwAll = BitWriter.writeBits bw2 0 5 := by
@@ -944,30 +949,30 @@ lemma fixedLitLenHuffman_decode_eobNoTail
   have hcur6 : bw6.curClearAbove := by
     simpa [bw6] using curClearAbove_writeBits bw 0 6 hbit hcur
   have hbound0 : br0.bitIndex + 1 ≤ br0.data.size * 8 := by
-    simpa [br0, eobNoTailStartReader, eobNoTailWriter, bwAll, BitWriter.writeBits] using
+    simpa [br0, eobNoTailStartReader, heobAll, BitWriter.readerAt] using
       (readerAt_writeBits_bound (bw := bw) (bits := 0) (len := 7) (k := 1) (by decide) hbit)
   have hbound1 : br1.bitIndex + 1 ≤ br1.data.size * 8 := by
-    simpa [br1, hsplit1] using
+    simpa [br1, hsplit1, BitWriter.readerAt] using
       (readerAt_writeBits_bound (bw := bw1) (bits := 0) (len := 6) (k := 1) (by decide)
         (by simpa [bw1] using bitPos_lt_8_writeBits bw 0 1 hbit))
   have hbound2 : br2.bitIndex + 1 ≤ br2.data.size * 8 := by
-    simpa [br2, hsplit2] using
+    simpa [br2, hsplit2, BitWriter.readerAt] using
       (readerAt_writeBits_bound (bw := bw2) (bits := 0) (len := 5) (k := 1) (by decide)
         (by simpa [bw2] using bitPos_lt_8_writeBits bw 0 2 hbit))
   have hbound3 : br3.bitIndex + 1 ≤ br3.data.size * 8 := by
-    simpa [br3, hsplit3] using
+    simpa [br3, hsplit3, BitWriter.readerAt] using
       (readerAt_writeBits_bound (bw := bw3) (bits := 0) (len := 4) (k := 1) (by decide)
         (by simpa [bw3] using bitPos_lt_8_writeBits bw 0 3 hbit))
   have hbound4 : br4.bitIndex + 1 ≤ br4.data.size * 8 := by
-    simpa [br4, hsplit4] using
+    simpa [br4, hsplit4, BitWriter.readerAt] using
       (readerAt_writeBits_bound (bw := bw4) (bits := 0) (len := 3) (k := 1) (by decide)
         (by simpa [bw4] using bitPos_lt_8_writeBits bw 0 4 hbit))
   have hbound5 : br5.bitIndex + 1 ≤ br5.data.size * 8 := by
-    simpa [br5, hsplit5] using
+    simpa [br5, hsplit5, BitWriter.readerAt] using
       (readerAt_writeBits_bound (bw := bw5) (bits := 0) (len := 2) (k := 1) (by decide)
         (by simpa [bw5] using bitPos_lt_8_writeBits bw 0 5 hbit))
   have hbound6 : br6.bitIndex + 1 ≤ br6.data.size * 8 := by
-    simpa [br6, hsplit6] using
+    simpa [br6, hsplit6, BitWriter.readerAt] using
       (readerAt_writeBits_bound (bw := bw6) (bits := 0) (len := 1) (k := 1) (by decide)
         (by simpa [bw6] using bitPos_lt_8_writeBits bw 0 6 hbit))
   have hbr0 : br0.bytePos < br0.data.size := by
@@ -986,7 +991,8 @@ lemma fixedLitLenHuffman_decode_eobNoTail
     exact bytePos_lt_of_bitIndex_lt_dataBits br6 (by omega)
   have hread0 :
       br0.readBit = (0, br1) := by
-    simpa [br0, br1, eobNoTailStartReader, eobNoTailWriter, bwAll, bw1, BitWriter.writeBits, hsplit1] using
+    simpa [br0, br1, eobNoTailStartReader, heobAll, bw1, BitWriter.readerAt,
+      BitWriter.writeBits, hsplit1] using
       (readBit_readerAt_writeBits (bw := bw) (bits := 0) (len := 7) hbit hcur (by decide))
   have hread1 :
       br1.readBit = (0, br2) := by
@@ -1015,7 +1021,8 @@ lemma fixedLitLenHuffman_decode_eobNoTail
         (by simpa [bw5] using bitPos_lt_8_writeBits bw 0 5 hbit) hcur5 (by decide))
   have hread6 :
       br6.readBit = (0, br7) := by
-    simpa [br6, br7, eobNoTailAfterReader, eobNoTailWriter, bwAll, bw6, BitWriter.writeBits, hsplit6] using
+    simpa [br6, br7, eobNoTailAfterReader, heobAll, bw6, BitWriter.readerAt,
+      BitWriter.writeBits, hsplit6] using
       (readBit_readerAt_writeBits (bw := bw6) (bits := 0) (len := 1)
         (by simpa [bw6] using bitPos_lt_8_writeBits bw 0 6 hbit) hcur6 (by decide))
   have htable1 : 1 < fixedLitLenHuffman.table.size := by native_decide
@@ -1086,6 +1093,8 @@ lemma fixedLitLenHuffman_decode_eobNoTail
       fixedLitLenHuffman.decode br0 =
         Huffman.decodeFuel fixedLitLenHuffman 8 0 1 br1 := by
     unfold Huffman.decode
+    change Huffman.decodeFuel fixedLitLenHuffman 9 0 0 br0 =
+      Huffman.decodeFuel fixedLitLenHuffman 8 0 1 br1
     simpa using
       (Huffman.decodeFuel_step_none (h := fixedLitLenHuffman) (fuel := 8) (code := 0) (len := 0)
         (br := br0) (br' := br1) (bit := 0)
@@ -1513,7 +1522,7 @@ lemma decodeCompressedBlock_fixedLitBitsEob
     have hbitcount_le : bw'.bitCount ≤ bw'.flush.size * 8 := by
       exact flush_size_mul_ge_bitCount (bw := bw') (hbit := bw'.hbit)
     have hlen_le' : len ≤ bw'.flush.size * 8 := le_trans hlen_le_bitcount hbitcount_le
-    simpa [br] using hlen_le'
+    simpa [br, BitWriter.readerAt] using hlen_le'
   have hfuel : data.size - i + 1 ≤ br.data.size * 8 + 1 := by
     omega
   have hmain := hk (data.size - i) i bw out hbit hcur rfl (br.data.size * 8 + 1) hfuel
@@ -1568,7 +1577,7 @@ lemma decodeCompressedBlock_fixedLitBitsEob_spec
     have hbitcount_le : bw'.bitCount ≤ bw'.flush.size * 8 := by
       exact flush_size_mul_ge_bitCount (bw := bw') (hbit := bw'.hbit)
     have hlen_le' : len ≤ bw'.flush.size * 8 := le_trans hlen_le_bitcount hbitcount_le
-    simpa [br] using hlen_le'
+    simpa [br, BitWriter.readerAt] using hlen_le'
   have hfuel : data.size - i + 1 ≤ br.data.size * 8 + 1 := by
     omega
   simpa [bitsLen, bits, len, bw', br] using

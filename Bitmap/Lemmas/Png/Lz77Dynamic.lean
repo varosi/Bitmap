@@ -1756,8 +1756,9 @@ lemma generatedDynamicDistTableLz77_lookup_generated_code
       | none => none
       | some table => some ({ maxLen := 5, table := table } : Png.Huffman)) =
         some generatedDynamicDistTableLz77 := by
-    simpa [Png.mkHuffman, lengths, hmax, count, nextCode0, nextCode, init]
-      using hmk
+    unfold Png.mkHuffman at hmk
+    simp [hmax, count, nextCode0, nextCode, init] at hmk
+    exact hmk
   cases hfill : Png.fillHuffmanTableAux lengths 0 nextCode init with
   | none =>
       simp [hfill] at hmk'
@@ -2066,8 +2067,10 @@ lemma generatedDynamicDistTableLz77_decode_readerAt_writeBits_core
     simpa [br4, bw', hsplit4, lenTot] using
       (Png.readerAt_writeBits_bound (bw := bw4) (bits := bitsTot >>> 4)
         (len := lenTot - 4) (k := 1) (by omega) hbit4)
+  have hbw1 : Png.BitWriter.writeBit bw (bitsTot % 2) = bw1 := by
+    simp [bw1, Png.BitWriter.writeBits]
   have hread0 : br0.readBit = (bitsTot % 2, br1) := by
-    simpa [br0, br1, bw', lenTot] using
+    simpa [br0, br1, bw', bw1, hbw1, lenTot] using
       (Png.readBit_readerAt_writeBits (bw := bw) (bits := bitsTot)
         (len := lenTot) hbit hcur (by omega))
   have hbw2 : Png.BitWriter.writeBit bw1 ((bitsTot >>> 1) % 2) = bw2 := by
@@ -2078,7 +2081,7 @@ lemma generatedDynamicDistTableLz77_decode_readerAt_writeBits_core
         (bw := bw1) (bits := bitsTot >>> 1) (len := lenTot - 1)
         hbit1 hcur1 (by omega))
   have hshift2 : bitsTot >>> 1 >>> 1 = bitsTot >>> 2 := by
-    simpa using (Nat.shiftRight_add bitsTot 1 1)
+    simpa using (Nat.shiftRight_add bitsTot 1 1).symm
   have hbw3 : Png.BitWriter.writeBit bw2 ((bitsTot >>> 2) % 2) = bw3 := by
     simp [bw2, bw3, Png.BitWriter.writeBits, hshift2]
   have hread2 : br2.readBit = ((bitsTot >>> 2) % 2, br3) := by
@@ -2089,7 +2092,7 @@ lemma generatedDynamicDistTableLz77_decode_readerAt_writeBits_core
   have hshift3 : bitsTot >>> 1 >>> 1 >>> 1 = bitsTot >>> 3 := by
     calc
       bitsTot >>> 1 >>> 1 >>> 1 = bitsTot >>> 2 >>> 1 := by simp [hshift2]
-      _ = bitsTot >>> 3 := by simpa using (Nat.shiftRight_add bitsTot 2 1)
+      _ = bitsTot >>> 3 := by simpa using (Nat.shiftRight_add bitsTot 2 1).symm
   have hbw4 : Png.BitWriter.writeBit bw3 ((bitsTot >>> 3) % 2) = bw4 := by
     simp [bw3, bw4, Png.BitWriter.writeBits, hshift3]
   have hread3 : br3.readBit = ((bitsTot >>> 3) % 2, br4) := by
@@ -2100,7 +2103,7 @@ lemma generatedDynamicDistTableLz77_decode_readerAt_writeBits_core
   have hshift4 : bitsTot >>> 1 >>> 1 >>> 1 >>> 1 = bitsTot >>> 4 := by
     calc
       bitsTot >>> 1 >>> 1 >>> 1 >>> 1 = bitsTot >>> 3 >>> 1 := by simp [hshift3]
-      _ = bitsTot >>> 4 := by simpa using (Nat.shiftRight_add bitsTot 3 1)
+      _ = bitsTot >>> 4 := by simpa using (Nat.shiftRight_add bitsTot 3 1).symm
   have hbw5 : Png.BitWriter.writeBit bw4 ((bitsTot >>> 4) % 2) = bw5 := by
     simp [bw4, bw5, Png.BitWriter.writeBits, hshift4]
   have hread4 : br4.readBit = ((bitsTot >>> 4) % 2, br5) := by
@@ -3682,7 +3685,7 @@ lemma generatedDynamicPayloadLz77TraceList_readerAt_writeBits
               Png.DynamicPayloadTransition spec br0 out brMid
                 (out.push b) := by
             simpa [spec, litLenCodes, distCodes, tokenBits, tokenLen,
-              tailBits, tailLen, bits, len, bwAll, br0, brMid,
+              tailBits, tailLen, bits, len, bwAll, br0, brMid, bwMid,
               dynamicPayloadLz77StreamBits, dynamicPayloadLz77StreamLen]
               using hstep
           have hrestRaw :=
@@ -3785,7 +3788,7 @@ lemma generatedDynamicPayloadLz77TraceList_readerAt_writeBits
                       Png.DynamicPayloadTransition spec br0 out brMid
                         outNext := by
                     simpa [spec, litLenCodes, distCodes, tokenBits, tokenLen,
-                      tailBits, tailLen, bits, len, bwAll, br0, brMid,
+                      tailBits, tailLen, bits, len, bwAll, br0, brMid, bwMid,
                       dynamicPayloadLz77StreamBits,
                       dynamicPayloadLz77StreamLen] using hstep
                   have hrestRaw :=
@@ -5540,7 +5543,7 @@ lemma inflateStored_deflateDynamicLz77_none (raw : ByteArray) :
         (h := hread0))
   have hpos : 0 < collapsedWriter.flush.size := by
     have : 3 ≤ collapsedWriter.flush.size * 8 := by
-      simpa [streamReader0] using hread0
+      simpa [streamReader0, Png.BitReader.bitIndex] using hread0
     by_contra hzero
     have hsize0 : collapsedWriter.flush.size = 0 := Nat.eq_zero_of_not_pos hzero
     omega

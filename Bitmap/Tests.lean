@@ -2050,7 +2050,11 @@ private def perfContentBitmap (w h : Nat) : BitmapRGB8 :=
   have hvalid : data.size = w * h * Pixel.bytesPerPixel (α := PixelRGB8) := by
     have hsize : data.size = w * h * bpp := by
       simp [data, ByteArray.size]
-    simpa [bpp, bytesPerPixelRGB, instPixelRGB8] using hsize
+    have hbpp : Pixel.bytesPerPixel (α := PixelRGB8) = bpp := by
+      change bytesPerPixelRGB = bpp
+      rfl
+    rw [hbpp]
+    exact hsize
   { size := { width := w, height := h }, data, valid := hvalid }
 
 -- Encode a deterministic content bitmap to PNG and decode it back.

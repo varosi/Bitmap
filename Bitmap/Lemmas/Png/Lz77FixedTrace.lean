@@ -460,7 +460,7 @@ lemma fixedLz77PayloadTransition_match_parts_readerAt_writeBits
     have hdecode0 :=
       decodeFixedLiteralSym_readerAt_writeBits' (bw := bw) (sym := sym)
         (restBits := lenTail.1) (restLen := lenTail.2) hsymLt hbit hcur
-    simpa [codeLen, symBits, bits, bwAll, bwSym, br0, brLen]
+    simpa [codeLen, symBits, bits, lenTail, lz77BitPairAppend, bwAll, bwSym, br0, brLen]
       using hdecode0
   have hbitLen : bwSym.bitPos < 8 := by
     simpa [bwSym] using bitPos_lt_8_writeBits bw bits.1 symBits.2 hbit
@@ -504,7 +504,7 @@ lemma fixedLz77PayloadTransition_match_parts_readerAt_writeBits
         (hidxExtra := hidxExtra) (hextra := hextraLen)
         (hbase := hbaseLen) (hbitsLt := hbitsLenLt)
         (hbit := hbitLen) (hcur := hcurLen)
-    simpa [lenExtraBits, lenTail, bwLen, brLen, brDist, hbwAllLen]
+    simpa [lenExtraBits, lenTail, lz77BitPairAppend, bwLen, brLen, brDist, hbwAllLen]
       using hdecode0
   have hbitDistSym : bwLen.bitPos < 8 := by
     simpa [bwLen] using bitPos_lt_8_writeBits bwSym lenTail.1
@@ -518,7 +518,8 @@ lemma fixedLz77PayloadTransition_match_parts_readerAt_writeBits
       decodeFixedDistanceSym_readerAt_writeBits_symbol (bw := bwLen)
         (distSym := distSym) (restBits := distExtraTail.1)
         (restLen := distExtraTail.2) hdistSymLt32 hbitDistSym hcurDistSym
-    simpa [distSymBits, distSymTail, bwDistSym, brDist, brCopy, hbwAllDist]
+    simpa [distSymBits, distSymTail, distExtraTail, lz77BitPairAppend,
+      bwDistSym, brDist, brCopy, hbwAllDist]
       using hdecode0
   have hbitDist : bwDistSym.bitPos < 8 := by
     simpa [bwDistSym] using bitPos_lt_8_writeBits bwLen distSymTail.1

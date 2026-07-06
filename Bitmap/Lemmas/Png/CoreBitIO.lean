@@ -975,7 +975,7 @@ lemma bitPosInv_writeBit_start (bw : BitWriter) (bit : Nat)
         symm
         simpa using (bitNat_of_testBit (x := x) (i := bw.bitPos))
       _ = bit % 2 := by
-        simpa using hbitnat
+        simpa [x] using hbitnat
   have htest : x.testBit bw.bitPos = decide (bit % 2 = 1) := by
     cases htb : x.testBit bw.bitPos with
     | false =>
@@ -1264,9 +1264,11 @@ lemma readBit_readerAt_writeBits (bw : BitWriter) (bits len : Nat)
             cases len with
             | zero => cases hlen
             | succ n =>
-                simpa [BitWriter.writeBits] using
-                  (flush_size_writeBits_le
-                    (bw := BitWriter.writeBit bw (bits % 2)) (bits := bits >>> 1) (len := n))
+                change (BitWriter.writeBit bw (bits % 2)).flush.size ≤
+                  (BitWriter.writeBits (BitWriter.writeBit bw (bits % 2))
+                    (bits >>> 1) n).flush.size
+                exact flush_size_writeBits_le
+                  (bw := BitWriter.writeBit bw (bits % 2)) (bits := bits >>> 1) (len := n)
           )
           (bitPos_lt_8_writeBit bw (bits % 2) hbit)) := by
   classical
@@ -1480,7 +1482,8 @@ lemma writeBits_small (bw : BitWriter) (bits len : Nat) (hsmall : bw.bitPos + le
       have ih' := ih (bw := BitWriter.writeBit bw (bits % 2)) (bits := bits >>> 1) hsmall'
       -- unfold one step of `writeBits`, then apply the IH
       simp [BitWriter.writeBits, BitWriter.writeBit, hpos]
-      simpa [BitWriter.writeBit, hpos, Nat.add_assoc, Nat.add_left_comm, Nat.add_comm] using ih'
+      simpa [BitWriter.writeBit, packBitsAccU8, hpos,
+        Nat.add_assoc, Nat.add_left_comm, Nat.add_comm] using ih'
 
 lemma writeBits_fill_byte (bw : BitWriter) (bits k : Nat) (hk : bw.bitPos + k = 8) :
     BitWriter.writeBits bw bits k =

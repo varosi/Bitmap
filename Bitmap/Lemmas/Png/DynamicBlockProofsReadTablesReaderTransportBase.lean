@@ -70,9 +70,9 @@ lemma dynamicTablesAfterHeader_bw44_full_eq
       BitWriter.writeBits (BitWriter.writeBits bw bitsTot 44)
         (bitsTot >>> 44) (lenTot - 44) := by
           have hsub : lenTot - 44 = dynamicHeaderCodeLenSymsRestLen restLen := by
-            simpa [lenTot] using dynamicHeaderReadLen_sub44 restLen
+            simpa [lenTot, dynamicHeaderCodeLenLens_length] using dynamicHeaderReadLen_sub44 restLen
           rw [show bitsTot >>> 44 = dynamicHeaderCodeLenSymsRestBits restBits by
-            simpa [bitsTot] using dynamicHeaderReadBits_shift44 restBits]
+            simpa [bitsTot, dynamicHeaderCodeLenLens_length] using dynamicHeaderReadBits_shift44 restBits]
           simp [hsub]
     _ = BitWriter.writeBits bw bitsTot (44 + (lenTot - 44)) := by
           symm

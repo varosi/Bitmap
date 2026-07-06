@@ -688,7 +688,7 @@ lemma decodeFixedLiteralSym_readerAt_writeBits_len9_core (bw : BitWriter) (sym :
         (bits := bitsTot >>> 8) (len := lenTot - 8) (k := 1) (hk := by omega)
         (hbit := bitPos_lt_8_writeBits (BitWriter.writeBits bw bitsTot 7) (bitsTot >>> 7) 1
           (bitPos_lt_8_writeBits bw bitsTot 7 hbit)))
-    simpa [bw', hsplit8tot, br8, lenTot] using hread2'
+    simpa [bw', hsplit8, hsplit8tot, br8, lenTot] using hread2'
   let br9 :=
     BitWriter.readerAt
       (BitWriter.writeBits (BitWriter.writeBits (BitWriter.writeBits bw bitsTot 7) (bitsTot >>> 7) 1)
@@ -698,14 +698,14 @@ lemma decodeFixedLiteralSym_readerAt_writeBits_len9_core (bw : BitWriter) (sym :
           flush_size_writeBits_prefix
             (BitWriter.writeBits (BitWriter.writeBits bw bitsTot 7) (bitsTot >>> 7) 1) (bitsTot >>> 8) 1
             (lenTot - 8) (by omega)
-        simpa [bw', hsplit8tot] using h)
+        simpa [bw', hsplit8, hsplit8tot] using h)
       (bitPos_lt_8_writeBits
         (BitWriter.writeBits (BitWriter.writeBits bw bitsTot 7) (bitsTot >>> 7) 1) (bitsTot >>> 8) 1
         (bitPos_lt_8_writeBits (BitWriter.writeBits bw bitsTot 7) (bitsTot >>> 7) 1
           (bitPos_lt_8_writeBits bw bitsTot 7 hbit)))
   have hbits9 :
       br8.readBits 1 hread2 = ((bitsTot >>> 8) % 2, br9) := by
-    simpa [bw', hsplit8tot, br8, br9, lenTot] using
+    simpa [bw', hsplit8, hsplit8tot, br8, br9, lenTot] using
       (readBits_readerAt_writeBits_prefix
         (bw := BitWriter.writeBits (BitWriter.writeBits bw bitsTot 7) (bitsTot >>> 7) 1)
         (bits := bitsTot >>> 8) (len := lenTot - 8) (k := 1) (hk := by omega)

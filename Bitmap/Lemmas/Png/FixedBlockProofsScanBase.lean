@@ -513,8 +513,7 @@ lemma fixedQuadBitsEob_len_ge_two (data : Array UInt8) (i : Nat) :
   · simp [hlt]
     let b := data[i]
     by_cases h3 : i + 3 < data.size
-    · dsimp [b]
-      by_cases hq : quadTailEqb data i b h3 = true
+    · by_cases hq : quadTailEqb data i b h3 = true
       · have htail : 2 ≤ (fixedQuadBitsEob data (i + 4)).2 := by
           exact fixedQuadBitsEob_len_ge_two data (i + 4)
         simpa [b, h3, hq] using
@@ -525,8 +524,7 @@ lemma fixedQuadBitsEob_len_ge_two (data : Array UInt8) (i : Nat) :
         simpa [b, h3, hq] using
           (literalRepeatBitsTail_len_ge_two b 1 (fixedQuadBitsEob data (i + 1)).1
             (fixedQuadBitsEob data (i + 1)).2 htail)
-    · dsimp [b]
-      have htail : 2 ≤ (fixedQuadBitsEob data (i + 1)).2 := by
+    · have htail : 2 ≤ (fixedQuadBitsEob data (i + 1)).2 := by
         exact fixedQuadBitsEob_len_ge_two data (i + 1)
       simpa [b, h3] using
         (literalRepeatBitsTail_len_ge_two b 1 (fixedQuadBitsEob data (i + 1)).1
@@ -593,8 +591,7 @@ lemma fixedQuadBitsTail_len_ge (data : Array UInt8) (i tailBits tailLen : Nat) :
   · simp [hlt]
     let b := data[i]
     by_cases h3 : i + 3 < data.size
-    · dsimp [b]
-      by_cases hq : quadTailEqb data i b h3 = true
+    · by_cases hq : quadTailEqb data i b h3 = true
       · have htail : tailLen ≤ (fixedQuadBitsTail data (i + 4) tailBits tailLen).2 := by
           exact fixedQuadBitsTail_len_ge data (i + 4) tailBits tailLen
         have hmore :
@@ -613,8 +610,7 @@ lemma fixedQuadBitsTail_len_ge (data : Array UInt8) (i tailBits tailLen : Nat) :
           exact literalRepeatBitsTail_len_ge b 1 (fixedQuadBitsTail data (i + 1) tailBits tailLen).1
             (fixedQuadBitsTail data (i + 1) tailBits tailLen).2
         exact le_trans htail (by simpa [b, h3, hq] using hmore)
-    · dsimp [b]
-      have htail : tailLen ≤ (fixedQuadBitsTail data (i + 1) tailBits tailLen).2 := by
+    · have htail : tailLen ≤ (fixedQuadBitsTail data (i + 1) tailBits tailLen).2 := by
         exact fixedQuadBitsTail_len_ge data (i + 1) tailBits tailLen
       have hmore :
           (fixedQuadBitsTail data (i + 1) tailBits tailLen).2 ≤
@@ -668,8 +664,7 @@ lemma fixedQuadOut_eq_byteArrayFromArray (data : Array UInt8) (i : Nat) (out : B
   · simp [hlt]
     let b := data[i]
     by_cases h3 : i + 3 < data.size
-    · dsimp [b]
-      by_cases hq : quadTailEqb data i b h3 = true
+    · by_cases hq : quadTailEqb data i b h3 = true
       · have hih : fixedQuadOut data (i + 4) (dist1RunOut out b 3) =
             byteArrayFromArray data (i + 4) (dist1RunOut out b 3) := by
             exact fixedQuadOut_eq_byteArrayFromArray data (i + 4) (dist1RunOut out b 3)
@@ -692,8 +687,7 @@ lemma fixedQuadOut_eq_byteArrayFromArray (data : Array UInt8) (i : Nat) (out : B
             byteArrayFromArray data (i + 1) (out.push b) := by
             exact fixedQuadOut_eq_byteArrayFromArray data (i + 1) (out.push b)
         simpa [b, h3, hq] using hih
-    · dsimp [b]
-      have hih : fixedQuadOut data (i + 1) (out.push b) =
+    · have hih : fixedQuadOut data (i + 1) (out.push b) =
           byteArrayFromArray data (i + 1) (out.push b) := by
           exact fixedQuadOut_eq_byteArrayFromArray data (i + 1) (out.push b)
       simpa [b, h3] using hih
@@ -718,12 +712,10 @@ lemma fixedQuadBitsTail_zero_zero (data : Array UInt8) (i : Nat) :
   · simp [hlt]
     let b := data[i]
     by_cases h3 : i + 3 < data.size
-    · dsimp [b]
-      by_cases hq : quadTailEqb data i b h3 = true
+    · by_cases hq : quadTailEqb data i b h3 = true
       · simpa [b, h3, hq, fixedQuadBitsTail_zero_zero data (i + 4)]
       · simpa [b, h3, hq, fixedQuadBitsTail_zero_zero data (i + 1)]
-    · dsimp [b]
-      simpa [b, h3, fixedQuadBitsTail_zero_zero data (i + 1)]
+    · simpa [b, h3, fixedQuadBitsTail_zero_zero data (i + 1)]
   · simp [hlt, fixedLitLenCode]
 termination_by data.size - i
 decreasing_by

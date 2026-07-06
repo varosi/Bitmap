@@ -9,6 +9,18 @@ namespace Png
 set_option linter.unnecessarySimpa false
 set_option linter.unusedSimpArgs false
 
+/-- Bridges `Array.getInternal` accesses to ordinary indexed accesses so
+table-bound proof arguments normalize the same across Lean versions. -/
+@[simp] lemma array_getInternal_eq_getElem {α : Type u}
+    (arr : Array α) (i : Nat) (h : i < arr.size) :
+    Array.getInternal arr i h = arr[i]'h := by
+  rfl
+
+lemma array_getElem_eq {α : Type u}
+    (arr : Array α) {i : Nat} (h1 h2 : i < arr.size) :
+    arr[i]'h1 = arr[i]'h2 := by
+  rfl
+
 lemma fixedLitLenRevCodeFast_eq (sym : Nat) (h : sym < 288) :
     fixedLitLenRevCodeFast sym =
       let codeLen := fixedLitLenCode sym
@@ -171,6 +183,7 @@ lemma pushRepeat_last_get!
   have hlastLt : out.size - 1 < out.size := by
     omega
   have hlastIdx : out[out.size - 1]'hlastLt = last := by
+    change out.data[out.size - 1]'hlastLt = last
     simpa [ByteArray.get!, getElem!_pos, hlastLt] using hlast
   have hidx :=
     pushRepeat_last_eq out b last n hout hlastIdx
@@ -181,7 +194,9 @@ lemma pushRepeat_last_get!
     simpa using hpushLt
   have hidxData :
       (pushRepeat out b n).data[(pushRepeat out b n).size - 1]'hpushLt = (if n = 0 then last else b) := by
-    simpa [ByteArray.get] using hidx
+    change (pushRepeat out b n).data[(pushRepeat out b n).size - 1]'hpushLt =
+      (if n = 0 then last else b) at hidx
+    exact hidx
   have hbang :
       (pushRepeat out b n).data[(pushRepeat out b n).size - 1]! =
         (pushRepeat out b n).data[(pushRepeat out b n).size - 1]'hpushLtData := by
@@ -473,7 +488,7 @@ lemma decodeFixedDistanceSym_zero_decodeDistance_zero_copyDistance_one_exists
       exact Nat.mul_le_mul_right 8 hflush5
     have hflush_mul' :
         (BitWriter.writeBits bw bitsTot 5).flush.size * 8 ≤ br5.data.size * 8 := by
-      simpa [br5] using hflush_mul
+      simpa [br5, BitWriter.readerAt] using hflush_mul
     calc
       br5.bitIndex = (BitWriter.writeBits bw bitsTot 5).bitCount := by
         simp [br5]
@@ -983,6 +998,34 @@ lemma fixedLenMatchInfo_spec_get! (len : Nat) (hlo : 3 ≤ len) (hhi : len ≤ 2
     have hsub : (len - 3) + 3 = len := Nat.sub_add_cancel hlo
     simpa [n] using hsub.symm
   simpa [hlen] using hall n
+
+/-- Projects the symbol upper bound from `fixedLenMatchInfo_spec_get!`.
+This avoids depending on Lean's internal encoding of nested `if`s. -/
+lemma fixedLenMatchInfo_sym_le_285 (len : Nat) (hlo : 3 ≤ len) (hhi : len ≤ 258) :
+    (fixedLenMatchInfo len).1 ≤ 285 := by
+  have hinfo := fixedLenMatchInfo_spec_get! len hlo hhi
+  rcases hfixed : fixedLenMatchInfo len with ⟨sym, extraBits, extraLen⟩
+  have hspec :
+      257 ≤ sym ∧ sym ≤ 285 ∧
+        extraLen = lengthExtra[sym - 257]! ∧
+        lengthBases[sym - 257]! + extraBits = len ∧
+        extraBits < 2 ^ extraLen := by
+    simpa [hfixed] using hinfo
+  simpa [hfixed] using hspec.2.1
+
+/-- Projects the extra-bit code-space bound from `fixedLenMatchInfo_spec_get!`.
+Call sites use this instead of reducing the whole match-info function. -/
+lemma fixedLenMatchInfo_extraBits_lt (len : Nat) (hlo : 3 ≤ len) (hhi : len ≤ 258) :
+    (fixedLenMatchInfo len).2.1 < 2 ^ (fixedLenMatchInfo len).2.2 := by
+  have hinfo := fixedLenMatchInfo_spec_get! len hlo hhi
+  rcases hfixed : fixedLenMatchInfo len with ⟨sym, extraBits, extraLen⟩
+  have hspec :
+      257 ≤ sym ∧ sym ≤ 285 ∧
+        extraLen = lengthExtra[sym - 257]! ∧
+        lengthBases[sym - 257]! + extraBits = len ∧
+        extraBits < 2 ^ extraLen := by
+    simpa [hfixed] using hinfo
+  simpa [hfixed] using hspec.2.2.2.2
 
 lemma array_getInternal_eq_get! {α : Type u} [Inhabited α]
     (arr : Array α) (i : Nat) (h : i < arr.size) :
@@ -1874,9 +1917,13 @@ lemma writeBits_literalRepeatBitsTail
             (literalRepeatBitsTail b (n + 1) tailBits tailLen).2
             =
           BitWriter.writeBits (BitWriter.writeFixedLiteralFast bw b) rest.1 rest.2 := by
-              simpa [literalRepeatBitsTail_succ, rest] using
-                (writeBits_literalRepeatBitsTail_one
-                  (bw := bw) (b := b) (tailBits := rest.1) (tailLen := rest.2))
+              have hstep :
+                  literalRepeatBitsTail b (n + 1) tailBits tailLen =
+                    literalRepeatBitsTail b 1 rest.1 rest.2 := by
+                simp [literalRepeatBitsTail_succ, literalRepeatBitsTail_zero, rest]
+              rw [hstep]
+              exact writeBits_literalRepeatBitsTail_one
+                (bw := bw) (b := b) (tailBits := rest.1) (tailLen := rest.2)
         _ =
           BitWriter.writeBits
             ((BitWriter.writeFixedLiteralFast bw b).writeFixedLiteralRepeatFast b n)
@@ -1958,7 +2005,9 @@ lemma writeBits_dist1ChunkStep
           distBitsTot (5 + tailLen) := by
             have hbitsLt : extraBits < 2 ^ extraLen := by
               have hinfo := fixedLenMatchInfo_spec_get! chunk hlen.1 hlen.2
-              simpa [info, sym, extraBits, extraLen] using hinfo.2.2.2.2
+              rcases hfixed : fixedLenMatchInfo chunk with ⟨sym0, extraBits0, extraLen0⟩
+              rw [hfixed] at hinfo
+              simpa [info, sym, extraBits, extraLen, hfixed] using hinfo.2.2.2.2
             simpa [lenBitsTot, Nat.add_assoc] using
               (writeBits_concat
                 (BitWriter.writeBits bw symBits codeLen.2) extraBits distBitsTot extraLen (5 + tailLen) hbitsLt)

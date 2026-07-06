@@ -37,7 +37,8 @@ lemma dynamicStreamReader0_readBits3 (raw : ByteArray) :
       (flush_size_writeBits_le hdrHeader streamBits streamLen)
       hbitHeader
     let hread0 : streamReader0.bitIndex + 3 ≤ streamReader0.data.size * 8 := by
-      simpa [streamReader0, BitWriter.readerAt, hdr0, BitWriter.empty] using
+      simpa [streamReader0, collapsedWriter, BitWriter.readerAt, hdr0,
+        BitWriter.empty] using
         (readerAt_writeBits_bound (bw := hdr0) (bits := streamBitsFull) (len := streamLenFull)
           (k := 3) (hk := by omega) (hbit := by decide))
     streamReader0.readBits 3 hread0 = (5, streamReaderHeader) := by
@@ -59,11 +60,28 @@ lemma dynamicStreamReader0_readBits3 (raw : ByteArray) :
     hend := by intro _; rfl
     hbit := by decide
   }
+  have hmod3 : streamBitsFull % 2 ^ 3 = 5 := by
+    have h := mod_two_pow_or_shift (a := 5) (b := streamBits) (k := 3) (len := 3) (by decide)
+    simpa [streamBitsFull] using h
+  have hprefixWriter :
+      BitWriter.writeBits hdr0 streamBitsFull 3 = hdrHeader := by
+    calc
+      BitWriter.writeBits hdr0 streamBitsFull 3 =
+          BitWriter.writeBits hdr0 (streamBitsFull % 2 ^ 3) 3 := by
+            exact writeBits_mod hdr0 streamBitsFull 3
+      _ = hdrHeader := by
+            simp [hdrHeader, hmod3]
+  have hprefixSizeFull :
+      (BitWriter.writeBits hdr0 streamBitsFull 3).flush.size ≤
+        collapsedWriter.flush.size := by
+    simpa [collapsedWriter, streamLenFull] using
+      (flush_size_writeBits_prefix (bw := hdr0) (bits := streamBitsFull) (k := 3)
+        (len := streamLenFull) (hk := by omega))
+  have hprefixSize :
+      hdrHeader.flush.size ≤ collapsedWriter.flush.size := by
+    simpa [hprefixWriter] using hprefixSizeFull
   let streamReaderHeader0 := BitWriter.readerAt hdrHeader collapsedWriter.flush
-      (by
-        simpa [collapsedWriter, hdrHeader, streamBitsFull, streamLenFull] using
-          (flush_size_writeBits_prefix (bw := hdr0) (bits := streamBitsFull) (k := 3)
-            (len := streamLenFull) (hk := by omega)))
+      hprefixSize
       hbitHeader
   let streamReaderHeader := BitWriter.readerAt hdrHeader
       (BitWriter.writeBits hdrHeader streamBits streamLen).flush
@@ -80,19 +98,13 @@ lemma dynamicStreamReader0_readBits3 (raw : ByteArray) :
   have hreaderEq : streamReaderHeader0 = streamReaderHeader := by
     change
       BitWriter.readerAt hdrHeader collapsedWriter.flush
-        (by
-          simpa [collapsedWriter, hdrHeader, streamBitsFull, streamLenFull] using
-            (flush_size_writeBits_prefix (bw := hdr0) (bits := streamBitsFull) (k := 3)
-              (len := streamLenFull) (hk := by omega)))
+        hprefixSize
         hbitHeader =
       BitWriter.readerAt hdrHeader (BitWriter.writeBits hdrHeader streamBits streamLen).flush
         (flush_size_writeBits_le hdrHeader streamBits streamLen) hbitHeader
     exact readerAt_eq_of_eqs
       (hbw := rfl) (hdata := hstreamData)
-      (hflush1 := by
-        simpa [collapsedWriter, hdrHeader, streamBitsFull, streamLenFull] using
-          (flush_size_writeBits_prefix (bw := hdr0) (bits := streamBitsFull) (k := 3)
-            (len := streamLenFull) (hk := by omega)))
+      (hflush1 := hprefixSize)
       (hflush2 := flush_size_writeBits_le hdrHeader streamBits streamLen)
       (hbit1 := hbitHeader) (hbit2 := hbitHeader)
   have hread0_at :
@@ -100,22 +112,56 @@ lemma dynamicStreamReader0_readBits3 (raw : ByteArray) :
         (flush_size_writeBits_le hdr0 streamBitsFull streamLenFull) (by decide)).bitIndex + 3 ≤
         (BitWriter.readerAt hdr0 collapsedWriter.flush
           (flush_size_writeBits_le hdr0 streamBitsFull streamLenFull) (by decide)).data.size * 8 := by
-    simpa using
+    simpa [collapsedWriter, BitWriter.readerAt, BitReader.bitIndex] using
       (readerAt_writeBits_bound (bw := hdr0) (bits := streamBitsFull) (len := streamLenFull)
         (k := 3) (hk := by omega) (hbit := by decide))
   have hread0 :
       streamReader0.bitIndex + 3 ≤ streamReader0.data.size * 8 := by
-    simpa [streamReader0, BitWriter.readerAt, hdr0, BitWriter.empty] using hread0_at
-  have hmod3 : streamBitsFull % 2 ^ 3 = 5 := by
-    have h := mod_two_pow_or_shift (a := 5) (b := streamBits) (k := 3) (len := 3) (by decide)
-    simpa [streamBitsFull] using h
+    simpa [streamReader0, collapsedWriter, BitWriter.readerAt, hdr0,
+      BitWriter.empty] using hread0_at
   have h' :=
     (readBits_readerAt_writeBits_prefix (bw := hdr0) (bits := streamBitsFull) (len := streamLenFull)
       (k := 3) (hk := by omega) (hbit := by decide) (hcur := curClearAbove_empty)
       (hread := hread0_at))
   dsimp at h'
+  have h'raw :
+      streamReader0.readBits 3 hread0_at =
+        (5,
+          BitWriter.readerAt (BitWriter.writeBits hdr0 streamBitsFull 3)
+            (BitWriter.writeBits hdr0 streamBitsFull streamLenFull).flush
+            (flush_size_writeBits_prefix (bw := hdr0)
+              (bits := streamBitsFull) (k := 3)
+              (len := streamLenFull) (hk := by omega))
+            (bitPos_lt_8_writeBits hdr0 streamBitsFull 3 (by decide))) := by
+    simpa [streamReader0, hmod3, collapsedWriter, hdr0,
+      BitWriter.readerAt, BitReader.bitIndex, BitWriter.empty] using h'
+  have hprefixReaderEq :
+      BitWriter.readerAt (BitWriter.writeBits hdr0 streamBitsFull 3)
+        (BitWriter.writeBits hdr0 streamBitsFull streamLenFull).flush
+        (flush_size_writeBits_prefix (bw := hdr0)
+          (bits := streamBitsFull) (k := 3)
+          (len := streamLenFull) (hk := by omega))
+        (bitPos_lt_8_writeBits hdr0 streamBitsFull 3 (by decide)) =
+        streamReaderHeader0 := by
+    change
+      BitWriter.readerAt (BitWriter.writeBits hdr0 streamBitsFull 3)
+        (BitWriter.writeBits hdr0 streamBitsFull streamLenFull).flush
+        (flush_size_writeBits_prefix (bw := hdr0)
+          (bits := streamBitsFull) (k := 3)
+          (len := streamLenFull) (hk := by omega))
+        (bitPos_lt_8_writeBits hdr0 streamBitsFull 3 (by decide)) =
+      BitWriter.readerAt hdrHeader collapsedWriter.flush hprefixSize hbitHeader
+    exact readerAt_eq_of_eqs
+      (hbw := hprefixWriter)
+      (hdata := by simp [collapsedWriter])
+      (hflush1 := flush_size_writeBits_prefix (bw := hdr0)
+        (bits := streamBitsFull) (k := 3)
+        (len := streamLenFull) (hk := by omega))
+      (hflush2 := hprefixSize)
+      (hbit1 := bitPos_lt_8_writeBits hdr0 streamBitsFull 3 (by decide))
+      (hbit2 := hbitHeader)
   have h'br0 : streamReader0.readBits 3 hread0_at = (5, streamReaderHeader0) := by
-    simpa [streamReader0, streamReaderHeader0, hmod3, hdr0, BitWriter.empty] using h'
+    exact h'raw.trans (by simp [hprefixReaderEq])
   have h'br : streamReader0.readBits 3 hread0_at = (5, streamReaderHeader) := by
     simpa [hreaderEq] using h'br0
   have hirrel : streamReader0.readBits 3 hread0 = streamReader0.readBits 3 hread0_at :=
@@ -346,12 +392,14 @@ private lemma dynamicPayloadTrace_dynamicStream_spec (raw : ByteArray) :
   have htrace :
       DynamicPayloadTrace spec (raw.size + 1) payloadReaderStart ByteArray.empty
         streamReaderFinal raw := by
-    simpa [payloadReaderStart, streamReaderFinal, payloadBits, hrawOut] using
+    simpa [payloadReaderStart, streamReaderFinal, streamWriter, payloadBits,
+      dynamicStreamPayloadBits, hrawOut] using
       (fixedLitBitsEob_trace_spec
         (data := raw.data) (i := 0) (bw := bwTables) (spec := spec)
         (out := ByteArray.empty) hbitTables hcurTables hlit)
   have hlen_ge : raw.size + 1 ≤ payloadBits.2 := by
-    simpa [payloadBits] using (fixedLitBitsEob_len_ge (data := raw.data) (i := 0))
+    simpa [payloadBits, dynamicStreamPayloadBits] using
+      (fixedLitBitsEob_len_ge (data := raw.data) (i := 0))
   have hlen_le : payloadBits.2 ≤ payloadReaderStart.data.size * 8 := by
     have hlen_le_bitcount : payloadBits.2 ≤ streamWriter.bitCount := by
       set_option linter.unnecessarySimpa false in
@@ -360,13 +408,13 @@ private lemma dynamicPayloadTrace_dynamicStream_spec (raw : ByteArray) :
     have hbitcount_le : streamWriter.bitCount ≤ streamWriter.flush.size * 8 := by
       exact flush_size_mul_ge_bitCount (bw := streamWriter) (hbit := streamWriter.hbit)
     have hlen_le' : payloadBits.2 ≤ streamWriter.flush.size * 8 := le_trans hlen_le_bitcount hbitcount_le
-    simpa [payloadReaderStart] using hlen_le'
+    simpa [payloadReaderStart, BitWriter.readerAt] using hlen_le'
   have hsteps : raw.size + 1 ≤ payloadReaderStart.data.size * 8 + 1 := by
     omega
   refine ⟨spec, hspec, hlit, hdist, ?_, hsteps⟩
   simpa [dynamicStreamWriter, dynamicStreamPayloadReaderStart, dynamicStreamPayloadBits,
-    dynamicStreamBwTables, payloadReaderStart, streamReaderFinal, payloadBits, bwTables,
-    streamWriter] using htrace
+    dynamicStreamBwTables, dynamicStreamHdrHeader, dynamicStreamHdr0, payloadReaderStart,
+    streamReaderFinal, payloadBits, bwTables, streamWriter] using htrace
 
 set_option maxRecDepth 400000 in
 set_option maxHeartbeats 6000000 in
@@ -436,7 +484,8 @@ lemma zlibDecompressLoop_deflateDynamicFast_stream (raw : ByteArray) :
       streamReader0.readBits
           3
           (by
-            simpa [streamReader0, BitWriter.readerAt, hdr0, BitWriter.empty] using
+            simpa [streamReader0, collapsedWriter, BitWriter.readerAt,
+              BitReader.bitIndex, hdr0, BitWriter.empty] using
               (readerAt_writeBits_bound (bw := hdr0) (bits := streamBitsFull) (len := streamLenFull)
                 (k := 3) (hk := by omega) (hbit := by decide))) =
         (5, streamReaderHeader) := by
@@ -447,7 +496,8 @@ lemma zlibDecompressLoop_deflateDynamicFast_stream (raw : ByteArray) :
     (bitPos_lt_8_writeBits bwTables payloadBits.1 payloadBits.2 hbitTables)
   obtain ⟨spec, hspec, _hlit, _hdist, htrace, hsteps⟩ := dynamicPayloadTrace_dynamicStream_spec raw
   have hcond : streamReader0.bitIndex + 3 ≤ streamReader0.data.size * 8 := by
-    simpa [streamReader0, BitWriter.readerAt, hdr0, BitWriter.empty] using
+    simpa [streamReader0, collapsedWriter, BitWriter.readerAt, BitReader.bitIndex,
+      hdr0, BitWriter.empty] using
       (readerAt_writeBits_bound (bw := hdr0) (bits := streamBitsFull) (len := streamLenFull)
         (k := 3) (hk := by omega) (hbit := by decide))
   change zlibDecompressLoopFuel (streamReader0.data.size * 8 + 1) streamReader0 ByteArray.empty =
@@ -464,10 +514,13 @@ lemma zlibDecompressLoop_deflateDynamicFast_stream (raw : ByteArray) :
       (by
         simpa [payloadBits, hdr0, hdrHeader, bwTables, streamWriter, payloadReaderStart,
           streamReaderFinal, dynamicStreamWriter, dynamicStreamPayloadReaderStart,
-          dynamicStreamPayloadBits, dynamicStreamBwTables] using htrace)
+          dynamicStreamPayloadBits, dynamicStreamBwTables, dynamicStreamHdrHeader,
+          dynamicStreamHdr0] using htrace)
       (by
         simpa [payloadBits, hdr0, hdrHeader, bwTables, streamWriter, payloadReaderStart,
-          dynamicStreamPayloadReaderStart, dynamicStreamPayloadBits, dynamicStreamBwTables] using hsteps))
+          dynamicStreamPayloadReaderStart, dynamicStreamPayloadBits, dynamicStreamWriter,
+          dynamicStreamBwTables, dynamicStreamHdrHeader, dynamicStreamHdr0,
+          BitWriter.readerAt] using hsteps))
 
 end Lemmas
 

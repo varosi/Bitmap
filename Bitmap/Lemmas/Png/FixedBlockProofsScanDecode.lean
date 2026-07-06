@@ -386,8 +386,8 @@ private lemma literalThenMatch3Dist1MidReader_eq_match3Dist1StartReader
     · simpa [hbw1] using
         congrArg BitWriter.flush
           (congrArg (fun bw' => BitWriter.writeBits bw' chunkBits.1 chunkBits.2) hbw1)
-    · simpa using congrArg (fun bw' => bw'.out.size) hbw1
-    · simpa using congrArg BitWriter.bitPos hbw1
+    · simpa [BitWriter.readerAt] using congrArg (fun bw' => bw'.out.size) hbw1
+    · simpa [BitWriter.readerAt] using congrArg BitWriter.bitPos hbw1
   calc
     literalThenMatch3Dist1MidReader bw b tailBits tailLen hbit
         = BitWriter.readerAt bw1 (BitWriter.writeBits bw1 chunkBits.1 chunkBits.2).flush

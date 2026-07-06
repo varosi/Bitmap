@@ -62,6 +62,7 @@ lemma writeFixedLiteralFast_curClearAbove
     (tailBits := 0) (tailLen := 0)] at hcur'
   exact hcur'
 
+set_option maxRecDepth 400000 in
 lemma literalTailStartReader_eq_runtimeStartReader
     (bw : BitWriter) (b : UInt8) (tailBits tailLen : Nat) (hbit : bw.bitPos < 8) :
     literalTailStartReader bw b tailBits tailLen hbit =
@@ -73,9 +74,15 @@ lemma literalTailStartReader_eq_runtimeStartReader
       literalTailWriter bw b tailBits tailLen = BitWriter.writeFixedLiteralFast bw b :=
     literalTailWriter_eq_writeFixedLiteralFast bw b tailBits tailLen
   apply BitReader.ext
-  · exact congrArg (fun bwTail => (BitWriter.writeBits bwTail tailBits tailLen).flush) hwriter
-  · simpa using congrArg (fun bwTail => bwTail.out.size) hwriter
-  · simpa using congrArg BitWriter.bitPos hwriter
+  · change (BitWriter.writeBits (literalTailWriter bw b tailBits tailLen) tailBits tailLen).flush =
+        (BitWriter.writeBits (BitWriter.writeFixedLiteralFast bw b) tailBits tailLen).flush
+    exact congrArg (fun bwTail => (BitWriter.writeBits bwTail tailBits tailLen).flush) hwriter
+  · change (literalTailWriter bw b tailBits tailLen).out.size =
+        (BitWriter.writeFixedLiteralFast bw b).out.size
+    exact congrArg (fun bwTail => bwTail.out.size) hwriter
+  · change (literalTailWriter bw b tailBits tailLen).bitPos =
+        (BitWriter.writeFixedLiteralFast bw b).bitPos
+    exact congrArg BitWriter.bitPos hwriter
 
 lemma writeFixedLiteralRepeatFast_bitPos_lt
     (bw : BitWriter) (b : UInt8) (n : Nat) (hbit : bw.bitPos < 8) :
@@ -220,7 +227,8 @@ lemma dist1ChunkLoopTailLitsTailStartReader_eq_runtimeStartReader
     dsimp [symBits]
     simpa using (reverseBits_lt codeLen.1 codeLen.2)
   have hextraBitsLt : extraBits < 2 ^ extraLen := by
-    simpa [chunkInfo, sym, extraBits, extraLen] using hinfo.2.2.2.2
+    simpa [chunkInfo, sym, extraBits, extraLen] using
+      fixedLenMatchInfo_extraBits_lt chunk hchunk.1 hchunk.2
   have hbw1 :
       bw1 = BitWriter.writeBits bw symBits codeLen.2 := by
     dsimp [bw1, bitsTot]
@@ -273,7 +281,7 @@ lemma dist1ChunkLoopTailLitsTailStartReader_eq_runtimeStartReader
           BitWriter.readerAt bwChunk
             (BitWriter.writeBits bwChunk tailBits tailLen).flush
             (flush_size_writeBits_le bwChunk tailBits tailLen) hbitChunk := by
-            simpa using literalRepeatTailStartReader_eq_runtimeStartReader
+            simpa [BitWriter.writeFixedLiteralRepeatFast, BitWriter.readerAt] using literalRepeatTailStartReader_eq_runtimeStartReader
               bwChunk b 0 tailBits tailLen hbitChunk
       _ =
           BitWriter.readerAt (bwChunk.writeFixedMatchDist1ChunksFast rem')
@@ -375,6 +383,7 @@ lemma decodeFixedBlockFuelFast_dist1Run_readerAt_writeBits_tail
       decodeFixedBlockFuelFast (fuel + dist1ChunkLoopSteps remaining + remLit)
         (literalTailStartReader bw b chunkBits.1 chunkBits.2 hbit) (out.push b) := by
           simpa [dist1RunBitsTail, dist1RunSteps, remLit, litTail, chunkBits,
+            literalRepeatBitsTail_succ, literalRepeatBitsTail_zero,
             Nat.add_assoc, Nat.add_left_comm, Nat.add_comm] using hstep
     _ =
       decodeFixedBlockFuelFast (fuel + dist1ChunkLoopSteps remaining + remLit)
@@ -753,7 +762,8 @@ lemma dist1ChunkLoopBitsTail_len_ge_steps
           have hinfo := fixedLenMatchInfo_spec_get! chunk hchunk.1 hchunk.2
           have hsymLt : sym < 288 := by
             have hsymLe : sym ≤ 285 := by
-              simpa [info, sym] using hinfo.2.1
+              simpa [info, sym] using
+                fixedLenMatchInfo_sym_le_285 chunk hchunk.1 hchunk.2
             omega
           have hrest' : dist1ChunkLoopSteps rem' + tailLen ≤ rest.2 := by
             simpa [rest] using hrest
@@ -1403,7 +1413,7 @@ lemma decodeFixedBlockFast_fixedRunFastBitsEob_readerAt_writeBits
       exact Nat.le_add_left (fixedRunFastBitsEob data i).2 bw.bitCount
     have hflush : bwAll.bitCount ≤ bwAll.flush.size * 8 := by
       exact flush_size_mul_ge_bitCount (bw := bwAll) hbitAll
-    simpa [br0, bwAll, fixedRunStartReader] using le_trans hcount hflush
+    simpa [br0, bwAll, fixedRunStartReader, BitWriter.readerAt] using le_trans hcount hflush
   have hstepsLe : fixedRunFastStepsEob data i ≤ br0.data.size * 8 + 1 := by
     exact le_trans hstepsBits (le_trans hbitsLe (Nat.le_add_right _ _))
   let fuel := br0.data.size * 8 + 1 - fixedRunFastStepsEob data i

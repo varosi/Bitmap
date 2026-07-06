@@ -247,6 +247,7 @@ lemma byteArrayFromArray_empty (data : Array UInt8) :
     have hget :=
       byteArrayFromArray_get_ge (data := data) (i := 0) (out := ByteArray.empty)
         (j := i) (hj := by simpa using hi1) (hge := by simp)
+    change (byteArrayFromArray data 0 ByteArray.empty)[i] = data[i]
     simpa using hget
 
 -- Bit encoding for a literal sequence followed by EOB.
@@ -538,7 +539,7 @@ lemma decodeFixedLiteralBlock_fixedLitBitsEob (data : Array UInt8) (i : Nat) (bw
     have hbitcount_le : bw'.bitCount ≤ bw'.flush.size * 8 := by
       exact (flush_size_mul_ge_bitCount (bw := bw') (hbit := bw'.hbit))
     have hlen_le' : len ≤ bw'.flush.size * 8 := le_trans hlen_le_bitcount hbitcount_le
-    simpa [br] using hlen_le'
+    simpa [br, BitWriter.readerAt] using hlen_le'
   have hfuel : data.size - i + 1 ≤ br.data.size * 8 := le_trans hlen_ge hlen_le
   have hmain :=
     hk (data.size - i) i bw out hbit hcur rfl (br.data.size * 8) hfuel

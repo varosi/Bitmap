@@ -12,7 +12,7 @@ def dynamicStreamBr14 (raw : ByteArray) : BitReader :=
       have hk : 14 ≤ dynamicStreamLenTot raw := by
         simpa [dynamicStreamLenTot, dynamicStreamPayloadBits] using
           dynamicHeaderReadLen_ge_14 (dynamicStreamPayloadBits raw).2
-      simpa [dynamicStreamBwPrime, dynamicStreamLenTot] using
+      simpa [dynamicStreamBwPrime, dynamicStreamBw14, dynamicStreamLenTot] using
         flush_size_writeBits_prefix dynamicStreamHdrHeader (dynamicStreamBitsTot raw) 14
           (dynamicStreamLenTot raw) hk)
     (by

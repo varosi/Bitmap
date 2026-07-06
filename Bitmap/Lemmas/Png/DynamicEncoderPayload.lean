@@ -510,6 +510,33 @@ lemma mkHuffman_generatedDynamicLitLenLengths_eq
   | some table =>
       rfl
 
+/-- Unfolds the generated literal/length `mkHuffman` result to the concrete
+nine-bit table builder shape used by row-size and lookup proofs. -/
+lemma mkHuffman_generatedDynamicLitLenLengths_unfold_eq
+    (tokens : Array Png.DeflateToken) :
+    let lengths :=
+      Png.generatedDynamicLitLenLengths (Png.litLenSymbolFreqs tokens)
+    let count := Png.countCodeLengthsAux lengths 0 (Array.replicate 10 0)
+    let nextCode := (Png.nextCodesAux count 9 1 0 (Array.replicate 10 0)).2
+    let init := Png.huffmanEmptyTable 9
+    (match Png.fillHuffmanTableAux lengths 0 nextCode init with
+    | none => none
+    | some table => some ({ maxLen := 9, table := table } : Png.Huffman)) =
+      some (generatedDynamicLitLenTable tokens) := by
+  intro lengths count nextCode init
+  have hmk :
+      Png.mkHuffman lengths =
+        some (generatedDynamicLitLenTable tokens) := by
+    simpa [lengths] using mkHuffman_generatedDynamicLitLenLengths_eq tokens
+  have hmax :
+      Png.maxCodeLenAux lengths 0 0 =
+        Png.generatedDynamicLitLenCodeLen := by
+    simpa [lengths] using
+      maxCodeLenAux_generatedDynamicLitLenLengths_eq_codeLen tokens
+  unfold Png.mkHuffman at hmk
+  simp [hmax, Png.generatedDynamicLitLenCodeLen, count, nextCode, init] at hmk
+  exact hmk
+
 /-- The generated literal/length table has the uniform nine-bit maximum.
 Payload decode proofs use this to unfold `Huffman.decode` with fixed fuel. -/
 lemma generatedDynamicLitLenTable_maxLen
@@ -534,8 +561,8 @@ lemma generatedDynamicLitLenTable_maxLen
       | none => none
       | some table => some ({ maxLen := 9, table := table } : Png.Huffman)) =
         some (generatedDynamicLitLenTable tokens) := by
-    simpa [Png.mkHuffman, lengths, hmax, Png.generatedDynamicLitLenCodeLen,
-      count, nextCode, init] using hmk
+    simpa [lengths, count, nextCode, init] using
+      mkHuffman_generatedDynamicLitLenLengths_unfold_eq tokens
   cases hfill : Png.fillHuffmanTableAux lengths 0 nextCode init with
   | none =>
       simp [hfill] at hmk'
@@ -567,8 +594,8 @@ lemma generatedDynamicLitLenTable_table_size
       | none => none
       | some table => some ({ maxLen := 9, table := table } : Png.Huffman)) =
         some (generatedDynamicLitLenTable tokens) := by
-    simpa [Png.mkHuffman, lengths, hmax, Png.generatedDynamicLitLenCodeLen,
-      count, nextCode, init] using hmk
+    simpa [lengths, count, nextCode, init] using
+      mkHuffman_generatedDynamicLitLenLengths_unfold_eq tokens
   cases hfill : Png.fillHuffmanTableAux lengths 0 nextCode init with
   | none =>
       simp [hfill] at hmk'
@@ -605,8 +632,8 @@ lemma generatedDynamicLitLenTable_row9_size
       | none => none
       | some table => some ({ maxLen := 9, table := table } : Png.Huffman)) =
         some (generatedDynamicLitLenTable tokens) := by
-    simpa [Png.mkHuffman, lengths, hmax, Png.generatedDynamicLitLenCodeLen,
-      count, nextCode, init] using hmk
+    simpa [lengths, count, nextCode, init] using
+      mkHuffman_generatedDynamicLitLenLengths_unfold_eq tokens
   cases hfill : Png.fillHuffmanTableAux lengths 0 nextCode init with
   | none =>
       simp [hfill] at hmk'
@@ -650,8 +677,8 @@ lemma generatedDynamicLitLenTable_short_row_get_none
       | none => none
       | some table => some ({ maxLen := 9, table := table } : Png.Huffman)) =
         some (generatedDynamicLitLenTable tokens) := by
-    simpa [Png.mkHuffman, lengths, hmax, Png.generatedDynamicLitLenCodeLen,
-      count, nextCode, init] using hmk
+    simpa [lengths, count, nextCode, init] using
+      mkHuffman_generatedDynamicLitLenLengths_unfold_eq tokens
   cases hfill : Png.fillHuffmanTableAux lengths 0 nextCode init with
   | none =>
       simp [hfill] at hmk'
@@ -717,8 +744,8 @@ lemma generatedDynamicLitLenTable_short_row_size
       | none => none
       | some table => some ({ maxLen := 9, table := table } : Png.Huffman)) =
         some (generatedDynamicLitLenTable tokens) := by
-    simpa [Png.mkHuffman, lengths, hmax, Png.generatedDynamicLitLenCodeLen,
-      count, nextCode, init] using hmk
+    simpa [lengths, count, nextCode, init] using
+      mkHuffman_generatedDynamicLitLenLengths_unfold_eq tokens
   cases hfill : Png.fillHuffmanTableAux lengths 0 nextCode init with
   | none =>
       simp [hfill] at hmk'
@@ -790,8 +817,8 @@ lemma generatedDynamicLitLenTable_lookup_generated_code_of_pos
       | none => none
       | some table => some ({ maxLen := 9, table := table } : Png.Huffman)) =
         some (generatedDynamicLitLenTable tokens) := by
-    simpa [Png.mkHuffman, lengths, hmax, Png.generatedDynamicLitLenCodeLen,
-      count, nextCode0, nextCode, init] using hmk
+    simpa [lengths, count, nextCode0, nextCode, init] using
+      mkHuffman_generatedDynamicLitLenLengths_unfold_eq tokens
   cases hfill : Png.fillHuffmanTableAux lengths 0 nextCode init with
   | none =>
       simp [hfill] at hmk'
@@ -1234,8 +1261,10 @@ lemma generatedDynamicLitLenTable_decode_readerAt_writeBits_core
     simpa [br8, bw', hsplit8, lenTot] using
       (Png.readerAt_writeBits_bound (bw := bw8) (bits := bitsTot >>> 8)
         (len := lenTot - 8) (k := 1) (by omega) hbit8)
+  have hbw1 : Png.BitWriter.writeBit bw (bitsTot % 2) = bw1 := by
+    simp [bw1, Png.BitWriter.writeBits]
   have hread0 : br0.readBit = (bitsTot % 2, br1) := by
-    simpa [br0, br1, bw', lenTot] using
+    simpa [br0, br1, bw', bw1, hbw1, lenTot] using
       (Png.readBit_readerAt_writeBits (bw := bw) (bits := bitsTot)
         (len := lenTot) hbit hcur (by omega))
   have hbw2 : Png.BitWriter.writeBit bw1 ((bitsTot >>> 1) % 2) = bw2 := by
@@ -1246,7 +1275,7 @@ lemma generatedDynamicLitLenTable_decode_readerAt_writeBits_core
         (bw := bw1) (bits := bitsTot >>> 1) (len := lenTot - 1)
         hbit1 hcur1 (by omega))
   have hshift2 : bitsTot >>> 1 >>> 1 = bitsTot >>> 2 := by
-    simpa using (Nat.shiftRight_add bitsTot 1 1)
+    simpa using (Nat.shiftRight_add bitsTot 1 1).symm
   have hbw3 : Png.BitWriter.writeBit bw2 ((bitsTot >>> 2) % 2) = bw3 := by
     simp [bw2, bw3, Png.BitWriter.writeBits, hshift2]
   have hread2 : br2.readBit = ((bitsTot >>> 2) % 2, br3) := by
@@ -1257,7 +1286,7 @@ lemma generatedDynamicLitLenTable_decode_readerAt_writeBits_core
   have hshift3 : bitsTot >>> 1 >>> 1 >>> 1 = bitsTot >>> 3 := by
     calc
       bitsTot >>> 1 >>> 1 >>> 1 = bitsTot >>> 2 >>> 1 := by simp [hshift2]
-      _ = bitsTot >>> 3 := by simpa using (Nat.shiftRight_add bitsTot 2 1)
+      _ = bitsTot >>> 3 := by simpa using (Nat.shiftRight_add bitsTot 2 1).symm
   have hbw4 : Png.BitWriter.writeBit bw3 ((bitsTot >>> 3) % 2) = bw4 := by
     simp [bw3, bw4, Png.BitWriter.writeBits, hshift3]
   have hread3 : br3.readBit = ((bitsTot >>> 3) % 2, br4) := by
@@ -1268,7 +1297,7 @@ lemma generatedDynamicLitLenTable_decode_readerAt_writeBits_core
   have hshift4 : bitsTot >>> 1 >>> 1 >>> 1 >>> 1 = bitsTot >>> 4 := by
     calc
       bitsTot >>> 1 >>> 1 >>> 1 >>> 1 = bitsTot >>> 3 >>> 1 := by simp [hshift3]
-      _ = bitsTot >>> 4 := by simpa using (Nat.shiftRight_add bitsTot 3 1)
+      _ = bitsTot >>> 4 := by simpa using (Nat.shiftRight_add bitsTot 3 1).symm
   have hbw5 : Png.BitWriter.writeBit bw4 ((bitsTot >>> 4) % 2) = bw5 := by
     simp [bw4, bw5, Png.BitWriter.writeBits, hshift4]
   have hread4 : br4.readBit = ((bitsTot >>> 4) % 2, br5) := by
@@ -1280,7 +1309,7 @@ lemma generatedDynamicLitLenTable_decode_readerAt_writeBits_core
     calc
       bitsTot >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 = bitsTot >>> 4 >>> 1 := by
         simp [hshift4]
-      _ = bitsTot >>> 5 := by simpa using (Nat.shiftRight_add bitsTot 4 1)
+      _ = bitsTot >>> 5 := by simpa using (Nat.shiftRight_add bitsTot 4 1).symm
   have hbw6 : Png.BitWriter.writeBit bw5 ((bitsTot >>> 5) % 2) = bw6 := by
     simp [bw5, bw6, Png.BitWriter.writeBits, hshift5]
   have hread5 : br5.readBit = ((bitsTot >>> 5) % 2, br6) := by
@@ -1293,7 +1322,7 @@ lemma generatedDynamicLitLenTable_decode_readerAt_writeBits_core
     calc
       bitsTot >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 = bitsTot >>> 5 >>> 1 := by
         simp [hshift5]
-      _ = bitsTot >>> 6 := by simpa using (Nat.shiftRight_add bitsTot 5 1)
+      _ = bitsTot >>> 6 := by simpa using (Nat.shiftRight_add bitsTot 5 1).symm
   have hbw7 : Png.BitWriter.writeBit bw6 ((bitsTot >>> 6) % 2) = bw7 := by
     simp [bw6, bw7, Png.BitWriter.writeBits, hshift6]
   have hread6 : br6.readBit = ((bitsTot >>> 6) % 2, br7) := by
@@ -1307,7 +1336,7 @@ lemma generatedDynamicLitLenTable_decode_readerAt_writeBits_core
       bitsTot >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 =
           bitsTot >>> 6 >>> 1 := by
         simp [hshift6]
-      _ = bitsTot >>> 7 := by simpa using (Nat.shiftRight_add bitsTot 6 1)
+      _ = bitsTot >>> 7 := by simpa using (Nat.shiftRight_add bitsTot 6 1).symm
   have hbw8 : Png.BitWriter.writeBit bw7 ((bitsTot >>> 7) % 2) = bw8 := by
     simp [bw7, bw8, Png.BitWriter.writeBits, hshift7]
   have hread7 : br7.readBit = ((bitsTot >>> 7) % 2, br8) := by
@@ -1322,7 +1351,7 @@ lemma generatedDynamicLitLenTable_decode_readerAt_writeBits_core
       bitsTot >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 >>> 1 =
           bitsTot >>> 7 >>> 1 := by
         simp [hshift7]
-      _ = bitsTot >>> 8 := by simpa using (Nat.shiftRight_add bitsTot 7 1)
+      _ = bitsTot >>> 8 := by simpa using (Nat.shiftRight_add bitsTot 7 1).symm
   have hbw9 : Png.BitWriter.writeBit bw8 ((bitsTot >>> 8) % 2) = bw9 := by
     simp [bw8, bw9, Png.BitWriter.writeBits, hshift8]
   have hread8 : br8.readBit = ((bitsTot >>> 8) % 2, br9) := by
@@ -1961,8 +1990,10 @@ lemma generatedDynamicDistMatchTable_decode_zero_readerAt_writeBits
         (k := 1) (by omega) hbit)
   have hbr0 : br0.bytePos < br0.data.size := by
     exact Png.bytePos_lt_of_bitIndex_lt_dataBits br0 (by omega)
+  have hbw1 : Png.BitWriter.writeBit bw (bitsTot % 2) = bw1 := by
+    simp [bw1, Png.BitWriter.writeBits]
   have hread0 : br0.readBit = (bitsTot % 2, br1) := by
-    simpa [br0, br1, bw', bw1, lenTot] using
+    simpa [br0, br1, bw', bw1, hbw1, lenTot] using
       (Png.readBit_readerAt_writeBits (bw := bw) (bits := bitsTot) (len := lenTot)
         hbit hcur (by omega))
   have htable1 : 1 < generatedDynamicDistMatchTable.table.size := by
@@ -2571,7 +2602,8 @@ lemma dynamicPayloadEobBits_generated_lt_codeSpace
   intro litLenCodes
   have hbits := generatedDynamicLitLenCodes_eob_bits_lt_codeSpace tokens
   have hlen := dynamicPayloadEobBitLen_generated_eq_nine tokens
-  simpa [dynamicPayloadEobBits, litLenCodes, hlen] using hbits
+  simpa [dynamicPayloadEobBits, litLenCodes, hlen,
+    Png.generatedDynamicLitLenCodeLen] using hbits
 
 /-- Generated literal payload bits fit in the literal token width. This is the
 literal branch's code-space guard for payload writer replay. -/
@@ -2597,7 +2629,7 @@ lemma dynamicPayloadTokenBits_generated_literal_lt_codeSpace_at
     generatedDynamicLitLenCodes_literal_len_eq_nine_at
       tokens target b htarget ht
   simpa [dynamicPayloadTokenBits, dynamicPayloadTokenBitLen,
-    litLenCodes, distCodes, hcodeLen] using hbits
+    litLenCodes, distCodes, hcodeLen, Png.generatedDynamicLitLenCodeLen] using hbits
 
 /-- Generated match payload bits fit in the match token width. This combines
 the generated nine-bit length symbol, DEFLATE length-extra bits, and generated
@@ -3206,7 +3238,7 @@ lemma generatedDynamicPayloadEob_finish_readerAt_writeBits
       hlen] using h
   exact Png.DynamicPayloadFinish.eob
     (spec := spec) (br := br0) (out := out)
-    (sym := 256) (br' := br') (by simpa [spec] using hdecode)
+    (sym := 256) (br' := br') (by simpa [spec, generatedDynamicTableSpec] using hdecode)
     (by decide) (by decide)
 
 /-- The empty generated payload-token list replays as a one-step trace that
@@ -3292,7 +3324,7 @@ lemma generatedDynamicPayloadLiteral_transition_readerAt_writeBits
   have hsym : b.toNat < 256 := UInt8.toNat_lt b
   exact Png.DynamicPayloadTransition.literal
     (spec := spec) (br := br0) (out := out)
-    (sym := b.toNat) (br' := br') (by simpa [spec] using hdecode) hsym
+    (sym := b.toNat) (br' := br') (by simpa [spec, generatedDynamicTableSpec] using hdecode) hsym
 
 /-- Builds a generic dynamic copy transition from already-proved match
 decodes. This isolates the semantic `DynamicPayloadTransition.copy`
@@ -3519,8 +3551,7 @@ lemma generatedDynamicPayloadMatch_afterSym_transition_readerAt_writeBits
         using hdecodeDistSym0
     refine ⟨hdist0, hbitsD0, ?_, ?_⟩
     · simpa [hbr2Eq] using hdecodeDistSym0'
-    · change Png.decodeDistance 0 brAfter hdist0 hbitsD0 = (1, brAfter)
-      exact hdecodeDist0
+    · exact hdecodeDist0
   have hcopy :
       Png.copyDistance out 1 matchLen =
         some (Png.pushRepeat out (out.get! (out.size - 1)) matchLen) :=
@@ -3986,7 +4017,7 @@ lemma generatedDynamicPayloadTraceList_readerAt_writeBits
               Png.DynamicPayloadTransition spec br0 out brMid
                 (out.push b) := by
             simpa [spec, litLenCodes, distCodes, tokenBits, tokenLen,
-              tailBits, tailLen, bits, len, bwAll, br0, brMid,
+              tailBits, tailLen, bits, len, bwAll, br0, brMid, bwMid,
               dynamicPayloadStreamBits, dynamicPayloadStreamLen] using hstep
           have htailValid :
               DynamicPayloadTraceOutputValid (out.push b) tokens := by
@@ -4045,7 +4076,7 @@ lemma generatedDynamicPayloadTraceList_readerAt_writeBits
           have hstep' :
               Png.DynamicPayloadTransition spec br0 out brMid out' := by
             simpa [spec, litLenCodes, distCodes, tokenBits, tokenLen,
-              tailBits, tailLen, bits, len, bwAll, br0, brMid, out',
+              tailBits, tailLen, bits, len, bwAll, br0, brMid, bwMid, out',
               dynamicPayloadStreamBits, dynamicPayloadStreamLen] using hstep
           have htailValid :
               DynamicPayloadTraceOutputValid out' tokens := by
@@ -4265,18 +4296,37 @@ lemma finalDynamicReader0_readBits3
       (Png.flush_size_writeBits_le hdrHeader streamBits streamLen)
       hbitHeader
     let hread0 : streamReader0.bitIndex + 3 ≤ streamReader0.data.size * 8 := by
-      simpa [streamReader0, Png.BitWriter.readerAt, hdr0, Png.BitWriter.empty] using
+      simpa [streamReader0, collapsedWriter, Png.BitWriter.readerAt, hdr0,
+        Png.BitWriter.empty] using
         (Png.readerAt_writeBits_bound (bw := hdr0) (bits := streamBitsFull)
           (len := streamLenFull) (k := 3) (hk := by omega)
           (hbit := by decide))
     streamReader0.readBits 3 hread0 = (5, streamReaderHeader) := by
   intro hdr0 hdrHeader streamBitsFull streamLenFull collapsedWriter
     hbitHeader streamReader0 streamReaderHeader hread0
+  have hmod3 : streamBitsFull % 2 ^ 3 = 5 := by
+    have h := Png.mod_two_pow_or_shift
+      (a := 5) (b := streamBits) (k := 3) (len := 3) (by decide)
+    simpa [streamBitsFull] using h
+  have hprefixWriter :
+      Png.BitWriter.writeBits hdr0 streamBitsFull 3 = hdrHeader := by
+    calc
+      Png.BitWriter.writeBits hdr0 streamBitsFull 3 =
+          Png.BitWriter.writeBits hdr0 (streamBitsFull % 2 ^ 3) 3 := by
+            exact Png.writeBits_mod hdr0 streamBitsFull 3
+      _ = hdrHeader := by
+            simpa [hdrHeader, hmod3]
+  have hprefixSizeFull :
+      (Png.BitWriter.writeBits hdr0 streamBitsFull 3).flush.size ≤
+        collapsedWriter.flush.size := by
+    simpa [collapsedWriter, streamLenFull] using
+      (Png.flush_size_writeBits_prefix (bw := hdr0) (bits := streamBitsFull)
+        (k := 3) (len := streamLenFull) (hk := by omega))
+  have hprefixSize :
+      hdrHeader.flush.size ≤ collapsedWriter.flush.size := by
+    simpa [hprefixWriter] using hprefixSizeFull
   let streamReaderHeader0 := Png.BitWriter.readerAt hdrHeader collapsedWriter.flush
-      (by
-        simpa [collapsedWriter, hdrHeader, streamBitsFull, streamLenFull] using
-          (Png.flush_size_writeBits_prefix (bw := hdr0) (bits := streamBitsFull)
-            (k := 3) (len := streamLenFull) (hk := by omega)))
+      hprefixSize
       hbitHeader
   have hstream :
       collapsedWriter = Png.BitWriter.writeBits hdrHeader streamBits streamLen := by
@@ -4290,11 +4340,7 @@ lemma finalDynamicReader0_readBits3
   have hreaderEq : streamReaderHeader0 = streamReaderHeader := by
     change
       Png.BitWriter.readerAt hdrHeader collapsedWriter.flush
-        (by
-          simpa [collapsedWriter, hdrHeader, streamBitsFull, streamLenFull] using
-            (Png.flush_size_writeBits_prefix (bw := hdr0)
-              (bits := streamBitsFull) (k := 3)
-              (len := streamLenFull) (hk := by omega)))
+        hprefixSize
         hbitHeader =
       Png.BitWriter.readerAt hdrHeader
         (Png.BitWriter.writeBits hdrHeader streamBits streamLen).flush
@@ -4302,11 +4348,7 @@ lemma finalDynamicReader0_readBits3
         hbitHeader
     exact readerAt_eq_of_eqs
       (hbw := rfl) (hdata := hstreamData)
-      (hflush1 := by
-        simpa [collapsedWriter, hdrHeader, streamBitsFull, streamLenFull] using
-          (Png.flush_size_writeBits_prefix (bw := hdr0)
-            (bits := streamBitsFull) (k := 3)
-            (len := streamLenFull) (hk := by omega)))
+      (hflush1 := hprefixSize)
       (hflush2 := Png.flush_size_writeBits_le hdrHeader streamBits streamLen)
       (hbit1 := hbitHeader) (hbit2 := hbitHeader)
   have hread0_at :
@@ -4316,27 +4358,60 @@ lemma finalDynamicReader0_readBits3
         (Png.BitWriter.readerAt hdr0 collapsedWriter.flush
           (Png.flush_size_writeBits_le hdr0 streamBitsFull streamLenFull)
           (by decide)).data.size * 8 := by
-    simpa using
+    simpa [collapsedWriter, Png.BitWriter.readerAt, Png.BitReader.bitIndex] using
       (Png.readerAt_writeBits_bound (bw := hdr0) (bits := streamBitsFull)
         (len := streamLenFull) (k := 3) (hk := by omega)
         (hbit := by decide))
   have hread0' :
       streamReader0.bitIndex + 3 ≤ streamReader0.data.size * 8 := by
-    simpa [streamReader0, Png.BitWriter.readerAt, hdr0, Png.BitWriter.empty]
+    simpa [streamReader0, collapsedWriter, Png.BitWriter.readerAt, hdr0,
+      Png.BitWriter.empty]
       using hread0_at
-  have hmod3 : streamBitsFull % 2 ^ 3 = 5 := by
-    have h := Png.mod_two_pow_or_shift
-      (a := 5) (b := streamBits) (k := 3) (len := 3) (by decide)
-    simpa [streamBitsFull] using h
   have hprefix :=
     Png.readBits_readerAt_writeBits_prefix
       (bw := hdr0) (bits := streamBitsFull) (len := streamLenFull)
       (k := 3) (hk := by omega) (hbit := by decide)
       (hcur := Png.curClearAbove_empty) (hread := hread0_at)
+  have hprefixRaw :
+      streamReader0.readBits 3 hread0_at =
+        (5,
+          Png.BitWriter.readerAt (Png.BitWriter.writeBits hdr0 streamBitsFull 3)
+            (Png.BitWriter.writeBits hdr0 streamBitsFull streamLenFull).flush
+            (Png.flush_size_writeBits_prefix (bw := hdr0)
+              (bits := streamBitsFull) (k := 3)
+              (len := streamLenFull) (hk := by omega))
+            (Png.bitPos_lt_8_writeBits hdr0 streamBitsFull 3 (by decide))) := by
+    simpa [streamReader0, hmod3, collapsedWriter, hdr0,
+      Png.BitWriter.readerAt, Png.BitReader.bitIndex, Png.BitWriter.empty]
+      using hprefix
+  have hprefixReaderEq :
+      Png.BitWriter.readerAt (Png.BitWriter.writeBits hdr0 streamBitsFull 3)
+        (Png.BitWriter.writeBits hdr0 streamBitsFull streamLenFull).flush
+        (Png.flush_size_writeBits_prefix (bw := hdr0)
+          (bits := streamBitsFull) (k := 3)
+          (len := streamLenFull) (hk := by omega))
+        (Png.bitPos_lt_8_writeBits hdr0 streamBitsFull 3 (by decide)) =
+        streamReaderHeader0 := by
+    change
+      Png.BitWriter.readerAt (Png.BitWriter.writeBits hdr0 streamBitsFull 3)
+        (Png.BitWriter.writeBits hdr0 streamBitsFull streamLenFull).flush
+        (Png.flush_size_writeBits_prefix (bw := hdr0)
+          (bits := streamBitsFull) (k := 3)
+          (len := streamLenFull) (hk := by omega))
+        (Png.bitPos_lt_8_writeBits hdr0 streamBitsFull 3 (by decide)) =
+      Png.BitWriter.readerAt hdrHeader collapsedWriter.flush hprefixSize hbitHeader
+    exact readerAt_eq_of_eqs
+      (hbw := hprefixWriter)
+      (hdata := by simpa [collapsedWriter])
+      (hflush1 := Png.flush_size_writeBits_prefix (bw := hdr0)
+        (bits := streamBitsFull) (k := 3)
+        (len := streamLenFull) (hk := by omega))
+      (hflush2 := hprefixSize)
+      (hbit1 := Png.bitPos_lt_8_writeBits hdr0 streamBitsFull 3 (by decide))
+      (hbit2 := hbitHeader)
   have hprefix0 :
       streamReader0.readBits 3 hread0_at = (5, streamReaderHeader0) := by
-    simpa [streamReader0, streamReaderHeader0, hmod3, hdr0,
-      Png.BitWriter.empty] using hprefix
+    exact hprefixRaw.trans (by simp [hprefixReaderEq])
   have hprefix1 :
       streamReader0.readBits 3 hread0_at = (5, streamReaderHeader) := by
     simpa [hreaderEq] using hprefix0

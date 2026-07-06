@@ -418,8 +418,8 @@ lemma writeGeneratedDynamicHeader_eq_prefix_writeBits
     writeDynamicCodeLengths_generated_eq_writeBits
       (bw := Png.BitWriter.writeBits bw prefixBits Png.generatedDynamicHeaderPrefixLen)
       (lengths := lengths) hlengths
-  simpa [Png.writeGeneratedDynamicHeader, litLenLengths, distLengths, lengths,
-    codeTokens, prefixBits] using htail
+  simpa [Png.writeGeneratedDynamicHeader, generatedDynamicHeaderCodeLengths,
+    litLenLengths, distLengths, lengths, codeTokens, prefixBits] using htail
 
 /-- The generated full-dynamic header writer is equivalent to one packed bit
 stream. This is the shape used by reader-side header replay. -/
@@ -1567,8 +1567,10 @@ lemma generatedCodeLenHuffman_decode_readerAt_writeBits_core
     exact Png.bytePos_lt_of_bitIndex_lt_dataBits br3 (by omega)
   have hbr4 : br4.bytePos < br4.data.size := by
     exact Png.bytePos_lt_of_bitIndex_lt_dataBits br4 (by omega)
+  have hbw1 : Png.BitWriter.writeBit bw (bitsTot % 2) = bw1 := by
+    simp [bw1, Png.BitWriter.writeBits]
   have hread0 : br0.readBit = (bitsTot % 2, br1) := by
-    simpa [br0, br1, bw', lenTot] using
+    simpa [br0, br1, bw1, bw', hbw1, lenTot] using
       (Png.readBit_readerAt_writeBits (bw := bw) (bits := bitsTot) (len := lenTot)
         hbit hcur (by omega))
   have hbw2 : Png.BitWriter.writeBit bw1 ((bitsTot >>> 1) % 2) = bw2 := by
@@ -1579,7 +1581,7 @@ lemma generatedCodeLenHuffman_decode_readerAt_writeBits_core
         (bw := bw1) (bits := bitsTot >>> 1) (len := lenTot - 1)
         hbit1 hcur1 (by omega))
   have hshift2 : bitsTot >>> 1 >>> 1 = bitsTot >>> 2 := by
-    simpa using (Nat.shiftRight_add bitsTot 1 1)
+    simpa using (Nat.shiftRight_add bitsTot 1 1).symm
   have hbw3 : Png.BitWriter.writeBit bw2 ((bitsTot >>> 2) % 2) = bw3 := by
     simp [bw2, bw3, Png.BitWriter.writeBits, hshift2]
   have hread2 : br2.readBit = ((bitsTot >>> 2) % 2, br3) := by
@@ -1590,7 +1592,7 @@ lemma generatedCodeLenHuffman_decode_readerAt_writeBits_core
   have hshift3 : bitsTot >>> 1 >>> 1 >>> 1 = bitsTot >>> 3 := by
     calc
       bitsTot >>> 1 >>> 1 >>> 1 = bitsTot >>> 2 >>> 1 := by simp [hshift2]
-      _ = bitsTot >>> 3 := by simpa using (Nat.shiftRight_add bitsTot 2 1)
+      _ = bitsTot >>> 3 := by simpa using (Nat.shiftRight_add bitsTot 2 1).symm
   have hbw4 : Png.BitWriter.writeBit bw3 ((bitsTot >>> 3) % 2) = bw4 := by
     simp [bw3, bw4, Png.BitWriter.writeBits, hshift3]
   have hread3 : br3.readBit = ((bitsTot >>> 3) % 2, br4) := by
@@ -1601,7 +1603,7 @@ lemma generatedCodeLenHuffman_decode_readerAt_writeBits_core
   have hshift4 : bitsTot >>> 1 >>> 1 >>> 1 >>> 1 = bitsTot >>> 4 := by
     calc
       bitsTot >>> 1 >>> 1 >>> 1 >>> 1 = bitsTot >>> 3 >>> 1 := by simp [hshift3]
-      _ = bitsTot >>> 4 := by simpa using (Nat.shiftRight_add bitsTot 3 1)
+      _ = bitsTot >>> 4 := by simpa using (Nat.shiftRight_add bitsTot 3 1).symm
   have hbw5 : Png.BitWriter.writeBit bw4 ((bitsTot >>> 4) % 2) = bw5 := by
     simp [bw4, bw5, Png.BitWriter.writeBits, hshift4]
   have hread4 : br4.readBit = ((bitsTot >>> 4) % 2, br5) := by

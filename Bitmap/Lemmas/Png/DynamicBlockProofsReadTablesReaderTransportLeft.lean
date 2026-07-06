@@ -16,10 +16,10 @@ lemma dynamicTablesAfterHeaderReaderAt_eq_writeBits44Reader
   unfold dynamicTablesAfterHeaderReaderAt dynamicCodeLenSymsReaderAt
   unfold dynamicTables44Reader
   apply readerAt_eq_of_eqs
-  · simpa using
+  · simpa [dynamicTablesAfterHeaderBw30] using
       (dynamicTablesAfterHeaderPrefix_eq_dynamicTables44PrefixWriter
         (bw := bw) (restBits := restBits))
-  · simpa using
+  · simpa [dynamicTablesAfterHeaderBw30] using
       congrArg BitWriter.flush
         (dynamicTablesAfterHeaderFull_eq_dynamicTablesAfterHeaderBwFull
           (bw := bw) (restBits := restBits) (restLen := restLen))

@@ -115,7 +115,8 @@ lemma dynamicCodeLenHuffman_decode_readerAt_writeBits_code
   let br1 := BitWriter.readerAt bw1 bw'.flush
     (by
       have hk : 1 ≤ lenTot := by omega
-      simpa [bw', lenTot] using (flush_size_writeBits_prefix bw bitsTot 1 lenTot hk))
+      simpa [bw', bw1, lenTot, BitWriter.writeBits] using
+        (flush_size_writeBits_prefix bw bitsTot 1 lenTot hk))
     (bitPos_lt_8_writeBit bw (bitsTot % 2) hbit)
   let br2 := BitWriter.readerAt (BitWriter.writeBits bw bitsTot 2) bw'.flush
     (by

@@ -102,7 +102,7 @@ lemma deflateDynamicFast_eq_streamWriter (raw : ByteArray) :
       (BitWriter.writeBits hdr0
         (5 ||| (dynamicHeaderTableBits <<< 3) ||| (payloadBits.1 <<< (3 + dynamicHeaderTableLen)))
         (3 + dynamicHeaderTableLen + payloadBits.2)).flush := by
-          simpa [payloadBits, hdr0, hdrHeader, streamBits, streamLen] using
+          simpa [payloadBits, dynamicStreamPayloadBits, hdr0, hdrHeader, streamBits, streamLen] using
             deflateDynamicFast_eq_writeBits raw
     _ = (BitWriter.writeBits hdr0 (5 ||| (streamBits <<< 3)) (3 + streamLen)).flush := by
           rw [hbits, hlen]

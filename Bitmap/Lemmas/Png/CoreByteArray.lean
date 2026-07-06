@@ -301,7 +301,8 @@ lemma byteArray_get!_eq_get (a : ByteArray) (i : Nat) (h : i < a.size) :
   cases a with
   | mk arr =>
       have h' : i < arr.size := by
-        simpa using h
+        change i < arr.size at h
+        exact h
       calc
         arr[i]! = arr[i]'h' := by
           simp [getElem!_pos, h']

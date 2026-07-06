@@ -185,8 +185,7 @@ lemma fixedQuadStepsEob_le_fixedQuadBitsEob_len
   ·
     let b := data[i]
     by_cases h3 : i + 3 < data.size
-    · dsimp [b]
-      by_cases hq : quadTailEqb data i b h3 = true
+    · by_cases hq : quadTailEqb data i b h3 = true
       · have htail : fixedQuadStepsEob data (i + 4) ≤ (fixedQuadBitsEob data (i + 4)).2 := by
           exact fixedQuadStepsEob_le_fixedQuadBitsEob_len data (i + 4)
         have hsteps :
@@ -229,8 +228,7 @@ lemma fixedQuadStepsEob_le_fixedQuadBitsEob_len
           simp [literalRepeatBitsTail_succ, literalRepeatBitsTail_zero]
           omega
         simpa [hsteps, hbits] using le_trans (Nat.add_le_add_left htail 1) hlen
-    · dsimp [b]
-      have htail : fixedQuadStepsEob data (i + 1) ≤ (fixedQuadBitsEob data (i + 1)).2 := by
+    · have htail : fixedQuadStepsEob data (i + 1) ≤ (fixedQuadBitsEob data (i + 1)).2 := by
         exact fixedQuadStepsEob_le_fixedQuadBitsEob_len data (i + 1)
       have hsteps :
           fixedQuadStepsEob data i = 1 + fixedQuadStepsEob data (i + 1) := by
@@ -283,7 +281,7 @@ lemma decodeFixedBlockFast_fixedQuadBitsEob_readerAt_writeBits
       exact Nat.le_add_left (fixedQuadBitsEob data i).2 bw.bitCount
     have hflush : bwAll.bitCount ≤ bwAll.flush.size * 8 := by
       exact flush_size_mul_ge_bitCount (bw := bwAll) hbitAll
-    simpa [br0, bwAll, Png.fixedQuadStartReader] using le_trans hcount hflush
+    simpa [br0, bwAll, Png.fixedQuadStartReader, BitWriter.readerAt] using le_trans hcount hflush
   have hstepsLe : fixedQuadStepsEob data i ≤ br0.data.size * 8 + 1 := by
     exact le_trans hstepsBits (le_trans hbitsLe (Nat.le_add_right _ _))
   let fuel := br0.data.size * 8 + 1 - fixedQuadStepsEob data i
@@ -453,7 +451,7 @@ lemma zlibDecompress_zlibCompressFixed (raw : ByteArray)
         (flush_size_writeBits_le hdr0 streamBits streamLen) (by decide)).bitIndex + 3 ≤
         (BitWriter.readerAt hdr0 streamWriter.flush
           (flush_size_writeBits_le hdr0 streamBits streamLen) (by decide)).data.size * 8 := by
-    simpa using
+    simpa [streamWriter, BitWriter.readerAt] using
       (readerAt_writeBits_bound (bw := hdr0) (bits := streamBits) (len := streamLen) (k := 3)
         (hk := by omega) (hbit := by decide))
   have hread0 : streamReader0.bitIndex + 3 ≤ streamReader0.data.size * 8 := by

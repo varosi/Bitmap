@@ -22,6 +22,7 @@ def eobNoTailStartReader (bw : BitWriter) (hbit : bw.bitPos < 8) : BitReader :=
   BitWriter.readerAt bw bwAll.flush
     (by
       have symEq : (256 : Nat) = 256 := rfl
+      change bw.flush.size ≤ (eobNoTailWriter bw).flush.size
       simpa [eobNoTailWriter, symEq] using
         (flush_size_writeBits_le (bw := bw)
           (bits := reverseBits (fixedLitLenCode 256).1 (fixedLitLenCode 256).2)
@@ -35,6 +36,7 @@ def eobNoTailAfterReader (bw : BitWriter) (hbit : bw.bitPos < 8) : BitReader :=
     (by rfl)
     (by
       have symEq : (256 : Nat) = 256 := rfl
+      change (eobNoTailWriter bw).bitPos < 8
       simpa [eobNoTailWriter, symEq] using
         (bitPos_lt_8_writeBits (bw := bw)
           (bits := reverseBits (fixedLitLenCode 256).1 (fixedLitLenCode 256).2)

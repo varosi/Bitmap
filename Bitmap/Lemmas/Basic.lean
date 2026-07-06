@@ -21,7 +21,9 @@ class LawfulAlphaChannel (RangeT : Type u) [AlphaChannel RangeT] : Prop where
 instance : LawfulAlphaChannel UInt8 where
   toNat_natCast_of_le_max := by
     intro n hn
-    have hn' : n ≤ 255 := by simpa using hn
+    have hn' : n ≤ 255 := by
+      change n ≤ 255 at hn
+      exact hn
     have hlt : n < 2 ^ 8 := by omega
     change UInt8.toNat (UInt8.ofNat n) = n
     rw [UInt8.toNat.eq_1]
@@ -45,7 +47,9 @@ instance : LawfulAlphaChannel UInt8 where
 instance : LawfulAlphaChannel UInt16 where
   toNat_natCast_of_le_max := by
     intro n hn
-    have hn' : n ≤ 65535 := by simpa using hn
+    have hn' : n ≤ 65535 := by
+      change n ≤ 65535 at hn
+      exact hn
     have hlt : n < 2 ^ 16 := by omega
     change UInt16.toNat (UInt16.ofNat n) = n
     rw [UInt16.toNat.eq_1]

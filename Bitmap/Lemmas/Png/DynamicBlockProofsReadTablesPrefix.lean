@@ -4,22 +4,22 @@ namespace Bitmaps
 
 namespace Png
 
-private def readTablesPrefixBits (restBits : Nat) : Nat :=
+def readTablesPrefixBits (restBits : Nat) : Nat :=
   dynamicHeaderReadBits restBits
 
-private def readTablesPrefixLen (restLen : Nat) : Nat :=
+def readTablesPrefixLen (restLen : Nat) : Nat :=
   dynamicHeaderReadLen restLen
 
-private def readTablesPrefixWriter (bw : BitWriter) (restBits restLen : Nat) : BitWriter :=
+def readTablesPrefixWriter (bw : BitWriter) (restBits restLen : Nat) : BitWriter :=
   BitWriter.writeBits bw (readTablesPrefixBits restBits) (readTablesPrefixLen restLen)
 
-private def readTablesPrefixReader
+def readTablesPrefixReader
     (bw : BitWriter) (restBits restLen : Nat) (hbit : bw.bitPos < 8) : BitReader :=
   BitWriter.readerAt bw (readTablesPrefixWriter bw restBits restLen).flush
     (flush_size_writeBits_le bw (readTablesPrefixBits restBits) (readTablesPrefixLen restLen))
     hbit
 
-private def readTablesPrefixReader5
+def readTablesPrefixReader5
     (bw : BitWriter) (restBits restLen : Nat) (hbit : bw.bitPos < 8) : BitReader :=
   BitWriter.readerAt (BitWriter.writeBits bw (readTablesPrefixBits restBits) 5)
     (readTablesPrefixWriter bw restBits restLen).flush
@@ -31,7 +31,7 @@ private def readTablesPrefixReader5
           (readTablesPrefixLen restLen) hk))
     (bitPos_lt_8_writeBits bw (readTablesPrefixBits restBits) 5 hbit)
 
-private def readTablesPrefixReader10
+def readTablesPrefixReader10
     (bw : BitWriter) (restBits restLen : Nat) (hbit : bw.bitPos < 8) : BitReader :=
   BitWriter.readerAt (BitWriter.writeBits bw (readTablesPrefixBits restBits) 10)
     (readTablesPrefixWriter bw restBits restLen).flush
@@ -43,11 +43,11 @@ private def readTablesPrefixReader10
           (readTablesPrefixLen restLen) hk))
     (bitPos_lt_8_writeBits bw (readTablesPrefixBits restBits) 10 hbit)
 
-private def readTablesPrefixWriter14
+def readTablesPrefixWriter14
     (bw : BitWriter) (restBits : Nat) : BitWriter :=
   BitWriter.writeBits bw (readTablesPrefixBits restBits) 14
 
-private def readTablesPrefixReader14
+def readTablesPrefixReader14
     (bw : BitWriter) (restBits restLen : Nat) (hbit : bw.bitPos < 8) : BitReader :=
   BitWriter.readerAt (readTablesPrefixWriter14 bw restBits)
     (readTablesPrefixWriter bw restBits restLen).flush
@@ -128,7 +128,7 @@ private lemma readTablesPrefixReader5_bound5
           (by
             have hk5 : 5 ≤ readTablesPrefixLen restLen := by
               simpa [readTablesPrefixLen] using dynamicHeaderReadLen_ge_5 restLen
-            simpa [readTablesPrefixWriter, readTablesPrefixBits, readTablesPrefixLen] using
+            simpa [bw5, readTablesPrefixWriter, readTablesPrefixBits, readTablesPrefixLen] using
               (flush_size_writeBits_prefix bw (readTablesPrefixBits restBits) 5
                 (readTablesPrefixLen restLen) hk5))
           (bitPos_lt_8_writeBits bw (readTablesPrefixBits restBits) 5 hbit) := by
@@ -209,7 +209,7 @@ private lemma readTablesPrefixReader10_bound4
           (by
             have hk10 : 10 ≤ readTablesPrefixLen restLen := by
               simpa [readTablesPrefixLen] using dynamicHeaderReadLen_ge_10 restLen
-            simpa [readTablesPrefixWriter, readTablesPrefixBits, readTablesPrefixLen] using
+            simpa [bw10, readTablesPrefixWriter, readTablesPrefixBits, readTablesPrefixLen] using
               (flush_size_writeBits_prefix bw (readTablesPrefixBits restBits) 10
                 (readTablesPrefixLen restLen) hk10))
           (bitPos_lt_8_writeBits bw (readTablesPrefixBits restBits) 10 hbit) := by

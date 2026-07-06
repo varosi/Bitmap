@@ -224,7 +224,13 @@ lemma readDynamicTables_readerAt_writeBits_concrete
                 none) =
           ((fun r : Array Nat × BitReader => (⟨r.snd, r.fst⟩ : MProd BitReader (Array Nat))) <$>
             readDynamicCodeLenLengths10 br14) := by
-      simpa using (readDynamicCodeLenLengths10_eq_forIn_range10_mprod br14)
+      change
+        forIn (List.range' 0 10)
+            ((⟨br14, Array.replicate 19 0⟩ : MProd BitReader (Array Nat)))
+            dynamicCodeLenLoopBodyM =
+          ((fun r : Array Nat × BitReader => (⟨r.snd, r.fst⟩ : MProd BitReader (Array Nat))) <$>
+            readDynamicCodeLenLengths10 br14)
+      exact readDynamicCodeLenLengths10_eq_forIn_range10_mprod br14
     let tail : Array Nat × BitReader → Option (Huffman × Huffman × BitReader) :=
       fun (r : Array Nat × BitReader) =>
       (mkHuffman r.fst).bind fun codeLenTable =>

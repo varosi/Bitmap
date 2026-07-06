@@ -474,7 +474,8 @@ lemma inflateStored_deflateDynamicFast_none (raw : ByteArray) :
       _ = collapsedWriter.flush := by
         exact congrArg BitWriter.flush hstream.symm
   have hread0 : streamReader0.bitIndex + 3 ≤ streamReader0.data.size * 8 := by
-    simpa [streamReader0, BitWriter.readerAt, hdr0, BitWriter.empty] using
+    simpa [streamReader0, collapsedWriter, BitWriter.readerAt, BitReader.bitIndex,
+      hdr0, BitWriter.empty] using
       (readerAt_writeBits_bound (bw := hdr0) (bits := streamBitsFull) (len := streamLenFull)
         (k := 3) (hk := by omega) (hbit := by decide))
   have hread :
@@ -493,7 +494,7 @@ lemma inflateStored_deflateDynamicFast_none (raw : ByteArray) :
       (readBitsFastU32_eq_readBitsAux (br := streamReader0) (n := 3) (h := hread0))
   have hpos : 0 < collapsedWriter.flush.size := by
     have : 3 ≤ collapsedWriter.flush.size * 8 := by
-      simpa [streamReader0] using hread0
+      simpa [streamReader0, BitReader.bitIndex] using hread0
     by_contra hzero
     have hsize0 : collapsedWriter.flush.size = 0 := Nat.eq_zero_of_not_pos hzero
     omega
@@ -636,7 +637,7 @@ lemma inflateStored_deflateDynamicFullFast_none (raw : ByteArray) :
         (h := hread0))
   have hpos : 0 < collapsedWriter.flush.size := by
     have : 3 ≤ collapsedWriter.flush.size * 8 := by
-      simpa [streamReader0] using hread0
+      simpa [streamReader0, BitReader.bitIndex] using hread0
     by_contra hzero
     have hsize0 : collapsedWriter.flush.size = 0 := Nat.eq_zero_of_not_pos hzero
     omega

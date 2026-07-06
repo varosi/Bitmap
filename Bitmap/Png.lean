@@ -2198,7 +2198,7 @@ def decodeLength (sym : Nat) (br : BitReader)
   if hextra : extra = 0 then
     (base, br)
   else
-    let (bits, br') := br.readBits extra (by simpa [hextra] using hbits)
+    let (bits, br') := br.readBits extra (by simpa [idx, extra, hidxExtra, hextra] using hbits)
     (base + bits, br')
 
 def decodeDistance (sym : Nat) (br : BitReader)
@@ -2218,7 +2218,7 @@ def decodeDistance (sym : Nat) (br : BitReader)
   if hextra : extra = 0 then
     (base, br)
   else
-    let (bits, br') := br.readBits extra (by simpa [hextra] using hbits)
+    let (bits, br') := br.readBits extra (by simpa [extra, hdistExtra, hextra] using hbits)
     (base + bits, br')
 
 def decodeCompressedBlockFuel (fuel : Nat) (litLen dist : Huffman) (br : BitReader)
@@ -2243,13 +2243,14 @@ def decodeCompressedBlockFuel (fuel : Nat) (litLen dist : Huffman) (br : BitRead
         have hidxExtra : idx < lengthExtra.size := by simpa [hLengthExtraSize] using hidxlt
         let extra := Array.getInternal lengthExtra idx hidxExtra
         if hbits : br'.bitIndex + extra <= br'.data.size * 8 then
-          let (len, br'') := decodeLength sym br' hlen (by simpa using hbits)
+          let (len, br'') := decodeLength sym br' hlen (by simpa [idx, extra, hidxExtra] using hbits)
           let (distSym, br''') ← dist.decode br''
           if hdist : distSym < distBases.size then
             let extraD := Array.getInternal distExtra distSym (by
               simpa [hDistExtraSize, hDistBasesSize] using hdist)
             if hbitsD : br'''.bitIndex + extraD <= br'''.data.size * 8 then
-              let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa using hbitsD)
+              let (distance, br'''') := decodeDistance distSym br''' hdist
+                (by simpa [extraD, hDistExtraSize, hDistBasesSize] using hbitsD)
               let out' ← copyDistance out distance len
               decodeCompressedBlockFuel fuel litLen dist br'''' out'
             else
@@ -2512,13 +2513,14 @@ def decodeFixedBlockFuel (fuel : Nat) (br : BitReader) (out : ByteArray) :
         have hidxExtra : idx < lengthExtra.size := by simpa [hLengthExtraSize] using hidxlt
         let extra := Array.getInternal lengthExtra idx hidxExtra
         if hbits : br'.bitIndex + extra <= br'.data.size * 8 then
-          let (len, br'') := decodeLength sym br' hlen (by simpa using hbits)
+          let (len, br'') := decodeLength sym br' hlen (by simpa [idx, extra, hidxExtra] using hbits)
           let (distSym, br''') ← decodeFixedDistanceSym br''
           if hdist : distSym < distBases.size then
             let extraD := Array.getInternal distExtra distSym (by
               simpa [hDistExtraSize, hDistBasesSize] using hdist)
             if hbitsD : br'''.bitIndex + extraD <= br'''.data.size * 8 then
-              let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa using hbitsD)
+              let (distance, br'''') := decodeDistance distSym br''' hdist
+                (by simpa [extraD, hDistExtraSize, hDistBasesSize] using hbitsD)
               let out' ← copyDistance out distance len
               decodeFixedBlockFuel fuel br'''' out'
             else
@@ -2552,13 +2554,14 @@ def decodeFixedBlockFuelFast (fuel : Nat) (br : BitReader) (out : ByteArray) :
         have hidxExtra : idx < lengthExtra.size := by simpa [hLengthExtraSize] using hidxlt
         let extra := Array.getInternal lengthExtra idx hidxExtra
         if hbits : br'.bitIndex + extra <= br'.data.size * 8 then
-          let (len, br'') := decodeLength sym br' hlen (by simpa using hbits)
+          let (len, br'') := decodeLength sym br' hlen (by simpa [idx, extra, hidxExtra] using hbits)
           let (distSym, br''') ← decodeFixedDistanceSym br''
           if hdist : distSym < distBases.size then
             let extraD := Array.getInternal distExtra distSym (by
               simpa [hDistExtraSize, hDistBasesSize] using hdist)
             if hbitsD : br'''.bitIndex + extraD <= br'''.data.size * 8 then
-              let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa using hbitsD)
+              let (distance, br'''') := decodeDistance distSym br''' hdist
+                (by simpa [extraD, hDistExtraSize, hDistBasesSize] using hbitsD)
               let out' ← copyDistance out distance len
               decodeFixedBlockFuelFast fuel br'''' out'
             else
