@@ -186,8 +186,9 @@ This library has proofs about:
   `pngColorTypeBitDepthSupported_rgb1_false`, `gray1FlatToFilterZeroRaw_size`,
   `encodeRawGray1_size`);
 - focused indexed-palette helper facts for PNG bit-depth validation, `PLTE`
-  acceptance/rejection, palette `tRNS`/`bKGD` parsing, and metadata chunk-order
-  acceptance (`pngColorTypeBitDepthSupported_palette1`,
+  acceptance/rejection, palette `tRNS`/`bKGD` parsing, metadata chunk-order
+  acceptance, and checked encoder validation rejection paths
+  (`pngColorTypeBitDepthSupported_palette1`,
   `pngColorTypeBitDepthSupported_palette2`,
   `pngColorTypeBitDepthSupported_palette4`,
   `pngColorTypeBitDepthSupported_palette8`,
@@ -231,6 +232,17 @@ This library has proofs about:
   `PaletteEncoderRoundTrip.decodeIndexedBitmap_encodeIndexedBitmapChecked_stored_8_256_data`,
   `PaletteEncoderRoundTrip.decodeIndexedBitmap_encodeIndexedBitmapChecked_fixed_8_256_data`,
   `PaletteEncoderRoundTrip.decodeIndexedBitmap_encodeIndexedBitmapChecked_dynamic_8_256_data`,
+  `PaletteValidation.encodeIndexedBitmapWithOptionsChecked_rejects_of_validate_error`,
+  `PaletteValidation.validateIndexedBitmap_rejects_bad_bitDepth`,
+  `PaletteValidation.validateIndexedBitmap_rejects_width_limit`,
+  `PaletteValidation.validateIndexedBitmap_rejects_height_limit`,
+  `PaletteValidation.validateIndexedBitmap_rejects_empty_palette`,
+  `PaletteValidation.validateIndexedBitmap_rejects_bad_palette_length`,
+  `PaletteValidation.validateIndexedBitmap_rejects_palette_oversize`,
+  `PaletteValidation.validateIndexedBitmap_rejects_palette_too_large_for_depth1`,
+  `PaletteValidation.validateIndexedBitmap_rejects_out_of_range_indices`,
+  `PaletteValidation.validateIndexedBitmap_rejects_alpha_too_long`,
+  `PaletteValidation.validateIndexedBitmap_rejects_background_out_of_range`,
   `parsePlteData_accepts_palette2`,
   `parsePlteData_accepts_valid`,
   `parseTrnsData_accepts_paletteAlpha`,
