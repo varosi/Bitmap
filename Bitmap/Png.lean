@@ -5864,6 +5864,7 @@ def encodeRawFast {px : Type u} [Pixel px] (bmp : Bitmap px) : ByteArray :=
 def encodeRawFilteredRows (data : ByteArray) (rowBytes h y : Nat)
     (prev raw : ByteArray) (strategy : PngFilterStrategy) (bpp : Nat) : ByteArray :=
   if hlt : y < h then
+    let _ := hlt
     let start := y * rowBytes
     let row := data.extract start (start + rowBytes)
     let filtered := filterRowForStrategy strategy row prev bpp
@@ -6014,31 +6015,63 @@ def palettePackIndexIntoRow (row : ByteArray) (bitDepth x : Nat) (idx : UInt8) :
     let packed := u8 (old.toNat ||| ((idx.toNat % paletteIndexLimit bitDepth) <<< shift))
     row.set! byteIndex packed
 
+def encodeIndexedPackedRowLoop (bmp : PngIndexedBitmap) (rowBytes y x : Nat)
+    (row : ByteArray) : ByteArray :=
+  if hlt : x < bmp.size.width then
+    let _ := hlt
+    let idx := bmp.data.get! (y * bmp.size.width + x)
+    let row := palettePackIndexIntoRow row bmp.bitDepth x idx
+    encodeIndexedPackedRowLoop bmp rowBytes y (x + 1) row
+  else
+    row
+termination_by bmp.size.width - x
+decreasing_by
+  have hx : x < bmp.size.width := hlt
+  have hx' : x < x + 1 := Nat.lt_succ_self x
+  exact Nat.sub_lt_sub_left hx hx'
+
+def encodeIndexedPackedRowsLoop (bmp : PngIndexedBitmap) (rowBytes y : Nat)
+    (packed : ByteArray) : ByteArray :=
+  if hlt : y < bmp.size.height then
+    let _ := hlt
+    let row0 := ByteArray.mk <| Array.replicate rowBytes 0
+    let row := encodeIndexedPackedRowLoop bmp rowBytes y 0 row0
+    let packed := packed ++ row
+    encodeIndexedPackedRowsLoop bmp rowBytes (y + 1) packed
+  else
+    packed
+termination_by bmp.size.height - y
+decreasing_by
+  have hy : y < bmp.size.height := hlt
+  have hy' : y < y + 1 := Nat.lt_succ_self y
+  exact Nat.sub_lt_sub_left hy hy'
+
 def encodeIndexedPackedRows (bmp : PngIndexedBitmap) : ByteArray :=
-  Id.run do
-    let rowBytes := paletteRowBytes bmp.size.width bmp.bitDepth
-    let mut packed := ByteArray.emptyWithCapacity (rowBytes * bmp.size.height)
-    for y in [0:bmp.size.height] do
-      let mut row := ByteArray.mk <| Array.replicate rowBytes 0
-      for x in [0:bmp.size.width] do
-        let idx := bmp.data.get! (y * bmp.size.width + x)
-        row := palettePackIndexIntoRow row bmp.bitDepth x idx
-      packed := packed ++ row
-    return packed
+  let rowBytes := paletteRowBytes bmp.size.width bmp.bitDepth
+  encodeIndexedPackedRowsLoop bmp rowBytes 0 ByteArray.empty
+
+def encodeIndexedRowsWithFilterLoop (packedRows : ByteArray) (rowBytes h y : Nat)
+    (prev raw : ByteArray) (strategy : PngFilterStrategy) : ByteArray :=
+  if hlt : y < h then
+    let _ := hlt
+    let start := y * rowBytes
+    let row := packedRows.extract start (start + rowBytes)
+    let (filter, encodedRow) := filterRowForStrategy strategy row prev 1
+    let raw := raw.push filter
+    let raw := raw ++ encodedRow
+    encodeIndexedRowsWithFilterLoop packedRows rowBytes h (y + 1) row raw strategy
+  else
+    raw
+termination_by h - y
+decreasing_by
+  have hy : y < h := hlt
+  have hy' : y < y + 1 := Nat.lt_succ_self y
+  exact Nat.sub_lt_sub_left hy hy'
 
 def encodeIndexedRowsWithFilter (packedRows : ByteArray) (rowBytes h : Nat)
     (strategy : PngFilterStrategy) : ByteArray :=
-  Id.run do
-    let mut raw := ByteArray.emptyWithCapacity (h * (rowBytes + 1))
-    let mut prev := ByteArray.empty
-    for y in [0:h] do
-      let start := y * rowBytes
-      let row := packedRows.extract start (start + rowBytes)
-      let (filter, encodedRow) := filterRowForStrategy strategy row prev 1
-      raw := raw.push filter
-      raw := raw ++ encodedRow
-      prev := row
-    return raw
+  encodeIndexedRowsWithFilterLoop packedRows rowBytes h 0 ByteArray.empty
+    ByteArray.empty strategy
 
 def encodeRawIndexedWithFilter (bmp : PngIndexedBitmap)
     (strategy : PngFilterStrategy) : ByteArray :=

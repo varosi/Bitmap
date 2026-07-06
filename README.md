@@ -195,6 +195,8 @@ This library has proofs about:
   `pngRowBytes_palette2`,
   `pngRowBytes_palette4`,
   `pngRowBytes_palette8`,
+  `encodeIndexedPackedRows_size`,
+  `encodeRawIndexedWithFilter_size`,
   `parsePlteData_accepts_palette2`,
   `parseTrnsData_accepts_paletteAlpha`,
   `parseBkgdData_accepts_paletteIndex`);
@@ -202,6 +204,7 @@ This library has proofs about:
   preservation, fixed-filter option sizing, adaptive filter-byte validity, and
   default filter-0 raw compatibility (`pngRowFilter_toByte_valid`,
   `filterRow_size`, `filterRowForStrategy_fixed_size`,
+  `filterRowForStrategy_size`,
   `adaptiveFilterRow_toByte_valid`, `encodeRawWithFilter_none_size`);
 - stored DEFLATE block forward correctness against an inductive
   `StoredDeflateStreamSpec` independent of the encoder
