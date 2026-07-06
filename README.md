@@ -207,6 +207,8 @@ This library has proofs about:
   `decodeParsedIndexedBitmapWithMetadata_stored_encodeRawIndexed_none_8_256_data`,
   `decodeParsedIndexedBitmapWithMetadata_fixed_encodeRawIndexed_none_8_256_data`,
   `decodeParsedIndexedBitmapWithMetadata_dynamic_encodeRawIndexed_none_8_256_data`,
+  `PaletteContainerSpec.bytes_size`,
+  `PaletteContainerSpec.parsePlteData`,
   `parsePlteData_accepts_palette2`,
   `parsePlteData_accepts_valid`,
   `parseTrnsData_accepts_paletteAlpha`,
