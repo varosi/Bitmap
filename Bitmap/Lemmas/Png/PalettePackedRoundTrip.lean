@@ -72,6 +72,15 @@ private def indexed4 : PngIndexedBitmap :=
     background := none
     valid := by native_decide }
 
+private def indexed8 : PngIndexedBitmap :=
+  { size := { width := 4, height := 1 }
+    bitDepth := 8
+    palette := palette16
+    data := ByteArray.mk #[u8 0, u8 3, u8 12, u8 15]
+    transparency := none
+    background := none
+    valid := by native_decide }
+
 private def decodeIndexedDataAfterCheckedEncode
     (bmp : PngIndexedBitmap) (mode : PngEncodeMode) : Option ByteArray :=
   match encodeIndexedBitmapChecked bmp mode with
@@ -84,6 +93,23 @@ private def decodeIndexedMetadataDataAfterCheckedEncode
   | .ok bytes =>
       (decodeIndexedBitmapWithMetadata bytes).map (fun result => result.bitmap.data)
   | .error _ => none
+
+/-- For every supported PNG palette bit depth, there is an explicit indexed
+bitmap whose checked encoder round-trips through both exact indexed decoders.
+This quantifies over all compression modes and covers the packed 1/2/4-bit
+paths plus the byte-wide 8-bit path. -/
+theorem checked_roundtrip_fixture_for_supported_bitDepth
+    (bitDepth : Nat) (mode : PngEncodeMode)
+    (hbd : bitDepth = 1 ∨ bitDepth = 2 ∨ bitDepth = 4 ∨ bitDepth = 8) :
+    ∃ bmp,
+      bmp.bitDepth = bitDepth ∧
+        decodeIndexedDataAfterCheckedEncode bmp mode = some bmp.data ∧
+        decodeIndexedMetadataDataAfterCheckedEncode bmp mode = some bmp.data := by
+  rcases hbd with rfl | rfl | rfl | rfl
+  · refine ⟨indexed1, rfl, ?_, ?_⟩ <;> cases mode <;> native_decide
+  · refine ⟨indexed2, rfl, ?_, ?_⟩ <;> cases mode <;> native_decide
+  · refine ⟨indexed4, rfl, ?_, ?_⟩ <;> cases mode <;> native_decide
+  · refine ⟨indexed8, rfl, ?_, ?_⟩ <;> cases mode <;> native_decide
 
 /-- Stored-zlib checked encode/decode round-trips a concrete 1-bit indexed row
 through both exact indexed decode APIs. -/
