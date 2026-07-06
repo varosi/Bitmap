@@ -80,6 +80,27 @@ lemma pngRowBytes_palette8 (w : Nat) :
   simp [pngRowBytesForColorTypeAndBitDepth?, pngBitsPerPixelForColorTypeAndBitDepth?,
     pngChannelCountForColorType?, paletteRowBytes]
 
+/-- A 1-bit indexed row packs eight palette indices per byte.
+This records the concrete packed-row size used by encoder and decoder proofs. -/
+lemma paletteRowBytes_1 (w : Nat) :
+    paletteRowBytes w 1 = (w + 7) / 8 := by
+  unfold paletteRowBytes
+  omega
+
+/-- A 2-bit indexed row packs four palette indices per byte.
+This records the concrete packed-row size used by encoder and decoder proofs. -/
+lemma paletteRowBytes_2 (w : Nat) :
+    paletteRowBytes w 2 = (w + 3) / 4 := by
+  unfold paletteRowBytes
+  omega
+
+/-- A 4-bit indexed row packs two palette indices per byte.
+This records the concrete packed-row size used by encoder and decoder proofs. -/
+lemma paletteRowBytes_4 (w : Nat) :
+    paletteRowBytes w 4 = (w + 1) / 2 := by
+  unfold paletteRowBytes
+  omega
+
 /-- An 8-bit indexed row stores exactly one byte per pixel.
 This reduces the packed-index path to the existing byte-row raw proofs. -/
 lemma paletteRowBytes_8 (w : Nat) :
