@@ -1,5 +1,4 @@
 import Bitmap.Lemmas.Png.DynamicBlockProofsDecode
-import Batteries.Data.List.Lemmas
 import Batteries.Control.ForInStep.Lemmas
 
 namespace Bitmaps

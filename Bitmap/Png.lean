@@ -2729,7 +2729,7 @@ termination_by data.size
 decreasing_by
   -- The recursive call consumes at least the 5-byte header.
   have hle : 5 + readU16LE data 1 (by omega) ≤ data.size := by
-    exact not_lt.mp hbad
+    exact Nat.not_lt.mp hbad
   have hpos : 0 < 5 + readU16LE data 1 (by omega) := by omega
   -- Reduce the suffix size and apply `Nat.sub_lt_self`.
   simp [ByteArray.size_extract]

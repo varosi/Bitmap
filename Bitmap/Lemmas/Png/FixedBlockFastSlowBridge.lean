@@ -562,28 +562,31 @@ lemma decodeFixedBlockFuelFast_eq_decodeFixedBlockFuel :
       rintro ⟨sym, br'⟩ _hp
       dsimp only
       -- Walk through the dispatch in lockstep, using `ih` at recursive call sites.
-      -- `split_ifs` is greedy and will split through the outer dispatch
-      -- (literal/EOB/length-range) plus the `hbits` feasibility check.
-      split_ifs with h256 h256eq hlen hbits
+      split
       · -- sym < 256: literal — recursive call.
         exact ih _ _
-      · -- sym == 256: end-of-block — same on both sides.
-        rfl
-      · -- 257 ≤ sym ≤ 285 ∧ hbits feasible: inner bind on distance decoder.
-        apply Option.bind_congr
-        rintro ⟨distSym, br'''⟩ _hp2
-        dsimp only
-        split_ifs with hdist hbitsD
-        · -- hbitsD feasible: inner bind on copyDistance.
-          apply Option.bind_congr
-          rintro out' _hp3
-          exact ih _ _
-        · rfl
-        · rfl
-      · -- 257 ≤ sym ≤ 285 ∧ ¬hbits: none.
-        rfl
-      · -- ¬ length range: none.
-        rfl
+      · split
+        · -- sym == 256: end-of-block — same on both sides.
+          rfl
+        · split
+          · split
+            · -- 257 ≤ sym ≤ 285 and length extra bits are feasible:
+              -- inner bind on distance decoder.
+              apply Option.bind_congr
+              rintro ⟨distSym, br'''⟩ _hp2
+              dsimp only
+              split
+              · split
+                · -- Distance extra bits feasible: inner bind on copyDistance.
+                  apply Option.bind_congr
+                  rintro out' _hp3
+                  exact ih _ _
+                · rfl
+              · rfl
+            · -- 257 ≤ sym ≤ 285 but length extra bits are infeasible: none.
+              rfl
+          · -- Not a valid length symbol: none.
+            rfl
 
 /-! ### Fast-variant corollary -/
 

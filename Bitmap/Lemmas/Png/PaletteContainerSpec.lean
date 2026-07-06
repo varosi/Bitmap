@@ -217,7 +217,8 @@ lemma bytes_extract_skip_through_ihdr (s : PaletteContainerSpec)
       (mkChunkBytes idatTypeBytes s.idatData ++
         mkChunkBytes iendTypeBytes ByteArray.empty))
     (i := start) (j := finish)
-  simpa [hPref] using h
+  rw [hPref] at h
+  exact h
 
 /-- Slicing past signature, IHDR, and PLTE exposes `IDAT ++ IEND`.
 This is the IDAT-relative view for the indexed-palette scaffold. -/
@@ -426,7 +427,10 @@ This is the first field read by the generic palette chunk parser lemma. -/
 private lemma mkChunkBytes_extract_len (typBytes data : ByteArray) :
     (mkChunkBytes typBytes data).extract 0 4 = u32be data.size := by
   have hlen : (u32be data.size).size = 4 := u32be_size _
-  simpa [mkChunkBytes_def, hlen] using
+  rw [mkChunkBytes_def]
+  change ((u32be data.size ++ (typBytes ++ data ++
+      u32be (crc32Chunk typBytes data).toNat)).extract 0 4) = u32be data.size
+  simpa [hlen] using
     (ByteArray.extract_append_eq_left
       (a := u32be data.size)
       (b := typBytes ++ data ++ u32be (crc32Chunk typBytes data).toNat)

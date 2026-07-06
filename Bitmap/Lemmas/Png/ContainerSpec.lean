@@ -337,7 +337,8 @@ lemma SimpleContainerSpec.bytes_extract_skip_through_ihdr
     (b := mkChunkBytes idatTypeBytes s.idatData ++
       mkChunkBytes iendTypeBytes ByteArray.empty)
     (i := start) (j := finish)
-  simpa [hPrefSize] using h
+  rw [hPrefSize] at h
+  exact h
 
 /-- The IHDR chunk in `s.bytes` lives at byte 8, has 13 bytes of payload, and
 ends at byte 33. After applying `mkChunkBytes` to the encoded IHDR data,
@@ -419,6 +420,8 @@ lemma readChunk_simpleContainer_ihdr (s : SimpleContainerSpec)
       (by rw [mkChunkBytes_ihdr_size])
     rw [hLeft]
     have hCrc := mkChunk_extract_crc "IHDR" (encodeIHDRData s.header) ihdr_utf8ByteSize
+    show (mkChunk "IHDR" (encodeIHDRData s.header)).extract 21 25 =
+      u32be (crc32Chunk ihdrTypeBytes (encodeIHDRData s.header)).toNat
     simpa [encodeIHDRData_size, ihdrTypeBytes] using hCrc
   -- CRC value: readU32BE s.bytes 29 _ = computed CRC.
   have hCrcRead :
@@ -502,6 +505,8 @@ lemma readChunk_simpleContainer_idat (s : SimpleContainerSpec)
       (by rw [mkChunkBytes_idat_size]; omega)
     rw [hLeft]
     have hCrc := mkChunk_extract_crc "IDAT" s.idatData idat_utf8ByteSize
+    show (mkChunk "IDAT" s.idatData).extract (8 + s.idatData.size) (12 + s.idatData.size) =
+      u32be (crc32Chunk idatTypeBytes s.idatData).toNat
     simpa [idatTypeBytes] using hCrc
   -- CRC value: readU32BE s.bytes (41 + s.idatData.size) _ = computed CRC.
   have hCrcRead :
@@ -605,6 +610,8 @@ lemma readChunk_simpleContainer_iend (s : SimpleContainerSpec)
     rw [show (45 + s.idatData.size + 12 : Nat) = (45 + s.idatData.size) + 8 + 4 by omega] at h
     rw [h]
     have hCrc := mkChunk_extract_crc "IEND" ByteArray.empty iend_utf8ByteSize
+    show (mkChunk "IEND" ByteArray.empty).extract 8 12 =
+      u32be (crc32Chunk iendTypeBytes ByteArray.empty).toNat
     simpa [iendTypeBytes] using hCrc
   have hCrcRead :
       readU32BE s.bytes ((45 + s.idatData.size) + 8 + 0) (by omega) =

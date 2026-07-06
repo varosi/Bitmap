@@ -1,5 +1,7 @@
-import Mathlib.Data.Nat.Basic
+import Init.Tactics
 import Init.Data.ByteArray
+import Batteries.Tactic.Init
+import Batteries.Tactic.Lemma
 
 namespace Bitmaps
 

@@ -7,11 +7,12 @@ testDriver = "bitmap_tests"
 [leanOptions]
 pp.unicode.fun = true # pretty-prints `fun a ↦ b`
 autoImplicit = false
+lang.lemmaCmd = true
 
 [[require]]
-name = "mathlib"
+name = "batteries"
 scope = "leanprover-community"
-rev = "v4.30.0"
+rev = "32dc18cde3684679f3c003de608743b57498c56f"
 
 [[lean_lib]]
 name = "Bitmap"

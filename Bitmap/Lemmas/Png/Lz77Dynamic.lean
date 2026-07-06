@@ -4131,7 +4131,12 @@ lemma generatedDynamicHeaderCodeLengthsLz77_extract_dist_full
     simpa [distLengths] using
       generatedDynamicDistLengthsLz77_size (Png.distSymbolFreqsLz77 source)
   rw [hfull]
-  simp [hlitSize, hdistSize]
+  have hleft : litLenLengths.extract 286 286 = #[] := by
+    rw [Array.extract_eq_empty_iff]
+    omega
+  have hright : distLengths.extract 0 30 = distLengths := by
+    simpa [hdistSize] using (Array.extract_size (xs := distLengths))
+  simp [hlitSize, hleft, hright]
 
 /-- The generated LZ77 dynamic header writer is its fixed prefix followed by
 the literal code-length token stream for the advertised length tables. -/
