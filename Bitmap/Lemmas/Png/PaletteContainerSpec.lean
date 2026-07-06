@@ -841,6 +841,70 @@ theorem parsePngLoopFuelWithMetadata_accepts (s : PaletteContainerSpec)
       some (parsed s) := by
   simpa using parsePngLoopFuelWithMetadata_accepts_with_extra s hIdatSize 0
 
+/-- The simple PNG fast path rejects the indexed-palette scaffold.
+The fast path only accepts non-palette color types, so color type 3 falls through
+to the general parser loop. -/
+lemma parsePngSimple_eq_none (s : PaletteContainerSpec) :
+    parsePngSimple s.bytes s.bytes_size_ge_8 = none := by
+  unfold parsePngSimple
+  have hSizeEq : s.bytes.size = s.idatData.size + s.palette.entries.size + 69 :=
+    PaletteContainerSpec.bytes_size s
+  have hSig : s.bytes.extract 0 8 = pngSignature := bytes_extract_signature s
+  have hSigCheck : (s.bytes.extract 0 8 != pngSignature) = false := by
+    rw [hSig]
+    exact bne_self_eq_false' (a := pngSignature)
+  have hLenIhdr : (8 : Nat) + 3 < s.bytes.size := by rw [hSizeEq]; omega
+  have hReadIhdr := readChunk_ihdr s hLenIhdr
+  have hBDlt : s.header.bitDepth < 256 := by
+    rcases s.hBitDepth with h | h | h | h <;> rw [h] <;> decide
+  have hCTlt : s.header.colorType < 256 := by
+    rw [s.hColorType]
+    decide
+  have hParseHdr :=
+    parseIHDRData_encodeIHDRData_lt256 s.header
+      s.hWidth s.hHeight hBDlt s.hInterlace hCTlt
+  have hSupported :
+      pngColorTypeBitDepthSupported s.header.colorType s.header.bitDepth = true :=
+    s.hCtBdSupported
+  simp [hSigCheck, hLenIhdr, hReadIhdr, hParseHdr, hSupported]
+  intro _ hColor
+  have hNot0 : ¬s.header.colorType = 0 := by rw [s.hColorType]; decide
+  have hNot2 : ¬s.header.colorType = 2 := by rw [s.hColorType]; decide
+  have hNot4 : ¬s.header.colorType = 4 := by rw [s.hColorType]; decide
+  have h6 := hColor hNot0 hNot2 hNot4
+  rw [s.hColorType] at h6
+  exact False.elim ((by decide : (3 : Nat) ≠ 6) h6)
+
+/-- The metadata-aware simple fast path also rejects the palette scaffold.
+It delegates to `parsePngSimple`, so this follows from the fast-path rejection. -/
+lemma parsePngSimpleWithMetadata_eq_none (s : PaletteContainerSpec) :
+    parsePngSimpleWithMetadata s.bytes s.bytes_size_ge_8 = none := by
+  unfold parsePngSimpleWithMetadata
+  simp [parsePngSimple_eq_none s]
+
+/-- `parsePngWithMetadata` accepts the indexed-palette scaffold.
+After the simple fast path rejects color type 3, the general parser loop records
+the PLTE metadata and returns the scaffold payload. -/
+theorem parsePngWithMetadata_accepts (s : PaletteContainerSpec)
+    (hIdatSize : s.idatData.size < 2 ^ 32) :
+    parsePngWithMetadata s.bytes s.bytes_size_ge_8 = some (parsed s) := by
+  unfold parsePngWithMetadata
+  have hSizeEq : s.bytes.size = s.idatData.size + s.palette.entries.size + 69 :=
+    PaletteContainerSpec.bytes_size s
+  have hSimple : parsePngSimpleWithMetadata s.bytes s.bytes_size_ge_8 = none :=
+    parsePngSimpleWithMetadata_eq_none s
+  have hSig : s.bytes.extract 0 8 = pngSignature := bytes_extract_signature s
+  have hSigCheck : (s.bytes.extract 0 8 != pngSignature) = false := by
+    rw [hSig]
+    exact bne_self_eq_false' (a := pngSignature)
+  have hFuel :
+      s.bytes.size + 1 = (s.bytes.size - 3) + 4 := by
+    rw [hSizeEq]
+    omega
+  simp [hSimple, hSigCheck]
+  rw [hFuel]
+  exact parsePngLoopFuelWithMetadata_accepts_with_extra s hIdatSize (s.bytes.size - 3)
+
 end PaletteContainerSpec
 
 end Lemmas
