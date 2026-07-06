@@ -105,6 +105,557 @@ lemma PaletteContainerSpec.parsePlteData (s : PaletteContainerSpec) :
     rfl
   simpa [hpal] using hparse
 
+namespace PaletteContainerSpec
+
+/-- Re-associate `bytes` so the PNG signature is isolated.
+This is the common starting point for all palette chunk-position proofs. -/
+lemma bytes_eq_signature_then_chunks (s : PaletteContainerSpec) :
+    s.bytes =
+      pngSignature ++
+        (mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header) ++
+          (mkChunkBytes plteTypeBytes s.palette.entries ++
+            (mkChunkBytes idatTypeBytes s.idatData ++
+              mkChunkBytes iendTypeBytes ByteArray.empty))) := by
+  unfold PaletteContainerSpec.bytes
+  simp [ByteArray.append_assoc]
+
+/-- The first eight bytes of the scaffold are the PNG signature.
+This is the signature-side fact used before chunk parsing begins. -/
+lemma bytes_extract_signature (s : PaletteContainerSpec) :
+    s.bytes.extract 0 8 = pngSignature := by
+  rw [bytes_eq_signature_then_chunks s]
+  have hSigSize : pngSignature.size = 8 := pngSignature_size
+  rw [byteArray_extract_append_prefix
+    (a := pngSignature)
+    (b := mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header) ++
+      (mkChunkBytes plteTypeBytes s.palette.entries ++
+        (mkChunkBytes idatTypeBytes s.idatData ++
+          mkChunkBytes iendTypeBytes ByteArray.empty)))
+    (n := 8) (by simp [hSigSize])]
+  rw [← hSigSize]
+  exact ByteArray.extract_zero_size
+
+/-- IHDR chunk wire size inside the indexed-palette scaffold.
+This supports the fixed byte offset of the following PLTE chunk. -/
+private lemma ihdrChunk_size (s : PaletteContainerSpec) :
+    (mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header)).size = 25 := by
+  rw [mkChunkBytes_size _ _ (by rfl : ihdrTypeBytes.size = 4)]
+  rw [encodeIHDRData_size]
+
+/-- PLTE chunk wire size inside the indexed-palette scaffold.
+This supports the byte offset of the following IDAT chunk. -/
+private lemma plteChunk_size (s : PaletteContainerSpec) :
+    (mkChunkBytes plteTypeBytes s.palette.entries).size =
+      s.palette.entries.size + 12 := by
+  rw [mkChunkBytes_size _ _ (by rfl : plteTypeBytes.size = 4)]
+
+/-- IDAT chunk wire size inside the indexed-palette scaffold.
+This supports the byte offset of the final IEND chunk. -/
+private lemma idatChunk_size (s : PaletteContainerSpec) :
+    (mkChunkBytes idatTypeBytes s.idatData).size = s.idatData.size + 12 := by
+  rw [mkChunkBytes_size _ _ (by rfl : idatTypeBytes.size = 4)]
+
+/-- IEND chunk wire size inside the indexed-palette scaffold.
+This pins the final empty chunk's wrapped size. -/
+private lemma iendChunk_size :
+    (mkChunkBytes iendTypeBytes ByteArray.empty).size = 12 := by
+  rw [mkChunkBytes_size _ _ (by rfl : iendTypeBytes.size = 4)]
+  simp
+
+/-- Slicing past the 8-byte signature exposes the chunk-only suffix.
+Later chunk proofs use this to reason relative to chunk offsets. -/
+lemma bytes_extract_skip_signature (s : PaletteContainerSpec)
+    (start finish : Nat) (_h : 8 + finish ≤ s.bytes.size) :
+    s.bytes.extract (8 + start) (8 + finish) =
+      (mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header) ++
+        (mkChunkBytes plteTypeBytes s.palette.entries ++
+          (mkChunkBytes idatTypeBytes s.idatData ++
+            mkChunkBytes iendTypeBytes ByteArray.empty))).extract start finish := by
+  rw [bytes_eq_signature_then_chunks s]
+  have hSig : pngSignature.size = 8 := pngSignature_size
+  have h := ByteArray.extract_append_size_add
+    (a := pngSignature)
+    (b := mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header) ++
+      (mkChunkBytes plteTypeBytes s.palette.entries ++
+        (mkChunkBytes idatTypeBytes s.idatData ++
+          mkChunkBytes iendTypeBytes ByteArray.empty)))
+    (i := start) (j := finish)
+  simpa [hSig] using h
+
+/-- Slicing past the signature and IHDR exposes `PLTE ++ IDAT ++ IEND`.
+This is the PLTE-relative view used for palette chunk parsing. -/
+lemma bytes_extract_skip_through_ihdr (s : PaletteContainerSpec)
+    (start finish : Nat) (_h : 33 + finish ≤ s.bytes.size) :
+    s.bytes.extract (33 + start) (33 + finish) =
+      (mkChunkBytes plteTypeBytes s.palette.entries ++
+        (mkChunkBytes idatTypeBytes s.idatData ++
+          mkChunkBytes iendTypeBytes ByteArray.empty)).extract start finish := by
+  rw [bytes_eq_signature_then_chunks s]
+  have hRe :
+      pngSignature ++
+        (mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header) ++
+          (mkChunkBytes plteTypeBytes s.palette.entries ++
+            (mkChunkBytes idatTypeBytes s.idatData ++
+              mkChunkBytes iendTypeBytes ByteArray.empty)))
+      =
+      (pngSignature ++ mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header)) ++
+        (mkChunkBytes plteTypeBytes s.palette.entries ++
+          (mkChunkBytes idatTypeBytes s.idatData ++
+            mkChunkBytes iendTypeBytes ByteArray.empty)) := by
+    simp [ByteArray.append_assoc]
+  rw [hRe]
+  have hIhdrMk :
+      (mkChunk "IHDR" (encodeIHDRData s.header)).size = 25 := by
+    rw [mkChunk_size]
+    simp [encodeIHDRData_size, ihdr_utf8ByteSize]
+  have hPref :
+      (pngSignature ++ mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header)).size = 33 := by
+    simp [ByteArray.size_append, pngSignature_size, hIhdrMk]
+  have h := ByteArray.extract_append_size_add
+    (a := pngSignature ++ mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header))
+    (b := mkChunkBytes plteTypeBytes s.palette.entries ++
+      (mkChunkBytes idatTypeBytes s.idatData ++
+        mkChunkBytes iendTypeBytes ByteArray.empty))
+    (i := start) (j := finish)
+  simpa [hPref] using h
+
+/-- Slicing past signature, IHDR, and PLTE exposes `IDAT ++ IEND`.
+This is the IDAT-relative view for the indexed-palette scaffold. -/
+lemma bytes_extract_skip_through_plte (s : PaletteContainerSpec)
+    (start finish : Nat)
+    (_h : 45 + s.palette.entries.size + finish ≤ s.bytes.size) :
+    s.bytes.extract (45 + s.palette.entries.size + start)
+        (45 + s.palette.entries.size + finish) =
+      (mkChunkBytes idatTypeBytes s.idatData ++
+        mkChunkBytes iendTypeBytes ByteArray.empty).extract start finish := by
+  rw [bytes_eq_signature_then_chunks s]
+  have hRe :
+      pngSignature ++
+        (mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header) ++
+          (mkChunkBytes plteTypeBytes s.palette.entries ++
+            (mkChunkBytes idatTypeBytes s.idatData ++
+              mkChunkBytes iendTypeBytes ByteArray.empty)))
+      =
+      (pngSignature ++ mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header) ++
+        mkChunkBytes plteTypeBytes s.palette.entries) ++
+        (mkChunkBytes idatTypeBytes s.idatData ++
+          mkChunkBytes iendTypeBytes ByteArray.empty) := by
+    simp [ByteArray.append_assoc]
+  rw [hRe]
+  have hIhdrMk :
+      (mkChunk "IHDR" (encodeIHDRData s.header)).size = 25 := by
+    rw [mkChunk_size]
+    simp [encodeIHDRData_size, ihdr_utf8ByteSize]
+  have hPref :
+      (pngSignature ++ mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header) ++
+        mkChunkBytes plteTypeBytes s.palette.entries).size =
+        45 + s.palette.entries.size := by
+    simp [ByteArray.size_append, pngSignature_size, hIhdrMk, plteChunk_size s]
+    omega
+  have h := ByteArray.extract_append_size_add
+    (a := pngSignature ++ mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header) ++
+      mkChunkBytes plteTypeBytes s.palette.entries)
+    (b := mkChunkBytes idatTypeBytes s.idatData ++
+      mkChunkBytes iendTypeBytes ByteArray.empty)
+    (i := start) (j := finish)
+  rw [hPref] at h
+  exact h
+
+/-- Slicing past signature, IHDR, PLTE, and IDAT exposes IEND.
+This gives the final chunk-relative view for parser-position proofs. -/
+lemma bytes_extract_skip_through_idat (s : PaletteContainerSpec)
+    (start finish : Nat)
+    (_h : 57 + s.palette.entries.size + s.idatData.size + finish ≤ s.bytes.size) :
+    s.bytes.extract (57 + s.palette.entries.size + s.idatData.size + start)
+        (57 + s.palette.entries.size + s.idatData.size + finish) =
+      (mkChunkBytes iendTypeBytes ByteArray.empty).extract start finish := by
+  rw [bytes_eq_signature_then_chunks s]
+  have hRe :
+      pngSignature ++
+        (mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header) ++
+          (mkChunkBytes plteTypeBytes s.palette.entries ++
+            (mkChunkBytes idatTypeBytes s.idatData ++
+              mkChunkBytes iendTypeBytes ByteArray.empty)))
+      =
+      (pngSignature ++ mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header) ++
+        mkChunkBytes plteTypeBytes s.palette.entries ++
+          mkChunkBytes idatTypeBytes s.idatData) ++
+        mkChunkBytes iendTypeBytes ByteArray.empty := by
+    simp [ByteArray.append_assoc]
+  rw [hRe]
+  have hIhdrMk :
+      (mkChunk "IHDR" (encodeIHDRData s.header)).size = 25 := by
+    rw [mkChunk_size]
+    simp [encodeIHDRData_size, ihdr_utf8ByteSize]
+  have hIdatMk : (mkChunk "IDAT" s.idatData).size = s.idatData.size + 12 := by
+    rw [mkChunk_size]
+    simp [idat_utf8ByteSize]
+  have hPref :
+      (pngSignature ++ mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header) ++
+        mkChunkBytes plteTypeBytes s.palette.entries ++
+          mkChunkBytes idatTypeBytes s.idatData).size =
+        57 + s.palette.entries.size + s.idatData.size := by
+    simp [ByteArray.size_append, pngSignature_size, hIhdrMk, plteChunk_size s,
+      hIdatMk]
+    omega
+  have h := ByteArray.extract_append_size_add
+    (a := pngSignature ++ mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header) ++
+      mkChunkBytes plteTypeBytes s.palette.entries ++
+        mkChunkBytes idatTypeBytes s.idatData)
+    (b := mkChunkBytes iendTypeBytes ByteArray.empty)
+    (i := start) (j := finish)
+  rw [hPref] at h
+  exact h
+
+/-- The IHDR chunk bytes live at byte offset 8.
+This wraps the local IHDR extraction into a full wrapped-chunk fact. -/
+lemma bytes_extract_ihdr (s : PaletteContainerSpec) :
+    s.bytes.extract 8 (8 + 12 + (encodeIHDRData s.header).size) =
+      mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header) := by
+  have hSize : 8 + (12 + (encodeIHDRData s.header).size) ≤ s.bytes.size := by
+    rw [PaletteContainerSpec.bytes_size s, encodeIHDRData_size]
+    omega
+  have h := bytes_extract_skip_signature s 0 (12 + (encodeIHDRData s.header).size) hSize
+  simp only [Nat.add_zero] at h
+  rw [show (8 + 12 + (encodeIHDRData s.header).size : Nat) =
+      8 + (12 + (encodeIHDRData s.header).size) by omega]
+  rw [h]
+  have hChunkSize :
+      (mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header)).size =
+        12 + (encodeIHDRData s.header).size := by
+    rw [mkChunkBytes_size _ _ (by rfl : ihdrTypeBytes.size = 4)]
+    omega
+  rw [byteArray_extract_append_prefix
+    (a := mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header))
+    (b := mkChunkBytes plteTypeBytes s.palette.entries ++
+      (mkChunkBytes idatTypeBytes s.idatData ++
+        mkChunkBytes iendTypeBytes ByteArray.empty))
+    (n := 12 + (encodeIHDRData s.header).size)
+    (by rw [hChunkSize])]
+  rw [← hChunkSize]
+  exact ByteArray.extract_zero_size
+
+/-- The PLTE chunk bytes live immediately after IHDR at byte offset 33.
+This is the wrapped-chunk fact used by `readChunk_plte`. -/
+lemma bytes_extract_plte (s : PaletteContainerSpec) :
+    s.bytes.extract 33 (33 + 12 + s.palette.entries.size) =
+      mkChunkBytes plteTypeBytes s.palette.entries := by
+  have hSize : 33 + (12 + s.palette.entries.size) ≤ s.bytes.size := by
+    rw [PaletteContainerSpec.bytes_size s]
+    omega
+  have h := bytes_extract_skip_through_ihdr s 0
+    (12 + s.palette.entries.size) hSize
+  simp only [Nat.add_zero] at h
+  rw [show (33 + (12 + s.palette.entries.size) : Nat) =
+      33 + 12 + s.palette.entries.size by omega] at h
+  rw [h]
+  have hChunkSize :
+      (mkChunkBytes plteTypeBytes s.palette.entries).size =
+        12 + s.palette.entries.size := by
+    rw [mkChunkBytes_size _ _ (by rfl : plteTypeBytes.size = 4)]
+    omega
+  rw [byteArray_extract_append_prefix
+    (a := mkChunkBytes plteTypeBytes s.palette.entries)
+    (b := mkChunkBytes idatTypeBytes s.idatData ++
+      mkChunkBytes iendTypeBytes ByteArray.empty)
+    (n := 12 + s.palette.entries.size)
+    (by rw [hChunkSize])]
+  rw [← hChunkSize]
+  exact ByteArray.extract_zero_size
+
+/-- The IDAT chunk bytes live after the PLTE chunk.
+This is the wrapped-chunk fact used by `readChunk_idat`. -/
+lemma bytes_extract_idat (s : PaletteContainerSpec) :
+    s.bytes.extract (45 + s.palette.entries.size)
+        (45 + s.palette.entries.size + 12 + s.idatData.size) =
+      mkChunkBytes idatTypeBytes s.idatData := by
+  have hSize :
+      45 + s.palette.entries.size + (12 + s.idatData.size) ≤ s.bytes.size := by
+    rw [PaletteContainerSpec.bytes_size s]
+    omega
+  have h := bytes_extract_skip_through_plte s 0
+    (12 + s.idatData.size) hSize
+  simp only [Nat.add_zero] at h
+  rw [show (45 + s.palette.entries.size + (12 + s.idatData.size) : Nat) =
+      45 + s.palette.entries.size + 12 + s.idatData.size by omega] at h
+  rw [h]
+  have hChunkSize :
+      (mkChunkBytes idatTypeBytes s.idatData).size =
+        12 + s.idatData.size := by
+    rw [mkChunkBytes_size _ _ (by rfl : idatTypeBytes.size = 4)]
+    omega
+  rw [byteArray_extract_append_prefix
+    (a := mkChunkBytes idatTypeBytes s.idatData)
+    (b := mkChunkBytes iendTypeBytes ByteArray.empty)
+    (n := 12 + s.idatData.size)
+    (by rw [hChunkSize])]
+  rw [← hChunkSize]
+  exact ByteArray.extract_zero_size
+
+/-- The IEND chunk bytes live after the IDAT chunk.
+This is the wrapped-chunk fact used by `readChunk_iend`. -/
+lemma bytes_extract_iend (s : PaletteContainerSpec) :
+    s.bytes.extract (57 + s.palette.entries.size + s.idatData.size)
+        (57 + s.palette.entries.size + s.idatData.size + 12 + ByteArray.empty.size) =
+      mkChunkBytes iendTypeBytes ByteArray.empty := by
+  have hSize :
+      57 + s.palette.entries.size + s.idatData.size +
+          (12 + ByteArray.empty.size) ≤ s.bytes.size := by
+    rw [PaletteContainerSpec.bytes_size s]
+    simp
+    omega
+  have h := bytes_extract_skip_through_idat s 0
+    (12 + ByteArray.empty.size) hSize
+  simp only [Nat.add_zero] at h
+  rw [show (57 + s.palette.entries.size + s.idatData.size +
+        (12 + ByteArray.empty.size) : Nat) =
+      57 + s.palette.entries.size + s.idatData.size + 12 + ByteArray.empty.size
+      by omega] at h
+  rw [h]
+  have hChunkSize :
+      (mkChunkBytes iendTypeBytes ByteArray.empty).size =
+        12 + ByteArray.empty.size := by
+    rw [mkChunkBytes_size _ _ (by rfl : iendTypeBytes.size = 4)]
+    simp
+  rw [show (12 + ByteArray.empty.size : Nat) =
+      (mkChunkBytes iendTypeBytes ByteArray.empty).size from hChunkSize.symm]
+  exact ByteArray.extract_zero_size
+
+/-- The length field of a `mkChunkBytes` wrapper is the payload size.
+This is the first field read by the generic palette chunk parser lemma. -/
+private lemma mkChunkBytes_extract_len (typBytes data : ByteArray) :
+    (mkChunkBytes typBytes data).extract 0 4 = u32be data.size := by
+  have hlen : (u32be data.size).size = 4 := u32be_size _
+  simpa [mkChunkBytes_def, hlen] using
+    (ByteArray.extract_append_eq_left
+      (a := u32be data.size)
+      (b := typBytes ++ data ++ u32be (crc32Chunk typBytes data).toNat)
+      (i := (u32be data.size).size) rfl)
+
+/-- The type field of a `mkChunkBytes` wrapper is stored at bytes 4 through 7.
+This feeds the generic `readChunk` reduction for scaffold chunks. -/
+private lemma mkChunkBytes_extract_type (typBytes data : ByteArray)
+    (htyp : typBytes.size = 4) :
+    (mkChunkBytes typBytes data).extract 4 8 = typBytes := by
+  have hlen : (u32be data.size).size = 4 := u32be_size _
+  have h1 :
+      (mkChunkBytes typBytes data).extract 4 8 =
+        (typBytes ++ data ++ u32be (crc32Chunk typBytes data).toNat).extract 0 4 := by
+    simpa [mkChunkBytes_def, hlen, ByteArray.append_assoc] using
+      (ByteArray.extract_append_size_add
+        (a := u32be data.size)
+        (b := typBytes ++ data ++ u32be (crc32Chunk typBytes data).toNat)
+        (i := 0) (j := 4))
+  have h2' :
+      (typBytes ++ data ++ u32be (crc32Chunk typBytes data).toNat).extract 0
+          typBytes.size = typBytes := by
+    simpa [ByteArray.append_assoc] using
+      (ByteArray.extract_append_eq_left
+        (a := typBytes)
+        (b := data ++ u32be (crc32Chunk typBytes data).toNat)
+        (i := typBytes.size) rfl)
+  have h2 :
+      (typBytes ++ data ++ u32be (crc32Chunk typBytes data).toNat).extract 0 4 =
+        typBytes := by
+    simpa [htyp] using h2'
+  rw [h1, h2]
+
+/-- The payload field of a `mkChunkBytes` wrapper starts after length and type.
+This connects a wrapped chunk back to its original payload bytes. -/
+private lemma mkChunkBytes_extract_data (typBytes data : ByteArray)
+    (htyp : typBytes.size = 4) :
+    (mkChunkBytes typBytes data).extract 8 (8 + data.size) = data := by
+  have hlen : (u32be data.size).size = 4 := u32be_size _
+  have hprefix : (u32be data.size ++ typBytes).size = 8 := by
+    rw [ByteArray.size_append, hlen, htyp]
+  have h1 :
+      (mkChunkBytes typBytes data).extract 8 (8 + data.size) =
+        (data ++ u32be (crc32Chunk typBytes data).toNat).extract 0 data.size := by
+    simpa [mkChunkBytes_def, hprefix, ByteArray.append_assoc] using
+      (ByteArray.extract_append_size_add
+        (a := u32be data.size ++ typBytes)
+        (b := data ++ u32be (crc32Chunk typBytes data).toNat)
+        (i := 0) (j := data.size))
+  have h2 :
+      (data ++ u32be (crc32Chunk typBytes data).toNat).extract 0 data.size = data := by
+    simpa using
+      (ByteArray.extract_append_eq_left
+        (a := data)
+        (b := u32be (crc32Chunk typBytes data).toNat)
+        (i := data.size) rfl)
+  rw [h1, h2]
+
+/-- The CRC trailer of a `mkChunkBytes` wrapper follows the payload.
+This supplies the equality checked by `readChunk`. -/
+private lemma mkChunkBytes_extract_crc (typBytes data : ByteArray)
+    (htyp : typBytes.size = 4) :
+    (mkChunkBytes typBytes data).extract (8 + data.size) (12 + data.size) =
+      u32be (crc32Chunk typBytes data).toNat := by
+  have hlen : (u32be data.size).size = 4 := u32be_size _
+  have hprefix : (u32be data.size ++ typBytes ++ data).size = 8 + data.size := by
+    rw [ByteArray.size_append, ByteArray.size_append, hlen, htyp]
+  rw [mkChunkBytes_def]
+  have h1 :
+      (u32be data.size ++ typBytes ++ data ++ u32be (crc32Chunk typBytes data).toNat).extract
+          (8 + data.size) (12 + data.size) =
+        (u32be (crc32Chunk typBytes data).toNat).extract 0 4 := by
+    have h := ByteArray.extract_append_size_add
+      (a := u32be data.size ++ typBytes ++ data)
+      (b := u32be (crc32Chunk typBytes data).toNat)
+      (i := 0) (j := 4)
+    rw [hprefix] at h
+    rw [show (12 + data.size : Nat) = 8 + data.size + 4 by omega]
+    simpa using h
+  rw [h1]
+  have hcrcLen : (u32be (crc32Chunk typBytes data).toNat).size = 4 := u32be_size _
+  rw [show (4 : Nat) = (u32be (crc32Chunk typBytes data).toNat).size from hcrcLen.symm]
+  exact ByteArray.extract_zero_size
+
+set_option maxHeartbeats 800000 in
+/-- Generic `readChunk` reduction for a wrapped chunk inside a byte stream.
+The palette scaffold uses this for IHDR, PLTE, IDAT, and IEND. -/
+lemma readChunk_at_mkChunkBytes (bytes : ByteArray) (pos : Nat)
+    (typBytes data : ByteArray)
+    (hTypSize : typBytes.size = 4)
+    (hDataSize : data.size < 2 ^ 32)
+    (hWrap : bytes.extract pos (pos + 12 + data.size) = mkChunkBytes typBytes data)
+    (hSize : pos + 12 + data.size ≤ bytes.size)
+    (hLen : pos + 3 < bytes.size) :
+    readChunk bytes pos hLen =
+      some (typBytes, data, pos + 8 + data.size + 4) := by
+  have hSubExtract : ∀ (a b : Nat), a ≤ b → b ≤ 12 + data.size →
+      bytes.extract (pos + a) (pos + b) =
+        (mkChunkBytes typBytes data).extract a b := by
+    intro a b _hab hb
+    have hMin : min (pos + b) (pos + 12 + data.size) = pos + b := by
+      omega
+    have hExt :
+        (bytes.extract pos (pos + 12 + data.size)).extract a b =
+          bytes.extract (pos + a) (pos + b) := by
+      have h := ByteArray.extract_extract (a := bytes)
+        (i := pos) (j := pos + 12 + data.size) (k := a) (l := b)
+      rw [hMin] at h
+      exact h
+    rw [← hExt, hWrap]
+  have hExtractLen :
+      bytes.extract pos (pos + 4) = u32be data.size := by
+    have h := hSubExtract 0 4 (by omega) (by omega)
+    simp at h
+    rw [h]
+    exact mkChunkBytes_extract_len typBytes data
+  have hLenRead : readU32BE bytes pos hLen = data.size :=
+    readU32BE_of_extract_eq bytes pos data.size hLen hExtractLen hDataSize
+  have hExtractType :
+      bytes.extract (pos + 4) (pos + 8) = typBytes := by
+    have h := hSubExtract 4 8 (by omega) (by omega)
+    rw [h]
+    exact mkChunkBytes_extract_type typBytes data hTypSize
+  have hExtractData :
+      bytes.extract (pos + 8) (pos + 8 + data.size) = data := by
+    have h := hSubExtract 8 (8 + data.size) (by omega) (by omega)
+    rw [show pos + 8 + data.size = pos + (8 + data.size) by omega]
+    rw [h]
+    exact mkChunkBytes_extract_data typBytes data hTypSize
+  have hExtractCrc :
+      bytes.extract (pos + 8 + data.size) (pos + 12 + data.size) =
+        u32be (crc32Chunk typBytes data).toNat := by
+    have h := hSubExtract (8 + data.size) (12 + data.size) (by omega) (by omega)
+    rw [show pos + 8 + data.size = pos + (8 + data.size) by omega,
+        show pos + 12 + data.size = pos + (12 + data.size) by omega]
+    rw [h]
+    exact mkChunkBytes_extract_crc typBytes data hTypSize
+  have hExtractCrc' :
+      bytes.extract (pos + 8 + data.size) (pos + 8 + data.size + 4) =
+        u32be (crc32Chunk typBytes data).toNat := by
+    rw [show pos + 8 + data.size + 4 = pos + 12 + data.size by omega]
+    exact hExtractCrc
+  have hCrcRead :
+      readU32BE bytes (pos + 8 + data.size) (by omega) =
+        (crc32Chunk typBytes data).toNat :=
+    readU32BE_of_extract_eq bytes (pos + 8 + data.size) _
+      (by omega) hExtractCrc' (UInt32.toNat_lt _)
+  have hCrcEnd : pos + 8 + data.size + 4 ≤ bytes.size := by omega
+  unfold readChunk
+  simp [hLenRead, hCrcEnd, hExtractType, hExtractData, hCrcRead]
+
+/-- `readChunk` at byte 8 reads the IHDR chunk from the palette scaffold.
+This is the first chunk-read fact for the full parser proof. -/
+lemma readChunk_ihdr (s : PaletteContainerSpec)
+    (hLen : 8 + 3 < s.bytes.size) :
+    readChunk s.bytes 8 hLen =
+      some (ihdrTypeBytes, encodeIHDRData s.header, 33) := by
+  have hIhdrSize : (encodeIHDRData s.header).size = 13 := encodeIHDRData_size s.header
+  have hSize : 8 + 12 + (encodeIHDRData s.header).size ≤ s.bytes.size := by
+    rw [PaletteContainerSpec.bytes_size s, hIhdrSize]
+    omega
+  have hFits : (encodeIHDRData s.header).size < 2 ^ 32 := by
+    rw [hIhdrSize]
+    decide
+  have h := readChunk_at_mkChunkBytes s.bytes 8 ihdrTypeBytes
+    (encodeIHDRData s.header) (by rfl) hFits (bytes_extract_ihdr s) hSize hLen
+  rw [show 8 + 8 + (encodeIHDRData s.header).size + 4 = 33 by rw [hIhdrSize]] at h
+  exact h
+
+/-- `readChunk` at byte 33 reads the required PLTE chunk.
+This proves the palette payload appears before IDAT at the expected offset. -/
+lemma readChunk_plte (s : PaletteContainerSpec)
+    (hPaletteSize : s.palette.entries.size < 2 ^ 32)
+    (hLen : 33 + 3 < s.bytes.size) :
+    readChunk s.bytes 33 hLen =
+      some (plteTypeBytes, s.palette.entries, 45 + s.palette.entries.size) := by
+  have hSize : 33 + 12 + s.palette.entries.size ≤ s.bytes.size := by
+    rw [PaletteContainerSpec.bytes_size s]
+    omega
+  have h := readChunk_at_mkChunkBytes s.bytes 33 plteTypeBytes
+    s.palette.entries (by rfl) hPaletteSize (bytes_extract_plte s) hSize hLen
+  rw [show 33 + 8 + s.palette.entries.size + 4 =
+      45 + s.palette.entries.size by omega] at h
+  exact h
+
+/-- `readChunk` after PLTE reads the single IDAT chunk.
+This is the payload-position fact for the indexed image data. -/
+lemma readChunk_idat (s : PaletteContainerSpec)
+    (hIdatSize : s.idatData.size < 2 ^ 32)
+    (hLen : (45 + s.palette.entries.size) + 3 < s.bytes.size) :
+    readChunk s.bytes (45 + s.palette.entries.size) hLen =
+      some (idatTypeBytes, s.idatData,
+        57 + s.palette.entries.size + s.idatData.size) := by
+  have hSize :
+      45 + s.palette.entries.size + 12 + s.idatData.size ≤ s.bytes.size := by
+    rw [PaletteContainerSpec.bytes_size s]
+    omega
+  have h := readChunk_at_mkChunkBytes s.bytes
+    (45 + s.palette.entries.size) idatTypeBytes s.idatData
+    (by rfl) hIdatSize (bytes_extract_idat s) hSize hLen
+  rw [show 45 + s.palette.entries.size + 8 + s.idatData.size + 4 =
+      57 + s.palette.entries.size + s.idatData.size by omega] at h
+  exact h
+
+/-- `readChunk` after IDAT reads the final empty IEND chunk.
+This closes the concrete chunk sequence of the palette scaffold. -/
+lemma readChunk_iend (s : PaletteContainerSpec)
+    (hLen : (57 + s.palette.entries.size + s.idatData.size) + 3 < s.bytes.size) :
+    readChunk s.bytes (57 + s.palette.entries.size + s.idatData.size) hLen =
+      some (iendTypeBytes, ByteArray.empty, s.bytes.size) := by
+  have hSize :
+      57 + s.palette.entries.size + s.idatData.size + 12 + ByteArray.empty.size ≤
+        s.bytes.size := by
+    rw [PaletteContainerSpec.bytes_size s]
+    simp
+    omega
+  have hFits : (ByteArray.empty : ByteArray).size < 2 ^ 32 := by decide
+  have h := readChunk_at_mkChunkBytes s.bytes
+    (57 + s.palette.entries.size + s.idatData.size) iendTypeBytes ByteArray.empty
+    (by rfl) hFits (bytes_extract_iend s) hSize hLen
+  rw [show 57 + s.palette.entries.size + s.idatData.size + 8 +
+        ByteArray.empty.size + 4 = s.bytes.size by
+      rw [PaletteContainerSpec.bytes_size s]
+      simp
+      omega] at h
+  exact h
+
+end PaletteContainerSpec
+
 end Lemmas
 
 end Bitmaps
