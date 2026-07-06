@@ -2780,12 +2780,29 @@ structure PngHeader where
   interlace : Nat := 0
 deriving Repr
 
+structure PngPalette where
+  entries : ByteArray
+deriving Repr, DecidableEq
+
+def PngPalette.entryCount (palette : PngPalette) : Nat :=
+  palette.entries.size / 3
+
+def PngPalette.rgbAt? (palette : PngPalette) (idx : Nat) :
+    Option (UInt8 × UInt8 × UInt8) := do
+  let base := idx * 3
+  if _h : base + 2 < palette.entries.size then
+    some (palette.entries.get! base, palette.entries.get! (base + 1),
+      palette.entries.get! (base + 2))
+  else
+    none
+
 inductive PngTransparency where
   | gray1 (gray : Bool)
   | gray8 (gray : UInt8)
   | rgb8 (r g b : UInt8)
   | gray16 (gray : UInt16)
   | rgb16 (r g b : UInt16)
+  | paletteAlpha (alpha : ByteArray)
 deriving Repr, DecidableEq
 
 inductive PngBackground where
@@ -2794,9 +2811,11 @@ inductive PngBackground where
   | rgb8 (r g b : UInt8)
   | gray16 (gray : UInt16)
   | rgb16 (r g b : UInt16)
+  | paletteIndex (idx : UInt8)
 deriving Repr, DecidableEq
 
 structure PngMetadata where
+  palette : Option PngPalette := none
   transparency : Option PngTransparency := none
   background : Option PngBackground := none
   gamma : Option Nat := none
@@ -2807,7 +2826,8 @@ structure PngMetadata where
 deriving Repr, DecidableEq
 
 def PngMetadata.empty : PngMetadata :=
-  { transparency := none
+  { palette := none
+    transparency := none
     background := none
     gamma := none
     chromaticities := none
@@ -2821,6 +2841,20 @@ structure PngDecodeResult (px : Type u) [Pixel px] where
 
 structure PngDecodeGray1Result where
   bitmap : BitmapGray1
+  metadata : PngMetadata
+
+structure PngIndexedBitmap where
+  size : Size
+  bitDepth : Nat
+  palette : PngPalette
+  data : ByteArray
+  transparency : Option ByteArray := none
+  background : Option UInt8 := none
+  valid : data.size = size.width * size.height
+deriving Repr
+
+structure PngIndexedDecodeResult where
+  bitmap : PngIndexedBitmap
   metadata : PngMetadata
 
 structure PngParsed where
@@ -2890,6 +2924,28 @@ def parsePhysData (data : ByteArray) : Option PngPhysicalPixelDimensions := do
   else
     none
 
+def paletteMaxEntriesForBitDepth (bitDepth : Nat) : Nat :=
+  if bitDepth == 1 then 2
+  else if bitDepth == 2 then 4
+  else if bitDepth == 4 then 16
+  else if bitDepth == 8 then 256
+  else 0
+
+def parsePlteData (hdr : PngHeader) (data : ByteArray) : Option PngPalette := do
+  if data.size == 0 then
+    none
+  else if data.size % 3 != 0 then
+    none
+  else if data.size > 256 * 3 then
+    none
+  else
+    let palette : PngPalette := { entries := data }
+    if hdr.colorType == 3 &&
+        palette.entryCount > paletteMaxEntriesForBitDepth hdr.bitDepth then
+      none
+    else
+      some palette
+
 def parseTrnsData (hdr : PngHeader) (data : ByteArray) : Option PngTransparency := do
   if hdr.colorType == 0 then
     if data.size != 2 then
@@ -2926,6 +2982,8 @@ def parseTrnsData (hdr : PngHeader) (data : ByteArray) : Option PngTransparency 
         (readU16BEUInt16! data 4))
     else
       none
+  else if hdr.colorType == 3 then
+    some (.paletteAlpha data)
   else
     none
 
@@ -2965,6 +3023,11 @@ def parseBkgdData (hdr : PngHeader) (data : ByteArray) : Option PngBackground :=
         (readU16BEUInt16! data 4))
     else
       none
+  else if hdr.colorType == 3 then
+    if data.size != 1 then
+      none
+    else
+      some (.paletteIndex (data.get! 0))
   else
     none
 
@@ -3015,6 +3078,8 @@ def pngBytesPerPixelForColorType? (colorType : Nat) : Option Nat :=
     some 1
   else if colorType == 2 then
     some 3
+  else if colorType == 3 then
+    some 1
   else if colorType == 4 then
     some 2
   else if colorType == 6 then
@@ -3027,6 +3092,8 @@ def pngChannelCountForColorType? (colorType : Nat) : Option Nat :=
     some 1
   else if colorType == 2 then
     some 3
+  else if colorType == 3 then
+    some 1
   else if colorType == 4 then
     some 2
   else if colorType == 6 then
@@ -3051,6 +3118,9 @@ def pngBitsPerPixelForColorTypeAndBitDepth? (colorType bitDepth : Nat) : Option 
   let channels ← pngChannelCountForColorType? colorType
   if colorType == 0 && bitDepth == 1 then
     some 1
+  else if colorType == 3 &&
+      (bitDepth == 1 || bitDepth == 2 || bitDepth == 4 || bitDepth == 8) then
+    some bitDepth
   else if bitDepth == 8 || bitDepth == 16 then
     some (channels * bitDepth)
   else
@@ -3061,7 +3131,8 @@ def pngRowBytesForColorTypeAndBitDepth? (width colorType bitDepth : Nat) : Optio
   some ((width * bitsPerPixel + 7) / 8)
 
 def pngFilterBppForColorTypeAndBitDepth? (colorType bitDepth : Nat) : Option Nat := do
-  if colorType == 0 && bitDepth == 1 then
+  if (colorType == 0 && bitDepth == 1) ||
+      (colorType == 3 && (bitDepth == 1 || bitDepth == 2 || bitDepth == 4)) then
     some 1
   else
     pngBytesPerPixelForColorTypeAndBitDepth? colorType bitDepth
@@ -3069,13 +3140,16 @@ def pngFilterBppForColorTypeAndBitDepth? (colorType bitDepth : Nat) : Option Nat
 def pngColorTypeBitDepthSupported (colorType bitDepth : Nat) : Bool :=
   if colorType == 0 then
     bitDepth == 1 || bitDepth == 8 || bitDepth == 16
+  else if colorType == 3 then
+    bitDepth == 1 || bitDepth == 2 || bitDepth == 4 || bitDepth == 8
   else if colorType == 2 || colorType == 4 || colorType == 6 then
     bitDepth == 8 || bitDepth == 16
   else
     false
 
 def pngBitDepthSupported (bitDepth : Nat) : Bool :=
-  bitDepth == 1 || bitDepth == 8 || bitDepth == 16
+  bitDepth == 1 || bitDepth == 2 || bitDepth == 4 ||
+    bitDepth == 8 || bitDepth == 16
 
 structure PngParseState where
   header : Option PngHeader
@@ -3158,9 +3232,11 @@ def parsePngLoopFuel (fuel : Nat) (bytes : ByteArray) (pos : Nat)
                       none
                     if !plteAllowedForColorType hdr.colorType then
                       none
-                    if chunkData.size % 3 != 0 then
-                      none
-                    parsePngLoopFuel fuel bytes posNext { state with seenPLTE := true }
+                    let palette ← parsePlteData hdr chunkData
+                    parsePngLoopFuel fuel bytes posNext
+                      { state with
+                          seenPLTE := true
+                          metadata := { state.metadata with palette := some palette } }
                   else if typBytes == idatTypeBytes then
                     if state.closedIDAT then
                       none
@@ -3340,9 +3416,11 @@ def parsePngLoopFuelWithMetadata (fuel : Nat) (bytes : ByteArray) (pos : Nat)
                       none
                     if !plteAllowedForColorType hdr.colorType then
                       none
-                    if chunkData.size % 3 != 0 then
-                      none
-                    parsePngLoopFuelWithMetadata fuel bytes posNext { state with seenPLTE := true }
+                    let palette ← parsePlteData hdr chunkData
+                    parsePngLoopFuelWithMetadata fuel bytes posNext
+                      { state with
+                          seenPLTE := true
+                          metadata := { state.metadata with palette := some palette } }
                   else if typBytes == idatTypeBytes then
                     if state.closedIDAT then
                       none
@@ -3365,19 +3443,55 @@ def parsePngLoopFuelWithMetadata (fuel : Nat) (bytes : ByteArray) (pos : Nat)
                       none
                     if state.metadata.transparency.isSome then
                       none
-                    let trns ← parseTrnsData hdr chunkData
-                    parsePngLoopFuelWithMetadata fuel bytes posNext
-                      { state with
-                          metadata := { state.metadata with transparency := some trns } }
+                    if hdr.colorType == 3 then
+                      if !state.seenPLTE then
+                        none
+                      else
+                        match state.metadata.palette with
+                        | some palette =>
+                            if chunkData.size > palette.entryCount then
+                              none
+                            else
+                              let trns ← parseTrnsData hdr chunkData
+                              parsePngLoopFuelWithMetadata fuel bytes posNext
+                                { state with
+                                    metadata := { state.metadata with transparency := some trns } }
+                        | none =>
+                            none
+                    else
+                      let trns ← parseTrnsData hdr chunkData
+                      parsePngLoopFuelWithMetadata fuel bytes posNext
+                        { state with
+                            metadata := { state.metadata with transparency := some trns } }
                   else if typBytes == bkgdTypeBytes then
                     if state.seenIDAT then
                       none
                     if state.metadata.background.isSome then
                       none
-                    let bkgd ← parseBkgdData hdr chunkData
-                    parsePngLoopFuelWithMetadata fuel bytes posNext
-                      { state with
-                          metadata := { state.metadata with background := some bkgd } }
+                    if hdr.colorType == 3 then
+                      if !state.seenPLTE then
+                        none
+                      else
+                        match state.metadata.palette with
+                        | some palette =>
+                            let bkgd ← parseBkgdData hdr chunkData
+                            match bkgd with
+                            | .paletteIndex idx =>
+                                if idx.toNat < palette.entryCount then
+                                  parsePngLoopFuelWithMetadata fuel bytes posNext
+                                    { state with
+                                        metadata := { state.metadata with background := some bkgd } }
+                                else
+                                  none
+                            | _ =>
+                                none
+                        | none =>
+                            none
+                    else
+                      let bkgd ← parseBkgdData hdr chunkData
+                      parsePngLoopFuelWithMetadata fuel bytes posNext
+                        { state with
+                            metadata := { state.metadata with background := some bkgd } }
                   else if typBytes == gamaTypeBytes then
                     if state.seenPLTE || state.seenIDAT then
                       none
@@ -3497,6 +3611,7 @@ def parsePngForDecode (bytes : ByteArray) (hsize : 8 <= bytes.size) :
 
 def PngMetadata.pixelOnlyColorSpace (metadata : PngMetadata) : PngMetadata :=
   { PngMetadata.empty with
+    palette := metadata.palette
     gamma := metadata.gamma
     chromaticities := metadata.chromaticities
     srgb := metadata.srgb }
@@ -3818,6 +3933,166 @@ def gray1FlatToSampleRaw (flat : ByteArray) (w h targetBitDepth : Nat) : ByteArr
           raw := raw.push (if on then 0xff else 0)
     return raw
 
+def paletteRowBytes (w bitDepth : Nat) : Nat :=
+  (w * bitDepth + 7) / 8
+
+def palettePackedShift (bitDepth x : Nat) : Nat :=
+  if bitDepth == 1 then
+    7 - (x % 8)
+  else if bitDepth == 2 then
+    6 - 2 * (x % 4)
+  else if bitDepth == 4 then
+    4 - 4 * (x % 2)
+  else
+    0
+
+def paletteIndexLimit (bitDepth : Nat) : Nat :=
+  if bitDepth == 1 then 2
+  else if bitDepth == 2 then 4
+  else if bitDepth == 4 then 16
+  else if bitDepth == 8 then 256
+  else 0
+
+@[inline] def palettePackedIndexAt (row : ByteArray) (bitDepth x : Nat) : UInt8 :=
+  if bitDepth == 8 then
+    row.get! x
+  else
+    let byte := row.get! (x / (8 / bitDepth))
+    let shift := palettePackedShift bitDepth x
+    u8 ((byte.toNat >>> shift) % paletteIndexLimit bitDepth)
+
+def paletteScatterFullRow (row flat : ByteArray) (w bitDepth y paletteEntries : Nat) :
+    Option ByteArray :=
+  Id.run do
+    let mut flat := flat
+    let mut ok := true
+    for x in [0:w] do
+      let idx := palettePackedIndexAt row bitDepth x
+      if idx.toNat >= paletteEntries then
+        ok := false
+      flat := flat.set! (y * w + x) idx
+    if ok then
+      some flat
+    else
+      none
+
+def decodePaletteRowsLoop (raw : ByteArray) (w h bitDepth rowBytes paletteEntries : Nat)
+    (y offset : Nat) (prevRow flat : ByteArray) : Option ByteArray :=
+  if hlt : y < h then
+    let _ := hlt
+    if _hrow : offset + 1 + rowBytes ≤ raw.size then
+      let filter := raw.get! offset
+      let dataStart := offset + 1
+      let rowData := raw.extract dataStart (dataStart + rowBytes)
+      if hfilter : filter.toNat ≤ 4 then
+        let row :=
+          if filter.toNat = 0 then
+            rowData
+          else
+            unfilterRow filter rowData prevRow 1 hfilter
+        match paletteScatterFullRow row flat w bitDepth y paletteEntries with
+        | some flat =>
+            decodePaletteRowsLoop raw w h bitDepth rowBytes paletteEntries (y + 1)
+              (dataStart + rowBytes) row flat
+        | none =>
+            none
+      else
+        none
+    else
+      none
+  else if offset == raw.size then
+    some flat
+  else
+    none
+termination_by h - y
+decreasing_by
+  have hy : y < h := hlt
+  have hy' : y < y + 1 := Nat.lt_succ_self y
+  exact Nat.sub_lt_sub_left hy hy'
+
+def adam7ScatterRowPalette (row flat : ByteArray) (w bitDepth paletteEntries : Nat)
+    (pass : Adam7Pass) (passY passWidth : Nat) : Option ByteArray :=
+  Id.run do
+    let mut flat := flat
+    let mut ok := true
+    let dstY := pass.startY + passY * pass.stepY
+    for passX in [0:passWidth] do
+      let dstX := pass.startX + passX * pass.stepX
+      let idx := palettePackedIndexAt row bitDepth passX
+      if idx.toNat >= paletteEntries then
+        ok := false
+      flat := flat.set! (dstY * w + dstX) idx
+    if ok then
+      some flat
+    else
+      none
+
+def decodeAdam7PalettePassRows (raw : ByteArray) (w bitDepth paletteEntries : Nat)
+    (pass : Adam7Pass) (passWidth passHeight passY offset : Nat) (prevRow flat : ByteArray) :
+    Option (Nat × ByteArray) := do
+  if hlt : passY < passHeight then
+    let _ := hlt
+    let rowBytes := paletteRowBytes passWidth bitDepth
+    if _hrow : offset + 1 + rowBytes ≤ raw.size then
+      let filter := raw.get! offset
+      let dataStart := offset + 1
+      let rowData := raw.extract dataStart (dataStart + rowBytes)
+      if hfilter : filter.toNat ≤ 4 then
+        let row :=
+          if filter.toNat = 0 then
+            rowData
+          else
+            unfilterRow filter rowData prevRow 1 hfilter
+        let flat ← adam7ScatterRowPalette row flat w bitDepth paletteEntries pass passY passWidth
+        decodeAdam7PalettePassRows raw w bitDepth paletteEntries pass passWidth passHeight
+          (passY + 1) (dataStart + rowBytes) row flat
+      else
+        none
+    else
+      none
+  else
+    some (offset, flat)
+termination_by passHeight - passY
+decreasing_by
+  have hpassY : passY < passHeight := hlt
+  have hsucc : passY < passY + 1 := Nat.lt_succ_self passY
+  exact Nat.sub_lt_sub_left hpassY hsucc
+
+def decodeAdam7PalettePasses (raw : ByteArray) (w h bitDepth paletteEntries offset : Nat)
+    (flat : ByteArray) : List Adam7Pass -> Option (Nat × ByteArray)
+  | [] => some (offset, flat)
+  | pass :: passes => do
+      let passWidth := adam7PassDim w pass.startX pass.stepX
+      let passHeight :=
+        if passWidth == 0 then
+          0
+        else
+          adam7PassDim h pass.startY pass.stepY
+      let (offset, flat) ←
+        decodeAdam7PalettePassRows raw w bitDepth paletteEntries pass passWidth passHeight
+          0 offset ByteArray.empty flat
+      decodeAdam7PalettePasses raw w h bitDepth paletteEntries offset flat passes
+
+def decodePaletteIndicesByInterlace? (raw : ByteArray) (hdr : PngHeader)
+    (paletteEntries : Nat) : Option ByteArray :=
+  let flat0 := ByteArray.mk <| Array.replicate (hdr.width * hdr.height) 0
+  if hdr.interlace == 0 then
+    let rowBytes := paletteRowBytes hdr.width hdr.bitDepth
+    decodePaletteRowsLoop raw hdr.width hdr.height hdr.bitDepth rowBytes paletteEntries
+      0 0 ByteArray.empty flat0
+  else if hdr.interlace == 1 then
+    match decodeAdam7PalettePasses raw hdr.width hdr.height hdr.bitDepth paletteEntries
+        0 flat0 adam7Passes with
+    | some (offset, flat) =>
+        if offset != raw.size then
+          none
+        else
+          some flat
+    | none =>
+        none
+  else
+    none
+
 def decodeRowDropAlpha (row : ByteArray) (w y bpp : Nat) (pixels : ByteArray) : ByteArray :=
   Id.run do
     let mut pixels := pixels
@@ -3843,6 +4118,7 @@ def backgroundToRGB (background : PngBackground) : UInt8 × UInt8 × UInt8 :=
       let gray8 := u8 (gray.toNat / 256)
       (gray8, gray8, gray8)
   | .rgb16 r g b => (u8 (r.toNat / 256), u8 (g.toNat / 256), u8 (b.toNat / 256))
+  | .paletteIndex _ => (0, 0, 0)
 
 def backgroundToGray (background : PngBackground) : UInt8 :=
   match background with
@@ -3851,6 +4127,7 @@ def backgroundToGray (background : PngBackground) : UInt8 :=
   | .rgb8 r g b => u8 ((r.toNat + g.toNat + b.toNat) / 3)
   | .gray16 gray => u8 (gray.toNat / 256)
   | .rgb16 r g b => u8 (((r.toNat / 256) + (g.toNat / 256) + (b.toNat / 256)) / 3)
+  | .paletteIndex _ => 0
 
 def u8ToUInt16Full (x : UInt8) : UInt16 :=
   UInt16.ofNat (x.toNat * 257)
@@ -3866,6 +4143,7 @@ def backgroundToRGB16 (background : PngBackground) : UInt16 × UInt16 × UInt16 
   | .rgb8 r g b => (u8ToUInt16Full r, u8ToUInt16Full g, u8ToUInt16Full b)
   | .gray16 gray => (gray, gray, gray)
   | .rgb16 r g b => (r, g, b)
+  | .paletteIndex _ => (0, 0, 0)
 
 def backgroundToGray16 (background : PngBackground) : UInt16 :=
   match background with
@@ -3874,6 +4152,7 @@ def backgroundToGray16 (background : PngBackground) : UInt16 :=
   | .rgb8 r g b => UInt16.ofNat ((r.toNat * 257 + g.toNat * 257 + b.toNat * 257) / 3)
   | .gray16 gray => gray
   | .rgb16 r g b => UInt16.ofNat ((r.toNat + g.toNat + b.toNat) / 3)
+  | .paletteIndex _ => 0
 
 def alphaCompositeByte (src bg alpha : UInt8) : UInt8 :=
   u8 ((src.toNat * alpha.toNat + bg.toNat * (255 - alpha.toNat)) / 255)
@@ -3883,6 +4162,158 @@ def alphaComposite16 (src bg alpha : UInt16) : UInt16 :=
 
 def alphaComposite16ToByte (src bg alpha : UInt16) : UInt8 :=
   u8 ((alphaComposite16 src bg alpha).toNat / 256)
+
+def paletteAlphaBytes? (metadata : PngMetadata) : Option ByteArray :=
+  match metadata.transparency with
+  | some (.paletteAlpha alpha) => some alpha
+  | _ => none
+
+def paletteBackgroundRGB? (palette : PngPalette) (metadata : PngMetadata) :
+    Option (UInt8 × UInt8 × UInt8) :=
+  match metadata.background with
+  | some (.paletteIndex idx) => palette.rgbAt? idx.toNat
+  | _ => none
+
+def paletteAlphaAt (alpha? : Option ByteArray) (idx : Nat) : UInt8 :=
+  match alpha? with
+  | some alpha =>
+      if idx < alpha.size then
+        alpha.get! idx
+      else
+        0xff
+  | none =>
+      0xff
+
+@[inline] def grayFromRGB8 (r g b : UInt8) : UInt8 :=
+  u8 ((r.toNat + g.toNat + b.toNat) / 3)
+
+@[inline] def pushU16BE (out : ByteArray) (n : Nat) : ByteArray :=
+  (out.push (u8 (n / 256))).push (u8 n)
+
+@[inline] def pushU16Full (out : ByteArray) (sample : UInt8) : ByteArray :=
+  pushU16BE out (sample.toNat * 257)
+
+def expandPaletteIndicesToPixels8 (indices : ByteArray) (palette : PngPalette)
+    (alpha? : Option ByteArray) (background? : Option (UInt8 × UInt8 × UInt8))
+    (targetColorType : UInt8) : Option ByteArray :=
+  Id.run do
+    let count := indices.size
+    let outBpp :=
+      if targetColorType == u8 0 then bytesPerPixelGray
+      else if targetColorType == u8 2 then bytesPerPixelRGB
+      else if targetColorType == u8 4 then bytesPerPixelGrayAlpha
+      else if targetColorType == u8 6 then bytesPerPixelRGBA
+      else 0
+    if outBpp == 0 then
+      none
+    else
+      let needsBackground :=
+        alpha?.isSome && (targetColorType == u8 0 || targetColorType == u8 2)
+      let mut out := ByteArray.emptyWithCapacity (count * outBpp)
+      let mut ok := true
+      for i in [0:count] do
+        let idx := (indices.get! i).toNat
+        match palette.rgbAt? idx with
+        | some (r0, g0, b0) =>
+            let a := paletteAlphaAt alpha? idx
+            let mut r := r0
+            let mut g := g0
+            let mut b := b0
+            if needsBackground then
+              match background? with
+              | some (br, bg, bb) =>
+                  r := alphaCompositeByte r0 br a
+                  g := alphaCompositeByte g0 bg a
+                  b := alphaCompositeByte b0 bb a
+              | none =>
+                  ok := false
+            if targetColorType == u8 0 then
+              out := out.push (grayFromRGB8 r g b)
+            else if targetColorType == u8 2 then
+              out := out.push r
+              out := out.push g
+              out := out.push b
+            else if targetColorType == u8 4 then
+              out := out.push (grayFromRGB8 r g b)
+              out := out.push a
+            else
+              out := out.push r
+              out := out.push g
+              out := out.push b
+              out := out.push a
+        | none =>
+            ok := false
+      if ok then
+        some out
+      else
+        none
+
+def expandPaletteIndicesToPixels16 (indices : ByteArray) (palette : PngPalette)
+    (alpha? : Option ByteArray) (background? : Option (UInt8 × UInt8 × UInt8))
+    (targetColorType : UInt8) : Option ByteArray :=
+  Id.run do
+    let count := indices.size
+    let outBpp :=
+      if targetColorType == u8 0 then bytesPerPixelGray16
+      else if targetColorType == u8 2 then bytesPerPixelRGB16
+      else if targetColorType == u8 4 then bytesPerPixelGrayAlpha16
+      else if targetColorType == u8 6 then bytesPerPixelRGBA16
+      else 0
+    if outBpp == 0 then
+      none
+    else
+      let needsBackground :=
+        alpha?.isSome && (targetColorType == u8 0 || targetColorType == u8 2)
+      let mut out := ByteArray.emptyWithCapacity (count * outBpp)
+      let mut ok := true
+      for i in [0:count] do
+        let idx := (indices.get! i).toNat
+        match palette.rgbAt? idx with
+        | some (r0, g0, b0) =>
+            let a := paletteAlphaAt alpha? idx
+            let mut r := r0
+            let mut g := g0
+            let mut b := b0
+            if needsBackground then
+              match background? with
+              | some (br, bg, bb) =>
+                  r := alphaCompositeByte r0 br a
+                  g := alphaCompositeByte g0 bg a
+                  b := alphaCompositeByte b0 bb a
+              | none =>
+                  ok := false
+            if targetColorType == u8 0 then
+              out := pushU16Full out (grayFromRGB8 r g b)
+            else if targetColorType == u8 2 then
+              out := pushU16Full out r
+              out := pushU16Full out g
+              out := pushU16Full out b
+            else if targetColorType == u8 4 then
+              out := pushU16Full out (grayFromRGB8 r g b)
+              out := pushU16Full out a
+            else
+              out := pushU16Full out r
+              out := pushU16Full out g
+              out := pushU16Full out b
+              out := pushU16Full out a
+        | none =>
+            ok := false
+      if ok then
+        some out
+      else
+        none
+
+def expandPaletteIndicesToPixels (indices : ByteArray) (palette : PngPalette)
+    (metadata : PngMetadata) (targetColorType targetBitDepth : UInt8) :
+    Option ByteArray :=
+  let alpha? := paletteAlphaBytes? metadata
+  let background? := paletteBackgroundRGB? palette metadata
+  if targetBitDepth == u8 8 then
+    expandPaletteIndicesToPixels8 indices palette alpha? background? targetColorType
+  else if targetBitDepth == u8 16 then
+    expandPaletteIndicesToPixels16 indices palette alpha? background? targetColorType
+  else
+    none
 
 def transparencyAlpha (trns : Option PngTransparency) (r g b : UInt8) : UInt8 :=
   match trns with
@@ -3899,6 +4330,8 @@ def transparencyAlpha (trns : Option PngTransparency) (r g b : UInt8) : UInt8 :=
   | some (.rgb16 tr tg tb) =>
       if r == u8 (tr.toNat / 256) && g == u8 (tg.toNat / 256) &&
           b == u8 (tb.toNat / 256) then u8 0 else u8 255
+  | some (.paletteAlpha _) =>
+      u8 255
   | none =>
       u8 255
 
@@ -3919,6 +4352,8 @@ def transparencyAlpha16 (trns : Option PngTransparency) (r g b : UInt16) : UInt1
       if r == gray && g == gray && b == gray then UInt16.ofNat 0 else UInt16.ofNat uint16MaxValue
   | some (.rgb16 tr tg tb) =>
       if r == tr && g == tg && b == tb then UInt16.ofNat 0 else UInt16.ofNat uint16MaxValue
+  | some (.paletteAlpha _) =>
+      UInt16.ofNat uint16MaxValue
   | none =>
       UInt16.ofNat uint16MaxValue
 
@@ -5028,10 +5463,53 @@ class PngPixel (α : Type u) [Pixel α] where
   decodeRowsLoop : (raw : ByteArray) -> (w h bpp rowBytes : Nat) ->
     (y offset : Nat) -> (prevRow pixels : ByteArray) -> Option ByteArray
 
+def decodeParsedPaletteBitmapWithMetadata {px : Type u} [Pixel px] [PngPixel px]
+    (parsed : PngParsed) : Option (PngDecodeResult px) := do
+  let hdr := parsed.header
+  if hdr.colorType != 3 then
+    none
+  if !pngColorTypeBitDepthSupported hdr.colorType hdr.bitDepth then
+    none
+  let palette ← parsed.metadata.palette
+  let targetColorType := PngPixel.colorType (α := px)
+  let targetBitDepth := PngPixel.bitDepth (α := px)
+  if !(targetBitDepth == u8 8 || targetBitDepth == u8 16) then
+    none
+  if targetColorType != u8 0 && targetColorType != u8 2 &&
+      targetColorType != u8 4 && targetColorType != u8 6 then
+    none
+  let inflated ←
+    if hsize : 2 <= parsed.idat.size then
+      match zlibDecompressStored parsed.idat hsize with
+      | some raw => some raw
+      | none => zlibDecompress parsed.idat hsize
+    else
+      none
+  let indices ← decodePaletteIndicesByInterlace? inflated hdr palette.entryCount
+  let pixels ← expandPaletteIndicesToPixels indices palette parsed.metadata
+    targetColorType targetBitDepth
+  let sourceForColorSpace :=
+    if targetColorType == u8 6 || targetColorType == u8 4 then
+      6
+    else
+      2
+  let pixels ← applyPngColorSpaceTransform parsed.metadata sourceForColorSpace
+    targetColorType targetBitDepth pixels
+  let size : Size := { width := hdr.width, height := hdr.height }
+  if hsize : pixels.size = size.width * size.height * Pixel.bytesPerPixel (α := px) then
+    some
+      { bitmap := { size, data := pixels, valid := hsize }
+        metadata := parsed.metadata }
+  else
+    none
+
 def decodeParsedBitmapWithMetadata {px : Type u} [Pixel px] [PngPixel px]
     (parsed : PngParsed) : Option (PngDecodeResult px) := do
   let hdr := parsed.header
   let idat := parsed.idat
+  if hdr.colorType == 3 then
+    decodeParsedPaletteBitmapWithMetadata (px := px) parsed
+  else
   if !pngColorTypeBitDepthSupported hdr.colorType hdr.bitDepth then
     none
   if hdr.colorType != 0 && hdr.colorType != 2 && hdr.colorType != 4 &&
@@ -5204,6 +5682,9 @@ def decodeBitmap {px : Type u} [Pixel px] [PngPixel px]
     { parsed with metadata := PngMetadata.pixelOnlyColorSpace parsed.metadata }
   let hdr := parsed.header
   let idat := parsed.idat
+  if hdr.colorType == 3 then
+    let decoded ← decodeParsedPaletteBitmapWithMetadata (px := px) parsed
+    return decoded.bitmap
   if !pngColorTypeBitDepthSupported hdr.colorType hdr.bitDepth then
     none
   if hdr.colorType != 0 && hdr.colorType != 2 && hdr.colorType != 4 &&
@@ -5280,6 +5761,67 @@ def decodeBitmap {px : Type u} [Pixel px] [PngPixel px]
     return { size, data := pixels, valid := hsize }
   else
     none
+
+def decodeParsedIndexedBitmapWithMetadata (parsed : PngParsed) :
+    Option PngIndexedDecodeResult := do
+  let hdr := parsed.header
+  if hdr.colorType != 3 then
+    none
+  if !pngColorTypeBitDepthSupported hdr.colorType hdr.bitDepth then
+    none
+  let palette ← parsed.metadata.palette
+  let inflated ←
+    if hsize : 2 <= parsed.idat.size then
+      match zlibDecompressStored parsed.idat hsize with
+      | some raw => some raw
+      | none => zlibDecompress parsed.idat hsize
+    else
+      none
+  let indices ← decodePaletteIndicesByInterlace? inflated hdr palette.entryCount
+  let transparency :=
+    match parsed.metadata.transparency with
+    | some (.paletteAlpha alpha) => some alpha
+    | _ => none
+  let background :=
+    match parsed.metadata.background with
+    | some (.paletteIndex idx) => some idx
+    | _ => none
+  let size : Size := { width := hdr.width, height := hdr.height }
+  if hvalid : indices.size = size.width * size.height then
+    some
+      { bitmap :=
+          { size
+            bitDepth := hdr.bitDepth
+            palette
+            data := indices
+            transparency
+            background
+            valid := hvalid }
+        metadata := parsed.metadata }
+  else
+    none
+
+def decodeIndexedBitmapWithMetadata (bytes : ByteArray) :
+    Option PngIndexedDecodeResult := do
+  let parsed ←
+    if hsize : 8 <= bytes.size then
+      parsePngWithMetadata bytes hsize
+    else
+      none
+  decodeParsedIndexedBitmapWithMetadata parsed
+
+def decodeIndexedBitmap (bytes : ByteArray) : Option PngIndexedBitmap := do
+  let parsed ←
+    if hsize : 8 <= bytes.size then
+      parsePngForDecode bytes hsize
+    else
+      none
+  if parsed.metadata.transparency.isSome then
+    none
+  let parsed :=
+    { parsed with metadata := PngMetadata.pixelOnlyColorSpace parsed.metadata }
+  let decoded ← decodeParsedIndexedBitmapWithMetadata parsed
+  some decoded.bitmap
 
 def encodeRawLoop (data : ByteArray) (rowBytes h : Nat) (y : Nat) (raw : ByteArray) : ByteArray :=
   if hlt : y < h then
@@ -5459,6 +6001,131 @@ def encodeBitmapCore (raw ihdr : ByteArray) (mode : PngEncodeMode)
   let outSize := pngSignature.size + ihdrChunk.size + ancillary.size + idatChunk.size + iendChunk.size
   let out := ByteArray.emptyWithCapacity outSize
   some (out ++ pngSignature ++ ihdrChunk ++ ancillary ++ idatChunk ++ iendChunk)
+
+def palettePackIndexIntoRow (row : ByteArray) (bitDepth x : Nat) (idx : UInt8) :
+    ByteArray :=
+  if bitDepth == 8 then
+    row.set! x idx
+  else
+    let samplesPerByte := 8 / bitDepth
+    let byteIndex := x / samplesPerByte
+    let shift := palettePackedShift bitDepth x
+    let old := row.get! byteIndex
+    let packed := u8 (old.toNat ||| ((idx.toNat % paletteIndexLimit bitDepth) <<< shift))
+    row.set! byteIndex packed
+
+def encodeIndexedPackedRows (bmp : PngIndexedBitmap) : ByteArray :=
+  Id.run do
+    let rowBytes := paletteRowBytes bmp.size.width bmp.bitDepth
+    let mut packed := ByteArray.emptyWithCapacity (rowBytes * bmp.size.height)
+    for y in [0:bmp.size.height] do
+      let mut row := ByteArray.mk <| Array.replicate rowBytes 0
+      for x in [0:bmp.size.width] do
+        let idx := bmp.data.get! (y * bmp.size.width + x)
+        row := palettePackIndexIntoRow row bmp.bitDepth x idx
+      packed := packed ++ row
+    return packed
+
+def encodeIndexedRowsWithFilter (packedRows : ByteArray) (rowBytes h : Nat)
+    (strategy : PngFilterStrategy) : ByteArray :=
+  Id.run do
+    let mut raw := ByteArray.emptyWithCapacity (h * (rowBytes + 1))
+    let mut prev := ByteArray.empty
+    for y in [0:h] do
+      let start := y * rowBytes
+      let row := packedRows.extract start (start + rowBytes)
+      let (filter, encodedRow) := filterRowForStrategy strategy row prev 1
+      raw := raw.push filter
+      raw := raw ++ encodedRow
+      prev := row
+    return raw
+
+def encodeRawIndexedWithFilter (bmp : PngIndexedBitmap)
+    (strategy : PngFilterStrategy) : ByteArray :=
+  let packedRows := encodeIndexedPackedRows bmp
+  let rowBytes := paletteRowBytes bmp.size.width bmp.bitDepth
+  encodeIndexedRowsWithFilter packedRows rowBytes bmp.size.height strategy
+
+def indexedDataInRange (data : ByteArray) (limit : Nat) : Bool :=
+  Id.run do
+    let mut ok := true
+    for i in [0:data.size] do
+      if (data.get! i).toNat >= limit then
+        ok := false
+    return ok
+
+def validateIndexedBitmap (bmp : PngIndexedBitmap) : Except String Unit := do
+  if bmp.bitDepth != 1 && bmp.bitDepth != 2 && bmp.bitDepth != 4 && bmp.bitDepth != 8 then
+    throw "indexed PNG bit depth must be 1, 2, 4, or 8"
+  if bmp.size.width >= UInt32.size then
+    throw "bitmap width exceeds PNG limit (2^32)"
+  if bmp.size.height >= UInt32.size then
+    throw "bitmap height exceeds PNG limit (2^32)"
+  if bmp.palette.entries.size == 0 then
+    throw "indexed PNG palette must not be empty"
+  if bmp.palette.entries.size % 3 != 0 then
+    throw "indexed PNG palette byte size must be a multiple of 3"
+  if bmp.palette.entries.size > 256 * 3 then
+    throw "indexed PNG palette has more than 256 entries"
+  if bmp.palette.entryCount > paletteMaxEntriesForBitDepth bmp.bitDepth then
+    throw "indexed PNG palette is too large for the selected bit depth"
+  if !indexedDataInRange bmp.data bmp.palette.entryCount then
+    throw "indexed PNG pixel data contains an out-of-range palette index"
+  match bmp.transparency with
+  | some alpha =>
+      if alpha.size > bmp.palette.entryCount then
+        throw "indexed PNG palette alpha data is longer than the palette"
+  | none =>
+      pure ()
+  match bmp.background with
+  | some idx =>
+      if idx.toNat >= bmp.palette.entryCount then
+        throw "indexed PNG background index is outside the palette"
+  | none =>
+      pure ()
+
+def encodeIndexedBitmapWithOptions (bmp : PngIndexedBitmap)
+    (options : PngEncodeOptions := {}) : Option ByteArray := do
+  let colorSpaceChunks ← encodeColorSpaceChunks? options.colorSpace options.chromaticities
+  let physChunk ← encodePhysChunk? options.physical
+  let timeChunk ← encodeTimeChunk? options.modificationTime
+  let raw := encodeRawIndexedWithFilter bmp options.filter
+  let idat :=
+    match options.mode with
+    | .stored => zlibCompressStored raw
+    | .fixed => zlibCompressFixed raw
+    | .dynamic => zlibCompressDynamic raw
+  let ihdr := u32be bmp.size.width ++ u32be bmp.size.height ++
+    ByteArray.mk #[u8 bmp.bitDepth, u8 3, u8 0, u8 0, u8 0]
+  let ihdrChunk := mkChunkBytes ihdrTypeBytes ihdr
+  let plteChunk := mkChunkBytes plteTypeBytes bmp.palette.entries
+  let trnsChunk :=
+    match bmp.transparency with
+    | some alpha => mkChunkBytes trnsTypeBytes alpha
+    | none => ByteArray.empty
+  let bkgdChunk :=
+    match bmp.background with
+    | some idx => mkChunkBytes bkgdTypeBytes (ByteArray.mk #[idx])
+    | none => ByteArray.empty
+  let idatChunk := mkChunkBytes idatTypeBytes idat
+  let iendChunk := mkChunkBytes iendTypeBytes ByteArray.empty
+  let outSize := pngSignature.size + ihdrChunk.size + colorSpaceChunks.size +
+    plteChunk.size + trnsChunk.size + bkgdChunk.size + physChunk.size +
+    timeChunk.size + idatChunk.size + iendChunk.size
+  let out := ByteArray.emptyWithCapacity outSize
+  some (out ++ pngSignature ++ ihdrChunk ++ colorSpaceChunks ++ plteChunk ++
+    trnsChunk ++ bkgdChunk ++ physChunk ++ timeChunk ++ idatChunk ++ iendChunk)
+
+def encodeIndexedBitmapWithOptionsChecked (bmp : PngIndexedBitmap)
+    (options : PngEncodeOptions := {}) : Except String ByteArray := do
+  validateIndexedBitmap bmp
+  match encodeIndexedBitmapWithOptions bmp options with
+  | some bytes => Except.ok bytes
+  | none => Except.error "invalid PNG ancillary encode options"
+
+def encodeIndexedBitmapChecked (bmp : PngIndexedBitmap)
+    (mode : PngEncodeMode := .fixed) : Except String ByteArray :=
+  encodeIndexedBitmapWithOptionsChecked bmp { mode := mode }
 
 def decodeParsedBitmapGray1WithMetadata (parsed : PngParsed) :
     Option PngDecodeGray1Result := do

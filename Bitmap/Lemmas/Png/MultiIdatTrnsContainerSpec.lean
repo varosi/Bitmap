@@ -17,6 +17,7 @@ structure TrnsChunkWitness (hdr : PngHeader) where
   payload : ByteArray
   trns : PngTransparency
   hParses : parseTrnsData hdr payload = some trns
+  hNotPalette : hdr.colorType ≠ 3
   hPayloadFits : payload.size < 2 ^ 32
 
 /-- Build a `PreIdatChunk` from a `TrnsChunkWitness` by packaging the
@@ -43,7 +44,7 @@ def TrnsChunkWitness.toPreIdat {hdr : PngHeader} (w : TrnsChunkWitness hdr) :
       hdr trnsTypeBytes w.payload (pos + 8 + w.payload.size + 4) w.trns
       hpos hLen hread hheader
       hNotIHDR hNotPLTE hNotIDAT hNotIEND
-      hIsTRNS hIDAT hDup w.hParses
+      hIsTRNS hIDAT hDup w.hNotPalette w.hParses
     rw [hStep]
     -- Rewrite the resulting state to the canonical record-update form.
     show parsePngLoopFuelWithMetadata fuel bytes (pos + 8 + w.payload.size + 4)

@@ -13,6 +13,7 @@ structure BkgdChunkWitness (hdr : PngHeader) where
   payload : ByteArray
   bkgd : PngBackground
   hParses : parseBkgdData hdr payload = some bkgd
+  hNotPalette : hdr.colorType ≠ 3
   hPayloadFits : payload.size < 2 ^ 32
 
 /-- Build a `PreIdatChunk` from a `BkgdChunkWitness`. -/
@@ -39,7 +40,7 @@ def BkgdChunkWitness.toPreIdat {hdr : PngHeader} (w : BkgdChunkWitness hdr) :
       hdr bkgdTypeBytes w.payload (pos + 8 + w.payload.size + 4) w.bkgd
       hpos hLen hread hheader
       hNotIHDR hNotPLTE hNotIDAT hNotIEND hNotTRNS
-      hIsBKGD hIDAT hDup w.hParses
+      hIsBKGD hIDAT hDup w.hNotPalette w.hParses
     rw [hStep]
     show parsePngLoopFuelWithMetadata fuel bytes (pos + 8 + w.payload.size + 4)
       { state with metadata :=

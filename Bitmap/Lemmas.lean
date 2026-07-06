@@ -3,6 +3,7 @@ import Bitmap.Lemmas.Png.Core
 import Bitmap.Lemmas.Png.ChunkValidation
 import Bitmap.Lemmas.Png.Adam7
 import Bitmap.Lemmas.Png.Gray1
+import Bitmap.Lemmas.Png.Palette
 import Bitmap.Lemmas.Png.EncodeFilter
 import Bitmap.Lemmas.Png.DynamicEncoder
 import Bitmap.Lemmas.Png.Lz77

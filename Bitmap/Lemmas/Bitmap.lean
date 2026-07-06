@@ -136,6 +136,13 @@ lemma decodeBitmap_encodeBitmap_common {px : Type u} [Pixel px] [PngPixel px]
             cases hrest' with
             | inl h4' => exact (False.elim (h4 h4'))
             | inr h6 => exact h6
+  have hctNot3 : ¬ ct = 3 := by
+    intro h3
+    rcases hct' with h0 | hrest
+    · omega
+    rcases hrest with h2 | hrest
+    · omega
+    rcases hrest with h4 | h6 <;> omega
   -- Parsed PNG header.
   have hparseSimple := parsePngSimple_encodeBitmap (bmp := bmp) (hw := hw) (hh := hh)
     (mode := mode) hidat hsize hct hbd hctbd
@@ -230,7 +237,7 @@ lemma decodeBitmap_encodeBitmap_common {px : Type u} [Pixel px] [PngPixel px]
         simpa [encodeBitmapIdat] using hmin
       simpa [hsize, hparseForDecode, zlibDecompressStored_zlibCompressStored, encodeBitmapIdat,
         ct, bd, hbdNoReject, hbitDepthEq, hbitDepthEqHeader, hnoDownsample, hpngBpp',
-        hctbd', hbdNot1', normalizeRawByInterlace?, PngMetadata.pixelOnlyColorSpace,
+        hctNot3, hctbd', hbdNot1', normalizeRawByInterlace?, PngMetadata.pixelOnlyColorSpace,
         PngMetadata.empty, applyPngColorSpaceTransform] using
         (And.intro hmetadataNoTransparency
           (And.intro hctProp
@@ -241,7 +248,7 @@ lemma decodeBitmap_encodeBitmap_common {px : Type u} [Pixel px] [PngPixel px]
       simpa [hsize, hparseForDecode,
         zlibDecompressStored_zlibCompressFixed_none, zlibDecompress_zlibCompressFixed,
         encodeBitmapIdat, ct, bd, hbdNoReject, hbitDepthEq, hbitDepthEqHeader,
-        hnoDownsample, hpngBpp', hctbd', hbdNot1', normalizeRawByInterlace?,
+        hnoDownsample, hpngBpp', hctNot3, hctbd', hbdNot1', normalizeRawByInterlace?,
         PngMetadata.pixelOnlyColorSpace, PngMetadata.empty, applyPngColorSpaceTransform] using
         (And.intro hmetadataNoTransparency
           (And.intro hctProp
@@ -252,7 +259,7 @@ lemma decodeBitmap_encodeBitmap_common {px : Type u} [Pixel px] [PngPixel px]
       simpa [hsize, hparseForDecode,
         zlibDecompressStored_zlibCompressDynamic_none, zlibDecompress_zlibCompressDynamic,
         encodeBitmapIdat, ct, bd, hbdNoReject, hbitDepthEq, hbitDepthEqHeader,
-        hnoDownsample, hpngBpp', hctbd', hbdNot1', normalizeRawByInterlace?,
+        hnoDownsample, hpngBpp', hctNot3, hctbd', hbdNot1', normalizeRawByInterlace?,
         PngMetadata.pixelOnlyColorSpace, PngMetadata.empty, applyPngColorSpaceTransform] using
         (And.intro hmetadataNoTransparency
           (And.intro hctProp

@@ -686,7 +686,7 @@ lemma walk_bkgd_step (fuel : Nat)
     (s.bkgdOffset + 8 + s.bkgdWitness.payload.size + 4) s.bkgdWitness.bkgd
     hPos hLen hReadBkgd hHeader
     hNotIHDR hNotPLTE hNotIDAT hNotIEND hNotTRNS
-    hIsBKGD hSeenIDAT hDup s.bkgdWitness.hParses
+    hIsBKGD hSeenIDAT hDup s.bkgdWitness.hNotPalette s.bkgdWitness.hParses
   rw [hStep]
   -- The resulting state: stateBeforeBkgd with metadata.background := some bkgd.
   -- Next position is firstIdatOffset == idatOffset 0.
@@ -736,7 +736,7 @@ lemma walk_trns_step (fuel : Nat)
     (33 + 8 + s.trnsWitness.payload.size + 4) s.trnsWitness.trns
     hPos hLen hReadTrns rfl
     hNotIHDR hNotPLTE hNotIDAT hNotIEND
-    hIsTRNS rfl rfl s.trnsWitness.hParses
+    hIsTRNS rfl rfl s.trnsWitness.hNotPalette s.trnsWitness.hParses
   rw [hStep]
   -- After tRNS step, the next position is bkgdOffset and the state matches
   -- stateBeforeBkgd.
