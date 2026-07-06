@@ -16,8 +16,8 @@ Proofs include functional correctness, guaranteed termination and no buffer over
 The encoder and decoder target a deliberately narrow PNG subset — the one for
 which the library implements directly. The byte-per-pixel bitmap formats in this
 subset carry full round-trip correctness proofs; packed 1-bit grayscale and
-explicit indexed-palette paths currently have focused layout and validation
-lemmas plus runtime fixture coverage.
+explicit indexed-palette paths currently have focused layout, validation, and
+8-bit filter-0 raw decoder lemmas plus runtime fixture coverage.
 
 ### Encoder
 
@@ -195,8 +195,14 @@ This library has proofs about:
   `pngRowBytes_palette2`,
   `pngRowBytes_palette4`,
   `pngRowBytes_palette8`,
+  `paletteRowBytes_8`,
   `encodeIndexedPackedRows_size`,
+  `encodeIndexedPackedRows_8_eq_data`,
   `encodeRawIndexedWithFilter_size`,
+  `encodeIndexedRowsWithFilter_none_eq_encodeRawGray8`,
+  `decodePaletteRowsLoop_encodeIndexedRowsWithFilter_none_8_256`,
+  `decodePaletteIndicesByInterlace_encodeIndexedRowsWithFilter_none_8_256`,
+  `decodePaletteIndicesByInterlace_encodeRawIndexedWithFilter_none_8_256`,
   `parsePlteData_accepts_palette2`,
   `parseTrnsData_accepts_paletteAlpha`,
   `parseBkgdData_accepts_paletteIndex`);

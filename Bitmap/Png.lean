@@ -3963,18 +3963,21 @@ def paletteIndexLimit (bitDepth : Nat) : Nat :=
 
 def paletteScatterFullRow (row flat : ByteArray) (w bitDepth y paletteEntries : Nat) :
     Option ByteArray :=
-  Id.run do
-    let mut flat := flat
-    let mut ok := true
-    for x in [0:w] do
-      let idx := palettePackedIndexAt row bitDepth x
-      if idx.toNat >= paletteEntries then
-        ok := false
-      flat := flat.set! (y * w + x) idx
-    if ok then
-      some flat
-    else
-      none
+  if bitDepth = 8 ∧ 256 ≤ paletteEntries then
+    some (row.copySlice 0 flat (y * w) w)
+  else
+    Id.run do
+      let mut flat := flat
+      let mut ok := true
+      for x in [0:w] do
+        let idx := palettePackedIndexAt row bitDepth x
+        if idx.toNat >= paletteEntries then
+          ok := false
+        flat := flat.set! (y * w + x) idx
+      if ok then
+        some flat
+      else
+        none
 
 def decodePaletteRowsLoop (raw : ByteArray) (w h bitDepth rowBytes paletteEntries : Nat)
     (y offset : Nat) (prevRow flat : ByteArray) : Option ByteArray :=
@@ -6048,7 +6051,10 @@ decreasing_by
 
 def encodeIndexedPackedRows (bmp : PngIndexedBitmap) : ByteArray :=
   let rowBytes := paletteRowBytes bmp.size.width bmp.bitDepth
-  encodeIndexedPackedRowsLoop bmp rowBytes 0 ByteArray.empty
+  if bmp.bitDepth = 8 then
+    bmp.data
+  else
+    encodeIndexedPackedRowsLoop bmp rowBytes 0 ByteArray.empty
 
 def encodeIndexedRowsWithFilterLoop (packedRows : ByteArray) (rowBytes h y : Nat)
     (prev raw : ByteArray) (strategy : PngFilterStrategy) : ByteArray :=
@@ -6070,8 +6076,12 @@ decreasing_by
 
 def encodeIndexedRowsWithFilter (packedRows : ByteArray) (rowBytes h : Nat)
     (strategy : PngFilterStrategy) : ByteArray :=
-  encodeIndexedRowsWithFilterLoop packedRows rowBytes h 0 ByteArray.empty
-    ByteArray.empty strategy
+  if strategy = .none then
+    let rawSize := h * (rowBytes + 1)
+    encodeRawLoop packedRows rowBytes h 0 (ByteArray.mk <| Array.replicate rawSize 0)
+  else
+    encodeIndexedRowsWithFilterLoop packedRows rowBytes h 0 ByteArray.empty
+      ByteArray.empty strategy
 
 def encodeRawIndexedWithFilter (bmp : PngIndexedBitmap)
     (strategy : PngFilterStrategy) : ByteArray :=
