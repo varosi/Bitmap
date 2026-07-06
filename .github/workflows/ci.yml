@@ -100,14 +100,23 @@ jobs:
           perl -0pi -e 's/(name = "mathlib"\nscope = "leanprover-community"\nrev = ")[^"]+(")/$1$ENV{LEAN_VERSION}$2/' lakefile.toml
           grep -A2 'name = "mathlib"' lakefile.toml | grep "rev = \"${LEAN_VERSION}\""
 
-      - name: Cache Lake build artifacts
+      - name: Cache Lake dependencies
         uses: actions/cache@v4
         with:
           path: |
-            .lake
-          key: ${{ runner.os }}-lake-${{ matrix.lean_version }}-${{ hashFiles('lean-toolchain', 'lakefile.toml', 'lake-manifest.json') }}
+            .lake/packages
+          key: ${{ runner.os }}-lake-deps-${{ matrix.lean_version }}-${{ hashFiles('lean-toolchain', 'lakefile.toml', 'lake-manifest.json') }}
           restore-keys: |
-            ${{ runner.os }}-lake-${{ matrix.lean_version }}-
+            ${{ runner.os }}-lake-deps-${{ matrix.lean_version }}-
+
+      - name: Cache project build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            .lake/build
+          key: ${{ runner.os }}-lake-build-${{ matrix.lean_version }}-${{ hashFiles('lean-toolchain', 'lakefile.toml', 'lake-manifest.json', 'Bitmap.lean', 'Bitmap/**/*.lean') }}
+          restore-keys: |
+            ${{ runner.os }}-lake-build-${{ matrix.lean_version }}-
 
       - name: Install selected Lean/Lake
         run: |
