@@ -125,6 +125,37 @@ lemma parsePlteData_rejects_palette_too_large_for_depth1 :
         none := by
   native_decide
 
+/-- Any non-empty, RGB-triplet-aligned PLTE payload inside PNG's 256-entry
+limit is accepted when it also fits the indexed bit-depth limit. This is the
+generic payload fact needed by palette container parser proofs. -/
+lemma parsePlteData_accepts_valid (hdr : PngHeader) (data : ByteArray)
+    (hnonempty : data.size ≠ 0)
+    (htriplets : data.size % 3 = 0)
+    (hmax : data.size ≤ 256 * 3)
+    (hfits :
+      hdr.colorType = 3 → data.size / 3 ≤ paletteMaxEntriesForBitDepth hdr.bitDepth) :
+    parsePlteData hdr data = some { entries := data } := by
+  unfold parsePlteData
+  have hsize0 : (data.size == 0) = false := by
+    by_cases h : data.size = 0
+    · exact (hnonempty h).elim
+    · simp [h]
+  have hmod : (data.size % 3 != 0) = false := by
+    simp [htriplets]
+  have hover : ¬ data.size > 256 * 3 := by
+    omega
+  by_cases hct : hdr.colorType = 3
+  · have hctb : (hdr.colorType == 3) = true := by
+      simp [hct]
+    have hle :
+        ({ entries := data } : PngPalette).entryCount ≤
+          paletteMaxEntriesForBitDepth hdr.bitDepth := by
+      simpa [PngPalette.entryCount] using hfits hct
+    simp [hsize0, hmod, hover, hctb, hle]
+  · have hctb : (hdr.colorType == 3) = false := by
+      simp [hct]
+    simp [hsize0, hmod, hover, hctb]
+
 /-- The metadata-aware parser records a valid PLTE chunk and continues.
 This is the branch-level fact used by palette container proofs. -/
 lemma parsePngLoopFuelWithMetadata_accepts_PLTE (fuel : Nat)

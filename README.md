@@ -208,6 +208,7 @@ This library has proofs about:
   `decodeParsedIndexedBitmapWithMetadata_fixed_encodeRawIndexed_none_8_256_data`,
   `decodeParsedIndexedBitmapWithMetadata_dynamic_encodeRawIndexed_none_8_256_data`,
   `parsePlteData_accepts_palette2`,
+  `parsePlteData_accepts_valid`,
   `parseTrnsData_accepts_paletteAlpha`,
   `parseBkgdData_accepts_paletteIndex`);
 - focused encoder-filter helper facts for valid filter bytes, filter row size
