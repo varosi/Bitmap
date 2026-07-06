@@ -710,11 +710,12 @@ lemma parsePngLoopFuelWithMetadata_iend_success_step (fuel : Nat)
     hSeenIDAT]
 
 set_option maxHeartbeats 1200000 in
-/-- The metadata-aware parser loop accepts the minimal indexed-palette stream.
-It walks IHDR, required PLTE, one IDAT, and IEND, preserving the parsed palette. -/
-theorem parsePngLoopFuelWithMetadata_accepts (s : PaletteContainerSpec)
-    (hIdatSize : s.idatData.size < 2 ^ 32) :
-    parsePngLoopFuelWithMetadata 4 s.bytes 8
+/-- The metadata-aware parser loop accepts the minimal indexed-palette stream
+with any extra fuel. This is the loop form needed by parser wrappers that use
+`bytes.size + 1` fuel. -/
+theorem parsePngLoopFuelWithMetadata_accepts_with_extra (s : PaletteContainerSpec)
+    (hIdatSize : s.idatData.size < 2 ^ 32) (extra : Nat) :
+    parsePngLoopFuelWithMetadata (extra + 4) s.bytes 8
       { header := none, idat := ByteArray.empty,
         seenPLTE := false, seenIDAT := false, closedIDAT := false,
         metadata := PngMetadata.empty } =
@@ -754,11 +755,11 @@ theorem parsePngLoopFuelWithMetadata_accepts (s : PaletteContainerSpec)
       metadata := metadata s }
 
   have hChangeIhdr :
-      parsePngLoopFuelWithMetadata 3 s.bytes 33
+      parsePngLoopFuelWithMetadata (extra + 3) s.bytes 33
         { header := some s.header, idat := ByteArray.empty,
           seenPLTE := false, seenIDAT := false, closedIDAT := false,
           metadata := PngMetadata.empty } =
-      parsePngLoopFuelWithMetadata 3 s.bytes 33 stateAfterIhdr := by
+      parsePngLoopFuelWithMetadata (extra + 3) s.bytes 33 stateAfterIhdr := by
     rfl
   rw [hChangeIhdr]
 
@@ -777,12 +778,13 @@ theorem parsePngLoopFuelWithMetadata_accepts (s : PaletteContainerSpec)
     rw [s.hColorType]
     decide
   have hStepPlte :=
-    parsePngLoopFuelWithMetadata_accepts_PLTE 2 s.bytes 33 stateAfterIhdr
+    parsePngLoopFuelWithMetadata_accepts_PLTE (extra + 2) s.bytes 33 stateAfterIhdr
       s.header plteTypeBytes s.palette.entries (45 + s.palette.entries.size)
       s.palette hPosPlte hLenPlte hReadPlte rfl hNotIhdrPlte hIsPlte
       hSeenPlte hMetadataPlte hAllowed (parsePlteData s)
+  rw [show (extra + 3 : Nat) = (extra + 2) + 1 by omega]
   rw [hStepPlte]
-  change parsePngLoopFuelWithMetadata 2 s.bytes (45 + s.palette.entries.size)
+  change parsePngLoopFuelWithMetadata (extra + 2) s.bytes (45 + s.palette.entries.size)
       stateAfterPlte =
     some (parsed s)
 
@@ -801,13 +803,14 @@ theorem parsePngLoopFuelWithMetadata_accepts (s : PaletteContainerSpec)
   have hPaletteIdat : (s.header.colorType == 3 && !stateAfterPlte.seenPLTE) = false := by
     simp [stateAfterPlte]
   have hStepIdat :=
-    parsePngLoopFuelWithMetadata_idat_appends_when_open 1 s.bytes
+    parsePngLoopFuelWithMetadata_idat_appends_when_open (extra + 1) s.bytes
       (45 + s.palette.entries.size) stateAfterPlte s.header idatTypeBytes
       s.idatData (57 + s.palette.entries.size + s.idatData.size)
       hPosIdat hLenIdat hReadIdat rfl hNotIhdrIdat hNotPlteIdat hIsIdat
       rfl hPaletteIdat
+  rw [show (extra + 2 : Nat) = (extra + 1) + 1 by omega]
   rw [hStepIdat]
-  change parsePngLoopFuelWithMetadata 1 s.bytes
+  change parsePngLoopFuelWithMetadata (extra + 1) s.bytes
       (57 + s.palette.entries.size + s.idatData.size) stateAfterIdat =
     some (parsed s)
 
@@ -821,11 +824,22 @@ theorem parsePngLoopFuelWithMetadata_accepts (s : PaletteContainerSpec)
     omega
   have hReadIend := readChunk_iend s hLenIend
   have hStepIend :=
-    parsePngLoopFuelWithMetadata_iend_success_step 0 s.bytes
+    parsePngLoopFuelWithMetadata_iend_success_step extra s.bytes
       (57 + s.palette.entries.size + s.idatData.size) stateAfterIdat
       s.header hPosIend hLenIend hReadIend rfl rfl
   rw [hStepIend]
   simp [stateAfterIdat, parsed]
+
+/-- The exact four-fuel parser-loop theorem for the minimal indexed-palette
+stream. This is the no-extra-fuel specialization of the generalized walk. -/
+theorem parsePngLoopFuelWithMetadata_accepts (s : PaletteContainerSpec)
+    (hIdatSize : s.idatData.size < 2 ^ 32) :
+    parsePngLoopFuelWithMetadata 4 s.bytes 8
+      { header := none, idat := ByteArray.empty,
+        seenPLTE := false, seenIDAT := false, closedIDAT := false,
+        metadata := PngMetadata.empty } =
+      some (parsed s) := by
+  simpa using parsePngLoopFuelWithMetadata_accepts_with_extra s hIdatSize 0
 
 end PaletteContainerSpec
 
