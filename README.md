@@ -213,6 +213,7 @@ This library has proofs about:
   `PaletteContainerSpec.readChunk_plte`,
   `PaletteContainerSpec.readChunk_idat`,
   `PaletteContainerSpec.readChunk_iend`,
+  `PaletteContainerSpec.parsePngLoopFuelWithMetadata_accepts`,
   `parsePlteData_accepts_palette2`,
   `parsePlteData_accepts_valid`,
   `parseTrnsData_accepts_paletteAlpha`,

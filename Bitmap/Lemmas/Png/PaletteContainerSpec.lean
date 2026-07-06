@@ -654,6 +654,179 @@ lemma readChunk_iend (s : PaletteContainerSpec)
       omega] at h
   exact h
 
+/-- Metadata returned by the minimal palette scaffold parser walk.
+It records exactly the required PLTE payload and no ancillary metadata. -/
+def metadata (s : PaletteContainerSpec) : PngMetadata :=
+  { PngMetadata.empty with palette := some s.palette }
+
+/-- Parsed result returned by the minimal palette scaffold parser walk.
+This packages the scaffold header, IDAT payload, and palette metadata. -/
+def parsed (s : PaletteContainerSpec) : PngParsed :=
+  { header := s.header, idat := s.idatData, metadata := metadata s }
+
+/-- Reading the IHDR length field in the palette scaffold yields 13.
+This supplies the header-length branch condition for the parser loop. -/
+lemma readU32BE_ihdr_len (s : PaletteContainerSpec)
+    (hLen : 8 + 3 < s.bytes.size) :
+    readU32BE s.bytes 8 hLen = 13 := by
+  have hIhdrSize : (encodeIHDRData s.header).size = 13 := encodeIHDRData_size s.header
+  have hExtractLen : s.bytes.extract 8 (8 + 4) = u32be 13 := by
+    have h := bytes_extract_ihdr s
+    have hChunkLen := mkChunkBytes_extract_len ihdrTypeBytes (encodeIHDRData s.header)
+    rw [hIhdrSize] at hChunkLen
+    have hsub :
+        (s.bytes.extract 8 (8 + 12 + (encodeIHDRData s.header).size)).extract 0 4 =
+          (mkChunkBytes ihdrTypeBytes (encodeIHDRData s.header)).extract 0 4 := by
+      rw [h]
+    rw [hChunkLen] at hsub
+    have hExt := ByteArray.extract_extract (a := s.bytes) (i := 8)
+      (j := 8 + 12 + (encodeIHDRData s.header).size) (k := 0) (l := 4)
+    have hMin : min (8 + 4) (8 + 12 + (encodeIHDRData s.header).size) = 8 + 4 := by
+      rw [hIhdrSize]
+      omega
+    rw [hMin] at hExt
+    rw [← hExt]
+    exact hsub
+  exact readU32BE_of_extract_eq s.bytes 8 13 hLen hExtractLen (by decide)
+
+/-- Metadata-aware IEND success for the palette scaffold.
+This local branch lemma closes the four-chunk parser-loop walk. -/
+lemma parsePngLoopFuelWithMetadata_iend_success_step (fuel : Nat)
+    (bytes : ByteArray) (pos : Nat) (state : PngMetadataParseState)
+    (hdr : PngHeader)
+    (hpos : pos + 8 ≤ bytes.size) (hLen : pos + 3 < bytes.size)
+    (hread : readChunk bytes pos hLen =
+      some (iendTypeBytes, ByteArray.empty, bytes.size))
+    (hheader : state.header = some hdr)
+    (hSeenIDAT : state.seenIDAT = true) :
+    parsePngLoopFuelWithMetadata (fuel + 1) bytes pos state =
+      some { header := hdr, idat := state.idat, metadata := state.metadata } := by
+  conv => lhs; unfold parsePngLoopFuelWithMetadata
+  have hNotIHDR : (iendTypeBytes == ihdrTypeBytes) = false := by decide
+  have hNotPLTE : (iendTypeBytes == plteTypeBytes) = false := by decide
+  have hNotIDAT : (iendTypeBytes == idatTypeBytes) = false := by decide
+  have hIsIEND : (iendTypeBytes == iendTypeBytes) = true := by decide
+  simp [hpos, hLen, hread, hheader, hNotIHDR, hNotPLTE, hNotIDAT, hIsIEND,
+    hSeenIDAT]
+
+set_option maxHeartbeats 1200000 in
+/-- The metadata-aware parser loop accepts the minimal indexed-palette stream.
+It walks IHDR, required PLTE, one IDAT, and IEND, preserving the parsed palette. -/
+theorem parsePngLoopFuelWithMetadata_accepts (s : PaletteContainerSpec)
+    (hIdatSize : s.idatData.size < 2 ^ 32) :
+    parsePngLoopFuelWithMetadata 4 s.bytes 8
+      { header := none, idat := ByteArray.empty,
+        seenPLTE := false, seenIDAT := false, closedIDAT := false,
+        metadata := PngMetadata.empty } =
+      some (parsed s) := by
+  have hSizeEq : s.bytes.size = s.idatData.size + s.palette.entries.size + 69 :=
+    PaletteContainerSpec.bytes_size s
+  have hPaletteSize : s.palette.entries.size < 2 ^ 32 := by
+    have h := s.hPaletteMax
+    omega
+  have hBDlt : s.header.bitDepth < 256 := by
+    rcases s.hBitDepth with h | h | h | h <;> rw [h] <;> decide
+  have hCTlt : s.header.colorType < 256 := by
+    rw [s.hColorType]
+    decide
+  have hParseHdr :=
+    parseIHDRData_encodeIHDRData_lt256 s.header
+      s.hWidth s.hHeight hBDlt s.hInterlace hCTlt
+  have hLenIhdr : (8 : Nat) + 3 < s.bytes.size := by rw [hSizeEq]; omega
+  have hPosIhdr : (8 : Nat) + 8 ≤ s.bytes.size := by rw [hSizeEq]; omega
+  have hReadIhdr := readChunk_ihdr s hLenIhdr
+  have hReadLen := readU32BE_ihdr_len s hLenIhdr
+  conv => lhs; unfold parsePngLoopFuelWithMetadata
+  simp [hPosIhdr, hLenIhdr, hReadIhdr, hReadLen, hParseHdr]
+  refine ⟨by decide, ?_⟩
+
+  let stateAfterIhdr : PngMetadataParseState :=
+    { header := some s.header, idat := ByteArray.empty,
+      seenPLTE := false, seenIDAT := false, closedIDAT := false,
+      metadata := PngMetadata.empty }
+  let stateAfterPlte : PngMetadataParseState :=
+    { header := some s.header, idat := ByteArray.empty,
+      seenPLTE := true, seenIDAT := false, closedIDAT := false,
+      metadata := metadata s }
+  let stateAfterIdat : PngMetadataParseState :=
+    { header := some s.header, idat := s.idatData,
+      seenPLTE := true, seenIDAT := true, closedIDAT := false,
+      metadata := metadata s }
+
+  have hChangeIhdr :
+      parsePngLoopFuelWithMetadata 3 s.bytes 33
+        { header := some s.header, idat := ByteArray.empty,
+          seenPLTE := false, seenIDAT := false, closedIDAT := false,
+          metadata := PngMetadata.empty } =
+      parsePngLoopFuelWithMetadata 3 s.bytes 33 stateAfterIhdr := by
+    rfl
+  rw [hChangeIhdr]
+
+  have hLenPlte : (33 : Nat) + 3 < s.bytes.size := by rw [hSizeEq]; omega
+  have hPosPlte : (33 : Nat) + 8 ≤ s.bytes.size := by rw [hSizeEq]; omega
+  have hReadPlte := readChunk_plte s hPaletteSize hLenPlte
+  have hNotIhdrPlte : (plteTypeBytes == ihdrTypeBytes) = false := by decide
+  have hIsPlte : (plteTypeBytes == plteTypeBytes) = true := by decide
+  have hSeenPlte : (stateAfterIhdr.seenPLTE || stateAfterIhdr.seenIDAT) = false := by
+    rfl
+  have hMetadataPlte :
+      (stateAfterIhdr.metadata.transparency.isSome ||
+        stateAfterIhdr.metadata.background.isSome) = false := by
+    rfl
+  have hAllowed : plteAllowedForColorType s.header.colorType = true := by
+    rw [s.hColorType]
+    decide
+  have hStepPlte :=
+    parsePngLoopFuelWithMetadata_accepts_PLTE 2 s.bytes 33 stateAfterIhdr
+      s.header plteTypeBytes s.palette.entries (45 + s.palette.entries.size)
+      s.palette hPosPlte hLenPlte hReadPlte rfl hNotIhdrPlte hIsPlte
+      hSeenPlte hMetadataPlte hAllowed (parsePlteData s)
+  rw [hStepPlte]
+  change parsePngLoopFuelWithMetadata 2 s.bytes (45 + s.palette.entries.size)
+      stateAfterPlte =
+    some (parsed s)
+
+  have hLenIdat :
+      (45 + s.palette.entries.size : Nat) + 3 < s.bytes.size := by
+    rw [hSizeEq]
+    omega
+  have hPosIdat :
+      (45 + s.palette.entries.size : Nat) + 8 ≤ s.bytes.size := by
+    rw [hSizeEq]
+    omega
+  have hReadIdat := readChunk_idat s hIdatSize hLenIdat
+  have hNotIhdrIdat : (idatTypeBytes == ihdrTypeBytes) = false := by decide
+  have hNotPlteIdat : (idatTypeBytes == plteTypeBytes) = false := by decide
+  have hIsIdat : (idatTypeBytes == idatTypeBytes) = true := by decide
+  have hPaletteIdat : (s.header.colorType == 3 && !stateAfterPlte.seenPLTE) = false := by
+    simp [stateAfterPlte]
+  have hStepIdat :=
+    parsePngLoopFuelWithMetadata_idat_appends_when_open 1 s.bytes
+      (45 + s.palette.entries.size) stateAfterPlte s.header idatTypeBytes
+      s.idatData (57 + s.palette.entries.size + s.idatData.size)
+      hPosIdat hLenIdat hReadIdat rfl hNotIhdrIdat hNotPlteIdat hIsIdat
+      rfl hPaletteIdat
+  rw [hStepIdat]
+  change parsePngLoopFuelWithMetadata 1 s.bytes
+      (57 + s.palette.entries.size + s.idatData.size) stateAfterIdat =
+    some (parsed s)
+
+  have hLenIend :
+      (57 + s.palette.entries.size + s.idatData.size : Nat) + 3 < s.bytes.size := by
+    rw [hSizeEq]
+    omega
+  have hPosIend :
+      (57 + s.palette.entries.size + s.idatData.size : Nat) + 8 ≤ s.bytes.size := by
+    rw [hSizeEq]
+    omega
+  have hReadIend := readChunk_iend s hLenIend
+  have hStepIend :=
+    parsePngLoopFuelWithMetadata_iend_success_step 0 s.bytes
+      (57 + s.palette.entries.size + s.idatData.size) stateAfterIdat
+      s.header hPosIend hLenIend hReadIend rfl rfl
+  rw [hStepIend]
+  simp [stateAfterIdat, parsed]
+
 end PaletteContainerSpec
 
 end Lemmas
