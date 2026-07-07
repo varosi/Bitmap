@@ -121,9 +121,10 @@ lemma palettePackIndexIntoRow_size (row : ByteArray) (bitDepth x : Nat) (idx : U
     (palettePackIndexIntoRow row bitDepth x idx).size = row.size := by
   unfold palettePackIndexIntoRow
   by_cases h8 : bitDepth == 8
-  · simpa [h8] using byteArray_size_set! row x idx
-  · simpa [h8] using
-      byteArray_size_set! row (x / (8 / bitDepth))
+  · rw [if_pos h8]
+    exact byteArray_size_set! row x idx
+  · rw [if_neg h8]
+    exact byteArray_size_set! row (x / (8 / bitDepth))
         (u8 ((row.get! (x / (8 / bitDepth))).toNat |||
           (idx.toNat % paletteIndexLimit bitDepth) <<< palettePackedShift bitDepth x))
 
