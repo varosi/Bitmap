@@ -242,6 +242,42 @@ private def alphaFixtureBytes? : Option ByteArray :=
   | .ok bytes => some bytes
   | .error _ => none
 
+private def colorSpaceFixtureBitmap : PngIndexedBitmap :=
+  fixtureBitmap 4 2 2 4
+
+private def paletteGamma : Nat :=
+  100000
+
+private def wideChromaticities : PngChromaticities :=
+  { white := { x := 31270, y := 32900 }
+    red := { x := 68000, y := 32000 }
+    green := { x := 21000, y := 71000 }
+    blue := { x := 15000, y := 6000 } }
+
+private def gammaFixtureBytes? : Option ByteArray :=
+  match encodeIndexedBitmapWithOptionsChecked colorSpaceFixtureBitmap
+      { mode := .fixed, colorSpace := some (.gamma paletteGamma) } with
+  | .ok bytes => some bytes
+  | .error _ => none
+
+private def srgbFixtureBytes? : Option ByteArray :=
+  match encodeIndexedBitmapWithOptionsChecked colorSpaceFixtureBitmap
+      { mode := .fixed, colorSpace := some (.srgb .perceptual true),
+        chromaticities := some PngChromaticities.srgb } with
+  | .ok bytes => some bytes
+  | .error _ => none
+
+private def chrmGammaFixtureBytes? : Option ByteArray :=
+  match encodeIndexedBitmapWithOptionsChecked colorSpaceFixtureBitmap
+      { mode := .fixed, colorSpace := some (.gamma paletteGamma),
+        chromaticities := some wideChromaticities } with
+  | .ok bytes => some bytes
+  | .error _ => none
+
+private def chrmGammaExpectedRGB8? : Option ByteArray := do
+  let matrix ← wideChromaticities.sourceToSrgbMatrix?
+  applyChrm8ToPixels matrix (some paletteGamma) (u8 2) (fixtureExpectedRGB8Data 4 2 4)
+
 private def decodeIndexedDataAfterCheckedEncode
     (bmp : PngIndexedBitmap) (mode : PngEncodeMode) : Option ByteArray :=
   match encodeIndexedBitmapChecked bmp mode with
@@ -441,6 +477,53 @@ theorem decodeIndexedBitmapWithMetadata_palette_metadata_fixture :
       (decodeIndexedBitmapWithMetadata bytes).map
         (fun decoded => (decoded.metadata.transparency, decoded.metadata.background)))) =
         some (some (.paletteAlpha alphaFixture), some (.paletteIndex (u8 1))) := by
+  native_decide
+
+/-- Palette `gAMA` metadata is applied after `PLTE` lookup when decoding the
+RGB8 fixture, and the scaled gamma value is preserved. -/
+theorem decodeBitmapWithMetadata_palette_gAMA_RGB8_fixture :
+    (gammaFixtureBytes?.bind (fun bytes =>
+      (decodeBitmapWithMetadata (px := PixelRGB8) bytes).map
+        (fun decoded => (decoded.bitmap.data, decoded.metadata.gamma)))) =
+        (applyGamma8ToPixels paletteGamma (u8 2) (fixtureExpectedRGB8Data 4 2 4)).map
+          (fun expected => (expected, some paletteGamma)) := by
+  native_decide
+
+/-- Palette `sRGB` metadata leaves already-sRGB palette samples unchanged after
+`PLTE` lookup when decoding the RGB8 fixture. -/
+theorem decodeBitmapWithMetadata_palette_sRGB_RGB8_fixture :
+    (srgbFixtureBytes?.bind (fun bytes =>
+      (decodeBitmapWithMetadata (px := PixelRGB8) bytes).map
+        (fun decoded => decoded.bitmap.data))) =
+        some (fixtureExpectedRGB8Data 4 2 4) := by
+  native_decide
+
+/-- Palette `sRGB` fixture decoding preserves rendering intent, compatible
+gamma, and compatible chromaticities metadata. -/
+theorem decodeBitmapWithMetadata_palette_sRGB_metadata_fixture :
+    (srgbFixtureBytes?.bind (fun bytes =>
+      (decodeBitmapWithMetadata (px := PixelRGB8) bytes).map
+        (fun decoded =>
+          (decoded.metadata.srgb, decoded.metadata.gamma, decoded.metadata.chromaticities)))) =
+        some (some .perceptual, some 45455, some PngChromaticities.srgb) := by
+  native_decide
+
+/-- Palette `cHRM` plus `gAMA` metadata is applied after `PLTE` lookup when
+decoding the RGB8 fixture. -/
+theorem decodeBitmapWithMetadata_palette_cHRM_gAMA_RGB8_fixture :
+    (chrmGammaFixtureBytes?.bind (fun bytes =>
+      (decodeBitmapWithMetadata (px := PixelRGB8) bytes).map
+        (fun decoded => decoded.bitmap.data))) =
+        chrmGammaExpectedRGB8? := by
+  native_decide
+
+/-- Palette `cHRM` plus `gAMA` fixture decoding preserves both color-space
+metadata values. -/
+theorem decodeBitmapWithMetadata_palette_cHRM_gAMA_metadata_fixture :
+    (chrmGammaFixtureBytes?.bind (fun bytes =>
+      (decodeBitmapWithMetadata (px := PixelRGB8) bytes).map
+        (fun decoded => (decoded.metadata.chromaticities, decoded.metadata.gamma)))) =
+        some (some wideChromaticities, some paletteGamma) := by
   native_decide
 
 end PalettePackedRoundTrip
