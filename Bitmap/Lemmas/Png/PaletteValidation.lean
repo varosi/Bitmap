@@ -85,6 +85,28 @@ lemma validateIndexedBitmap_accepts
             hnotEntryOver, hrange, hnotAlpha, hnotIdx]
           rfl
 
+/-- The checked indexed encoder accepts valid bitmaps when the palette-size
+bound is stated with the decoder's packed-index limit helper. This keeps
+encoder validation reusable with packed-row decoder invariants. -/
+lemma validateIndexedBitmap_accepts_of_paletteIndexLimit
+    (bmp : PngIndexedBitmap)
+    (hbd : bmp.bitDepth = 1 ∨ bmp.bitDepth = 2 ∨ bmp.bitDepth = 4 ∨ bmp.bitDepth = 8)
+    (hw : bmp.size.width < UInt32.size)
+    (hh : bmp.size.height < UInt32.size)
+    (hpalNonempty : bmp.palette.entries.size ≠ 0)
+    (hpalTriplets : bmp.palette.entries.size % 3 = 0)
+    (hpalMax : bmp.palette.entries.size ≤ 256 * 3)
+    (hpalFits : bmp.palette.entryCount ≤ paletteIndexLimit bmp.bitDepth)
+    (hrange : indexedDataInRange bmp.data bmp.palette.entryCount = true)
+    (htrans :
+      ∀ alpha, bmp.transparency = some alpha → alpha.size ≤ bmp.palette.entryCount)
+    (hbg :
+      ∀ idx, bmp.background = some idx → idx.toNat < bmp.palette.entryCount) :
+    validateIndexedBitmap bmp = Except.ok () := by
+  exact validateIndexedBitmap_accepts bmp hbd hw hh hpalNonempty hpalTriplets hpalMax
+    (by simpa [paletteMaxEntriesForBitDepth_eq_paletteIndexLimit] using hpalFits) hrange
+    htrans hbg
+
 /-- The indexed encoder rejects bit depths outside PNG's 1/2/4/8 palette set. -/
 lemma validateIndexedBitmap_rejects_bad_bitDepth (bmp : PngIndexedBitmap)
     (h1 : bmp.bitDepth ≠ 1) (h2 : bmp.bitDepth ≠ 2)

@@ -64,6 +64,13 @@ This records the selected-palette-size boundary used by validation. -/
     paletteIndexLimit 8 = 256 := by
   rfl
 
+/-- Encoder palette-capacity validation and decoder packed-index bounds use the
+same limit for every bit depth. This keeps the two helper APIs aligned. -/
+lemma paletteMaxEntriesForBitDepth_eq_paletteIndexLimit (bitDepth : Nat) :
+    paletteMaxEntriesForBitDepth bitDepth = paletteIndexLimit bitDepth := by
+  unfold paletteMaxEntriesForBitDepth paletteIndexLimit
+  rfl
+
 /-- PNG row-byte calculation for 1-bit indexed rows matches `paletteRowBytes`.
 This keeps parser-side row sizing aligned with indexed row packing. -/
 lemma pngRowBytes_palette1 (w : Nat) :
