@@ -355,6 +355,77 @@ lemma parsePngLoopFuelWithMetadata_accepts_palette_tRNS (fuel : Nat)
   simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
     hTRNS, hseenIDAT, hdup, hColorType, hseenPLTE, hpalette, hfits, parseTrnsData]
 
+/-- Palette `tRNS` is rejected until `PLTE` has appeared.
+This is the palette-specific ordering guard before alpha metadata is accepted. -/
+lemma parsePngLoopFuelWithMetadata_rejects_palette_tRNS_before_PLTE (fuel : Nat)
+    (bytes : ByteArray) (pos : Nat) (state : PngMetadataParseState)
+    (hdr : PngHeader) (typBytes chunkData : ByteArray) (posNext : Nat)
+    (hpos : pos + 8 ≤ bytes.size) (hLen : pos + 3 < bytes.size)
+    (hread : readChunk bytes pos hLen = some (typBytes, chunkData, posNext))
+    (hheader : state.header = some hdr)
+    (hnotIHDR : (typBytes == ihdrTypeBytes) = false)
+    (hnotPLTE : (typBytes == plteTypeBytes) = false)
+    (hnotIDAT : (typBytes == idatTypeBytes) = false)
+    (hnotIEND : (typBytes == iendTypeBytes) = false)
+    (hTRNS : (typBytes == trnsTypeBytes) = true)
+    (hseenIDAT : state.seenIDAT = false)
+    (hdup : state.metadata.transparency.isSome = false)
+    (hColorType : hdr.colorType = 3)
+    (hseenPLTE : state.seenPLTE = false) :
+    parsePngLoopFuelWithMetadata (fuel + 1) bytes pos state = none := by
+  unfold parsePngLoopFuelWithMetadata
+  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
+    hTRNS, hseenIDAT, hdup, hColorType, hseenPLTE]
+
+/-- Palette `tRNS` is rejected if parser state says `PLTE` was seen but no
+palette payload is present. This pins the metadata consistency check. -/
+lemma parsePngLoopFuelWithMetadata_rejects_palette_tRNS_without_palette
+    (fuel : Nat)
+    (bytes : ByteArray) (pos : Nat) (state : PngMetadataParseState)
+    (hdr : PngHeader) (typBytes chunkData : ByteArray) (posNext : Nat)
+    (hpos : pos + 8 ≤ bytes.size) (hLen : pos + 3 < bytes.size)
+    (hread : readChunk bytes pos hLen = some (typBytes, chunkData, posNext))
+    (hheader : state.header = some hdr)
+    (hnotIHDR : (typBytes == ihdrTypeBytes) = false)
+    (hnotPLTE : (typBytes == plteTypeBytes) = false)
+    (hnotIDAT : (typBytes == idatTypeBytes) = false)
+    (hnotIEND : (typBytes == iendTypeBytes) = false)
+    (hTRNS : (typBytes == trnsTypeBytes) = true)
+    (hseenIDAT : state.seenIDAT = false)
+    (hdup : state.metadata.transparency.isSome = false)
+    (hColorType : hdr.colorType = 3)
+    (hseenPLTE : state.seenPLTE = true)
+    (hpalette : state.metadata.palette = none) :
+    parsePngLoopFuelWithMetadata (fuel + 1) bytes pos state = none := by
+  unfold parsePngLoopFuelWithMetadata
+  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
+    hTRNS, hseenIDAT, hdup, hColorType, hseenPLTE, hpalette]
+
+/-- Palette `tRNS` is rejected when its alpha byte payload is longer than
+`PLTE`. This is the parser-side bound used before indexed alpha lookup. -/
+lemma parsePngLoopFuelWithMetadata_rejects_palette_tRNS_too_long (fuel : Nat)
+    (bytes : ByteArray) (pos : Nat) (state : PngMetadataParseState)
+    (hdr : PngHeader) (typBytes chunkData : ByteArray) (posNext : Nat)
+    (palette : PngPalette)
+    (hpos : pos + 8 ≤ bytes.size) (hLen : pos + 3 < bytes.size)
+    (hread : readChunk bytes pos hLen = some (typBytes, chunkData, posNext))
+    (hheader : state.header = some hdr)
+    (hnotIHDR : (typBytes == ihdrTypeBytes) = false)
+    (hnotPLTE : (typBytes == plteTypeBytes) = false)
+    (hnotIDAT : (typBytes == idatTypeBytes) = false)
+    (hnotIEND : (typBytes == iendTypeBytes) = false)
+    (hTRNS : (typBytes == trnsTypeBytes) = true)
+    (hseenIDAT : state.seenIDAT = false)
+    (hdup : state.metadata.transparency.isSome = false)
+    (hColorType : hdr.colorType = 3)
+    (hseenPLTE : state.seenPLTE = true)
+    (hpalette : state.metadata.palette = some palette)
+    (htooLong : chunkData.size > palette.entryCount) :
+    parsePngLoopFuelWithMetadata (fuel + 1) bytes pos state = none := by
+  unfold parsePngLoopFuelWithMetadata
+  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
+    hTRNS, hseenIDAT, hdup, hColorType, hseenPLTE, hpalette, htooLong]
+
 /-- The metadata-aware parser records a valid `tRNS` chunk and continues.
 This is the branch-level correctness fact for supported transparency metadata. -/
 lemma parsePngLoopFuelWithMetadata_accepts_tRNS (fuel : Nat)
@@ -490,6 +561,82 @@ lemma parsePngLoopFuelWithMetadata_accepts_palette_bKGD (fuel : Nat)
   conv =>
     lhs
     unfold parsePngLoopFuelWithMetadata
+  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
+    hnotTRNS, hBKGD, hseenIDAT, hdup, hColorType, hseenPLTE, hpalette, hparse, hidx]
+
+/-- Palette `bKGD` is rejected until `PLTE` has appeared.
+This is the indexed-background counterpart to the palette `tRNS` ordering rule. -/
+lemma parsePngLoopFuelWithMetadata_rejects_palette_bKGD_before_PLTE (fuel : Nat)
+    (bytes : ByteArray) (pos : Nat) (state : PngMetadataParseState)
+    (hdr : PngHeader) (typBytes chunkData : ByteArray) (posNext : Nat)
+    (hpos : pos + 8 ≤ bytes.size) (hLen : pos + 3 < bytes.size)
+    (hread : readChunk bytes pos hLen = some (typBytes, chunkData, posNext))
+    (hheader : state.header = some hdr)
+    (hnotIHDR : (typBytes == ihdrTypeBytes) = false)
+    (hnotPLTE : (typBytes == plteTypeBytes) = false)
+    (hnotIDAT : (typBytes == idatTypeBytes) = false)
+    (hnotIEND : (typBytes == iendTypeBytes) = false)
+    (hnotTRNS : (typBytes == trnsTypeBytes) = false)
+    (hBKGD : (typBytes == bkgdTypeBytes) = true)
+    (hseenIDAT : state.seenIDAT = false)
+    (hdup : state.metadata.background.isSome = false)
+    (hColorType : hdr.colorType = 3)
+    (hseenPLTE : state.seenPLTE = false) :
+    parsePngLoopFuelWithMetadata (fuel + 1) bytes pos state = none := by
+  unfold parsePngLoopFuelWithMetadata
+  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
+    hnotTRNS, hBKGD, hseenIDAT, hdup, hColorType, hseenPLTE]
+
+/-- Palette `bKGD` is rejected if `PLTE` has been marked seen but its payload
+is absent. This records the parser's palette metadata consistency check. -/
+lemma parsePngLoopFuelWithMetadata_rejects_palette_bKGD_without_palette
+    (fuel : Nat)
+    (bytes : ByteArray) (pos : Nat) (state : PngMetadataParseState)
+    (hdr : PngHeader) (typBytes chunkData : ByteArray) (posNext : Nat)
+    (hpos : pos + 8 ≤ bytes.size) (hLen : pos + 3 < bytes.size)
+    (hread : readChunk bytes pos hLen = some (typBytes, chunkData, posNext))
+    (hheader : state.header = some hdr)
+    (hnotIHDR : (typBytes == ihdrTypeBytes) = false)
+    (hnotPLTE : (typBytes == plteTypeBytes) = false)
+    (hnotIDAT : (typBytes == idatTypeBytes) = false)
+    (hnotIEND : (typBytes == iendTypeBytes) = false)
+    (hnotTRNS : (typBytes == trnsTypeBytes) = false)
+    (hBKGD : (typBytes == bkgdTypeBytes) = true)
+    (hseenIDAT : state.seenIDAT = false)
+    (hdup : state.metadata.background.isSome = false)
+    (hColorType : hdr.colorType = 3)
+    (hseenPLTE : state.seenPLTE = true)
+    (hpalette : state.metadata.palette = none) :
+    parsePngLoopFuelWithMetadata (fuel + 1) bytes pos state = none := by
+  unfold parsePngLoopFuelWithMetadata
+  simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
+    hnotTRNS, hBKGD, hseenIDAT, hdup, hColorType, hseenPLTE, hpalette]
+
+/-- Palette `bKGD` is rejected when its palette index is outside `PLTE`.
+This connects parsed one-byte background metadata to palette bounds checking. -/
+lemma parsePngLoopFuelWithMetadata_rejects_palette_bKGD_index_out_of_range
+    (fuel : Nat)
+    (bytes : ByteArray) (pos : Nat) (state : PngMetadataParseState)
+    (hdr : PngHeader) (typBytes chunkData : ByteArray) (posNext : Nat)
+    (palette : PngPalette) (idx : UInt8)
+    (hpos : pos + 8 ≤ bytes.size) (hLen : pos + 3 < bytes.size)
+    (hread : readChunk bytes pos hLen = some (typBytes, chunkData, posNext))
+    (hheader : state.header = some hdr)
+    (hnotIHDR : (typBytes == ihdrTypeBytes) = false)
+    (hnotPLTE : (typBytes == plteTypeBytes) = false)
+    (hnotIDAT : (typBytes == idatTypeBytes) = false)
+    (hnotIEND : (typBytes == iendTypeBytes) = false)
+    (hnotTRNS : (typBytes == trnsTypeBytes) = false)
+    (hBKGD : (typBytes == bkgdTypeBytes) = true)
+    (hseenIDAT : state.seenIDAT = false)
+    (hdup : state.metadata.background.isSome = false)
+    (hColorType : hdr.colorType = 3)
+    (hseenPLTE : state.seenPLTE = true)
+    (hpalette : state.metadata.palette = some palette)
+    (hparse : parseBkgdData hdr chunkData = some (.paletteIndex idx))
+    (hidx : ¬ idx.toNat < palette.entryCount) :
+    parsePngLoopFuelWithMetadata (fuel + 1) bytes pos state = none := by
+  unfold parsePngLoopFuelWithMetadata
   simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hnotIDAT, hnotIEND,
     hnotTRNS, hBKGD, hseenIDAT, hdup, hColorType, hseenPLTE, hpalette, hparse, hidx]
 
