@@ -22,6 +22,18 @@ private lemma byteArray_size_set! (row : ByteArray) (i : Nat) (v : UInt8) :
       · simp [h, Array.size_set]
       · simp [h]
 
+private lemma u8_toNat_of_lt (n : Nat) (h : n < 256) :
+    (u8 n).toNat = n := by
+  simpa [u8, UInt8.size] using
+    UInt8.toNat_ofNat_of_lt' (n := n) (by simpa [UInt8.size] using h)
+
+private lemma u8_mod_toNat_lt (n limit : Nat) (hpos : 0 < limit) (hlimit : limit ≤ 256) :
+    (u8 (n % limit)).toNat < limit := by
+  have hmod : n % limit < limit := Nat.mod_lt n hpos
+  have hmod256 : n % limit < 256 := Nat.lt_of_lt_of_le hmod hlimit
+  rw [u8_toNat_of_lt (n % limit) hmod256]
+  exact hmod
+
 /-- A packed palette row uses the PNG/RFC byte count formula.
 This pins the row-size helper shared by indexed encode and decode. -/
 @[simp] lemma paletteRowBytes_eq (w bitDepth : Nat) :
@@ -114,6 +126,31 @@ lemma paletteScatterFullRow_8_256 (row flat : ByteArray) (w y : Nat) :
     paletteScatterFullRow row flat w 8 y 256 =
       some (row.copySlice 0 flat (y * w) w) := by
   simp [paletteScatterFullRow]
+
+/-- Reading a packed palette index is always within the addressable range for
+the selected PNG bit depth. This is the core per-sample safety fact for
+arbitrary packed 1/2/4/8-bit palette rows. -/
+lemma palettePackedIndexAt_lt_indexLimit (row : ByteArray) (bitDepth x : Nat)
+    (hbd : bitDepth = 1 ∨ bitDepth = 2 ∨ bitDepth = 4 ∨ bitDepth = 8) :
+    (palettePackedIndexAt row bitDepth x).toNat < paletteIndexLimit bitDepth := by
+  rcases hbd with rfl | rfl | rfl | rfl
+  · unfold palettePackedIndexAt
+    simp [paletteIndexLimit, palettePackedShift, u8_mod_toNat_lt]
+  · unfold palettePackedIndexAt
+    simp [paletteIndexLimit, palettePackedShift, u8_mod_toNat_lt]
+  · unfold palettePackedIndexAt
+    simp [paletteIndexLimit, palettePackedShift, u8_mod_toNat_lt]
+  · unfold palettePackedIndexAt
+    simpa [paletteIndexLimit] using UInt8.toNat_lt (row.get! x)
+
+/-- If a palette has at least the bit-depth-addressable number of entries, any
+packed index read from a row is a valid palette lookup. This is the row-local
+range condition used by packed palette decoding. -/
+lemma palettePackedIndexAt_lt_entries (row : ByteArray) (bitDepth x entries : Nat)
+    (hbd : bitDepth = 1 ∨ bitDepth = 2 ∨ bitDepth = 4 ∨ bitDepth = 8)
+    (hentries : paletteIndexLimit bitDepth ≤ entries) :
+    (palettePackedIndexAt row bitDepth x).toNat < entries :=
+  Nat.lt_of_lt_of_le (palettePackedIndexAt_lt_indexLimit row bitDepth x hbd) hentries
 
 /-- Packing one indexed sample into a row does not change the row byte count.
 This is the inner-loop invariant for indexed row construction. -/

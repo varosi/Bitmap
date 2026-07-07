@@ -202,6 +202,8 @@ This library has proofs about:
   `paletteRowBytes_2`,
   `paletteRowBytes_4`,
   `paletteRowBytes_8`,
+  `palettePackedIndexAt_lt_indexLimit`,
+  `palettePackedIndexAt_lt_entries`,
   `encodeIndexedPackedRows_size`,
   `encodeIndexedPackedRows_8_eq_data`,
   `encodeRawIndexedWithFilter_size`,
