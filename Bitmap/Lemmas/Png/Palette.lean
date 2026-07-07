@@ -134,6 +134,34 @@ lemma paletteScatterFullRow_8_256 (row flat : ByteArray) (w y : Nat) :
       some (row.copySlice 0 flat (y * w) w) := by
   simp [paletteScatterFullRow]
 
+/-- An Adam7 palette scatter with no pass pixels leaves the flat index buffer
+unchanged. This pins the zero-width pass behavior used by Adam7 decoding. -/
+lemma adam7ScatterRowPalette_empty_width
+    (row flat : ByteArray) (w bitDepth paletteEntries : Nat)
+    (pass : Adam7Pass) (passY : Nat) :
+    adam7ScatterRowPalette row flat w bitDepth paletteEntries pass passY 0 =
+      some flat := by
+  simp [adam7ScatterRowPalette, Std.Legacy.Range.forIn_eq_forIn_range']
+  rfl
+
+/-- Decoding zero palette rows for one Adam7 pass consumes no bytes and leaves
+the flat index buffer unchanged. This is the pass-loop base case. -/
+lemma decodeAdam7PalettePassRows_empty_height
+    (raw : ByteArray) (w bitDepth paletteEntries : Nat)
+    (pass : Adam7Pass) (passWidth passY offset : Nat)
+    (prevRow flat : ByteArray) :
+    decodeAdam7PalettePassRows raw w bitDepth paletteEntries pass passWidth 0
+      passY offset prevRow flat = some (offset, flat) := by
+  simp [decodeAdam7PalettePassRows]
+
+/-- With no Adam7 passes left, palette pass decoding returns the accumulated
+offset and flat index buffer unchanged. This records the dispatcher base case. -/
+lemma decodeAdam7PalettePasses_nil
+    (raw flat : ByteArray) (w h bitDepth paletteEntries offset : Nat) :
+    decodeAdam7PalettePasses raw w h bitDepth paletteEntries offset flat [] =
+      some (offset, flat) := by
+  rfl
+
 /-- Reading a packed palette index is always within the addressable range for
 the selected PNG bit depth. This is the core per-sample safety fact for
 arbitrary packed 1/2/4/8-bit palette rows. -/
