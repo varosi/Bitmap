@@ -152,6 +152,36 @@ lemma palettePackedIndexAt_lt_entries (row : ByteArray) (bitDepth x entries : Na
     (palettePackedIndexAt row bitDepth x).toNat < entries :=
   Nat.lt_of_lt_of_le (palettePackedIndexAt_lt_indexLimit row bitDepth x hbd) hentries
 
+private lemma u8_mul257_div256_eq_self (sample : UInt8) :
+    u8 (sample.toNat * 257 / 256) = sample := by
+  have hs : sample.toNat < 256 := by
+    simpa using UInt8.toNat_lt sample
+  have hdiv : sample.toNat * 257 / 256 = sample.toNat := by
+    rw [show sample.toNat * 257 = sample.toNat + 256 * sample.toNat by omega]
+    rw [Nat.add_mul_div_left _ _ (by decide : 0 < 256)]
+    rw [Nat.div_eq_of_lt hs]
+    omega
+  rw [hdiv]
+  exact UInt8.toNat.inj (u8_toNat_of_lt sample.toNat hs)
+
+private lemma u8_mul257_eq_self (sample : UInt8) :
+    u8 (sample.toNat * 257) = sample := by
+  have hs : sample.toNat < 256 := by
+    simpa using UInt8.toNat_lt sample
+  change UInt8.ofNat (sample.toNat * 257) = sample
+  rw [UInt8.ofNat_eq_iff_mod_eq_toNat]
+  rw [show sample.toNat * 257 = 256 * sample.toNat + sample.toNat by omega]
+  change (256 * sample.toNat + sample.toNat) % 256 = sample.toNat
+  rw [Nat.add_comm]
+  rw [Nat.add_mul_mod_self_left, Nat.mod_eq_of_lt hs]
+
+/-- Full-range 16-bit palette expansion writes an 8-bit sample as duplicated
+big-endian bytes. This pins the `u8 * 257` channel expansion rule. -/
+lemma pushU16Full_eq_push_sample_twice (out : ByteArray) (sample : UInt8) :
+    pushU16Full out sample = (out.push sample).push sample := by
+  unfold pushU16Full pushU16BE
+  rw [u8_mul257_div256_eq_self, u8_mul257_eq_self]
+
 /-- Packing one indexed sample into a row does not change the row byte count.
 This is the inner-loop invariant for indexed row construction. -/
 lemma palettePackIndexIntoRow_size (row : ByteArray) (bitDepth x : Nat) (idx : UInt8) :
