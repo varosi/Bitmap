@@ -34,6 +34,12 @@ private lemma u8_mod_toNat_lt (n limit : Nat) (hpos : 0 < limit) (hlimit : limit
   rw [u8_toNat_of_lt (n % limit) hmod256]
   exact hmod
 
+private lemma u8_toNat_eq_self (sample : UInt8) :
+    u8 sample.toNat = sample := by
+  have hs : sample.toNat < 256 := by
+    simpa using UInt8.toNat_lt sample
+  exact UInt8.toNat.inj (u8_toNat_of_lt sample.toNat hs)
+
 /-- A packed palette row uses the PNG/RFC byte count formula.
 This pins the row-size helper shared by indexed encode and decode. -/
 @[simp] lemma paletteRowBytes_eq (w bitDepth : Nat) :
@@ -217,6 +223,24 @@ lemma pushU16Full_eq_push_sample_twice (out : ByteArray) (sample : UInt8) :
   unfold pushU16Full pushU16BE
   rw [u8_mul257_div256_eq_self, u8_mul257_eq_self]
 
+/-- Alpha compositing with a fully opaque palette alpha returns the palette
+sample. This pins the `tRNS` alpha endpoint used with `bKGD` compositing. -/
+lemma alphaCompositeByte_opaque (src bg : UInt8) :
+    alphaCompositeByte src bg 0xff = src := by
+  unfold alphaCompositeByte
+  have h255 : (0xff : UInt8).toNat = 255 := by decide
+  simp [h255]
+  exact u8_toNat_eq_self src
+
+/-- Alpha compositing with a fully transparent palette alpha returns the
+background sample. This pins the transparent `tRNS` endpoint over `bKGD`. -/
+lemma alphaCompositeByte_transparent (src bg : UInt8) :
+    alphaCompositeByte src bg 0 = bg := by
+  unfold alphaCompositeByte
+  have h0 : (0 : UInt8).toNat = 0 := by decide
+  simp [h0]
+  exact u8_toNat_eq_self bg
+
 /-- Palette transparency metadata exposes its alpha byte payload unchanged.
 This pins the handoff from parsed `tRNS` metadata into palette expansion. -/
 @[simp] lemma paletteAlphaBytes?_paletteAlpha (alpha : ByteArray) :
@@ -229,6 +253,12 @@ This records the decoder's default-alpha rule for indexed PNGs. -/
 @[simp] lemma paletteAlphaAt_none (idx : Nat) :
     paletteAlphaAt none idx = 0xff := by
   rfl
+
+/-- The default palette alpha behaves as fully opaque under compositing. This
+connects missing palette `tRNS` metadata to the compositing endpoint. -/
+lemma alphaCompositeByte_paletteAlphaAt_none (src bg : UInt8) (idx : Nat) :
+    alphaCompositeByte src bg (paletteAlphaAt none idx) = src := by
+  simpa using alphaCompositeByte_opaque src bg
 
 /-- Palette alpha bytes are read directly when the index is inside the `tRNS`
 payload. This is the in-range branch used by palette RGBA expansion. -/
