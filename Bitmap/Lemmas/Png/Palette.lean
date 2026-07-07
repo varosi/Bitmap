@@ -340,6 +340,57 @@ lemma expandPaletteIndicesToPixels16_unsupported_colorType
   simp [h0, h2, h4, h6]
   rfl
 
+/-- Expanding an empty palette index buffer to any supported 8-bit target
+produces an empty pixel buffer. This is the palette expansion loop base case. -/
+lemma expandPaletteIndicesToPixels8_empty_supported
+    (palette : PngPalette) (alpha? : Option ByteArray)
+    (background? : Option (UInt8 × UInt8 × UInt8)) (targetColorType : UInt8)
+    (hct : targetColorType = u8 0 ∨ targetColorType = u8 2 ∨
+      targetColorType = u8 4 ∨ targetColorType = u8 6) :
+    expandPaletteIndicesToPixels8 ByteArray.empty palette alpha? background?
+      targetColorType = some ByteArray.empty := by
+  rcases hct with rfl | rfl | rfl | rfl
+  all_goals
+    unfold expandPaletteIndicesToPixels8
+    simp [Std.Legacy.Range.forIn_eq_forIn_range']
+    rfl
+
+/-- Expanding an empty palette index buffer to any supported 16-bit target
+produces an empty pixel buffer. This pins the 16-bit expansion loop base case. -/
+lemma expandPaletteIndicesToPixels16_empty_supported
+    (palette : PngPalette) (alpha? : Option ByteArray)
+    (background? : Option (UInt8 × UInt8 × UInt8)) (targetColorType : UInt8)
+    (hct : targetColorType = u8 0 ∨ targetColorType = u8 2 ∨
+      targetColorType = u8 4 ∨ targetColorType = u8 6) :
+    expandPaletteIndicesToPixels16 ByteArray.empty palette alpha? background?
+      targetColorType = some ByteArray.empty := by
+  rcases hct with rfl | rfl | rfl | rfl
+  all_goals
+    unfold expandPaletteIndicesToPixels16
+    simp [Std.Legacy.Range.forIn_eq_forIn_range']
+    rfl
+
+/-- The public palette expansion wrapper returns an empty pixel buffer for an
+empty index buffer whenever both target color type and bit depth are supported. -/
+lemma expandPaletteIndicesToPixels_empty_supported
+    (palette : PngPalette) (metadata : PngMetadata)
+    (targetColorType targetBitDepth : UInt8)
+    (hct : targetColorType = u8 0 ∨ targetColorType = u8 2 ∨
+      targetColorType = u8 4 ∨ targetColorType = u8 6)
+    (hbd : targetBitDepth = u8 8 ∨ targetBitDepth = u8 16) :
+    expandPaletteIndicesToPixels ByteArray.empty palette metadata targetColorType
+      targetBitDepth = some ByteArray.empty := by
+  rcases hbd with rfl | rfl
+  · simpa [expandPaletteIndicesToPixels] using
+      expandPaletteIndicesToPixels8_empty_supported palette
+        (paletteAlphaBytes? metadata) (paletteBackgroundRGB? palette metadata)
+        targetColorType hct
+  · have hne : (u8 16 : UInt8) ≠ u8 8 := by decide
+    simpa [expandPaletteIndicesToPixels, hne] using
+      expandPaletteIndicesToPixels16_empty_supported palette
+        (paletteAlphaBytes? metadata) (paletteBackgroundRGB? palette metadata)
+        targetColorType hct
+
 /-- Palette expansion rejects target bit depths other than 8 or 16. This pins
 the public expansion wrapper's bit-depth boundary. -/
 lemma expandPaletteIndicesToPixels_unsupported_bitDepth
