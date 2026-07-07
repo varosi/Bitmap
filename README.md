@@ -227,6 +227,7 @@ This library has proofs about:
   `expandPaletteIndicesToPixels8_empty_supported`,
   `expandPaletteIndicesToPixels16_empty_supported`,
   `expandPaletteIndicesToPixels_empty_supported`,
+  `expandPaletteIndicesToPixels_unsupported_colorType`,
   `expandPaletteIndicesToPixels_unsupported_bitDepth`,
   `encodeIndexedPackedRows_size`,
   `encodeIndexedPackedRows_8_eq_data`,

@@ -421,6 +421,29 @@ lemma expandPaletteIndicesToPixels_empty_supported
         (paletteAlphaBytes? metadata) (paletteBackgroundRGB? palette metadata)
         targetColorType hct
 
+/-- The public palette expansion wrapper rejects unsupported target color types
+when the requested target bit depth is otherwise supported. -/
+lemma expandPaletteIndicesToPixels_unsupported_colorType
+    (indices : ByteArray) (palette : PngPalette) (metadata : PngMetadata)
+    (targetColorType targetBitDepth : UInt8)
+    (h0 : targetColorType ≠ u8 0)
+    (h2 : targetColorType ≠ u8 2)
+    (h4 : targetColorType ≠ u8 4)
+    (h6 : targetColorType ≠ u8 6)
+    (hbd : targetBitDepth = u8 8 ∨ targetBitDepth = u8 16) :
+    expandPaletteIndicesToPixels indices palette metadata targetColorType
+      targetBitDepth = none := by
+  rcases hbd with rfl | rfl
+  · simpa [expandPaletteIndicesToPixels] using
+      expandPaletteIndicesToPixels8_unsupported_colorType indices palette
+        (paletteAlphaBytes? metadata) (paletteBackgroundRGB? palette metadata)
+        targetColorType h0 h2 h4 h6
+  · have hne : (u8 16 : UInt8) ≠ u8 8 := by decide
+    simpa [expandPaletteIndicesToPixels, hne] using
+      expandPaletteIndicesToPixels16_unsupported_colorType indices palette
+        (paletteAlphaBytes? metadata) (paletteBackgroundRGB? palette metadata)
+        targetColorType h0 h2 h4 h6
+
 /-- Palette expansion rejects target bit depths other than 8 or 16. This pins
 the public expansion wrapper's bit-depth boundary. -/
 lemma expandPaletteIndicesToPixels_unsupported_bitDepth
