@@ -182,6 +182,41 @@ lemma pushU16Full_eq_push_sample_twice (out : ByteArray) (sample : UInt8) :
   unfold pushU16Full pushU16BE
   rw [u8_mul257_div256_eq_self, u8_mul257_eq_self]
 
+/-- Palette transparency metadata exposes its alpha byte payload unchanged.
+This pins the handoff from parsed `tRNS` metadata into palette expansion. -/
+@[simp] lemma paletteAlphaBytes?_paletteAlpha (alpha : ByteArray) :
+    paletteAlphaBytes? { PngMetadata.empty with transparency := some (.paletteAlpha alpha) } =
+      some alpha := by
+  simp [paletteAlphaBytes?]
+
+/-- Without palette `tRNS`, every palette entry is treated as fully opaque.
+This records the decoder's default-alpha rule for indexed PNGs. -/
+@[simp] lemma paletteAlphaAt_none (idx : Nat) :
+    paletteAlphaAt none idx = 0xff := by
+  rfl
+
+/-- Palette alpha bytes are read directly when the index is inside the `tRNS`
+payload. This is the in-range branch used by palette RGBA expansion. -/
+lemma paletteAlphaAt_some_lt (alpha : ByteArray) (idx : Nat) (hidx : idx < alpha.size) :
+    paletteAlphaAt (some alpha) idx = alpha.get! idx := by
+  unfold paletteAlphaAt
+  simp [hidx]
+
+/-- Palette entries beyond the provided `tRNS` payload default to fully opaque.
+This is PNG's partial-palette-alpha behavior. -/
+lemma paletteAlphaAt_some_ge (alpha : ByteArray) (idx : Nat) (hidx : alpha.size ≤ idx) :
+    paletteAlphaAt (some alpha) idx = 0xff := by
+  unfold paletteAlphaAt
+  simp [Nat.not_lt_of_ge hidx]
+
+/-- Palette background metadata is resolved by looking up the named palette
+entry in `PLTE`. This pins the `bKGD` handoff used by non-alpha targets. -/
+lemma paletteBackgroundRGB?_paletteIndex (palette : PngPalette) (idx : UInt8) :
+    paletteBackgroundRGB? palette
+      { PngMetadata.empty with background := some (.paletteIndex idx) } =
+        palette.rgbAt? idx.toNat := by
+  simp [paletteBackgroundRGB?]
+
 /-- Packing one indexed sample into a row does not change the row byte count.
 This is the inner-loop invariant for indexed row construction. -/
 lemma palettePackIndexIntoRow_size (row : ByteArray) (bitDepth x : Nat) (idx : UInt8) :
