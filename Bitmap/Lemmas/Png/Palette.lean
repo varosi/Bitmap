@@ -217,6 +217,64 @@ lemma paletteBackgroundRGB?_paletteIndex (palette : PngPalette) (idx : UInt8) :
         palette.rgbAt? idx.toNat := by
   simp [paletteBackgroundRGB?]
 
+/-- A palette lookup succeeds when the requested RGB triplet is inside `PLTE`.
+This exposes the exact bytes selected by a valid indexed-color sample. -/
+lemma paletteRgbAt?_of_base_lt (palette : PngPalette) (idx : Nat)
+    (h : idx * 3 + 2 < palette.entries.size) :
+    palette.rgbAt? idx =
+      some (palette.entries.get! (idx * 3),
+        palette.entries.get! (idx * 3 + 1),
+        palette.entries.get! (idx * 3 + 2)) := by
+  unfold PngPalette.rgbAt?
+  simp [h]
+
+/-- A palette lookup fails when the requested RGB triplet is outside `PLTE`.
+This is the out-of-range branch used by palette expansion rejection proofs. -/
+lemma paletteRgbAt?_of_base_ge (palette : PngPalette) (idx : Nat)
+    (h : palette.entries.size ≤ idx * 3 + 2) :
+    palette.rgbAt? idx = none := by
+  unfold PngPalette.rgbAt?
+  simp [Nat.not_lt_of_ge h]
+
+/-- For triplet-aligned palettes, every index below `entryCount` has a full RGB
+triplet. This connects parser `PLTE` validation to successful palette lookup. -/
+lemma paletteRgbAt?_of_lt_entryCount (palette : PngPalette) (idx : Nat)
+    (htriplets : palette.entries.size % 3 = 0)
+    (hidx : idx < palette.entryCount) :
+    palette.rgbAt? idx =
+      some (palette.entries.get! (idx * 3),
+        palette.entries.get! (idx * 3 + 1),
+        palette.entries.get! (idx * 3 + 2)) := by
+  have hsizeMul : 3 * (palette.entries.size / 3) = palette.entries.size := by
+    have hmod := Nat.mod_add_div palette.entries.size 3
+    omega
+  have hsize : palette.entries.size = palette.entryCount * 3 := by
+    simpa [PngPalette.entryCount, Nat.mul_comm] using hsizeMul.symm
+  have hidxSucc : idx + 1 ≤ palette.entryCount := Nat.succ_le_of_lt hidx
+  have hmul : (idx + 1) * 3 ≤ palette.entryCount * 3 :=
+    Nat.mul_le_mul_right 3 hidxSucc
+  have hle : (idx + 1) * 3 ≤ palette.entries.size := by
+    simpa [hsize] using hmul
+  have hbase : idx * 3 + 2 < palette.entries.size := by
+    have hstep : idx * 3 + 2 < (idx + 1) * 3 := by
+      omega
+    exact Nat.lt_of_lt_of_le hstep hle
+  exact paletteRgbAt?_of_base_lt palette idx hbase
+
+/-- A valid palette `bKGD` index resolves to its `PLTE` triplet. This links
+metadata validation to the background color used for compositing. -/
+lemma paletteBackgroundRGB?_paletteIndex_of_lt_entryCount
+    (palette : PngPalette) (idx : UInt8)
+    (htriplets : palette.entries.size % 3 = 0)
+    (hidx : idx.toNat < palette.entryCount) :
+    paletteBackgroundRGB? palette
+      { PngMetadata.empty with background := some (.paletteIndex idx) } =
+        some (palette.entries.get! (idx.toNat * 3),
+          palette.entries.get! (idx.toNat * 3 + 1),
+          palette.entries.get! (idx.toNat * 3 + 2)) := by
+  rw [paletteBackgroundRGB?_paletteIndex]
+  exact paletteRgbAt?_of_lt_entryCount palette idx.toNat htriplets hidx
+
 /-- Palette expansion to 8-bit samples rejects target color types outside the
 supported grayscale/RGB/gray-alpha/RGBA set. -/
 lemma expandPaletteIndicesToPixels8_unsupported_colorType
