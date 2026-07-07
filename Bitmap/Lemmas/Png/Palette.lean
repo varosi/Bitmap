@@ -241,6 +241,18 @@ lemma alphaCompositeByte_transparent (src bg : UInt8) :
   simp [h0]
   exact u8_toNat_eq_self bg
 
+/-- Converting a palette entry whose RGB channels are equal to grayscale keeps
+that sample unchanged. This is the grayscale-target palette expansion base fact. -/
+lemma grayFromRGB8_uniform (sample : UInt8) :
+    grayFromRGB8 sample sample sample = sample := by
+  unfold grayFromRGB8
+  have hdiv : (sample.toNat + sample.toNat + sample.toNat) / 3 = sample.toNat := by
+    rw [show sample.toNat + sample.toNat + sample.toNat = sample.toNat * 3 by omega]
+    rw [Nat.mul_comm sample.toNat 3]
+    exact Nat.mul_div_right sample.toNat (by decide : 0 < 3)
+  rw [hdiv]
+  exact u8_toNat_eq_self sample
+
 /-- Palette transparency metadata exposes its alpha byte payload unchanged.
 This pins the handoff from parsed `tRNS` metadata into palette expansion. -/
 @[simp] lemma paletteAlphaBytes?_paletteAlpha (alpha : ByteArray) :

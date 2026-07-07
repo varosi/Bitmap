@@ -213,6 +213,7 @@ This library has proofs about:
   `alphaCompositeByte_opaque`,
   `alphaCompositeByte_transparent`,
   `alphaCompositeByte_paletteAlphaAt_none`,
+  `grayFromRGB8_uniform`,
   `paletteAlphaBytes?_paletteAlpha`,
   `paletteAlphaBytes?_none`,
   `paletteAlphaBytes?_non_palette`,
