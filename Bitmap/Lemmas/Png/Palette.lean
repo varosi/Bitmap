@@ -241,6 +241,29 @@ lemma alphaCompositeByte_transparent (src bg : UInt8) :
   simp [h0]
   exact u8_toNat_eq_self bg
 
+/-- Alpha compositing a sample over the same background sample is idempotent
+for every alpha value. This is a palette compositing stability fact. -/
+lemma alphaCompositeByte_same (sample alpha : UInt8) :
+    alphaCompositeByte sample sample alpha = sample := by
+  unfold alphaCompositeByte
+  have ha : alpha.toNat ≤ 255 := by
+    have hlt : alpha.toNat < 256 := by
+      simpa using UInt8.toNat_lt alpha
+    omega
+  have hnum :
+      sample.toNat * alpha.toNat + sample.toNat * (255 - alpha.toNat) =
+        sample.toNat * 255 := by
+    rw [← Nat.mul_add]
+    have hsum : alpha.toNat + (255 - alpha.toNat) = 255 := by
+      omega
+    rw [hsum]
+  rw [hnum]
+  have hdiv : sample.toNat * 255 / 255 = sample.toNat := by
+    rw [Nat.mul_comm sample.toNat 255]
+    exact Nat.mul_div_right sample.toNat (by decide : 0 < 255)
+  rw [hdiv]
+  exact u8_toNat_eq_self sample
+
 /-- Converting a palette entry whose RGB channels are equal to grayscale keeps
 that sample unchanged. This is the grayscale-target palette expansion base fact. -/
 lemma grayFromRGB8_uniform (sample : UInt8) :
@@ -252,6 +275,13 @@ lemma grayFromRGB8_uniform (sample : UInt8) :
     exact Nat.mul_div_right sample.toNat (by decide : 0 < 3)
   rw [hdiv]
   exact u8_toNat_eq_self sample
+
+/-- Full-range 16-bit grayscale expansion of a uniform RGB palette entry writes
+the duplicated sample bytes. This combines gray conversion with `u8 * 257`. -/
+lemma pushU16Full_grayFromRGB8_uniform (out : ByteArray) (sample : UInt8) :
+    pushU16Full out (grayFromRGB8 sample sample sample) =
+      (out.push sample).push sample := by
+  rw [grayFromRGB8_uniform, pushU16Full_eq_push_sample_twice]
 
 /-- Palette transparency metadata exposes its alpha byte payload unchanged.
 This pins the handoff from parsed `tRNS` metadata into palette expansion. -/
