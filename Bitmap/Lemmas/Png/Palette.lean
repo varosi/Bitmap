@@ -217,6 +217,47 @@ lemma paletteBackgroundRGB?_paletteIndex (palette : PngPalette) (idx : UInt8) :
         palette.rgbAt? idx.toNat := by
   simp [paletteBackgroundRGB?]
 
+/-- Palette expansion to 8-bit samples rejects target color types outside the
+supported grayscale/RGB/gray-alpha/RGBA set. -/
+lemma expandPaletteIndicesToPixels8_unsupported_colorType
+    (indices : ByteArray) (palette : PngPalette)
+    (alpha? : Option ByteArray) (background? : Option (UInt8 × UInt8 × UInt8))
+    (targetColorType : UInt8)
+    (h0 : targetColorType ≠ u8 0)
+    (h2 : targetColorType ≠ u8 2)
+    (h4 : targetColorType ≠ u8 4)
+    (h6 : targetColorType ≠ u8 6) :
+    expandPaletteIndicesToPixels8 indices palette alpha? background? targetColorType = none := by
+  unfold expandPaletteIndicesToPixels8
+  simp [h0, h2, h4, h6]
+  rfl
+
+/-- Palette expansion to 16-bit samples rejects target color types outside the
+supported grayscale/RGB/gray-alpha/RGBA set. -/
+lemma expandPaletteIndicesToPixels16_unsupported_colorType
+    (indices : ByteArray) (palette : PngPalette)
+    (alpha? : Option ByteArray) (background? : Option (UInt8 × UInt8 × UInt8))
+    (targetColorType : UInt8)
+    (h0 : targetColorType ≠ u8 0)
+    (h2 : targetColorType ≠ u8 2)
+    (h4 : targetColorType ≠ u8 4)
+    (h6 : targetColorType ≠ u8 6) :
+    expandPaletteIndicesToPixels16 indices palette alpha? background? targetColorType = none := by
+  unfold expandPaletteIndicesToPixels16
+  simp [h0, h2, h4, h6]
+  rfl
+
+/-- Palette expansion rejects target bit depths other than 8 or 16. This pins
+the public expansion wrapper's bit-depth boundary. -/
+lemma expandPaletteIndicesToPixels_unsupported_bitDepth
+    (indices : ByteArray) (palette : PngPalette) (metadata : PngMetadata)
+    (targetColorType targetBitDepth : UInt8)
+    (h8 : targetBitDepth ≠ u8 8)
+    (h16 : targetBitDepth ≠ u8 16) :
+    expandPaletteIndicesToPixels indices palette metadata targetColorType targetBitDepth = none := by
+  unfold expandPaletteIndicesToPixels
+  simp [h8, h16]
+
 /-- Packing one indexed sample into a row does not change the row byte count.
 This is the inner-loop invariant for indexed row construction. -/
 lemma palettePackIndexIntoRow_size (row : ByteArray) (bitDepth x : Nat) (idx : UInt8) :
