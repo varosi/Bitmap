@@ -1653,8 +1653,30 @@ private def expectPalettePng : IO Unit := do
     "palette tRNS too long"
   expectPaletteInvalidDecode
     (indexedPngWithChunks 1 1 1 0
+      (plte2 ++ Png.mkChunkBytes Png.trnsTypeBytes (ByteArray.mk #[0]) ++
+        Png.mkChunkBytes Png.trnsTypeBytes (ByteArray.mk #[1])) raw1)
+    "duplicate palette tRNS"
+  expectPaletteInvalidDecode
+    (indexedPngWithChunks 1 1 1 0
       (plte2 ++ Png.mkChunkBytes Png.bkgdTypeBytes (ByteArray.mk #[2])) raw1)
     "palette bKGD out of range"
+  expectPaletteInvalidDecode
+    (indexedPngWithChunks 1 1 1 0
+      (plte2 ++ Png.mkChunkBytes Png.bkgdTypeBytes (ByteArray.mk #[0]) ++
+        Png.mkChunkBytes Png.bkgdTypeBytes (ByteArray.mk #[1])) raw1)
+    "duplicate palette bKGD"
+  expectPaletteInvalidDecode
+    (indexedPngWithChunks 1 1 1 0
+      (plte2 ++ Png.mkChunkBytes Png.idatTypeBytes raw1 ++
+        Png.mkChunkBytes Png.trnsTypeBytes (ByteArray.mk #[0]))
+      ByteArray.empty)
+    "palette tRNS after IDAT"
+  expectPaletteInvalidDecode
+    (indexedPngWithChunks 1 1 1 0
+      (plte2 ++ Png.mkChunkBytes Png.idatTypeBytes raw1 ++
+        Png.mkChunkBytes Png.bkgdTypeBytes (ByteArray.mk #[0]))
+      ByteArray.empty)
+    "palette bKGD after IDAT"
 
 private def filterRGB8Fixture : BitmapRGB8 :=
   Bitmap.ofPixelFn 6 4 (fun idx : Fin (6 * 4) =>
