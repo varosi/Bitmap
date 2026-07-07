@@ -248,6 +248,19 @@ This pins the handoff from parsed `tRNS` metadata into palette expansion. -/
       some alpha := by
   simp [paletteAlphaBytes?]
 
+/-- Without palette transparency metadata, no palette alpha byte payload is
+available. This is the default branch consumed by palette expansion. -/
+@[simp] lemma paletteAlphaBytes?_none :
+    paletteAlphaBytes? PngMetadata.empty = none := by
+  simp [paletteAlphaBytes?, PngMetadata.empty]
+
+/-- Non-palette transparency metadata is ignored by the palette-alpha helper.
+This separates indexed `tRNS` handling from gray/RGB transparency metadata. -/
+lemma paletteAlphaBytes?_non_palette (trns : PngTransparency)
+    (h : ∀ alpha, trns ≠ .paletteAlpha alpha) :
+    paletteAlphaBytes? { PngMetadata.empty with transparency := some trns } = none := by
+  cases trns <;> simp [paletteAlphaBytes?] at h ⊢
+
 /-- Without palette `tRNS`, every palette entry is treated as fully opaque.
 This records the decoder's default-alpha rule for indexed PNGs. -/
 @[simp] lemma paletteAlphaAt_none (idx : Nat) :
@@ -281,6 +294,20 @@ lemma paletteBackgroundRGB?_paletteIndex (palette : PngPalette) (idx : UInt8) :
       { PngMetadata.empty with background := some (.paletteIndex idx) } =
         palette.rgbAt? idx.toNat := by
   simp [paletteBackgroundRGB?]
+
+/-- Without palette background metadata, the palette background helper returns
+no RGB value. This is the default branch for indexed `bKGD` compositing. -/
+@[simp] lemma paletteBackgroundRGB?_none (palette : PngPalette) :
+    paletteBackgroundRGB? palette PngMetadata.empty = none := by
+  simp [paletteBackgroundRGB?, PngMetadata.empty]
+
+/-- Non-palette background metadata is ignored by the palette background helper.
+This separates indexed `bKGD` lookup from gray/RGB background metadata. -/
+lemma paletteBackgroundRGB?_non_palette (palette : PngPalette) (background : PngBackground)
+    (h : ∀ idx, background ≠ .paletteIndex idx) :
+    paletteBackgroundRGB? palette
+      { PngMetadata.empty with background := some background } = none := by
+  cases background <;> simp [paletteBackgroundRGB?] at h ⊢
 
 /-- A palette lookup succeeds when the requested RGB triplet is inside `PLTE`.
 This exposes the exact bytes selected by a valid indexed-color sample. -/
