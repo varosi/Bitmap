@@ -174,6 +174,27 @@ theorem checked_dynamic_4bit_fixture_data :
       decodeIndexedMetadataDataAfterCheckedEncode indexed4 .dynamic = some indexed4.data := by
   native_decide
 
+/-- Stored-zlib checked encode/decode round-trips a concrete 8-bit indexed row
+through both exact indexed decode APIs. -/
+theorem checked_stored_8bit_fixture_data :
+    decodeIndexedDataAfterCheckedEncode indexed8 .stored = some indexed8.data ∧
+      decodeIndexedMetadataDataAfterCheckedEncode indexed8 .stored = some indexed8.data := by
+  native_decide
+
+/-- Fixed-Huffman checked encode/decode round-trips a concrete 8-bit indexed row
+through both exact indexed decode APIs. -/
+theorem checked_fixed_8bit_fixture_data :
+    decodeIndexedDataAfterCheckedEncode indexed8 .fixed = some indexed8.data ∧
+      decodeIndexedMetadataDataAfterCheckedEncode indexed8 .fixed = some indexed8.data := by
+  native_decide
+
+/-- Dynamic-Huffman checked encode/decode round-trips a concrete 8-bit indexed
+row through both exact indexed decode APIs. -/
+theorem checked_dynamic_8bit_fixture_data :
+    decodeIndexedDataAfterCheckedEncode indexed8 .dynamic = some indexed8.data ∧
+      decodeIndexedMetadataDataAfterCheckedEncode indexed8 .dynamic = some indexed8.data := by
+  native_decide
+
 end PalettePackedRoundTrip
 
 end Lemmas
