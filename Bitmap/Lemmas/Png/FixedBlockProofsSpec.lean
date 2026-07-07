@@ -176,7 +176,7 @@ lemma decodeFixedBlockFuel_step_literal_of_decodes
       none
   change (match (sym, br') with | (s, r) => k s r) = decodeFixedBlockFuel fuel br' (out.push (u8 sym))
   have hpair : (match (sym, br') with | (s, r) => k s r) = k sym br' := by
-    simpa using (match_pair_eta (a := sym) (b := br') (k := k))
+    exact match_pair_eta (a := sym) (b := br') (k := k)
   rw [hpair]
   dsimp [k]
   rw [if_pos hlit]
@@ -331,7 +331,7 @@ lemma decodeFixedBlockFuel_step_match_of_decodes
             none
       else
         none) := by
-    simpa [hextra, array_getInternal_eq_getElem, array_getElem_eq]
+    simp [hextra]
   rw [hLetExtra]
   rw [dif_pos hbits]
   rw [hdecodeLen]
@@ -465,7 +465,7 @@ lemma decodeFixedBlockFuel_step_match_of_decodes
           decodeFixedBlockFuel fuel br'''' out'
       else
         none) := by
-    simpa [hextraD, array_getInternal_eq_getElem, array_getElem_eq]
+    simp [hextraD]
   rw [hLetExtraD]
   rw [dif_pos hbitsD]
   rw [hdecodeDist]
@@ -535,7 +535,7 @@ lemma decodeFixedBlockFuel_step_eob_of_decodes
       none
   change (match (sym, br') with | (s, r) => k s r) = some (br', out)
   have hpair : (match (sym, br') with | (s, r) => k s r) = k sym br' := by
-    simpa using (match_pair_eta (a := sym) (b := br') (k := k))
+    exact match_pair_eta (a := sym) (b := br') (k := k)
   rw [hpair]
   dsimp [k]
   rw [if_neg hnotLit]

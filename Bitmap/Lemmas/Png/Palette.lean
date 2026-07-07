@@ -121,8 +121,11 @@ lemma palettePackIndexIntoRow_size (row : ByteArray) (bitDepth x : Nat) (idx : U
     (palettePackIndexIntoRow row bitDepth x idx).size = row.size := by
   unfold palettePackIndexIntoRow
   by_cases h8 : bitDepth == 8
-  · simp [h8, byteArray_size_set!]
-  · simp [h8, byteArray_size_set!]
+  · simpa [h8] using byteArray_size_set! row x idx
+  · simpa [h8] using
+      byteArray_size_set! row (x / (8 / bitDepth))
+        (u8 ((row.get! (x / (8 / bitDepth))).toNat |||
+          (idx.toNat % paletteIndexLimit bitDepth) <<< palettePackedShift bitDepth x))
 
 /-- Writing all indices for one packed row preserves the allocated row size.
 This proves the inner indexed row encoder cannot grow or shrink rows. -/

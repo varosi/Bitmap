@@ -7,6 +7,8 @@ namespace Bitmaps
 
 namespace Png
 
+set_option linter.unusedVariables false
+
 /-- Transports `readerAt` across equal writer and backing data values. Match
 trace proofs use this when rebracketing proof-facing token bits. -/
 lemma lz77ReaderAt_eq_of_eqs
@@ -180,7 +182,7 @@ lemma fixedPayloadTransition_copy_of_decodes
     hdist hextraD hbitsD hdecodeDist hcopy
   · omega
   · cases hbeq : (sym == 256) with
-    | false => simpa using hbeq
+    | false => rfl
     | true =>
         have hs : sym = 256 := by simpa using hbeq
         omega

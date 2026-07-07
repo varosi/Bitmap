@@ -600,8 +600,8 @@ lemma readChunk_simpleContainer_iend (s : SimpleContainerSpec)
     have h := s.bytes_extract_skip_through_idat 8 (8 + 0) (by rw [hSize]; omega)
     rw [show (45 + s.idatData.size + (8 + 0) : Nat) = (45 + s.idatData.size) + 8 + 0 by omega] at h
     rw [h]
-    have hData := mkChunk_extract_data "IEND" ByteArray.empty iend_utf8ByteSize
-    simpa using hData
+    change (mkChunk "IEND" ByteArray.empty).extract 8 (8 + 0) = ByteArray.empty
+    exact mkChunk_extract_data "IEND" ByteArray.empty iend_utf8ByteSize
   -- IEND CRC.
   have hExtractCrc :
       s.bytes.extract ((45 + s.idatData.size) + 8) ((45 + s.idatData.size) + 8 + 4) =
@@ -620,7 +620,7 @@ lemma readChunk_simpleContainer_iend (s : SimpleContainerSpec)
       (by omega) (by simpa using hExtractCrc) (UInt32.toNat_lt _)
   -- Combine via readChunk's definition.
   unfold readChunk
-  simp [hLenRead, hCrcEnd, hExtractType, hExtractData, hCrcRead]
+  simp [hLenRead, hCrcEnd, hExtractType, hCrcRead]
   show ((45 + s.idatData.size) + 8 + 0 + 4 : Nat) = 57 + s.idatData.size
   omega
 

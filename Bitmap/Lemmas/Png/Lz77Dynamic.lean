@@ -4135,7 +4135,7 @@ lemma generatedDynamicHeaderCodeLengthsLz77_extract_dist_full
     rw [Array.extract_eq_empty_iff]
     omega
   have hright : distLengths.extract 0 30 = distLengths := by
-    simpa [hdistSize] using (Array.extract_size (xs := distLengths))
+    simp [hdistSize]
   simp [hlitSize, hleft, hright]
 
 /-- The generated LZ77 dynamic header writer is its fixed prefix followed by
