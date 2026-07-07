@@ -249,6 +249,37 @@ theorem decodeIndexedBitmap_encodeIndexedBitmapChecked_dynamic_8_256_data
       s bmp rfl rfl rfl hIdatSize hbd hpal
   exact ⟨s.bytes, hEncode, hMetadata, hPixel⟩
 
+/-- Checked indexed encode/decode round-trips 8-bit full-palette filter-0
+inputs for every supported compression mode. This packages the per-mode
+container proofs behind the public `encodeIndexedBitmapChecked` API. -/
+theorem decodeIndexedBitmap_encodeIndexedBitmapChecked_8_256_data
+    (mode : PngEncodeMode)
+    (bmp : PngIndexedBitmap)
+    (hw : bmp.size.width < UInt32.size) (hh : bmp.size.height < UInt32.size)
+    (hbd : bmp.bitDepth = 8)
+    (hpalSize : bmp.palette.entries.size = 256 * 3)
+    (hrange : indexedDataInRange bmp.data bmp.palette.entryCount = true)
+    (htrans : bmp.transparency = none)
+    (hbg : bmp.background = none)
+    (hIdatSize :
+      (match mode with
+       | .stored => zlibCompressStored (encodeRawIndexedWithFilter bmp .none)
+       | .fixed => zlibCompressFixed (encodeRawIndexedWithFilter bmp .none)
+       | .dynamic => zlibCompressDynamic (encodeRawIndexedWithFilter bmp .none)).size
+        < 2 ^ 32) :
+    ∃ bytes,
+      encodeIndexedBitmapChecked bmp mode = Except.ok bytes ∧
+        (decodeIndexedBitmapWithMetadata bytes).map (fun result => result.bitmap.data) =
+          some bmp.data ∧
+        (decodeIndexedBitmap bytes).map (fun bitmap => bitmap.data) = some bmp.data := by
+  cases mode
+  · exact decodeIndexedBitmap_encodeIndexedBitmapChecked_stored_8_256_data
+      bmp hw hh hbd hpalSize hrange htrans hbg hIdatSize
+  · exact decodeIndexedBitmap_encodeIndexedBitmapChecked_fixed_8_256_data
+      bmp hw hh hbd hpalSize hrange htrans hbg hIdatSize
+  · exact decodeIndexedBitmap_encodeIndexedBitmapChecked_dynamic_8_256_data
+      bmp hw hh hbd hpalSize hrange htrans hbg hIdatSize
+
 end PaletteEncoderRoundTrip
 
 end Lemmas
