@@ -275,6 +275,7 @@ This library has proofs about:
   `PaletteEncoderRoundTrip.decodeIndexedBitmap_encodeIndexedBitmapChecked_fixed_8_256_data`,
   `PaletteEncoderRoundTrip.decodeIndexedBitmap_encodeIndexedBitmapChecked_dynamic_8_256_data`,
   `PalettePackedRoundTrip.checked_roundtrip_fixture_for_supported_bitDepth`,
+  `PalettePackedRoundTrip.checked_fixed_filter_roundtrip_fixture_for_supported_bitDepth`,
   `PalettePackedRoundTrip.checked_stored_1bit_fixture_data`,
   `PalettePackedRoundTrip.checked_fixed_1bit_fixture_data`,
   `PalettePackedRoundTrip.checked_dynamic_1bit_fixture_data`,

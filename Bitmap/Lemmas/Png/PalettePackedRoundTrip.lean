@@ -255,6 +255,19 @@ private def decodeIndexedMetadataDataAfterCheckedEncode
       (decodeIndexedBitmapWithMetadata bytes).map (fun result => result.bitmap.data)
   | .error _ => none
 
+private def decodeIndexedDataAfterCheckedEncodeWithOptions
+    (bmp : PngIndexedBitmap) (options : PngEncodeOptions) : Option ByteArray :=
+  match encodeIndexedBitmapWithOptionsChecked bmp options with
+  | .ok bytes => (decodeIndexedBitmap bytes).map (fun bitmap => bitmap.data)
+  | .error _ => none
+
+private def decodeIndexedMetadataDataAfterCheckedEncodeWithOptions
+    (bmp : PngIndexedBitmap) (options : PngEncodeOptions) : Option ByteArray :=
+  match encodeIndexedBitmapWithOptionsChecked bmp options with
+  | .ok bytes =>
+      (decodeIndexedBitmapWithMetadata bytes).map (fun result => result.bitmap.data)
+  | .error _ => none
+
 /-- For every supported PNG palette bit depth, there is an explicit indexed
 bitmap whose checked encoder round-trips through both exact indexed decoders.
 This quantifies over all compression modes and covers the packed 1/2/4-bit
@@ -271,6 +284,24 @@ theorem checked_roundtrip_fixture_for_supported_bitDepth
   · refine ⟨indexed2, rfl, ?_, ?_⟩ <;> cases mode <;> native_decide
   · refine ⟨indexed4, rfl, ?_, ?_⟩ <;> cases mode <;> native_decide
   · refine ⟨indexed8, rfl, ?_, ?_⟩ <;> cases mode <;> native_decide
+
+/-- For every supported PNG palette bit depth and every PNG row filter, there
+is an explicit indexed bitmap whose fixed-Huffman checked encoder round-trips
+through both exact indexed decoders. This pins the filtered packed paths. -/
+theorem checked_fixed_filter_roundtrip_fixture_for_supported_bitDepth
+    (bitDepth : Nat) (rowFilter : PngRowFilter)
+    (hbd : bitDepth = 1 ∨ bitDepth = 2 ∨ bitDepth = 4 ∨ bitDepth = 8) :
+    ∃ bmp,
+      bmp.bitDepth = bitDepth ∧
+        decodeIndexedDataAfterCheckedEncodeWithOptions bmp
+          { mode := .fixed, filter := .fixed rowFilter } = some bmp.data ∧
+        decodeIndexedMetadataDataAfterCheckedEncodeWithOptions bmp
+          { mode := .fixed, filter := .fixed rowFilter } = some bmp.data := by
+  rcases hbd with rfl | rfl | rfl | rfl
+  · refine ⟨indexed1, rfl, ?_, ?_⟩ <;> cases rowFilter <;> native_decide
+  · refine ⟨indexed2, rfl, ?_, ?_⟩ <;> cases rowFilter <;> native_decide
+  · refine ⟨indexed4, rfl, ?_, ?_⟩ <;> cases rowFilter <;> native_decide
+  · refine ⟨indexed8, rfl, ?_, ?_⟩ <;> cases rowFilter <;> native_decide
 
 /-- Stored-zlib checked encode/decode round-trips a concrete 1-bit indexed row
 through both exact indexed decode APIs. -/
