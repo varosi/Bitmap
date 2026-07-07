@@ -24,6 +24,67 @@ lemma encodeIndexedBitmapWithOptionsChecked_rejects_of_validate_error
   simp [hvalid]
   rfl
 
+/-- The checked indexed encoder accepts any explicit indexed bitmap whose
+dimensions, palette shape, palette-size bound, pixel indices, and optional
+palette metadata satisfy the PNG color-type 3 validation rules. -/
+lemma validateIndexedBitmap_accepts
+    (bmp : PngIndexedBitmap)
+    (hbd : bmp.bitDepth = 1 ∨ bmp.bitDepth = 2 ∨ bmp.bitDepth = 4 ∨ bmp.bitDepth = 8)
+    (hw : bmp.size.width < UInt32.size)
+    (hh : bmp.size.height < UInt32.size)
+    (hpalNonempty : bmp.palette.entries.size ≠ 0)
+    (hpalTriplets : bmp.palette.entries.size % 3 = 0)
+    (hpalMax : bmp.palette.entries.size ≤ 256 * 3)
+    (hpalFits : bmp.palette.entryCount ≤ paletteMaxEntriesForBitDepth bmp.bitDepth)
+    (hrange : indexedDataInRange bmp.data bmp.palette.entryCount = true)
+    (htrans :
+      ∀ alpha, bmp.transparency = some alpha → alpha.size ≤ bmp.palette.entryCount)
+    (hbg :
+      ∀ idx, bmp.background = some idx → idx.toNat < bmp.palette.entryCount) :
+    validateIndexedBitmap bmp = Except.ok () := by
+  have hbdOk :
+      (bmp.bitDepth != 1 && bmp.bitDepth != 2 && bmp.bitDepth != 4 && bmp.bitDepth != 8) =
+        false := by
+    rcases hbd with hbd | hbd | hbd | hbd <;> simp [hbd]
+  have hnotWidth : ¬ bmp.size.width ≥ UInt32.size := Nat.not_le_of_gt hw
+  have hnotHeight : ¬ bmp.size.height ≥ UInt32.size := Nat.not_le_of_gt hh
+  have hnotEmpty : (bmp.palette.entries.size == 0) = false := by
+    simp [hpalNonempty]
+  have hgoodMod : (bmp.palette.entries.size % 3 != 0) = false := by
+    simp [hpalTriplets]
+  have hnotPalOver : ¬ bmp.palette.entries.size > 256 * 3 := Nat.not_lt_of_ge hpalMax
+  have hnotEntryOver :
+      ¬ bmp.palette.entryCount > paletteMaxEntriesForBitDepth bmp.bitDepth :=
+    Nat.not_lt_of_ge hpalFits
+  unfold validateIndexedBitmap
+  cases htransOpt : bmp.transparency with
+  | none =>
+      cases hbgOpt : bmp.background with
+      | none =>
+          simp [hbdOk, hnotWidth, hnotHeight, hnotEmpty, hgoodMod, hnotPalOver,
+            hnotEntryOver, hrange]
+          rfl
+      | some idx =>
+          have hidxLt : idx.toNat < bmp.palette.entryCount := hbg idx hbgOpt
+          have hnotIdx : ¬ idx.toNat ≥ bmp.palette.entryCount := Nat.not_le_of_gt hidxLt
+          simp [hbdOk, hnotWidth, hnotHeight, hnotEmpty, hgoodMod, hnotPalOver,
+            hnotEntryOver, hrange, hnotIdx]
+          rfl
+  | some alpha =>
+      have halphaLe : alpha.size ≤ bmp.palette.entryCount := htrans alpha htransOpt
+      have hnotAlpha : ¬ alpha.size > bmp.palette.entryCount := Nat.not_lt_of_ge halphaLe
+      cases hbgOpt : bmp.background with
+      | none =>
+          simp [hbdOk, hnotWidth, hnotHeight, hnotEmpty, hgoodMod, hnotPalOver,
+            hnotEntryOver, hrange, hnotAlpha]
+          rfl
+      | some idx =>
+          have hidxLt : idx.toNat < bmp.palette.entryCount := hbg idx hbgOpt
+          have hnotIdx : ¬ idx.toNat ≥ bmp.palette.entryCount := Nat.not_le_of_gt hidxLt
+          simp [hbdOk, hnotWidth, hnotHeight, hnotEmpty, hgoodMod, hnotPalOver,
+            hnotEntryOver, hrange, hnotAlpha, hnotIdx]
+          rfl
+
 /-- The indexed encoder rejects bit depths outside PNG's 1/2/4/8 palette set. -/
 lemma validateIndexedBitmap_rejects_bad_bitDepth (bmp : PngIndexedBitmap)
     (h1 : bmp.bitDepth ≠ 1) (h2 : bmp.bitDepth ≠ 2)

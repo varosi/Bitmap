@@ -246,6 +246,7 @@ This library has proofs about:
   `PalettePackedRoundTrip.checked_stored_4bit_fixture_data`,
   `PalettePackedRoundTrip.checked_fixed_4bit_fixture_data`,
   `PalettePackedRoundTrip.checked_dynamic_4bit_fixture_data`,
+  `PaletteValidation.validateIndexedBitmap_accepts`,
   `PaletteValidation.encodeIndexedBitmapWithOptionsChecked_rejects_of_validate_error`,
   `PaletteValidation.validateIndexedBitmap_rejects_bad_bitDepth`,
   `PaletteValidation.validateIndexedBitmap_rejects_width_limit`,
