@@ -218,6 +218,54 @@ private def fixtureExpectedRGB8Data (w h entryCount : Nat)
         out := out.push b
     return out
 
+private def fixtureExpectedRGB16Data (w h entryCount : Nat) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelRGB16)
+    for y in [0:h] do
+      for x in [0:w] do
+        let idx := (fixtureIndex entryCount x y).toNat
+        let (r, g, b) := fixturePaletteRGB idx
+        out := pushU16Full out r
+        out := pushU16Full out g
+        out := pushU16Full out b
+    return out
+
+private def fixtureExpectedRGBA16Data (w h entryCount : Nat)
+    (alpha? : Option ByteArray := none) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelRGBA16)
+    for y in [0:h] do
+      for x in [0:w] do
+        let idx := (fixtureIndex entryCount x y).toNat
+        let (r, g, b) := fixturePaletteRGB idx
+        out := pushU16Full out r
+        out := pushU16Full out g
+        out := pushU16Full out b
+        out := pushU16Full out (fixtureAlphaAt alpha? idx)
+    return out
+
+private def fixtureExpectedGray16Data (w h entryCount : Nat) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelGray16)
+    for y in [0:h] do
+      for x in [0:w] do
+        let idx := (fixtureIndex entryCount x y).toNat
+        let (r, g, b) := fixturePaletteRGB idx
+        out := pushU16Full out (grayFromRGB8 r g b)
+    return out
+
+private def fixtureExpectedGrayAlpha16Data (w h entryCount : Nat)
+    (alpha? : Option ByteArray := none) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelGrayAlpha16)
+    for y in [0:h] do
+      for x in [0:w] do
+        let idx := (fixtureIndex entryCount x y).toNat
+        let (r, g, b) := fixturePaletteRGB idx
+        out := pushU16Full out (grayFromRGB8 r g b)
+        out := pushU16Full out (fixtureAlphaAt alpha? idx)
+    return out
+
 private def fixtureAdam7Bytes : ByteArray :=
   fixturePngWithChunks 9 7 2 1
     (mkChunkBytes plteTypeBytes (fixturePaletteEntries 4))
@@ -230,6 +278,11 @@ private def multiIdatFixtureBytes : ByteArray :=
   fixturePngWithSplitIdat 7 3 4 0
     (mkChunkBytes plteTypeBytes multiIdatFixtureBitmap.palette.entries)
     (encodeRawIndexedWithFilter multiIdatFixtureBitmap .none)
+
+private def fixture16Bytes? : Option ByteArray :=
+  match encodeIndexedBitmapChecked multiIdatFixtureBitmap .fixed with
+  | .ok bytes => some bytes
+  | .error _ => none
 
 private def alphaFixture : ByteArray :=
   ByteArray.mk #[u8 0, u8 255, u8 128, u8 255]
@@ -477,6 +530,38 @@ theorem decodeIndexedBitmapWithMetadata_palette_metadata_fixture :
       (decodeIndexedBitmapWithMetadata bytes).map
         (fun decoded => (decoded.metadata.transparency, decoded.metadata.background)))) =
         some (some (.paletteAlpha alphaFixture), some (.paletteIndex (u8 1))) := by
+  native_decide
+
+/-- Palette decode expands 8-bit `PLTE` entries into full-range RGB16 samples
+for the 16-bit RGB target fixture. -/
+theorem decodeBitmap_palette_RGB16_fixture :
+    (fixture16Bytes?.bind (fun bytes =>
+      (decodeBitmap (px := PixelRGB16) bytes).map (fun decoded => decoded.data))) =
+        some (fixtureExpectedRGB16Data 7 3 16) := by
+  native_decide
+
+/-- Palette decode expands 8-bit `PLTE` entries and default opaque alpha into
+full-range RGBA16 samples for the 16-bit RGBA target fixture. -/
+theorem decodeBitmap_palette_RGBA16_fixture :
+    (fixture16Bytes?.bind (fun bytes =>
+      (decodeBitmap (px := PixelRGBA16) bytes).map (fun decoded => decoded.data))) =
+        some (fixtureExpectedRGBA16Data 7 3 16) := by
+  native_decide
+
+/-- Palette decode expands grayscale-converted `PLTE` entries into full-range
+Gray16 samples for the 16-bit grayscale target fixture. -/
+theorem decodeBitmap_palette_Gray16_fixture :
+    (fixture16Bytes?.bind (fun bytes =>
+      (decodeBitmap (px := PixelGray16) bytes).map (fun decoded => decoded.data))) =
+        some (fixtureExpectedGray16Data 7 3 16) := by
+  native_decide
+
+/-- Palette decode expands grayscale-converted `PLTE` entries and default
+opaque alpha into full-range GrayAlpha16 samples for the fixture. -/
+theorem decodeBitmap_palette_GrayAlpha16_fixture :
+    (fixture16Bytes?.bind (fun bytes =>
+      (decodeBitmap (px := PixelGrayAlpha16) bytes).map (fun decoded => decoded.data))) =
+        some (fixtureExpectedGrayAlpha16Data 7 3 16) := by
   native_decide
 
 /-- Palette `gAMA` metadata is applied after `PLTE` lookup when decoding the
