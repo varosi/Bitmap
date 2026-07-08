@@ -3961,23 +3961,28 @@ def paletteIndexLimit (bitDepth : Nat) : Nat :=
     let shift := palettePackedShift bitDepth x
     u8 ((byte.toNat >>> shift) % paletteIndexLimit bitDepth)
 
+def paletteScatterFullRowLoop (row flat : ByteArray) (w bitDepth y paletteEntries x : Nat)
+    (ok : Bool) : Option ByteArray :=
+  if hlt : x < w then
+    let idx := palettePackedIndexAt row bitDepth x
+    let ok := ok && !(idx.toNat >= paletteEntries)
+    let flat := flat.set! (y * w + x) idx
+    paletteScatterFullRowLoop row flat w bitDepth y paletteEntries (x + 1) ok
+  else if ok then
+    some flat
+  else
+    none
+termination_by w - x
+decreasing_by
+  have hx : x < w := hlt
+  exact Nat.sub_lt_sub_left hx (Nat.lt_succ_self x)
+
 def paletteScatterFullRow (row flat : ByteArray) (w bitDepth y paletteEntries : Nat) :
     Option ByteArray :=
   if bitDepth = 8 ∧ 256 ≤ paletteEntries then
     some (row.copySlice 0 flat (y * w) w)
   else
-    Id.run do
-      let mut flat := flat
-      let mut ok := true
-      for x in [0:w] do
-        let idx := palettePackedIndexAt row bitDepth x
-        if idx.toNat >= paletteEntries then
-          ok := false
-        flat := flat.set! (y * w + x) idx
-      if ok then
-        some flat
-      else
-        none
+    paletteScatterFullRowLoop row flat w bitDepth y paletteEntries 0 true
 
 def decodePaletteRowsLoop (raw : ByteArray) (w h bitDepth rowBytes paletteEntries : Nat)
     (y offset : Nat) (prevRow flat : ByteArray) : Option ByteArray :=
@@ -4013,22 +4018,28 @@ decreasing_by
   have hy' : y < y + 1 := Nat.lt_succ_self y
   exact Nat.sub_lt_sub_left hy hy'
 
+def adam7ScatterRowPaletteLoop (row flat : ByteArray) (w bitDepth paletteEntries : Nat)
+    (pass : Adam7Pass) (passY passX passWidth : Nat) (ok : Bool) : Option ByteArray :=
+  if hlt : passX < passWidth then
+    let dstY := pass.startY + passY * pass.stepY
+    let dstX := pass.startX + passX * pass.stepX
+    let idx := palettePackedIndexAt row bitDepth passX
+    let ok := ok && !(idx.toNat >= paletteEntries)
+    let flat := flat.set! (dstY * w + dstX) idx
+    adam7ScatterRowPaletteLoop row flat w bitDepth paletteEntries pass passY (passX + 1)
+      passWidth ok
+  else if ok then
+    some flat
+  else
+    none
+termination_by passWidth - passX
+decreasing_by
+  have hx : passX < passWidth := hlt
+  exact Nat.sub_lt_sub_left hx (Nat.lt_succ_self passX)
+
 def adam7ScatterRowPalette (row flat : ByteArray) (w bitDepth paletteEntries : Nat)
     (pass : Adam7Pass) (passY passWidth : Nat) : Option ByteArray :=
-  Id.run do
-    let mut flat := flat
-    let mut ok := true
-    let dstY := pass.startY + passY * pass.stepY
-    for passX in [0:passWidth] do
-      let dstX := pass.startX + passX * pass.stepX
-      let idx := palettePackedIndexAt row bitDepth passX
-      if idx.toNat >= paletteEntries then
-        ok := false
-      flat := flat.set! (dstY * w + dstX) idx
-    if ok then
-      some flat
-    else
-      none
+  adam7ScatterRowPaletteLoop row flat w bitDepth paletteEntries pass passY 0 passWidth true
 
 def decodeAdam7PalettePassRows (raw : ByteArray) (w bitDepth paletteEntries : Nat)
     (pass : Adam7Pass) (passWidth passHeight passY offset : Nat) (prevRow flat : ByteArray) :

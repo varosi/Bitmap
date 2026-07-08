@@ -269,8 +269,7 @@ lemma adam7ScatterRowPalette_empty_width
     (pass : Adam7Pass) (passY : Nat) :
     adam7ScatterRowPalette row flat w bitDepth paletteEntries pass passY 0 =
       some flat := by
-  simp [adam7ScatterRowPalette, Std.Legacy.Range.forIn_eq_forIn_range']
-  rfl
+  simp [adam7ScatterRowPalette, adam7ScatterRowPaletteLoop]
 
 /-- Decoding zero palette rows for one Adam7 pass consumes no bytes and leaves
 the flat index buffer unchanged. This is the pass-loop base case. -/
@@ -314,6 +313,126 @@ lemma palettePackedIndexAt_lt_entries (row : ByteArray) (bitDepth x entries : Na
     (hentries : paletteIndexLimit bitDepth ≤ entries) :
     (palettePackedIndexAt row bitDepth x).toNat < entries :=
   Nat.lt_of_lt_of_le (palettePackedIndexAt_lt_indexLimit row bitDepth x hbd) hentries
+
+private lemma paletteScatterFullRowLoop_succeeds_of_indexLimit
+    (row flat : ByteArray) (w bitDepth y paletteEntries x : Nat)
+    (hbd : bitDepth = 1 ∨ bitDepth = 2 ∨ bitDepth = 4 ∨ bitDepth = 8)
+    (hentries : paletteIndexLimit bitDepth ≤ paletteEntries) :
+    ∃ flat',
+      paletteScatterFullRowLoop row flat w bitDepth y paletteEntries x true = some flat' := by
+  have hk :
+      ∀ k, ∀ x flat,
+        w - x = k →
+        ∃ flat',
+          paletteScatterFullRowLoop row flat w bitDepth y paletteEntries x true = some flat' := by
+    intro k
+    induction k with
+    | zero =>
+        intro x flat hk
+        have hx : w ≤ x := Nat.le_of_sub_eq_zero hk
+        have hlt : ¬ x < w := not_lt_of_ge hx
+        exact ⟨flat, by simp [paletteScatterFullRowLoop, hlt]⟩
+    | succ k ih =>
+        intro x flat hk
+        have hlt : x < w := Nat.lt_of_sub_eq_succ hk
+        have hidx :
+            (palettePackedIndexAt row bitDepth x).toNat < paletteEntries :=
+          palettePackedIndexAt_lt_entries row bitDepth x paletteEntries hbd hentries
+        have hflag :
+            (!decide (paletteEntries ≤ (palettePackedIndexAt row bitDepth x).toNat)) = true := by
+          simp [Nat.not_le_of_gt hidx]
+        have hk' : w - (x + 1) = k := by
+          have hsum : w = Nat.succ k + x := Nat.eq_add_of_sub_eq (Nat.le_of_lt hlt) hk
+          calc
+            w - (x + 1) = (Nat.succ k + x) - (x + 1) := by simp [hsum]
+            _ = k := by omega
+        rcases ih (x := x + 1)
+          (flat := flat.set! (y * w + x) (palettePackedIndexAt row bitDepth x)) hk' with
+          ⟨out, hout⟩
+        refine ⟨out, ?_⟩
+        rw [paletteScatterFullRowLoop.eq_1]
+        simp [hlt, hflag, hout]
+  exact hk (w - x) x flat rfl
+
+/-- Full-row palette scatter succeeds for arbitrary supported packed rows when
+the palette has every entry addressable by the selected bit depth. This hardens
+the non-interlaced indexed decoder against false out-of-range failures. -/
+lemma paletteScatterFullRow_succeeds_of_indexLimit
+    (row flat : ByteArray) (w bitDepth y paletteEntries : Nat)
+    (hbd : bitDepth = 1 ∨ bitDepth = 2 ∨ bitDepth = 4 ∨ bitDepth = 8)
+    (hentries : paletteIndexLimit bitDepth ≤ paletteEntries) :
+    ∃ flat', paletteScatterFullRow row flat w bitDepth y paletteEntries = some flat' := by
+  unfold paletteScatterFullRow
+  by_cases hfast : bitDepth = 8 ∧ 256 ≤ paletteEntries
+  · exact ⟨row.copySlice 0 flat (y * w) w, by simp [hfast]⟩
+  · simp [hfast]
+    exact
+      paletteScatterFullRowLoop_succeeds_of_indexLimit row flat w bitDepth y
+        paletteEntries 0 hbd hentries
+
+private lemma adam7ScatterRowPaletteLoop_succeeds_of_indexLimit
+    (row flat : ByteArray) (w bitDepth paletteEntries : Nat)
+    (pass : Adam7Pass) (passY passX passWidth : Nat)
+    (hbd : bitDepth = 1 ∨ bitDepth = 2 ∨ bitDepth = 4 ∨ bitDepth = 8)
+    (hentries : paletteIndexLimit bitDepth ≤ paletteEntries) :
+    ∃ flat',
+      adam7ScatterRowPaletteLoop row flat w bitDepth paletteEntries pass passY passX
+        passWidth true = some flat' := by
+  have hk :
+      ∀ k, ∀ passX flat,
+        passWidth - passX = k →
+        ∃ flat',
+          adam7ScatterRowPaletteLoop row flat w bitDepth paletteEntries pass passY passX
+            passWidth true = some flat' := by
+    intro k
+    induction k with
+    | zero =>
+        intro passX flat hk
+        have hx : passWidth ≤ passX := Nat.le_of_sub_eq_zero hk
+        have hlt : ¬ passX < passWidth := not_lt_of_ge hx
+        exact ⟨flat, by simp [adam7ScatterRowPaletteLoop, hlt]⟩
+    | succ k ih =>
+        intro passX flat hk
+        have hlt : passX < passWidth := Nat.lt_of_sub_eq_succ hk
+        have hidx :
+            (palettePackedIndexAt row bitDepth passX).toNat < paletteEntries :=
+          palettePackedIndexAt_lt_entries row bitDepth passX paletteEntries hbd hentries
+        have hflag :
+            (!decide (paletteEntries ≤ (palettePackedIndexAt row bitDepth passX).toNat)) =
+              true := by
+          simp [Nat.not_le_of_gt hidx]
+        have hk' : passWidth - (passX + 1) = k := by
+          have hsum : passWidth = Nat.succ k + passX :=
+            Nat.eq_add_of_sub_eq (Nat.le_of_lt hlt) hk
+          calc
+            passWidth - (passX + 1) =
+                (Nat.succ k + passX) - (passX + 1) := by simp [hsum]
+            _ = k := by omega
+        rcases ih (passX := passX + 1)
+          (flat :=
+            flat.set! ((pass.startY + passY * pass.stepY) * w +
+              (pass.startX + passX * pass.stepX))
+              (palettePackedIndexAt row bitDepth passX)) hk' with
+          ⟨out, hout⟩
+        refine ⟨out, ?_⟩
+        rw [adam7ScatterRowPaletteLoop.eq_1]
+        simp [hlt, hflag, hout]
+  exact hk (passWidth - passX) passX flat rfl
+
+/-- Adam7 palette row scatter succeeds for arbitrary supported packed rows when
+the palette has every entry addressable by the selected bit depth. This replaces
+fixture-only coverage of the interlaced packed-index range check. -/
+lemma adam7ScatterRowPalette_succeeds_of_indexLimit
+    (row flat : ByteArray) (w bitDepth paletteEntries : Nat)
+    (pass : Adam7Pass) (passY passWidth : Nat)
+    (hbd : bitDepth = 1 ∨ bitDepth = 2 ∨ bitDepth = 4 ∨ bitDepth = 8)
+    (hentries : paletteIndexLimit bitDepth ≤ paletteEntries) :
+    ∃ flat',
+      adam7ScatterRowPalette row flat w bitDepth paletteEntries pass passY passWidth =
+        some flat' := by
+  simpa [adam7ScatterRowPalette] using
+    adam7ScatterRowPaletteLoop_succeeds_of_indexLimit row flat w bitDepth paletteEntries pass
+      passY 0 passWidth hbd hentries
 
 private lemma packedZeroNat1 (row : ByteArray) (x : Nat)
     (hzero : palettePackedIndexAt row 1 x = 0) :
