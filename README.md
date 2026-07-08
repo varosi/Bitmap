@@ -2,7 +2,7 @@
 
 Lean 4 bitmap image utilities with verified PNG encode/decode support, plus a small widget for visualization.
 
-Current library version: `0.8.0`.
+Current library version: `0.9.0`.
 
 The widget accepts the supported 8-bit bitmap formats and displays 16-bit bitmap
 formats by downsampling each channel to its high byte for browser canvas output.
