@@ -218,6 +218,28 @@ private def fixtureExpectedRGB8Data (w h entryCount : Nat)
         out := out.push b
     return out
 
+private def fixtureExpectedGray8Data (w h entryCount : Nat) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelGray)
+    for y in [0:h] do
+      for x in [0:w] do
+        let idx := (fixtureIndex entryCount x y).toNat
+        let (r, g, b) := fixturePaletteRGB idx
+        out := out.push (grayFromRGB8 r g b)
+    return out
+
+private def fixtureExpectedGrayAlpha8Data (w h entryCount : Nat)
+    (alpha? : Option ByteArray := none) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelGrayAlpha)
+    for y in [0:h] do
+      for x in [0:w] do
+        let idx := (fixtureIndex entryCount x y).toNat
+        let (r, g, b) := fixturePaletteRGB idx
+        out := out.push (grayFromRGB8 r g b)
+        out := out.push (fixtureAlphaAt alpha? idx)
+    return out
+
 private def fixtureExpectedRGB16Data (w h entryCount : Nat) : ByteArray :=
   Id.run do
     let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelRGB16)
@@ -334,6 +356,13 @@ private def chrmGammaFixtureBytes? : Option ByteArray :=
 private def chrmGammaExpectedRGB8? : Option ByteArray := do
   let matrix ← wideChromaticities.sourceToSrgbMatrix?
   applyChrm8ToPixels matrix (some paletteGamma) (u8 2) (fixtureExpectedRGB8Data 4 2 4)
+
+private def decodeBitmapDataAfterCheckedIndexedEncode
+    {px : Type} [Pixel px] [PngPixel px]
+    (bmp : PngIndexedBitmap) (mode : PngEncodeMode) : Option ByteArray :=
+  match encodeIndexedBitmapChecked bmp mode with
+  | .ok bytes => (decodeBitmap (px := px) bytes).map (fun bitmap => bitmap.data)
+  | .error _ => none
 
 private def decodeIndexedDataAfterCheckedEncode
     (bmp : PngIndexedBitmap) (mode : PngEncodeMode) : Option ByteArray :=
@@ -472,6 +501,36 @@ theorem checked_adaptive_filter_shape_fixture_for_supported_bitDepth
   · refine ⟨indexed2, rfl, ?_, ?_⟩ <;> cases mode <;> native_decide
   · refine ⟨indexed4, rfl, ?_, ?_⟩ <;> cases mode <;> native_decide
   · refine ⟨indexed8, rfl, ?_, ?_⟩ <;> cases mode <;> native_decide
+
+/-- For every supported PNG palette bit depth and compression mode, plain
+palette decode expands through `PLTE` into the 8- and 16-bit RGB, RGBA, gray,
+and gray+alpha bitmap targets expected from the fixture palette. -/
+theorem checked_palette_expansion_fixture_for_supported_bitDepth
+    (bitDepth : Nat) (mode : PngEncodeMode)
+    (hbd : bitDepth = 1 ∨ bitDepth = 2 ∨ bitDepth = 4 ∨ bitDepth = 8) :
+    ∃ bmp entryCount,
+      bmp.bitDepth = bitDepth ∧
+        decodeBitmapDataAfterCheckedIndexedEncode (px := PixelRGB8) bmp mode =
+          some (fixtureExpectedRGB8Data 9 5 entryCount) ∧
+        decodeBitmapDataAfterCheckedIndexedEncode (px := PixelRGBA8) bmp mode =
+          some (fixtureExpectedRGBA8Data 9 5 entryCount) ∧
+        decodeBitmapDataAfterCheckedIndexedEncode (px := PixelGray8) bmp mode =
+          some (fixtureExpectedGray8Data 9 5 entryCount) ∧
+        decodeBitmapDataAfterCheckedIndexedEncode (px := PixelGrayAlpha8) bmp mode =
+          some (fixtureExpectedGrayAlpha8Data 9 5 entryCount) ∧
+        decodeBitmapDataAfterCheckedIndexedEncode (px := PixelRGB16) bmp mode =
+          some (fixtureExpectedRGB16Data 9 5 entryCount) ∧
+        decodeBitmapDataAfterCheckedIndexedEncode (px := PixelRGBA16) bmp mode =
+          some (fixtureExpectedRGBA16Data 9 5 entryCount) ∧
+        decodeBitmapDataAfterCheckedIndexedEncode (px := PixelGray16) bmp mode =
+          some (fixtureExpectedGray16Data 9 5 entryCount) ∧
+        decodeBitmapDataAfterCheckedIndexedEncode (px := PixelGrayAlpha16) bmp mode =
+          some (fixtureExpectedGrayAlpha16Data 9 5 entryCount) := by
+  rcases hbd with rfl | rfl | rfl | rfl
+  · refine ⟨fixtureBitmap 9 5 1 2, 2, rfl, ?_⟩ <;> cases mode <;> native_decide
+  · refine ⟨fixtureBitmap 9 5 2 4, 4, rfl, ?_⟩ <;> cases mode <;> native_decide
+  · refine ⟨fixtureBitmap 9 5 4 16, 16, rfl, ?_⟩ <;> cases mode <;> native_decide
+  · refine ⟨fixtureBitmap 9 5 8 16, 16, rfl, ?_⟩ <;> cases mode <;> native_decide
 
 /-- Stored-zlib checked encode/decode round-trips a concrete 1-bit indexed row
 through both exact indexed decode APIs. -/

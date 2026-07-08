@@ -337,6 +337,7 @@ This library has proofs about:
   `PalettePackedRoundTrip.checked_fixed_filter_roundtrip_fixture_for_supported_bitDepth`,
   `PalettePackedRoundTrip.checked_fixed_filter_shape_fixture_for_supported_bitDepth`,
   `PalettePackedRoundTrip.checked_adaptive_filter_shape_fixture_for_supported_bitDepth`,
+  `PalettePackedRoundTrip.checked_palette_expansion_fixture_for_supported_bitDepth`,
   `PalettePackedRoundTrip.checked_stored_1bit_fixture_data`,
   `PalettePackedRoundTrip.checked_fixed_1bit_fixture_data`,
   `PalettePackedRoundTrip.checked_dynamic_1bit_fixture_data`,
