@@ -49,6 +49,40 @@ private lemma decodeParsedIndexedBitmapWithMetadata_bind_pixelOnly
   rw [hparsedEq, hdecoded]
   rfl
 
+/-- IDAT payload shape shared by the generalized palette container round-trip
+proofs. Keeping this as a named term avoids proof-dependent `match` artifacts
+when rewriting scaffold fields. -/
+private def paletteRangeIdat (mode : PngEncodeMode) (bmp : PngIndexedBitmap) :
+    ByteArray :=
+  match mode with
+  | .stored => zlibCompressStored (encodeRawIndexedWithFilter bmp .none)
+  | .fixed => zlibCompressFixed (encodeRawIndexedWithFilter bmp .none)
+  | .dynamic => zlibCompressDynamic (encodeRawIndexedWithFilter bmp .none)
+
+/-- Rewrites the palette container's parsed scaffold to the explicit parsed PNG
+record used by parsed indexed round-trip theorems. This keeps later transports
+stable across Lean 4.30 and 4.31. -/
+private lemma parsed_eq_paletteRange
+    (s : PaletteContainerSpec) (bmp : PngIndexedBitmap) (mode : PngEncodeMode)
+    (hHeader :
+      s.header =
+        { width := bmp.size.width, height := bmp.size.height, colorType := 3,
+          bitDepth := bmp.bitDepth, interlace := 0 })
+    (hPalette : s.palette = bmp.palette)
+    (hIdat : s.idatData = paletteRangeIdat mode bmp) :
+    parsed s =
+      { header :=
+          { width := bmp.size.width, height := bmp.size.height, colorType := 3,
+            bitDepth := bmp.bitDepth, interlace := 0 }
+        idat := paletteRangeIdat mode bmp
+        metadata := { PngMetadata.empty with palette := some bmp.palette } } := by
+  cases s
+  simp [parsed, metadata] at hHeader hPalette hIdat ⊢
+  cases hHeader
+  cases hPalette
+  cases hIdat
+  simp
+
 /-- Metadata-aware decode over a stored-zlib palette container returns the
 original index bytes for 1/2/4-bit full-addressable-palette filter-0 inputs. -/
 theorem decodeIndexedBitmapWithMetadata_stored_encodeRawIndexed_none_non8_data
@@ -617,6 +651,154 @@ theorem decodeIndexedBitmap_encodeRawIndexed_none_paletteRange_data
         simpa [PngMetadata.pixelOnlyColorSpace] using
           decodeParsedIndexedBitmapWithMetadata_bind_pixelOnly (parsed s) decoded hdecoded⟩,
       hdata⟩
+
+/-- Metadata-aware indexed decode over a palette container reconstructs the
+complete runtime decode shape under the source-index-safe smaller-palette
+assumptions. -/
+theorem decodeIndexedBitmapWithMetadata_encodeRawIndexed_none_paletteRange_shape
+    (s : PaletteContainerSpec) (bmp : PngIndexedBitmap) (mode : PngEncodeMode)
+    (hHeader :
+      s.header =
+        { width := bmp.size.width, height := bmp.size.height, colorType := 3,
+          bitDepth := bmp.bitDepth, interlace := 0 })
+    (hPalette : s.palette = bmp.palette)
+    (hIdat :
+      s.idatData =
+        match mode with
+        | .stored => zlibCompressStored (encodeRawIndexedWithFilter bmp .none)
+        | .fixed => zlibCompressFixed (encodeRawIndexedWithFilter bmp .none)
+        | .dynamic => zlibCompressDynamic (encodeRawIndexedWithFilter bmp .none))
+    (hIdatSize : s.idatData.size < 2 ^ 32)
+    (hbd : bmp.bitDepth = 1 ∨ bmp.bitDepth = 2 ∨ bmp.bitDepth = 4 ∨ bmp.bitDepth = 8)
+    (hpalFits : bmp.palette.entryCount ≤ paletteIndexLimit bmp.bitDepth)
+    (hrange :
+      ∀ y, y < bmp.size.height → ∀ x, x < bmp.size.width →
+        (bmp.data.get! (y * bmp.size.width + x)).toNat < bmp.palette.entryCount) :
+    (decodeIndexedBitmapWithMetadata s.bytes).map indexedDecodeResultShape =
+      some
+        (indexedBitmapShape
+          { size := bmp.size
+            bitDepth := bmp.bitDepth
+            palette := bmp.palette
+            data := bmp.data
+            transparency := none
+            background := none
+            valid := bmp.valid },
+          { PngMetadata.empty with palette := some bmp.palette }) := by
+  unfold decodeIndexedBitmapWithMetadata
+  have hParse (h : 8 ≤ s.bytes.size) :
+      parsePngWithMetadata s.bytes h = some (parsed s) := by
+    simpa using parsePngWithMetadata_accepts s hIdatSize
+  have hIdatDef : s.idatData = paletteRangeIdat mode bmp := by
+    simpa [paletteRangeIdat] using hIdat
+  have hParsedEq := parsed_eq_paletteRange s bmp mode hHeader hPalette hIdatDef
+  have hParsed :=
+    decodeParsedIndexedBitmapWithMetadata_encodeRawIndexed_none_paletteRange_shape
+      mode bmp hbd hpalFits hrange
+  rw [dif_pos s.bytes_size_ge_8]
+  simp only [hParse s.bytes_size_ge_8]
+  change (decodeParsedIndexedBitmapWithMetadata (parsed s)).map indexedDecodeResultShape =
+    some
+      (indexedBitmapShape
+        { size := bmp.size
+          bitDepth := bmp.bitDepth
+          palette := bmp.palette
+          data := bmp.data
+          transparency := none
+          background := none
+          valid := bmp.valid },
+        { PngMetadata.empty with palette := some bmp.palette })
+  rw [hParsedEq]
+  rcases Option.map_eq_some_iff.mp hParsed with ⟨decoded, hdecoded, hshape⟩
+  exact Option.map_eq_some_iff.mpr
+    ⟨decoded,
+      by
+        cases mode <;> exact hdecoded,
+      hshape⟩
+
+/-- Pixel-only indexed decode over a palette container reconstructs the
+complete indexed bitmap runtime shape under the source-index-safe
+smaller-palette assumptions. -/
+theorem decodeIndexedBitmap_encodeRawIndexed_none_paletteRange_shape
+    (s : PaletteContainerSpec) (bmp : PngIndexedBitmap) (mode : PngEncodeMode)
+    (hHeader :
+      s.header =
+        { width := bmp.size.width, height := bmp.size.height, colorType := 3,
+          bitDepth := bmp.bitDepth, interlace := 0 })
+    (hPalette : s.palette = bmp.palette)
+    (hIdat :
+      s.idatData =
+        match mode with
+        | .stored => zlibCompressStored (encodeRawIndexedWithFilter bmp .none)
+        | .fixed => zlibCompressFixed (encodeRawIndexedWithFilter bmp .none)
+        | .dynamic => zlibCompressDynamic (encodeRawIndexedWithFilter bmp .none))
+    (hIdatSize : s.idatData.size < 2 ^ 32)
+    (hbd : bmp.bitDepth = 1 ∨ bmp.bitDepth = 2 ∨ bmp.bitDepth = 4 ∨ bmp.bitDepth = 8)
+    (hpalFits : bmp.palette.entryCount ≤ paletteIndexLimit bmp.bitDepth)
+    (hrange :
+      ∀ y, y < bmp.size.height → ∀ x, x < bmp.size.width →
+        (bmp.data.get! (y * bmp.size.width + x)).toNat < bmp.palette.entryCount) :
+    (decodeIndexedBitmap s.bytes).map indexedBitmapShape =
+      some
+        (indexedBitmapShape
+          { size := bmp.size
+            bitDepth := bmp.bitDepth
+            palette := bmp.palette
+            data := bmp.data
+            transparency := none
+            background := none
+            valid := bmp.valid }) := by
+  unfold decodeIndexedBitmap
+  have hParse (h : 8 ≤ s.bytes.size) :
+      parsePngForDecode s.bytes h = some (parsed s) := by
+    simpa using parsePngForDecode_accepts s hIdatSize
+  simp [s.bytes_size_ge_8, hParse, PngMetadata.pixelOnlyColorSpace]
+  have hParsed :
+      (decodeParsedIndexedBitmapWithMetadata
+        { parsed s with metadata := PngMetadata.pixelOnlyColorSpace (parsed s).metadata }).map
+          indexedDecodeResultShape =
+        some
+          (indexedBitmapShape
+            { size := bmp.size
+              bitDepth := bmp.bitDepth
+              palette := bmp.palette
+              data := bmp.data
+              transparency := none
+              background := none
+              valid := bmp.valid },
+            { PngMetadata.empty with palette := some bmp.palette }) := by
+    have hIdatDef : s.idatData = paletteRangeIdat mode bmp := by
+      simpa [paletteRangeIdat] using hIdat
+    have hBaseParsedEq := parsed_eq_paletteRange s bmp mode hHeader hPalette hIdatDef
+    have hParsedEq :
+        { parsed s with metadata := PngMetadata.pixelOnlyColorSpace (parsed s).metadata } =
+          { header :=
+              { width := bmp.size.width, height := bmp.size.height, colorType := 3,
+                bitDepth := bmp.bitDepth, interlace := 0 }
+            idat := paletteRangeIdat mode bmp
+            metadata := { PngMetadata.empty with palette := some bmp.palette } } := by
+      rw [hBaseParsedEq]
+      simp [PngMetadata.pixelOnlyColorSpace, PngMetadata.empty]
+    have hp :=
+      decodeParsedIndexedBitmapWithMetadata_encodeRawIndexed_none_paletteRange_shape
+        mode bmp hbd hpalFits hrange
+    rw [hParsedEq]
+    rcases Option.map_eq_some_iff.mp hp with ⟨decoded, hdecoded, hshape⟩
+    exact Option.map_eq_some_iff.mpr
+      ⟨decoded,
+        by
+          cases mode <;> exact hdecoded,
+        hshape⟩
+  simp [indexedDecodeResultShape] at hParsed
+  rcases hParsed with ⟨decoded, hdecoded, hshape⟩
+  rcases hshape with ⟨hbitmapShape, _hmetadata⟩
+  exact
+    ⟨decoded.bitmap,
+      ⟨by rfl, by
+        simpa [PngMetadata.pixelOnlyColorSpace] using
+          decodeParsedIndexedBitmapWithMetadata_bind_pixelOnly (parsed s) decoded hdecoded⟩,
+      by
+        simpa using hbitmapShape⟩
 
 end PaletteContainerSpec
 

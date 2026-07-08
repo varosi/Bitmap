@@ -17,8 +17,9 @@ The encoder and decoder target a deliberately narrow PNG subset — the one for
 which the library implements directly. The byte-per-pixel bitmap formats in this
 subset carry full round-trip correctness proofs; packed 1-bit grayscale and
 explicit indexed-palette paths currently have focused layout, validation,
-packed-row, raw decoder, parsed/container, and checked-encoder filter-0
-round-trip proofs for supported bit depths, plus runtime fixture coverage.
+packed-row, raw decoder, parsed/container, exact indexed runtime-shape, and
+checked-encoder filter-0 round-trip proofs for supported bit depths, plus
+runtime fixture coverage.
 
 ### Encoder
 
@@ -196,9 +197,11 @@ This library has proofs about:
   acceptance, checked encoder validation rejection paths, Boolean range
   validation from flat and coordinate-wise pixel bounds, symbolic packed-row
   round trips for all supported palette bit depths, smaller-palette raw decode
-  when every source index is below the actual palette entry count, and public
-  checked indexed encoder round-trip theorems for all palette bit depths whose
-  checked range predicate is derived from the indexed bitmap shape
+  when every source index is below the actual palette entry count, exact
+  indexed runtime-shape round trips through parsed/container/public checked
+  encoder layers, and public checked indexed encoder round-trip theorems for
+  all palette bit depths whose checked range predicate is derived from the
+  indexed bitmap shape
   (`pngColorTypeBitDepthSupported_palette1`,
   `pngColorTypeBitDepthSupported_palette2`,
   `pngColorTypeBitDepthSupported_palette4`,
@@ -285,6 +288,9 @@ This library has proofs about:
   `decodeParsedIndexedBitmapWithMetadata_dynamic_encodeRawIndexed_none_8_paletteRange_data`,
   `decodeParsedIndexedBitmapWithMetadata_dynamic_encodeRawIndexed_none_non8_data`,
   `decodeParsedIndexedBitmapWithMetadata_dynamic_encodeRawIndexed_none_non8_paletteRange_data`,
+  `indexedBitmapShape`,
+  `indexedDecodeResultShape`,
+  `decodeParsedIndexedBitmapWithMetadata_encodeRawIndexed_none_paletteRange_shape`,
   `PaletteContainerSpec.bytes_size`,
   `PaletteContainerSpec.parsePlteData`,
   `PaletteContainerSpec.readChunk_ihdr`,
@@ -311,6 +317,8 @@ This library has proofs about:
   `PaletteContainerSpec.decodeIndexedBitmap_dynamic_encodeRawIndexed_none_8_256_data`,
   `PaletteContainerSpec.decodeIndexedBitmapWithMetadata_encodeRawIndexed_none_paletteRange_data`,
   `PaletteContainerSpec.decodeIndexedBitmap_encodeRawIndexed_none_paletteRange_data`,
+  `PaletteContainerSpec.decodeIndexedBitmapWithMetadata_encodeRawIndexed_none_paletteRange_shape`,
+  `PaletteContainerSpec.decodeIndexedBitmap_encodeRawIndexed_none_paletteRange_shape`,
   `ExternalIndexedPalettePngSpec.decodeIndexedBitmapWithMetadata_external_correct`,
   `ExternalIndexedPalettePngSpec.decodeIndexedBitmap_external_correct`,
   `PaletteEncoderRoundTrip.decodeIndexedBitmap_encodeIndexedBitmapChecked_8_256_data`,
@@ -323,6 +331,7 @@ This library has proofs about:
   `PaletteEncoderRoundTrip.decodeIndexedBitmap_encodeIndexedBitmapChecked_dynamic_non8_data`,
   `PaletteEncoderRoundTrip.decodeIndexedBitmap_encodeIndexedBitmapChecked_supported_bitDepth_data`,
   `PaletteEncoderRoundTrip.decodeIndexedBitmap_encodeIndexedBitmapChecked_paletteRange_data`,
+  `PaletteEncoderRoundTrip.decodeIndexedBitmap_encodeIndexedBitmapChecked_paletteRange_shape`,
   `PalettePackedRoundTrip.checked_roundtrip_fixture_for_supported_bitDepth`,
   `PalettePackedRoundTrip.checked_fixed_filter_roundtrip_fixture_for_supported_bitDepth`,
   `PalettePackedRoundTrip.checked_stored_1bit_fixture_data`,
