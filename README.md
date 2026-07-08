@@ -214,6 +214,7 @@ This library has proofs about:
   `paletteScatterFullRow_succeeds_of_indexLimit`,
   `adam7ScatterRowPalette_empty_width`,
   `adam7ScatterRowPalette_succeeds_of_indexLimit`,
+  `adam7ScatterRowPalette_get!_of_indexLimit`,
   `decodeAdam7PalettePassRows_empty_height`,
   `decodeAdam7PalettePasses_nil`,
   `palettePackedIndexAt_lt_indexLimit`,

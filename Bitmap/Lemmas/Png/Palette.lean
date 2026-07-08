@@ -434,6 +434,167 @@ lemma adam7ScatterRowPalette_succeeds_of_indexLimit
     adam7ScatterRowPaletteLoop_succeeds_of_indexLimit row flat w bitDepth paletteEntries pass
       passY 0 passWidth hbd hentries
 
+private def adam7PaletteDstIndex (w : Nat) (pass : Adam7Pass) (passY passX : Nat) : Nat :=
+  (pass.startY + passY * pass.stepY) * w + (pass.startX + passX * pass.stepX)
+
+private lemma adam7PaletteDstIndex_ne_of_ne
+    (w : Nat) (pass : Adam7Pass) (passY x y : Nat)
+    (hstep : 0 < pass.stepX) (hne : x ≠ y) :
+    adam7PaletteDstIndex w pass passY x ≠ adam7PaletteDstIndex w pass passY y := by
+  intro h
+  have h1 :
+      pass.startX + x * pass.stepX = pass.startX + y * pass.stepX := by
+    exact Nat.add_left_cancel h
+  have hmul : x * pass.stepX = y * pass.stepX := by
+    exact Nat.add_left_cancel h1
+  exact hne (Nat.mul_right_cancel hstep hmul)
+
+private lemma adam7ScatterRowPaletteLoop_get!_of_indexLimit
+    (row flat : ByteArray) (w bitDepth paletteEntries : Nat)
+    (pass : Adam7Pass) (passY passX passWidth watchX : Nat)
+    (hbd : bitDepth = 1 ∨ bitDepth = 2 ∨ bitDepth = 4 ∨ bitDepth = 8)
+    (hentries : paletteIndexLimit bitDepth ≤ paletteEntries)
+    (hstep : 0 < pass.stepX)
+    (hdst : ∀ x, x < passWidth →
+      adam7PaletteDstIndex w pass passY x < flat.size) :
+    ∃ out,
+      adam7ScatterRowPaletteLoop row flat w bitDepth paletteEntries pass passY passX
+        passWidth true = some out ∧
+      (if watchX < passX then
+        out.get! (adam7PaletteDstIndex w pass passY watchX) =
+          flat.get! (adam7PaletteDstIndex w pass passY watchX)
+      else if watchX < passWidth then
+        out.get! (adam7PaletteDstIndex w pass passY watchX) =
+          palettePackedIndexAt row bitDepth watchX
+      else
+        out.get! (adam7PaletteDstIndex w pass passY watchX) =
+          flat.get! (adam7PaletteDstIndex w pass passY watchX)) := by
+  have hk :
+      ∀ k, ∀ passX flat,
+        passWidth - passX = k →
+        (∀ x, x < passWidth →
+          adam7PaletteDstIndex w pass passY x < flat.size) →
+        ∃ out,
+          adam7ScatterRowPaletteLoop row flat w bitDepth paletteEntries pass passY passX
+            passWidth true = some out ∧
+          (if watchX < passX then
+            out.get! (adam7PaletteDstIndex w pass passY watchX) =
+              flat.get! (adam7PaletteDstIndex w pass passY watchX)
+          else if watchX < passWidth then
+            out.get! (adam7PaletteDstIndex w pass passY watchX) =
+              palettePackedIndexAt row bitDepth watchX
+          else
+            out.get! (adam7PaletteDstIndex w pass passY watchX) =
+              flat.get! (adam7PaletteDstIndex w pass passY watchX)) := by
+    intro k
+    induction k with
+    | zero =>
+        intro passX flat hk hdst
+        have hx : passWidth ≤ passX := Nat.le_of_sub_eq_zero hk
+        have hlt : ¬ passX < passWidth := not_lt_of_ge hx
+        refine ⟨flat, ?_, ?_⟩
+        · simp [adam7ScatterRowPaletteLoop, hlt]
+        · by_cases hwatch : watchX < passX
+          · simp [hwatch]
+          · have hnotWidth : ¬ watchX < passWidth := fun h => hwatch (lt_of_lt_of_le h hx)
+            simp [hwatch, hnotWidth]
+    | succ k ih =>
+        intro passX flat hk hdst
+        have hlt : passX < passWidth := Nat.lt_of_sub_eq_succ hk
+        have hidx :
+            (palettePackedIndexAt row bitDepth passX).toNat < paletteEntries :=
+          palettePackedIndexAt_lt_entries row bitDepth passX paletteEntries hbd hentries
+        have hflag :
+            (!decide (paletteEntries ≤ (palettePackedIndexAt row bitDepth passX).toNat)) =
+              true := by
+          simp [Nat.not_le_of_gt hidx]
+        let dst := adam7PaletteDstIndex w pass passY passX
+        let idx := palettePackedIndexAt row bitDepth passX
+        let flat' := flat.set! dst idx
+        have hdstPass : dst < flat.size := by
+          simpa [dst] using hdst passX hlt
+        have hdst' :
+            ∀ x, x < passWidth →
+              adam7PaletteDstIndex w pass passY x < flat'.size := by
+          intro x hx
+          simpa [flat', byteArray_size_set!] using hdst x hx
+        have hk' : passWidth - (passX + 1) = k := by
+          have hsum : passWidth = Nat.succ k + passX :=
+            Nat.eq_add_of_sub_eq (Nat.le_of_lt hlt) hk
+          calc
+            passWidth - (passX + 1) =
+                (Nat.succ k + passX) - (passX + 1) := by simp [hsum]
+            _ = k := by omega
+        rcases ih (passX := passX + 1) (flat := flat') hk' hdst' with
+          ⟨out, hout, hget⟩
+        refine ⟨out, ?_, ?_⟩
+        · rw [adam7ScatterRowPaletteLoop.eq_1]
+          simpa [hlt, hflag, dst, idx, flat', adam7PaletteDstIndex] using hout
+        · by_cases hltWatch : watchX < passX
+          · have hltWatchSucc : watchX < passX + 1 := Nat.lt_trans hltWatch (Nat.lt_succ_self _)
+            have hne : dst ≠ adam7PaletteDstIndex w pass passY watchX := by
+              exact adam7PaletteDstIndex_ne_of_ne w pass passY passX watchX hstep
+                (by omega)
+            have hflat' :
+                flat'.get! (adam7PaletteDstIndex w pass passY watchX) =
+                  flat.get! (adam7PaletteDstIndex w pass passY watchX) := by
+              simpa [flat', dst, idx] using
+                byteArray_get!_set!_ne flat dst (adam7PaletteDstIndex w pass passY watchX)
+                  idx hne
+            simp [hltWatch, hltWatchSucc] at hget ⊢
+            exact hget.trans hflat'
+          · have hgeWatch : passX ≤ watchX := Nat.le_of_not_lt hltWatch
+            by_cases heq : watchX = passX
+            · subst watchX
+              have hltSucc : passX < passX + 1 := Nat.lt_succ_self passX
+              have hcurrent :
+                  flat'.get! dst = idx := by
+                exact byteArray_get!_set!_self flat dst idx hdstPass
+              simp [hltWatch, hltSucc, hlt] at hget ⊢
+              exact hget.trans hcurrent
+            · have hsucc : passX + 1 ≤ watchX := by omega
+              have hnotSucc : ¬ watchX < passX + 1 := not_lt_of_ge hsucc
+              by_cases hwatchWidth : watchX < passWidth
+              · simp [hltWatch, hnotSucc, hwatchWidth] at hget ⊢
+                exact hget
+              · have hne : dst ≠ adam7PaletteDstIndex w pass passY watchX := by
+                  exact adam7PaletteDstIndex_ne_of_ne w pass passY passX watchX hstep
+                    (by omega)
+                have hflat' :
+                    flat'.get! (adam7PaletteDstIndex w pass passY watchX) =
+                      flat.get! (adam7PaletteDstIndex w pass passY watchX) := by
+                  simpa [flat', dst, idx] using
+                    byteArray_get!_set!_ne flat dst
+                      (adam7PaletteDstIndex w pass passY watchX) idx hne
+                simp [hltWatch, hnotSucc, hwatchWidth] at hget ⊢
+                exact hget.trans hflat'
+  exact hk (passWidth - passX) passX flat rfl hdst
+
+/-- Adam7 palette scatter writes each in-bounds pass-local sample to its exact
+destination coordinate for arbitrary supported packed rows. This is the
+symbolic exactness counterpart to the Adam7 scatter success lemma. -/
+lemma adam7ScatterRowPalette_get!_of_indexLimit
+    (row flat : ByteArray) (w bitDepth paletteEntries : Nat)
+    (pass : Adam7Pass) (passY passWidth passX : Nat)
+    (hpassX : passX < passWidth)
+    (hbd : bitDepth = 1 ∨ bitDepth = 2 ∨ bitDepth = 4 ∨ bitDepth = 8)
+    (hentries : paletteIndexLimit bitDepth ≤ paletteEntries)
+    (hstep : 0 < pass.stepX)
+    (hdst : ∀ x, x < passWidth →
+      adam7PaletteDstIndex w pass passY x < flat.size) :
+    ∃ out,
+      adam7ScatterRowPalette row flat w bitDepth paletteEntries pass passY passWidth =
+        some out ∧
+      out.get! (adam7PaletteDstIndex w pass passY passX) =
+        palettePackedIndexAt row bitDepth passX := by
+  rcases
+    adam7ScatterRowPaletteLoop_get!_of_indexLimit row flat w bitDepth paletteEntries pass
+      passY 0 passWidth passX hbd hentries hstep hdst with
+    ⟨out, hout, hget⟩
+  refine ⟨out, ?_, ?_⟩
+  · simpa [adam7ScatterRowPalette] using hout
+  · simpa [hpassX] using hget
+
 private lemma packedZeroNat1 (row : ByteArray) (x : Nat)
     (hzero : palettePackedIndexAt row 1 x = 0) :
     ((row.get! (x / 8)).toNat >>> (7 - x % 8)) % 2 = 0 := by
