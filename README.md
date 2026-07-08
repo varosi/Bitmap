@@ -19,8 +19,8 @@ subset carry full round-trip correctness proofs; packed 1-bit grayscale and
 explicit indexed-palette paths currently have focused layout, validation,
 packed-row, raw decoder, parsed/container, exact indexed runtime-shape, and
 checked-encoder filter-0 round-trip proofs for supported bit depths, plus
-fixed-filter, Adam7, multi-IDAT, palette-transparency/background, and expansion
-runtime fixture coverage.
+fixed/adaptive-filter, Adam7, multi-IDAT, palette-transparency/background, and
+expansion runtime fixture coverage.
 
 ### Encoder
 
@@ -336,6 +336,7 @@ This library has proofs about:
   `PalettePackedRoundTrip.checked_roundtrip_fixture_for_supported_bitDepth`,
   `PalettePackedRoundTrip.checked_fixed_filter_roundtrip_fixture_for_supported_bitDepth`,
   `PalettePackedRoundTrip.checked_fixed_filter_shape_fixture_for_supported_bitDepth`,
+  `PalettePackedRoundTrip.checked_adaptive_filter_shape_fixture_for_supported_bitDepth`,
   `PalettePackedRoundTrip.checked_stored_1bit_fixture_data`,
   `PalettePackedRoundTrip.checked_fixed_1bit_fixture_data`,
   `PalettePackedRoundTrip.checked_dynamic_1bit_fixture_data`,

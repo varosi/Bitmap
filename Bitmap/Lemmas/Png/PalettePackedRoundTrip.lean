@@ -454,6 +454,25 @@ theorem checked_fixed_filter_shape_fixture_for_supported_bitDepth
   · refine ⟨indexed4, rfl, ?_, ?_⟩ <;> cases rowFilter <;> native_decide
   · refine ⟨indexed8, rfl, ?_, ?_⟩ <;> cases rowFilter <;> native_decide
 
+/-- For every supported PNG palette bit depth and compression mode, adaptive
+row filtering preserves the exact indexed bitmap shape and parsed palette
+metadata. This covers the non-fixed filter strategy on packed palette rows. -/
+theorem checked_adaptive_filter_shape_fixture_for_supported_bitDepth
+    (bitDepth : Nat) (mode : PngEncodeMode)
+    (hbd : bitDepth = 1 ∨ bitDepth = 2 ∨ bitDepth = 4 ∨ bitDepth = 8) :
+    ∃ bmp,
+      bmp.bitDepth = bitDepth ∧
+        decodeIndexedShapeMatchesAfterCheckedEncodeWithOptions bmp
+          { mode, filter := .adaptive } = true ∧
+        decodeIndexedMetadataShapeMatchesAfterCheckedEncodeWithOptions bmp
+          (paletteOnlyMetadata bmp.palette)
+          { mode, filter := .adaptive } = true := by
+  rcases hbd with rfl | rfl | rfl | rfl
+  · refine ⟨indexed1, rfl, ?_, ?_⟩ <;> cases mode <;> native_decide
+  · refine ⟨indexed2, rfl, ?_, ?_⟩ <;> cases mode <;> native_decide
+  · refine ⟨indexed4, rfl, ?_, ?_⟩ <;> cases mode <;> native_decide
+  · refine ⟨indexed8, rfl, ?_, ?_⟩ <;> cases mode <;> native_decide
+
 /-- Stored-zlib checked encode/decode round-trips a concrete 1-bit indexed row
 through both exact indexed decode APIs. -/
 theorem checked_stored_1bit_fixture_data :
