@@ -17,8 +17,8 @@ The encoder and decoder target a deliberately narrow PNG subset — the one for
 which the library implements directly. The byte-per-pixel bitmap formats in this
 subset carry full round-trip correctness proofs; packed 1-bit grayscale and
 explicit indexed-palette paths currently have focused layout, validation,
-8-bit filter-0 raw decoder, and stored/fixed/dynamic-IDAT parsed decode lemmas
-plus runtime fixture coverage.
+packed-row, raw decoder, parsed/container, and checked-encoder filter-0
+round-trip proofs for supported bit depths, plus runtime fixture coverage.
 
 ### Encoder
 
@@ -195,9 +195,10 @@ This library has proofs about:
   acceptance/rejection, palette `tRNS`/`bKGD` parsing, metadata chunk-order
   acceptance, checked encoder validation rejection paths, Boolean range
   validation from flat and coordinate-wise pixel bounds, symbolic packed-row
-  round trips for all supported palette bit depths, and public checked indexed
-  encoder round-trip theorems for all palette bit depths whose checked range
-  predicate is derived from the indexed bitmap shape
+  round trips for all supported palette bit depths, smaller-palette raw decode
+  when every source index is below the actual palette entry count, and public
+  checked indexed encoder round-trip theorems for all palette bit depths whose
+  checked range predicate is derived from the indexed bitmap shape
   (`pngColorTypeBitDepthSupported_palette1`,
   `pngColorTypeBitDepthSupported_palette2`,
   `pngColorTypeBitDepthSupported_palette4`,
@@ -214,9 +215,13 @@ This library has proofs about:
   `paletteRowBytes_8`,
   `paletteScatterFullRow_8_256`,
   `paletteScatterFullRow_succeeds_of_indexLimit`,
+  `paletteScatterFullRow_succeeds_of_rowRange_nonfast`,
   `paletteScatterFullRow_get!_of_indexLimit_non8`,
+  `paletteScatterFullRow_get!_of_rowRange_nonfast`,
   `paletteScatterFullRow_preserves_lt_rowStart_non8`,
+  `paletteScatterFullRow_preserves_lt_rowStart_of_rowRange_nonfast`,
   `paletteScatterFullRow_size_of_some_non8`,
+  `paletteScatterFullRow_size_of_some_nonfast`,
   `adam7ScatterRowPalette_empty_width`,
   `adam7ScatterRowPalette_succeeds_of_indexLimit`,
   `adam7ScatterRowPalette_get!_of_indexLimit`,
@@ -263,14 +268,23 @@ This library has proofs about:
   `encodeIndexedRowsWithFilter_none_eq_encodeRawGray8`,
   `decodePaletteRowsLoop_encodeIndexedRowsWithFilter_none_8_256`,
   `decodePaletteIndicesByInterlace_encodeIndexedRowsWithFilter_none_8_256`,
+  `decodePaletteIndicesByInterlace_encodeIndexedRowsWithFilter_none_of_packed_indices_nonfast`,
   `decodePaletteIndicesByInterlace_encodeRawIndexedWithFilter_none_8_256`,
+  `decodePaletteIndicesByInterlace_encodeRawIndexedWithFilter_none_8_paletteRange`,
   `decodePaletteIndicesByInterlace_encodeRawIndexedWithFilter_none_non8`,
+  `decodePaletteIndicesByInterlace_encodeRawIndexedWithFilter_none_non8_paletteRange`,
   `decodeParsedIndexedBitmapWithMetadata_stored_encodeRawIndexed_none_8_256_data`,
+  `decodeParsedIndexedBitmapWithMetadata_stored_encodeRawIndexed_none_8_paletteRange_data`,
   `decodeParsedIndexedBitmapWithMetadata_stored_encodeRawIndexed_none_non8_data`,
+  `decodeParsedIndexedBitmapWithMetadata_stored_encodeRawIndexed_none_non8_paletteRange_data`,
   `decodeParsedIndexedBitmapWithMetadata_fixed_encodeRawIndexed_none_8_256_data`,
+  `decodeParsedIndexedBitmapWithMetadata_fixed_encodeRawIndexed_none_8_paletteRange_data`,
   `decodeParsedIndexedBitmapWithMetadata_fixed_encodeRawIndexed_none_non8_data`,
+  `decodeParsedIndexedBitmapWithMetadata_fixed_encodeRawIndexed_none_non8_paletteRange_data`,
   `decodeParsedIndexedBitmapWithMetadata_dynamic_encodeRawIndexed_none_8_256_data`,
+  `decodeParsedIndexedBitmapWithMetadata_dynamic_encodeRawIndexed_none_8_paletteRange_data`,
   `decodeParsedIndexedBitmapWithMetadata_dynamic_encodeRawIndexed_none_non8_data`,
+  `decodeParsedIndexedBitmapWithMetadata_dynamic_encodeRawIndexed_none_non8_paletteRange_data`,
   `PaletteContainerSpec.bytes_size`,
   `PaletteContainerSpec.parsePlteData`,
   `PaletteContainerSpec.readChunk_ihdr`,
@@ -295,6 +309,8 @@ This library has proofs about:
   `PaletteContainerSpec.decodeIndexedBitmap_fixed_encodeRawIndexed_none_8_256_data`,
   `PaletteContainerSpec.decodeIndexedBitmap_dynamic_encodeRawIndexed_none_non8_data`,
   `PaletteContainerSpec.decodeIndexedBitmap_dynamic_encodeRawIndexed_none_8_256_data`,
+  `PaletteContainerSpec.decodeIndexedBitmapWithMetadata_encodeRawIndexed_none_paletteRange_data`,
+  `PaletteContainerSpec.decodeIndexedBitmap_encodeRawIndexed_none_paletteRange_data`,
   `ExternalIndexedPalettePngSpec.decodeIndexedBitmapWithMetadata_external_correct`,
   `ExternalIndexedPalettePngSpec.decodeIndexedBitmap_external_correct`,
   `PaletteEncoderRoundTrip.decodeIndexedBitmap_encodeIndexedBitmapChecked_8_256_data`,
@@ -306,6 +322,7 @@ This library has proofs about:
   `PaletteEncoderRoundTrip.decodeIndexedBitmap_encodeIndexedBitmapChecked_fixed_non8_data`,
   `PaletteEncoderRoundTrip.decodeIndexedBitmap_encodeIndexedBitmapChecked_dynamic_non8_data`,
   `PaletteEncoderRoundTrip.decodeIndexedBitmap_encodeIndexedBitmapChecked_supported_bitDepth_data`,
+  `PaletteEncoderRoundTrip.decodeIndexedBitmap_encodeIndexedBitmapChecked_paletteRange_data`,
   `PalettePackedRoundTrip.checked_roundtrip_fixture_for_supported_bitDepth`,
   `PalettePackedRoundTrip.checked_fixed_filter_roundtrip_fixture_for_supported_bitDepth`,
   `PalettePackedRoundTrip.checked_stored_1bit_fixture_data`,

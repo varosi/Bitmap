@@ -10,9 +10,9 @@ open Png
 /-! ## Indexed-palette public encoder round-trip layer
 
 These theorems connect the public checked indexed encoder API to the palette
-container decoder proofs.  The current proof scope is explicit 8-bit indexed
-input with a full 256-entry palette, filter-0 rows, and no optional palette
-alpha or background chunks. -/
+container decoder proofs.  The generalized proof scope is explicit indexed
+input at supported palette bit depths, filter-0 rows, no optional palette alpha
+or background chunks, and source indices bounded by the actual palette size. -/
 
 namespace PaletteEncoderRoundTrip
 
@@ -84,6 +84,27 @@ private lemma validateIndexedBitmap_accepts_non8_full
   exact
     PaletteValidation.validateIndexedBitmap_accepts_of_paletteIndexLimit
       bmp hbdSupported hw hh hpalNonempty hpalTriplets hpalMax hpalFits hrange
+      (by intro alpha halpha; simp [htrans] at halpha)
+      (by intro idx hidx; simp [hbg] at hidx)
+
+/-- The checked indexed encoder accepts any supported palette bit depth when the
+palette shape is valid, the palette fits that depth, and all source indices are
+below the actual palette entry count. -/
+private lemma validateIndexedBitmap_accepts_paletteRange
+    (bmp : PngIndexedBitmap)
+    (hw : bmp.size.width < UInt32.size) (hh : bmp.size.height < UInt32.size)
+    (hbd : bmp.bitDepth = 1 ∨ bmp.bitDepth = 2 ∨ bmp.bitDepth = 4 ∨ bmp.bitDepth = 8)
+    (hpalNonempty : bmp.palette.entries.size ≠ 0)
+    (hpalTriplets : bmp.palette.entries.size % 3 = 0)
+    (hpalMax : bmp.palette.entries.size ≤ 256 * 3)
+    (hpalFits : bmp.palette.entryCount ≤ paletteIndexLimit bmp.bitDepth)
+    (hrange : indexedDataInRange bmp.data bmp.palette.entryCount = true)
+    (htrans : bmp.transparency = none)
+    (hbg : bmp.background = none) :
+    validateIndexedBitmap bmp = Except.ok () := by
+  exact
+    PaletteValidation.validateIndexedBitmap_accepts_of_paletteIndexLimit
+      bmp hbd hw hh hpalNonempty hpalTriplets hpalMax hpalFits hrange
       (by intro alpha halpha; simp [htrans] at halpha)
       (by intro idx hidx; simp [hbg] at hidx)
 
@@ -171,6 +192,40 @@ private def encodedSpecNon8 (bmp : PngIndexedBitmap) (idat : ByteArray)
       have hpalCount : bmp.palette.entryCount = paletteIndexLimit bmp.bitDepth :=
         entryCount_of_entries_size_paletteIndexLimit bmp.palette bmp.bitDepth hpalSize
       simp [hpalCount, paletteMaxEntriesForBitDepth_eq_paletteIndexLimit] }
+
+/-- Palette container scaffold for checked indexed encoder output with an
+arbitrary valid palette that fits the selected indexed bit depth. -/
+private def encodedSpecPaletteRange (bmp : PngIndexedBitmap) (idat : ByteArray)
+    (hw : bmp.size.width < UInt32.size) (hh : bmp.size.height < UInt32.size)
+    (hbd : bmp.bitDepth = 1 ∨ bmp.bitDepth = 2 ∨ bmp.bitDepth = 4 ∨ bmp.bitDepth = 8)
+    (hpalNonempty : bmp.palette.entries.size ≠ 0)
+    (hpalTriplets : bmp.palette.entries.size % 3 = 0)
+    (hpalMax : bmp.palette.entries.size ≤ 256 * 3)
+    (hpalFits : bmp.palette.entryCount ≤ paletteIndexLimit bmp.bitDepth) :
+    PaletteContainerSpec :=
+  { header :=
+      { width := bmp.size.width, height := bmp.size.height, colorType := 3,
+        bitDepth := bmp.bitDepth, interlace := 0 }
+    palette := bmp.palette
+    idatData := idat
+    hBitDepth := by
+      exact hbd
+    hColorType := by
+      rfl
+    hCtBdSupported := by
+      rcases hbd with hbd | hbd | hbd | hbd <;> simp [hbd, pngColorTypeBitDepthSupported]
+    hInterlace := by
+      left
+      rfl
+    hWidth := by
+      simpa [UInt32.size] using hw
+    hHeight := by
+      simpa [UInt32.size] using hh
+    hPaletteNonempty := hpalNonempty
+    hPaletteTriplets := hpalTriplets
+    hPaletteMax := hpalMax
+    hPaletteFits := by
+      simpa [paletteMaxEntriesForBitDepth_eq_paletteIndexLimit] using hpalFits }
 
 private lemma encodeIndexedBitmapWithOptionsChecked_stored_eq_spec_bytes
     (bmp : PngIndexedBitmap)
@@ -297,6 +352,39 @@ private lemma encodeIndexedBitmapWithOptionsChecked_dynamic_eq_spec_bytes_non8
   simp [htrans, hbg, s, encodedSpecNon8, encodeColorSpaceChunks?,
     encodeChrmChunk?, encodePhysChunk?, encodeTimeChunk?, ByteArray.append_assoc]
   rfl
+
+/-- The checked indexed encoder emits the generalized palette scaffold for
+filter-0 output whenever validation accepts the explicit indexed bitmap. -/
+private lemma encodeIndexedBitmapWithOptionsChecked_eq_spec_bytes_paletteRange
+    (mode : PngEncodeMode)
+    (bmp : PngIndexedBitmap)
+    (hw : bmp.size.width < UInt32.size) (hh : bmp.size.height < UInt32.size)
+    (hbd : bmp.bitDepth = 1 ∨ bmp.bitDepth = 2 ∨ bmp.bitDepth = 4 ∨ bmp.bitDepth = 8)
+    (hpalNonempty : bmp.palette.entries.size ≠ 0)
+    (hpalTriplets : bmp.palette.entries.size % 3 = 0)
+    (hpalMax : bmp.palette.entries.size ≤ 256 * 3)
+    (hpalFits : bmp.palette.entryCount ≤ paletteIndexLimit bmp.bitDepth)
+    (hrange : indexedDataInRange bmp.data bmp.palette.entryCount = true)
+    (htrans : bmp.transparency = none)
+    (hbg : bmp.background = none) :
+    encodeIndexedBitmapWithOptionsChecked bmp (options mode) =
+      Except.ok
+        (encodedSpecPaletteRange bmp
+          (match mode with
+           | .stored => zlibCompressStored (encodeRawIndexedWithFilter bmp .none)
+           | .fixed => zlibCompressFixed (encodeRawIndexedWithFilter bmp .none)
+           | .dynamic => zlibCompressDynamic (encodeRawIndexedWithFilter bmp .none))
+          hw hh hbd hpalNonempty hpalTriplets hpalMax hpalFits).bytes := by
+  have hvalid :=
+    validateIndexedBitmap_accepts_paletteRange bmp hw hh hbd hpalNonempty
+      hpalTriplets hpalMax hpalFits hrange htrans hbg
+  unfold encodeIndexedBitmapWithOptionsChecked
+  simp [hvalid]
+  cases mode <;>
+    unfold encodeIndexedBitmapWithOptions options PaletteContainerSpec.bytes encodeIHDRData <;>
+    simp [htrans, hbg, encodedSpecPaletteRange, encodeColorSpaceChunks?,
+      encodeChrmChunk?, encodePhysChunk?, encodeTimeChunk?, ByteArray.append_assoc] <;>
+    rfl
 
 /-- Stored-zlib checked indexed encode succeeds, and both indexed decode APIs
 recover the original index bytes for 8-bit full-palette filter-0 inputs. -/
@@ -637,6 +725,59 @@ theorem decodeIndexedBitmap_encodeIndexedBitmapChecked_supported_bitDepth_data
       simpa [hpal] using hchecked
     exact decodeIndexedBitmap_encodeIndexedBitmapChecked_8_256_data
       mode bmp hw hh hbd hpalSize256 hrangeChecked htrans hbg hIdatSize
+
+/-- Checked indexed encode/decode round-trips every supported palette bit depth
+for any explicit palette that fits the bit depth and contains every source
+index. This generalizes the earlier full-addressable-palette theorem. -/
+theorem decodeIndexedBitmap_encodeIndexedBitmapChecked_paletteRange_data
+    (mode : PngEncodeMode)
+    (bmp : PngIndexedBitmap)
+    (hw : bmp.size.width < UInt32.size) (hh : bmp.size.height < UInt32.size)
+    (hbd : bmp.bitDepth = 1 ∨ bmp.bitDepth = 2 ∨ bmp.bitDepth = 4 ∨ bmp.bitDepth = 8)
+    (hpalNonempty : bmp.palette.entries.size ≠ 0)
+    (hpalTriplets : bmp.palette.entries.size % 3 = 0)
+    (hpalMax : bmp.palette.entries.size ≤ 256 * 3)
+    (hpalFits : bmp.palette.entryCount ≤ paletteIndexLimit bmp.bitDepth)
+    (hrange :
+      ∀ y, y < bmp.size.height → ∀ x, x < bmp.size.width →
+        (bmp.data.get! (y * bmp.size.width + x)).toNat < bmp.palette.entryCount)
+    (htrans : bmp.transparency = none)
+    (hbg : bmp.background = none)
+    (hIdatSize :
+      (match mode with
+       | .stored => zlibCompressStored (encodeRawIndexedWithFilter bmp .none)
+       | .fixed => zlibCompressFixed (encodeRawIndexedWithFilter bmp .none)
+       | .dynamic => zlibCompressDynamic (encodeRawIndexedWithFilter bmp .none)).size
+        < 2 ^ 32) :
+    ∃ bytes,
+      encodeIndexedBitmapChecked bmp mode = Except.ok bytes ∧
+        (decodeIndexedBitmapWithMetadata bytes).map (fun result => result.bitmap.data) =
+          some bmp.data ∧
+        (decodeIndexedBitmap bytes).map (fun bitmap => bitmap.data) = some bmp.data := by
+  let idat :=
+    match mode with
+    | .stored => zlibCompressStored (encodeRawIndexedWithFilter bmp .none)
+    | .fixed => zlibCompressFixed (encodeRawIndexedWithFilter bmp .none)
+    | .dynamic => zlibCompressDynamic (encodeRawIndexedWithFilter bmp .none)
+  let s := encodedSpecPaletteRange bmp idat hw hh hbd hpalNonempty hpalTriplets
+    hpalMax hpalFits
+  have hrangeChecked : indexedDataInRange bmp.data bmp.palette.entryCount = true :=
+    PaletteValidation.indexedDataInRange_true_of_valid_coordinates
+      bmp bmp.palette.entryCount hrange
+  have hEncode : encodeIndexedBitmapChecked bmp mode = Except.ok s.bytes := by
+    unfold encodeIndexedBitmapChecked
+    have hbytes :=
+      encodeIndexedBitmapWithOptionsChecked_eq_spec_bytes_paletteRange
+        mode bmp hw hh hbd hpalNonempty hpalTriplets hpalMax hpalFits
+        hrangeChecked htrans hbg
+    simpa [options, s, idat] using hbytes
+  have hMetadata :=
+    PaletteContainerSpec.decodeIndexedBitmapWithMetadata_encodeRawIndexed_none_paletteRange_data
+      s bmp mode rfl rfl rfl hIdatSize hbd hpalFits hrange
+  have hPixel :=
+    PaletteContainerSpec.decodeIndexedBitmap_encodeRawIndexed_none_paletteRange_data
+      s bmp mode rfl rfl rfl hIdatSize hbd hpalFits hrange
+  exact ⟨s.bytes, hEncode, hMetadata, hPixel⟩
 
 end PaletteEncoderRoundTrip
 
