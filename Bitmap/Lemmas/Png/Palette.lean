@@ -52,6 +52,26 @@ private lemma byteArray_get!_replicate_zero (rowBytes i : Nat) :
   · rw [getElem!_neg (Array.replicate rowBytes (0 : UInt8)) i h]
     rfl
 
+private lemma byteArray_eq_of_size_get!
+    (a b : ByteArray)
+    (hsize : a.size = b.size)
+    (hget : ∀ i, i < a.size → a.get! i = b.get! i) :
+    a = b := by
+  cases a with
+  | mk adata =>
+      cases b with
+      | mk bdata =>
+          simp [ByteArray.size] at hsize hget ⊢
+          apply Array.ext
+          · exact hsize
+          · intro i hia hib
+            have hget' := hget i (by simpa [ByteArray.size] using hia)
+            have ha : adata[i]! = adata[i] := by
+              exact getElem!_pos adata i hia
+            have hb : bdata[i]! = bdata[i] := by
+              exact getElem!_pos bdata i hib
+            simpa [ByteArray.get!, ha, hb] using hget'
+
 private lemma u8_toNat_of_lt (n : Nat) (h : n < 256) :
     (u8 n).toNat = n := by
   simpa [u8, UInt8.size] using
@@ -369,6 +389,300 @@ lemma paletteScatterFullRow_succeeds_of_indexLimit
     exact
       paletteScatterFullRowLoop_succeeds_of_indexLimit row flat w bitDepth y
         paletteEntries 0 hbd hentries
+
+private def paletteFullRowDstIndex (w y x : Nat) : Nat :=
+  y * w + x
+
+private lemma paletteFullRowDstIndex_ne_of_ne
+    (w y x z : Nat) (hne : x ≠ z) :
+    paletteFullRowDstIndex w y x ≠ paletteFullRowDstIndex w y z := by
+  intro h
+  exact hne (Nat.add_left_cancel h)
+
+private lemma paletteScatterFullRowLoop_get!_of_indexLimit
+    (row flat : ByteArray) (w bitDepth y paletteEntries x watchX : Nat)
+    (hbd : bitDepth = 1 ∨ bitDepth = 2 ∨ bitDepth = 4 ∨ bitDepth = 8)
+    (hentries : paletteIndexLimit bitDepth ≤ paletteEntries)
+    (hdst : ∀ z, z < w → paletteFullRowDstIndex w y z < flat.size) :
+    ∃ out,
+      paletteScatterFullRowLoop row flat w bitDepth y paletteEntries x true = some out ∧
+      (if watchX < x then
+        out.get! (paletteFullRowDstIndex w y watchX) =
+          flat.get! (paletteFullRowDstIndex w y watchX)
+      else if watchX < w then
+        out.get! (paletteFullRowDstIndex w y watchX) =
+          palettePackedIndexAt row bitDepth watchX
+      else
+        out.get! (paletteFullRowDstIndex w y watchX) =
+          flat.get! (paletteFullRowDstIndex w y watchX)) := by
+  have hk :
+      ∀ k, ∀ x flat,
+        w - x = k →
+        (∀ z, z < w → paletteFullRowDstIndex w y z < flat.size) →
+        ∃ out,
+          paletteScatterFullRowLoop row flat w bitDepth y paletteEntries x true =
+            some out ∧
+          (if watchX < x then
+            out.get! (paletteFullRowDstIndex w y watchX) =
+              flat.get! (paletteFullRowDstIndex w y watchX)
+          else if watchX < w then
+            out.get! (paletteFullRowDstIndex w y watchX) =
+              palettePackedIndexAt row bitDepth watchX
+          else
+            out.get! (paletteFullRowDstIndex w y watchX) =
+              flat.get! (paletteFullRowDstIndex w y watchX)) := by
+    intro k
+    induction k with
+    | zero =>
+        intro x flat hk hdst
+        have hx : w ≤ x := Nat.le_of_sub_eq_zero hk
+        have hlt : ¬ x < w := not_lt_of_ge hx
+        refine ⟨flat, ?_, ?_⟩
+        · simp [paletteScatterFullRowLoop, hlt]
+        · by_cases hwatch : watchX < x
+          · simp [hwatch]
+          · have hnotWidth : ¬ watchX < w := fun h => hwatch (lt_of_lt_of_le h hx)
+            simp [hwatch, hnotWidth]
+    | succ k ih =>
+        intro x flat hk hdst
+        have hlt : x < w := Nat.lt_of_sub_eq_succ hk
+        have hidx :
+            (palettePackedIndexAt row bitDepth x).toNat < paletteEntries :=
+          palettePackedIndexAt_lt_entries row bitDepth x paletteEntries hbd hentries
+        have hflag :
+            (!decide (paletteEntries ≤ (palettePackedIndexAt row bitDepth x).toNat)) =
+              true := by
+          simp [Nat.not_le_of_gt hidx]
+        let dst := paletteFullRowDstIndex w y x
+        let idx := palettePackedIndexAt row bitDepth x
+        let flat' := flat.set! dst idx
+        have hdstX : dst < flat.size := by
+          simpa [dst] using hdst x hlt
+        have hdst' :
+            ∀ z, z < w → paletteFullRowDstIndex w y z < flat'.size := by
+          intro z hz
+          simpa [flat', byteArray_size_set!] using hdst z hz
+        have hk' : w - (x + 1) = k := by
+          have hsum : w = Nat.succ k + x :=
+            Nat.eq_add_of_sub_eq (Nat.le_of_lt hlt) hk
+          calc
+            w - (x + 1) = (Nat.succ k + x) - (x + 1) := by simp [hsum]
+            _ = k := by omega
+        rcases ih (x := x + 1) (flat := flat') hk' hdst' with
+          ⟨out, hout, hget⟩
+        refine ⟨out, ?_, ?_⟩
+        · rw [paletteScatterFullRowLoop.eq_1]
+          simpa [hlt, hflag, dst, idx, flat', paletteFullRowDstIndex] using hout
+        · by_cases hltWatch : watchX < x
+          · have hltWatchSucc : watchX < x + 1 := Nat.lt_trans hltWatch (Nat.lt_succ_self _)
+            have hne : dst ≠ paletteFullRowDstIndex w y watchX := by
+              exact paletteFullRowDstIndex_ne_of_ne w y x watchX (by omega)
+            have hflat' :
+                flat'.get! (paletteFullRowDstIndex w y watchX) =
+                  flat.get! (paletteFullRowDstIndex w y watchX) := by
+              simpa [flat', dst, idx] using
+                byteArray_get!_set!_ne flat dst (paletteFullRowDstIndex w y watchX)
+                  idx hne
+            simp [hltWatch, hltWatchSucc] at hget ⊢
+            exact hget.trans hflat'
+          · have hgeWatch : x ≤ watchX := Nat.le_of_not_lt hltWatch
+            by_cases heq : watchX = x
+            · subst watchX
+              have hltSucc : x < x + 1 := Nat.lt_succ_self x
+              have hcurrent :
+                  flat'.get! dst = idx := by
+                exact byteArray_get!_set!_self flat dst idx hdstX
+              simp [hltWatch, hltSucc, hlt] at hget ⊢
+              exact hget.trans hcurrent
+            · have hsucc : x + 1 ≤ watchX := by omega
+              have hnotSucc : ¬ watchX < x + 1 := not_lt_of_ge hsucc
+              by_cases hwatchWidth : watchX < w
+              · simp [hltWatch, hnotSucc, hwatchWidth] at hget ⊢
+                exact hget
+              · have hne : dst ≠ paletteFullRowDstIndex w y watchX := by
+                  exact paletteFullRowDstIndex_ne_of_ne w y x watchX (by omega)
+                have hflat' :
+                    flat'.get! (paletteFullRowDstIndex w y watchX) =
+                      flat.get! (paletteFullRowDstIndex w y watchX) := by
+                  simpa [flat', dst, idx] using
+                    byteArray_get!_set!_ne flat dst (paletteFullRowDstIndex w y watchX)
+                      idx hne
+                simp [hltWatch, hnotSucc, hwatchWidth] at hget ⊢
+                exact hget.trans hflat'
+  exact hk (w - x) x flat rfl hdst
+
+/-- Non-8-bit full-row palette scatter writes each decoded packed sample to its
+flat image position. The 8-bit copy-slice fast path is covered separately by
+the existing byte-row proof. -/
+lemma paletteScatterFullRow_get!_of_indexLimit_non8
+    (row flat : ByteArray) (w bitDepth y paletteEntries x : Nat)
+    (hx : x < w)
+    (hbd : bitDepth = 1 ∨ bitDepth = 2 ∨ bitDepth = 4)
+    (hentries : paletteIndexLimit bitDepth ≤ paletteEntries)
+    (hdst : ∀ z, z < w → paletteFullRowDstIndex w y z < flat.size) :
+    ∃ out,
+      paletteScatterFullRow row flat w bitDepth y paletteEntries = some out ∧
+      out.get! (paletteFullRowDstIndex w y x) =
+        palettePackedIndexAt row bitDepth x := by
+  have hbdSupported :
+      bitDepth = 1 ∨ bitDepth = 2 ∨ bitDepth = 4 ∨ bitDepth = 8 := by
+    rcases hbd with hbd | hbd | hbd
+    · exact Or.inl hbd
+    · exact Or.inr (Or.inl hbd)
+    · exact Or.inr (Or.inr (Or.inl hbd))
+  have hnotFast : ¬ (bitDepth = 8 ∧ 256 ≤ paletteEntries) := by
+    intro hfast
+    rcases hfast with ⟨h8, _⟩
+    rcases hbd with h1 | h2 | h4 <;> omega
+  rcases
+    paletteScatterFullRowLoop_get!_of_indexLimit row flat w bitDepth y paletteEntries
+      0 x hbdSupported hentries hdst with
+    ⟨out, hout, hget⟩
+  refine ⟨out, ?_, ?_⟩
+  · simpa [paletteScatterFullRow, hnotFast] using hout
+  · simpa [hx] using hget
+
+private lemma paletteScatterFullRowLoop_preserves_lt_rowStart
+    (row flat : ByteArray) (w bitDepth y paletteEntries x i : Nat)
+    (hbd : bitDepth = 1 ∨ bitDepth = 2 ∨ bitDepth = 4 ∨ bitDepth = 8)
+    (hentries : paletteIndexLimit bitDepth ≤ paletteEntries)
+    (hi : i < y * w) :
+    ∃ out,
+      paletteScatterFullRowLoop row flat w bitDepth y paletteEntries x true = some out ∧
+      out.get! i = flat.get! i := by
+  have hk :
+      ∀ k, ∀ x flat,
+        w - x = k →
+        ∃ out,
+          paletteScatterFullRowLoop row flat w bitDepth y paletteEntries x true =
+            some out ∧
+          out.get! i = flat.get! i := by
+    intro k
+    induction k with
+    | zero =>
+        intro x flat hk
+        have hx : w ≤ x := Nat.le_of_sub_eq_zero hk
+        have hlt : ¬ x < w := not_lt_of_ge hx
+        exact ⟨flat, by simp [paletteScatterFullRowLoop, hlt], rfl⟩
+    | succ k ih =>
+        intro x flat hk
+        have hlt : x < w := Nat.lt_of_sub_eq_succ hk
+        have hidx :
+            (palettePackedIndexAt row bitDepth x).toNat < paletteEntries :=
+          palettePackedIndexAt_lt_entries row bitDepth x paletteEntries hbd hentries
+        have hflag :
+            (!decide (paletteEntries ≤ (palettePackedIndexAt row bitDepth x).toNat)) =
+              true := by
+          simp [Nat.not_le_of_gt hidx]
+        let dst := paletteFullRowDstIndex w y x
+        let idx := palettePackedIndexAt row bitDepth x
+        let flat' := flat.set! dst idx
+        have hne : dst ≠ i := by
+          intro heq
+          have hdstGe : y * w ≤ dst := by
+            simp [dst, paletteFullRowDstIndex]
+          have hi' : dst < y * w := by simpa [heq] using hi
+          omega
+        have hflat' : flat'.get! i = flat.get! i := by
+          simpa [flat', dst, idx] using byteArray_get!_set!_ne flat dst i idx hne
+        have hk' : w - (x + 1) = k := by
+          have hsum : w = Nat.succ k + x :=
+            Nat.eq_add_of_sub_eq (Nat.le_of_lt hlt) hk
+          calc
+            w - (x + 1) = (Nat.succ k + x) - (x + 1) := by simp [hsum]
+            _ = k := by omega
+        rcases ih (x := x + 1) (flat := flat') hk' with ⟨out, hout, hget⟩
+        refine ⟨out, ?_, ?_⟩
+        · rw [paletteScatterFullRowLoop.eq_1]
+          simpa [hlt, hflag, dst, idx, flat', paletteFullRowDstIndex] using hout
+        · exact hget.trans hflat'
+  exact hk (w - x) x flat rfl
+
+/-- Non-8-bit full-row scatter leaves positions before the destination row
+unchanged. This preserves rows already decoded by the non-interlaced loop. -/
+lemma paletteScatterFullRow_preserves_lt_rowStart_non8
+    (row flat : ByteArray) (w bitDepth y paletteEntries i : Nat)
+    (hbd : bitDepth = 1 ∨ bitDepth = 2 ∨ bitDepth = 4)
+    (hentries : paletteIndexLimit bitDepth ≤ paletteEntries)
+    (hi : i < y * w) :
+    ∃ out,
+      paletteScatterFullRow row flat w bitDepth y paletteEntries = some out ∧
+      out.get! i = flat.get! i := by
+  have hbdSupported :
+      bitDepth = 1 ∨ bitDepth = 2 ∨ bitDepth = 4 ∨ bitDepth = 8 := by
+    rcases hbd with hbd | hbd | hbd
+    · exact Or.inl hbd
+    · exact Or.inr (Or.inl hbd)
+    · exact Or.inr (Or.inr (Or.inl hbd))
+  have hnotFast : ¬ (bitDepth = 8 ∧ 256 ≤ paletteEntries) := by
+    intro hfast
+    rcases hfast with ⟨h8, _⟩
+    rcases hbd with h1 | h2 | h4 <;> omega
+  rcases
+    paletteScatterFullRowLoop_preserves_lt_rowStart row flat w bitDepth y
+      paletteEntries 0 i hbdSupported hentries hi with
+    ⟨out, hout, hget⟩
+  exact ⟨out, by simpa [paletteScatterFullRow, hnotFast] using hout, hget⟩
+
+private lemma paletteScatterFullRowLoop_size_of_some
+    (row flat out : ByteArray) (w bitDepth y paletteEntries x : Nat) (ok : Bool)
+    (h :
+      paletteScatterFullRowLoop row flat w bitDepth y paletteEntries x ok = some out) :
+    out.size = flat.size := by
+  have hk :
+      ∀ k, ∀ x flat ok,
+        w - x = k →
+        paletteScatterFullRowLoop row flat w bitDepth y paletteEntries x ok = some out →
+        out.size = flat.size := by
+    intro k
+    induction k with
+    | zero =>
+        intro x flat ok hk hsome
+        have hx : w ≤ x := Nat.le_of_sub_eq_zero hk
+        have hlt : ¬ x < w := not_lt_of_ge hx
+        rw [paletteScatterFullRowLoop] at hsome
+        simp [hlt] at hsome
+        cases ok <;> simp at hsome
+        cases hsome
+        rfl
+    | succ k ih =>
+        intro x flat ok hk hsome
+        have hlt : x < w := Nat.lt_of_sub_eq_succ hk
+        let idx := palettePackedIndexAt row bitDepth x
+        let ok' := ok && !(idx.toNat >= paletteEntries)
+        let flat' := flat.set! (y * w + x) idx
+        have hk' : w - (x + 1) = k := by
+          have hsum : w = Nat.succ k + x :=
+            Nat.eq_add_of_sub_eq (Nat.le_of_lt hlt) hk
+          calc
+            w - (x + 1) = (Nat.succ k + x) - (x + 1) := by simp [hsum]
+            _ = k := by omega
+        have hrec :
+            paletteScatterFullRowLoop row flat' w bitDepth y paletteEntries
+              (x + 1) ok' = some out := by
+          rw [paletteScatterFullRowLoop.eq_1] at hsome
+          simpa [hlt, idx, ok', flat'] using hsome
+        have hsize := ih (x := x + 1) (flat := flat') (ok := ok') hk' hrec
+        have hsetSize : flat'.size = flat.size := by
+          change (flat.set! (y * w + x) idx).size = flat.size
+          exact byteArray_size_set! flat (y * w + x) idx
+        exact hsize.trans hsetSize
+  exact hk (w - x) x flat ok rfl h
+
+/-- Non-8-bit full-row scatter preserves the flat buffer size whenever it
+succeeds. This keeps the non-interlaced decode loop's flat-size invariant. -/
+lemma paletteScatterFullRow_size_of_some_non8
+    (row flat out : ByteArray) (w bitDepth y paletteEntries : Nat)
+    (hbd : bitDepth = 1 ∨ bitDepth = 2 ∨ bitDepth = 4)
+    (h : paletteScatterFullRow row flat w bitDepth y paletteEntries = some out) :
+    out.size = flat.size := by
+  have hnotFast : ¬ (bitDepth = 8 ∧ 256 ≤ paletteEntries) := by
+    intro hfast
+    rcases hfast with ⟨h8, _⟩
+    rcases hbd with h1 | h2 | h4 <;> omega
+  exact
+    paletteScatterFullRowLoop_size_of_some row flat out w bitDepth y paletteEntries
+      0 true (by simpa [paletteScatterFullRow, hnotFast] using h)
 
 private lemma adam7ScatterRowPaletteLoop_succeeds_of_indexLimit
     (row flat : ByteArray) (w bitDepth paletteEntries : Nat)
@@ -1398,6 +1712,173 @@ lemma encodeIndexedPackedRows_8_eq_data (bmp : PngIndexedBitmap)
   unfold encodeIndexedPackedRows
   simp [hbd]
 
+private def packedRowsHaveIndices
+    (bmp : PngIndexedBitmap) (rowBytes rows : Nat) (packed : ByteArray) : Prop :=
+  packed.size = rows * rowBytes ∧
+    ∀ y, y < rows → ∀ x, x < bmp.size.width →
+      palettePackedIndexAt
+        (packed.extract (y * rowBytes) (y * rowBytes + rowBytes))
+        bmp.bitDepth x = bmp.data.get! (y * bmp.size.width + x)
+
+private lemma encodeIndexedPackedRowsLoop_indices
+    (bmp : PngIndexedBitmap)
+    (hbd : bmp.bitDepth = 1 ∨ bmp.bitDepth = 2 ∨ bmp.bitDepth = 4 ∨ bmp.bitDepth = 8)
+    (rowBytes y : Nat) (packed : ByteArray)
+    (hrowBytes : rowBytes = paletteRowBytes bmp.size.width bmp.bitDepth)
+    (hy : y ≤ bmp.size.height)
+    (hpacked : packedRowsHaveIndices bmp rowBytes y packed)
+    (hrange :
+      ∀ y, y < bmp.size.height → ∀ x, x < bmp.size.width →
+        (bmp.data.get! (y * bmp.size.width + x)).toNat <
+          paletteIndexLimit bmp.bitDepth) :
+    packedRowsHaveIndices bmp rowBytes bmp.size.height
+      (encodeIndexedPackedRowsLoop bmp rowBytes y packed) := by
+  have hk :
+      ∀ k, ∀ y packed,
+        bmp.size.height - y = k →
+        y ≤ bmp.size.height →
+        packedRowsHaveIndices bmp rowBytes y packed →
+        packedRowsHaveIndices bmp rowBytes bmp.size.height
+          (encodeIndexedPackedRowsLoop bmp rowBytes y packed) := by
+    intro k
+    induction k with
+    | zero =>
+        intro y packed hk hy hpacked
+        have hge : bmp.size.height ≤ y := Nat.le_of_sub_eq_zero hk
+        have hyEq : y = bmp.size.height := Nat.le_antisymm hy hge
+        simpa [encodeIndexedPackedRowsLoop, hyEq] using hpacked
+    | succ k ih =>
+        intro y packed hk hy hpacked
+        have hlt : y < bmp.size.height := Nat.lt_of_sub_eq_succ hk
+        have hy' : y + 1 ≤ bmp.size.height := Nat.succ_le_of_lt hlt
+        let row0 := ByteArray.mk <| Array.replicate rowBytes 0
+        let row := encodeIndexedPackedRowLoop bmp rowBytes y 0 row0
+        let packed' := packed ++ row
+        have hrow0 : row0.size = rowBytes := by
+          simp [row0, ByteArray.size, Array.size_replicate]
+        have hrowSize : row.size = rowBytes := by
+          simpa [row] using encodeIndexedPackedRowLoop_size bmp rowBytes y 0 row0 hrow0
+        have hrowIndices :
+            ∀ x, x < bmp.size.width →
+              palettePackedIndexAt row bmp.bitDepth x =
+                bmp.data.get! (y * bmp.size.width + x) := by
+          have hzero :=
+            encodeIndexedPackedRowLoop_zeroRow_indices bmp hbd y
+              (by intro z hz; exact hrange y hlt z hz)
+          intro x hx
+          simpa [row, row0, hrowBytes] using hzero x hx
+        have hpacked' :
+            packedRowsHaveIndices bmp rowBytes (y + 1) packed' := by
+          constructor
+          · calc
+              packed'.size = packed.size + row.size := by
+                simp [packed', ByteArray.size_append]
+              _ = y * rowBytes + rowBytes := by
+                rw [hpacked.1, hrowSize]
+              _ = (y + 1) * rowBytes := by
+                simp [Nat.add_mul, Nat.one_mul]
+          · intro targetY htargetY x hx
+            by_cases htargetPrev : targetY < y
+            · have hstart : targetY * rowBytes ≤ packed.size := by
+                have hmul : targetY * rowBytes ≤ y * rowBytes :=
+                  Nat.mul_le_mul_right rowBytes (Nat.le_of_lt htargetPrev)
+                simpa [hpacked.1] using hmul
+              have hend : targetY * rowBytes + rowBytes ≤ packed.size := by
+                have hsucc : targetY + 1 ≤ y := Nat.succ_le_of_lt htargetPrev
+                have hmul : (targetY + 1) * rowBytes ≤ y * rowBytes :=
+                  Nat.mul_le_mul_right rowBytes hsucc
+                have hrow : targetY * rowBytes + rowBytes =
+                    (targetY + 1) * rowBytes := by
+                  simp [Nat.add_mul, Nat.one_mul]
+                simpa [hpacked.1, hrow] using hmul
+              have hslice :
+                  packed'.extract (targetY * rowBytes)
+                    (targetY * rowBytes + rowBytes) =
+                    packed.extract (targetY * rowBytes)
+                      (targetY * rowBytes + rowBytes) := by
+                simpa [packed'] using
+                  byteArray_extract_append_left packed row (targetY * rowBytes)
+                    (targetY * rowBytes + rowBytes) hstart hend
+              simpa [hslice] using hpacked.2 targetY htargetPrev x hx
+            · have htargetEq : targetY = y := by omega
+              have hslice :
+                  packed'.extract (targetY * rowBytes)
+                    (targetY * rowBytes + rowBytes) = row := by
+                have hbase : targetY * rowBytes = packed.size := by
+                  simp [htargetEq, hpacked.1]
+                have happend :
+                    (packed ++ row).extract (packed.size + 0)
+                      (packed.size + rowBytes) = row.extract 0 rowBytes := by
+                  simpa using
+                    (ByteArray.extract_append_size_add
+                      (a := packed) (b := row) (i := 0) (j := rowBytes))
+                have hrowExtract : row.extract 0 rowBytes = row := by
+                  have hzero :
+                      row.extract 0 row.size = row := by
+                    exact ByteArray.extract_zero_size
+                  simpa [hrowSize] using hzero
+                calc
+                  packed'.extract (targetY * rowBytes)
+                      (targetY * rowBytes + rowBytes) =
+                      (packed ++ row).extract (packed.size + 0)
+                        (packed.size + rowBytes) := by
+                        simp [packed', hbase]
+                  _ = row.extract 0 rowBytes := happend
+                  _ = row := hrowExtract
+              rw [hslice]
+              simpa [htargetEq] using hrowIndices x hx
+        have hk' : bmp.size.height - (y + 1) = k := by
+          have hsum : bmp.size.height = Nat.succ k + y :=
+            Nat.eq_add_of_sub_eq (Nat.le_of_lt hlt) hk
+          calc
+            bmp.size.height - (y + 1) =
+                (Nat.succ k + y) - (y + 1) := by simp [hsum]
+            _ = k := by omega
+        have hnext := ih (y := y + 1) (packed := packed') hk' hy' hpacked'
+        have hdef :=
+          encodeIndexedPackedRowsLoop.eq_1
+            (bmp := bmp) (rowBytes := rowBytes) (y := y) (packed := packed)
+        rw [hdef]
+        simpa [hlt, row0, row, packed'] using hnext
+  exact hk (bmp.size.height - y) y packed rfl hy hpacked
+
+/-- For non-8-bit supported palette bit depths, extracting any encoded packed
+row and reading one packed sample recovers the source bitmap index. This is the
+all-row counterpart of `encodeIndexedPackedRowLoop_zeroRow_indices`. -/
+lemma encodeIndexedPackedRows_indices_non8
+    (bmp : PngIndexedBitmap)
+    (hbd : bmp.bitDepth = 1 ∨ bmp.bitDepth = 2 ∨ bmp.bitDepth = 4)
+    (hrange :
+      ∀ y, y < bmp.size.height → ∀ x, x < bmp.size.width →
+        (bmp.data.get! (y * bmp.size.width + x)).toNat <
+          paletteIndexLimit bmp.bitDepth) :
+    let rowBytes := paletteRowBytes bmp.size.width bmp.bitDepth
+    ∀ y, y < bmp.size.height → ∀ x, x < bmp.size.width →
+      palettePackedIndexAt
+        ((encodeIndexedPackedRows bmp).extract
+          (y * rowBytes) (y * rowBytes + rowBytes))
+        bmp.bitDepth x = bmp.data.get! (y * bmp.size.width + x) := by
+  intro rowBytes y hy x hx
+  have hbdSupported :
+      bmp.bitDepth = 1 ∨ bmp.bitDepth = 2 ∨ bmp.bitDepth = 4 ∨ bmp.bitDepth = 8 := by
+    rcases hbd with hbd | hbd | hbd
+    · exact Or.inl hbd
+    · exact Or.inr (Or.inl hbd)
+    · exact Or.inr (Or.inr (Or.inl hbd))
+  have hnot8 : bmp.bitDepth ≠ 8 := by
+    intro h8
+    rcases hbd with h1 | h2 | h4 <;> omega
+  have hpacked0 :
+      packedRowsHaveIndices bmp rowBytes 0 ByteArray.empty := by
+    constructor
+    · simp
+    · intro y hy
+      omega
+  have hloop :=
+    encodeIndexedPackedRowsLoop_indices bmp hbdSupported rowBytes 0 ByteArray.empty
+      (by rfl) (Nat.zero_le _) hpacked0 hrange
+  simpa [encodeIndexedPackedRows, hnot8, rowBytes] using hloop.2 y hy x hx
+
 /-- Extracting one packed indexed row has the configured row size.
 This is the local bound needed by raw indexed encoder size proofs. -/
 lemma indexedPackedRow_extract_size (packedRows : ByteArray) (rowBytes h y : Nat)
@@ -1789,6 +2270,248 @@ lemma decodePaletteIndicesByInterlace_encodeRawIndexedWithFilter_none_8_256
     decodePaletteIndicesByInterlace_encodeIndexedRowsWithFilter_none_8_256
       bmp.data bmp.size.width bmp.size.height hpacked
   simpa [hdr, hraw] using hdecode
+
+/-- For non-8-bit supported indexed images, filter-0 raw encoding followed by
+the non-interlaced palette-index decoder reconstructs the exact source index
+buffer, provided every source index is addressable by the bit depth. -/
+lemma decodePaletteIndicesByInterlace_encodeRawIndexedWithFilter_none_non8
+    (bmp : PngIndexedBitmap)
+    (hbd : bmp.bitDepth = 1 ∨ bmp.bitDepth = 2 ∨ bmp.bitDepth = 4)
+    (paletteEntries : Nat)
+    (hentries : paletteIndexLimit bmp.bitDepth ≤ paletteEntries)
+    (hrange :
+      ∀ y, y < bmp.size.height → ∀ x, x < bmp.size.width →
+        (bmp.data.get! (y * bmp.size.width + x)).toNat <
+          paletteIndexLimit bmp.bitDepth) :
+    let hdr : PngHeader :=
+      { width := bmp.size.width, height := bmp.size.height, colorType := 3,
+        bitDepth := bmp.bitDepth, interlace := 0 }
+    decodePaletteIndicesByInterlace? (encodeRawIndexedWithFilter bmp .none) hdr
+      paletteEntries = some bmp.data := by
+  intro hdr
+  let rowBytes := paletteRowBytes bmp.size.width bmp.bitDepth
+  let packedRows := encodeIndexedPackedRows bmp
+  let raw := encodeIndexedRowsWithFilter packedRows rowBytes bmp.size.height .none
+  let flat0 := ByteArray.mk <| Array.replicate (bmp.size.width * bmp.size.height) 0
+  let rawBmp : BitmapGray8 :=
+    { size := { width := rowBytes, height := bmp.size.height }
+      data := packedRows
+      valid := by
+        have hpacked : packedRows.size = bmp.size.height * rowBytes := by
+          simpa [packedRows, rowBytes] using encodeIndexedPackedRows_size bmp
+        calc
+          packedRows.size = bmp.size.height * rowBytes := hpacked
+          _ = rowBytes * bmp.size.height * Pixel.bytesPerPixel (α := PixelGray8) := by
+                simp [bytesPerPixel_gray, bytesPerPixelGray, Nat.mul_comm] }
+  have hrawEq : raw = encodeRaw rawBmp := by
+    have hpacked : packedRows.size = bmp.size.height * rowBytes := by
+      simpa [packedRows, rowBytes] using encodeIndexedPackedRows_size bmp
+    simpa [raw, rawBmp] using
+      encodeIndexedRowsWithFilter_none_eq_encodeRawGray8 packedRows rowBytes
+        bmp.size.height hpacked
+  have hrawSize : raw.size = bmp.size.height * (rowBytes + 1) := by
+    calc
+      raw.size = (encodeRaw rawBmp).size := by simp [hrawEq]
+      _ = bmp.size.height * (rowBytes + 1) := by
+            have hsize := encodeRaw_size (bmp := rawBmp)
+            simpa [rawBmp, bytesPerPixel_gray, bytesPerPixelGray] using hsize
+  have hflat0 : flat0.size = bmp.size.width * bmp.size.height := by
+    simp [flat0, ByteArray.size, Array.size_replicate]
+  have hdataSize : bmp.data.size = bmp.size.width * bmp.size.height := bmp.valid
+  have hpackedIndex :=
+    encodeIndexedPackedRows_indices_non8 bmp hbd hrange
+  have hbdSupported :
+      bmp.bitDepth = 1 ∨ bmp.bitDepth = 2 ∨ bmp.bitDepth = 4 ∨ bmp.bitDepth = 8 := by
+    rcases hbd with hbd | hbd | hbd
+    · exact Or.inl hbd
+    · exact Or.inr (Or.inl hbd)
+    · exact Or.inr (Or.inr (Or.inl hbd))
+  have hloop :
+      decodePaletteRowsLoop raw bmp.size.width bmp.size.height bmp.bitDepth rowBytes
+        paletteEntries 0 0 ByteArray.empty flat0 = some bmp.data := by
+    have hk :
+        ∀ k, ∀ y offset prevRow flat,
+          bmp.size.height - y = k →
+          y ≤ bmp.size.height →
+          offset = y * (rowBytes + 1) →
+          flat.size = bmp.size.width * bmp.size.height →
+          (∀ yy, yy < y → ∀ x, x < bmp.size.width →
+            flat.get! (yy * bmp.size.width + x) =
+              bmp.data.get! (yy * bmp.size.width + x)) →
+          decodePaletteRowsLoop raw bmp.size.width bmp.size.height bmp.bitDepth rowBytes
+            paletteEntries y offset prevRow flat = some bmp.data := by
+      intro k
+      induction k with
+      | zero =>
+          intro y offset prevRow flat hk hy hoff hflat hprefix
+          have hyGe : bmp.size.height ≤ y := Nat.le_of_sub_eq_zero hk
+          have hyEq : y = bmp.size.height := Nat.le_antisymm hy hyGe
+          have hlt : ¬ y < bmp.size.height := not_lt_of_ge hyGe
+          have hoffsetRaw : offset = raw.size := by
+            calc
+              offset = y * (rowBytes + 1) := hoff
+              _ = bmp.size.height * (rowBytes + 1) := by simp [hyEq]
+              _ = raw.size := hrawSize.symm
+          have hflatEq : flat = bmp.data := by
+            have hsize : flat.size = bmp.data.size := by
+              calc
+                flat.size = bmp.size.width * bmp.size.height := hflat
+                _ = bmp.data.size := hdataSize.symm
+            refine byteArray_eq_of_size_get! flat bmp.data hsize ?_
+            intro i hi
+            by_cases hw : bmp.size.width = 0
+            · have hflatZero : flat.size = 0 := by
+                simpa [hw] using hflat
+              omega
+            · have hwpos : 0 < bmp.size.width := Nat.pos_of_ne_zero hw
+              have hiData : i < bmp.size.width * bmp.size.height := by
+                simpa [hflat] using hi
+              have hyi : i / bmp.size.width < bmp.size.height := by
+                apply Nat.div_lt_of_lt_mul
+                simpa [Nat.mul_comm] using hiData
+              have hxi : i % bmp.size.width < bmp.size.width :=
+                Nat.mod_lt i hwpos
+              have hidx :
+                  i / bmp.size.width * bmp.size.width + i % bmp.size.width = i := by
+                have h := Nat.mod_add_div i bmp.size.width
+                simpa [Nat.add_comm, Nat.mul_comm] using h
+              have hget :=
+                hprefix (i / bmp.size.width) (by simpa [hyEq] using hyi)
+                  (i % bmp.size.width) hxi
+              simpa [hidx] using hget
+          simp [decodePaletteRowsLoop, hlt, hoffsetRaw, hflatEq]
+      | succ k ih =>
+          intro y offset prevRow flat hk hy hoff hflat hprefix
+          have hlt : y < bmp.size.height := Nat.lt_of_sub_eq_succ hk
+          have hy' : y + 1 ≤ bmp.size.height := Nat.succ_le_of_lt hlt
+          have hofflt : offset < raw.size := by
+            have hmul : y * (rowBytes + 1) <
+                bmp.size.height * (rowBytes + 1) :=
+              Nat.mul_lt_mul_of_pos_right hlt (by omega)
+            simpa [hoff, hrawSize] using hmul
+          have hrowBound : offset + 1 + rowBytes ≤ raw.size := by
+            have hmul : (y + 1) * (rowBytes + 1) ≤
+                bmp.size.height * (rowBytes + 1) :=
+              Nat.mul_le_mul_right (rowBytes + 1) hy'
+            have hmul' : (y + 1) * (rowBytes + 1) ≤ raw.size := by
+              simpa [hrawSize] using hmul
+            have hcalc : offset + 1 + rowBytes = (y + 1) * (rowBytes + 1) := by
+              calc
+                offset + 1 + rowBytes = y * (rowBytes + 1) + (rowBytes + 1) := by
+                  omega
+                _ = (y + 1) * (rowBytes + 1) := by
+                  simp [Nat.add_mul, Nat.one_mul, Nat.add_assoc, Nat.add_comm]
+            simpa [hcalc] using hmul'
+          have hfilter0 : raw.get! offset = 0 := by
+            have hzero := encodeRaw_filter_zero (bmp := rawBmp) (y := y) hlt
+            simpa [raw, hrawEq, rawBmp, bytesPerPixel_gray, bytesPerPixelGray, hoff]
+              using hzero
+          have hrowData :
+              raw.extract (offset + 1) (offset + 1 + rowBytes) =
+                packedRows.extract (y * rowBytes) (y * rowBytes + rowBytes) := by
+            have hrow := encodeRaw_row_extract (bmp := rawBmp) (y := y) hlt
+            simpa [raw, hrawEq, rawBmp, bytesPerPixel_gray, bytesPerPixelGray, hoff]
+              using hrow
+          let rowData := raw.extract (offset + 1) (offset + 1 + rowBytes)
+          have hrowData' :
+              rowData = packedRows.extract (y * rowBytes) (y * rowBytes + rowBytes) := by
+            simpa [rowData] using hrowData
+          have hscatterSuccess :
+              ∃ flatNext,
+                paletteScatterFullRow rowData flat bmp.size.width bmp.bitDepth y
+                  paletteEntries = some flatNext :=
+            paletteScatterFullRow_succeeds_of_indexLimit rowData flat bmp.size.width
+              bmp.bitDepth y paletteEntries hbdSupported hentries
+          rcases hscatterSuccess with ⟨flatNext, hscatter⟩
+          have hflatNext : flatNext.size = bmp.size.width * bmp.size.height := by
+            calc
+              flatNext.size = flat.size :=
+                paletteScatterFullRow_size_of_some_non8 rowData flat flatNext
+                  bmp.size.width bmp.bitDepth y paletteEntries hbd hscatter
+              _ = bmp.size.width * bmp.size.height := hflat
+          have hprefix' :
+              ∀ yy, yy < y + 1 → ∀ x, x < bmp.size.width →
+                flatNext.get! (yy * bmp.size.width + x) =
+                  bmp.data.get! (yy * bmp.size.width + x) := by
+            intro yy hyy x hx
+            by_cases hprev : yy < y
+            · have hi : yy * bmp.size.width + x < y * bmp.size.width := by
+                have hsucc : yy + 1 ≤ y := Nat.succ_le_of_lt hprev
+                have hmul : (yy + 1) * bmp.size.width ≤ y * bmp.size.width :=
+                  Nat.mul_le_mul_right bmp.size.width hsucc
+                have hltx : yy * bmp.size.width + x <
+                    (yy + 1) * bmp.size.width := by
+                  have hx' :
+                      yy * bmp.size.width + x <
+                        yy * bmp.size.width + bmp.size.width :=
+                    Nat.add_lt_add_left hx (yy * bmp.size.width)
+                  simpa [Nat.add_mul, Nat.one_mul, Nat.add_assoc] using hx'
+                exact Nat.lt_of_lt_of_le hltx hmul
+              rcases
+                paletteScatterFullRow_preserves_lt_rowStart_non8 rowData flat
+                  bmp.size.width bmp.bitDepth y paletteEntries
+                  (yy * bmp.size.width + x) hbd hentries hi with
+                ⟨out, hout, hget⟩
+              rw [hscatter] at hout
+              cases hout
+              exact hget.trans (hprefix yy hprev x hx)
+            · have hyyEq : yy = y := by omega
+              have hdst :
+                  ∀ z, z < bmp.size.width →
+                    paletteFullRowDstIndex bmp.size.width y z < flat.size := by
+                intro z hz
+                have hltRow : y * bmp.size.width + z <
+                    (y + 1) * bmp.size.width := by
+                  have hz' :
+                      y * bmp.size.width + z <
+                        y * bmp.size.width + bmp.size.width :=
+                    Nat.add_lt_add_left hz (y * bmp.size.width)
+                  simpa [Nat.add_mul, Nat.one_mul, Nat.add_assoc] using hz'
+                have hrowLe : (y + 1) * bmp.size.width ≤
+                    bmp.size.height * bmp.size.width :=
+                  Nat.mul_le_mul_right bmp.size.width hy'
+                have hflatBound : y * bmp.size.width + z <
+                    bmp.size.width * bmp.size.height := by
+                  have h := Nat.lt_of_lt_of_le hltRow hrowLe
+                  simpa [Nat.mul_comm] using h
+                simpa [hflat, paletteFullRowDstIndex] using hflatBound
+              rcases
+                paletteScatterFullRow_get!_of_indexLimit_non8 rowData flat
+                  bmp.size.width bmp.bitDepth y paletteEntries x hx hbd hentries hdst with
+                ⟨out, hout, hget⟩
+              rw [hscatter] at hout
+              cases hout
+              have hpackedAt :
+                  palettePackedIndexAt rowData bmp.bitDepth x =
+                    bmp.data.get! (y * bmp.size.width + x) := by
+                simpa [rowData, hrowData', rowBytes] using hpackedIndex y hlt x hx
+              simpa [hyyEq, paletteFullRowDstIndex] using hget.trans hpackedAt
+          have hk' : bmp.size.height - (y + 1) = k := by
+            have hsum : bmp.size.height = Nat.succ k + y :=
+              Nat.eq_add_of_sub_eq (Nat.le_of_lt hlt) hk
+            calc
+              bmp.size.height - (y + 1) =
+                  (Nat.succ k + y) - (y + 1) := by simp [hsum]
+              _ = k := by omega
+          have hoff' : offset + 1 + rowBytes = (y + 1) * (rowBytes + 1) := by
+            calc
+              offset + 1 + rowBytes = y * (rowBytes + 1) + (rowBytes + 1) := by
+                omega
+              _ = (y + 1) * (rowBytes + 1) := by
+                simp [Nat.add_mul, Nat.one_mul, Nat.add_assoc, Nat.add_comm]
+          have hnext :=
+            ih (y := y + 1) (offset := offset + 1 + rowBytes)
+              (prevRow := rowData) (flat := flatNext) hk' hy' hoff'
+              hflatNext hprefix'
+          rw [decodePaletteRowsLoop.eq_1]
+          simp [hlt, hrowBound, hfilter0, rowData, hscatter, hnext]
+    have hstart :=
+      hk (bmp.size.height - 0) (y := 0) (offset := 0)
+        (prevRow := ByteArray.empty) (flat := flat0) rfl (Nat.zero_le _)
+        (by simp) hflat0 (by intro yy hyy; omega)
+    simpa [flat0] using hstart
+  unfold decodePaletteIndicesByInterlace?
+  simpa [hdr, raw, encodeRawIndexedWithFilter, packedRows, rowBytes, flat0, hloop]
 
 /-- A parsed non-interlaced 8-bit indexed PNG with stored zlib IDAT and a full
 palette decodes back to the bitmap's index bytes. This composes the raw
