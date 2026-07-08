@@ -87,6 +87,21 @@ private lemma validateIndexedBitmap_accepts_non8_full
       (by intro alpha halpha; simp [htrans] at halpha)
       (by intro idx hidx; simp [hbg] at hidx)
 
+private lemma indexedDataInRange_non8_full_of_coordinates
+    (bmp : PngIndexedBitmap)
+    (hpalSize : bmp.palette.entries.size = paletteIndexLimit bmp.bitDepth * 3)
+    (hrange :
+      ∀ y, y < bmp.size.height → ∀ x, x < bmp.size.width →
+        (bmp.data.get! (y * bmp.size.width + x)).toNat <
+          paletteIndexLimit bmp.bitDepth) :
+    indexedDataInRange bmp.data bmp.palette.entryCount = true := by
+  have hpal : bmp.palette.entryCount = paletteIndexLimit bmp.bitDepth :=
+    entryCount_of_entries_size_paletteIndexLimit bmp.palette bmp.bitDepth hpalSize
+  have hchecked :=
+    PaletteValidation.indexedDataInRange_true_of_valid_coordinates
+      bmp (paletteIndexLimit bmp.bitDepth) hrange
+  simpa [hpal] using hchecked
+
 private def encodedSpec (bmp : PngIndexedBitmap) (idat : ByteArray)
     (hw : bmp.size.width < UInt32.size) (hh : bmp.size.height < UInt32.size)
     (hpalSize : bmp.palette.entries.size = 256 * 3) : PaletteContainerSpec :=
@@ -396,7 +411,6 @@ theorem decodeIndexedBitmap_encodeIndexedBitmapChecked_stored_non8_data
     (hw : bmp.size.width < UInt32.size) (hh : bmp.size.height < UInt32.size)
     (hbd : bmp.bitDepth = 1 ∨ bmp.bitDepth = 2 ∨ bmp.bitDepth = 4)
     (hpalSize : bmp.palette.entries.size = paletteIndexLimit bmp.bitDepth * 3)
-    (hrangeChecked : indexedDataInRange bmp.data bmp.palette.entryCount = true)
     (hrange :
       ∀ y, y < bmp.size.height → ∀ x, x < bmp.size.width →
         (bmp.data.get! (y * bmp.size.width + x)).toNat <
@@ -415,6 +429,8 @@ theorem decodeIndexedBitmap_encodeIndexedBitmapChecked_stored_non8_data
   have hEncode :
       encodeIndexedBitmapChecked bmp .stored = Except.ok s.bytes := by
     unfold encodeIndexedBitmapChecked
+    have hrangeChecked :=
+      indexedDataInRange_non8_full_of_coordinates bmp hpalSize hrange
     simpa [options] using
       encodeIndexedBitmapWithOptionsChecked_stored_eq_spec_bytes_non8
         bmp hw hh hbd hpalSize hrangeChecked htrans hbg
@@ -436,7 +452,6 @@ theorem decodeIndexedBitmap_encodeIndexedBitmapChecked_fixed_non8_data
     (hw : bmp.size.width < UInt32.size) (hh : bmp.size.height < UInt32.size)
     (hbd : bmp.bitDepth = 1 ∨ bmp.bitDepth = 2 ∨ bmp.bitDepth = 4)
     (hpalSize : bmp.palette.entries.size = paletteIndexLimit bmp.bitDepth * 3)
-    (hrangeChecked : indexedDataInRange bmp.data bmp.palette.entryCount = true)
     (hrange :
       ∀ y, y < bmp.size.height → ∀ x, x < bmp.size.width →
         (bmp.data.get! (y * bmp.size.width + x)).toNat <
@@ -455,6 +470,8 @@ theorem decodeIndexedBitmap_encodeIndexedBitmapChecked_fixed_non8_data
   have hEncode :
       encodeIndexedBitmapChecked bmp .fixed = Except.ok s.bytes := by
     unfold encodeIndexedBitmapChecked
+    have hrangeChecked :=
+      indexedDataInRange_non8_full_of_coordinates bmp hpalSize hrange
     simpa [options] using
       encodeIndexedBitmapWithOptionsChecked_fixed_eq_spec_bytes_non8
         bmp hw hh hbd hpalSize hrangeChecked htrans hbg
@@ -476,7 +493,6 @@ theorem decodeIndexedBitmap_encodeIndexedBitmapChecked_dynamic_non8_data
     (hw : bmp.size.width < UInt32.size) (hh : bmp.size.height < UInt32.size)
     (hbd : bmp.bitDepth = 1 ∨ bmp.bitDepth = 2 ∨ bmp.bitDepth = 4)
     (hpalSize : bmp.palette.entries.size = paletteIndexLimit bmp.bitDepth * 3)
-    (hrangeChecked : indexedDataInRange bmp.data bmp.palette.entryCount = true)
     (hrange :
       ∀ y, y < bmp.size.height → ∀ x, x < bmp.size.width →
         (bmp.data.get! (y * bmp.size.width + x)).toNat <
@@ -495,6 +511,8 @@ theorem decodeIndexedBitmap_encodeIndexedBitmapChecked_dynamic_non8_data
   have hEncode :
       encodeIndexedBitmapChecked bmp .dynamic = Except.ok s.bytes := by
     unfold encodeIndexedBitmapChecked
+    have hrangeChecked :=
+      indexedDataInRange_non8_full_of_coordinates bmp hpalSize hrange
     simpa [options] using
       encodeIndexedBitmapWithOptionsChecked_dynamic_eq_spec_bytes_non8
         bmp hw hh hbd hpalSize hrangeChecked htrans hbg
@@ -548,7 +566,6 @@ theorem decodeIndexedBitmap_encodeIndexedBitmapChecked_non8_data
     (hw : bmp.size.width < UInt32.size) (hh : bmp.size.height < UInt32.size)
     (hbd : bmp.bitDepth = 1 ∨ bmp.bitDepth = 2 ∨ bmp.bitDepth = 4)
     (hpalSize : bmp.palette.entries.size = paletteIndexLimit bmp.bitDepth * 3)
-    (hrangeChecked : indexedDataInRange bmp.data bmp.palette.entryCount = true)
     (hrange :
       ∀ y, y < bmp.size.height → ∀ x, x < bmp.size.width →
         (bmp.data.get! (y * bmp.size.width + x)).toNat <
@@ -568,11 +585,11 @@ theorem decodeIndexedBitmap_encodeIndexedBitmapChecked_non8_data
         (decodeIndexedBitmap bytes).map (fun bitmap => bitmap.data) = some bmp.data := by
   cases mode
   · exact decodeIndexedBitmap_encodeIndexedBitmapChecked_stored_non8_data
-      bmp hw hh hbd hpalSize hrangeChecked hrange htrans hbg hIdatSize
+      bmp hw hh hbd hpalSize hrange htrans hbg hIdatSize
   · exact decodeIndexedBitmap_encodeIndexedBitmapChecked_fixed_non8_data
-      bmp hw hh hbd hpalSize hrangeChecked hrange htrans hbg hIdatSize
+      bmp hw hh hbd hpalSize hrange htrans hbg hIdatSize
   · exact decodeIndexedBitmap_encodeIndexedBitmapChecked_dynamic_non8_data
-      bmp hw hh hbd hpalSize hrangeChecked hrange htrans hbg hIdatSize
+      bmp hw hh hbd hpalSize hrange htrans hbg hIdatSize
 
 end PaletteEncoderRoundTrip
 

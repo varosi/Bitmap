@@ -193,9 +193,11 @@ This library has proofs about:
   `encodeRawGray1_size`);
 - focused indexed-palette helper facts for PNG bit-depth validation, `PLTE`
   acceptance/rejection, palette `tRNS`/`bKGD` parsing, metadata chunk-order
-  acceptance, checked encoder validation rejection paths, symbolic packed-row
+  acceptance, checked encoder validation rejection paths, Boolean range
+  validation from flat and coordinate-wise pixel bounds, symbolic packed-row
   round trips for all supported palette bit depths, and packed 1/2/4-bit public
-  API round-trip examples
+  API round-trip theorems whose checked range predicate is derived from the
+  indexed bitmap shape
   (`pngColorTypeBitDepthSupported_palette1`,
   `pngColorTypeBitDepthSupported_palette2`,
   `pngColorTypeBitDepthSupported_palette4`,
@@ -335,6 +337,8 @@ This library has proofs about:
   `PalettePackedRoundTrip.decodeBitmapWithMetadata_palette_cHRM_gAMA_metadata_fixture`,
   `PaletteValidation.validateIndexedBitmap_accepts`,
   `PaletteValidation.validateIndexedBitmap_accepts_of_paletteIndexLimit`,
+  `PaletteValidation.indexedDataInRange_true_of_forall_get!`,
+  `PaletteValidation.indexedDataInRange_true_of_valid_coordinates`,
   `PaletteValidation.encodeIndexedBitmapWithOptionsChecked_rejects_of_validate_error`,
   `PaletteValidation.validateIndexedBitmap_rejects_bad_bitDepth`,
   `PaletteValidation.validateIndexedBitmap_rejects_width_limit`,
