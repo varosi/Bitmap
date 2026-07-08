@@ -193,8 +193,9 @@ This library has proofs about:
   `encodeRawGray1_size`);
 - focused indexed-palette helper facts for PNG bit-depth validation, `PLTE`
   acceptance/rejection, palette `tRNS`/`bKGD` parsing, metadata chunk-order
-  acceptance, checked encoder validation rejection paths, and packed 1/2/4-bit
-  public API round-trip examples
+  acceptance, checked encoder validation rejection paths, symbolic packed-row
+  round trips for all supported palette bit depths, and packed 1/2/4-bit public
+  API round-trip examples
   (`pngColorTypeBitDepthSupported_palette1`,
   `pngColorTypeBitDepthSupported_palette2`,
   `pngColorTypeBitDepthSupported_palette4`,
@@ -215,6 +216,11 @@ This library has proofs about:
   `decodeAdam7PalettePasses_nil`,
   `palettePackedIndexAt_lt_indexLimit`,
   `palettePackedIndexAt_lt_entries`,
+  `palettePackedIndexAt_pack_same`,
+  `palettePackedIndexAt_pack_other`,
+  `palettePackedByteIndex_lt_rowBytes`,
+  `encodeIndexedPackedRowLoop_indices`,
+  `encodeIndexedPackedRowLoop_zeroRow_indices`,
   `pushU16Full_eq_push_sample_twice`,
   `alphaCompositeByte_opaque`,
   `alphaCompositeByte_transparent`,

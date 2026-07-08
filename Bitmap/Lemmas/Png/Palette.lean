@@ -22,6 +22,36 @@ private lemma byteArray_size_set! (row : ByteArray) (i : Nat) (v : UInt8) :
       · simp [h, Array.size_set]
       · simp [h]
 
+private lemma byteArray_get!_set!_self (row : ByteArray) (i : Nat) (v : UInt8)
+    (hi : i < row.size) :
+    (row.set! i v).get! i = v := by
+  cases row with
+  | mk arr =>
+      have hi' : i < arr.size := by simpa [ByteArray.size] using hi
+      simp [ByteArray.set!, ByteArray.get!, Array.setIfInBounds, hi']
+
+private lemma byteArray_get!_set!_ne (row : ByteArray) (i j : Nat) (v : UInt8)
+    (hij : i ≠ j) :
+    (row.set! i v).get! j = row.get! j := by
+  cases row with
+  | mk arr =>
+      simp [ByteArray.set!, ByteArray.get!, Array.setIfInBounds]
+      by_cases hi : i < arr.size
+      · by_cases hj : j < arr.size
+        · simp [hi, hj, Array.getElem_set_ne (xs := arr) (i := i) (j := j)
+            (h' := hi) (pj := hj) (h := hij)]
+        · simp [hi, hj]
+      · simp [hi]
+
+private lemma byteArray_get!_replicate_zero (rowBytes i : Nat) :
+    (ByteArray.mk <| Array.replicate rowBytes (0 : UInt8)).get! i = 0 := by
+  simp [ByteArray.get!]
+  by_cases h : i < (Array.replicate rowBytes (0 : UInt8)).size
+  · rw [getElem!_pos (Array.replicate rowBytes (0 : UInt8)) i h]
+    simp
+  · rw [getElem!_neg (Array.replicate rowBytes (0 : UInt8)) i h]
+    rfl
+
 private lemma u8_toNat_of_lt (n : Nat) (h : n < 256) :
     (u8 n).toNat = n := by
   simpa [u8, UInt8.size] using
@@ -39,6 +69,98 @@ private lemma u8_toNat_eq_self (sample : UInt8) :
   have hs : sample.toNat < 256 := by
     simpa using UInt8.toNat_lt sample
   exact UInt8.toNat.inj (u8_toNat_of_lt sample.toNat hs)
+
+private lemma packedFieldWriteSame1 (old idx : UInt8) (r : Nat)
+    (hr : r < 8) (hidx : idx.toNat < 2)
+    (hzero : (old.toNat >>> (7 - r)) % 2 = 0) :
+    u8 (((u8 (old.toNat ||| ((idx.toNat % 2) <<< (7 - r)))).toNat >>> (7 - r)) % 2) =
+      idx := by
+  have h :
+      ∀ old idx : Fin 256, ∀ r : Fin 8,
+        idx.val < 2 →
+        (old.val >>> (7 - r.val)) % 2 = 0 →
+        u8 (((u8 (old.val ||| ((idx.val % 2) <<< (7 - r.val)))).toNat >>>
+          (7 - r.val)) % 2) = u8 idx.val := by
+    native_decide
+  simpa [u8_toNat_eq_self idx] using
+    h ⟨old.toNat, UInt8.toNat_lt old⟩ ⟨idx.toNat, UInt8.toNat_lt idx⟩ ⟨r, hr⟩
+      hidx hzero
+
+private lemma packedFieldWriteSame2 (old idx : UInt8) (r : Nat)
+    (hr : r < 4) (hidx : idx.toNat < 4)
+    (hzero : (old.toNat >>> (6 - 2 * r)) % 4 = 0) :
+    u8 (((u8 (old.toNat ||| ((idx.toNat % 4) <<< (6 - 2 * r)))).toNat >>>
+      (6 - 2 * r)) % 4) = idx := by
+  have h :
+      ∀ old idx : Fin 256, ∀ r : Fin 4,
+        idx.val < 4 →
+        (old.val >>> (6 - 2 * r.val)) % 4 = 0 →
+        u8 (((u8 (old.val ||| ((idx.val % 4) <<< (6 - 2 * r.val)))).toNat >>>
+          (6 - 2 * r.val)) % 4) = u8 idx.val := by
+    native_decide
+  simpa [u8_toNat_eq_self idx] using
+    h ⟨old.toNat, UInt8.toNat_lt old⟩ ⟨idx.toNat, UInt8.toNat_lt idx⟩ ⟨r, hr⟩
+      hidx hzero
+
+private lemma packedFieldWriteSame4 (old idx : UInt8) (r : Nat)
+    (hr : r < 2) (hidx : idx.toNat < 16)
+    (hzero : (old.toNat >>> (4 - 4 * r)) % 16 = 0) :
+    u8 (((u8 (old.toNat ||| ((idx.toNat % 16) <<< (4 - 4 * r)))).toNat >>>
+      (4 - 4 * r)) % 16) = idx := by
+  have h :
+      ∀ old idx : Fin 256, ∀ r : Fin 2,
+        idx.val < 16 →
+        (old.val >>> (4 - 4 * r.val)) % 16 = 0 →
+        u8 (((u8 (old.val ||| ((idx.val % 16) <<< (4 - 4 * r.val)))).toNat >>>
+          (4 - 4 * r.val)) % 16) = u8 idx.val := by
+    native_decide
+  simpa [u8_toNat_eq_self idx] using
+    h ⟨old.toNat, UInt8.toNat_lt old⟩ ⟨idx.toNat, UInt8.toNat_lt idx⟩ ⟨r, hr⟩
+      hidx hzero
+
+private lemma packedFieldWriteOther1 (old idx : UInt8) (r s : Nat)
+    (hr : r < 8) (hs : s < 8) (hne : r ≠ s) :
+    u8 (((u8 (old.toNat ||| ((idx.toNat % 2) <<< (7 - r)))).toNat >>> (7 - s)) % 2) =
+      u8 ((old.toNat >>> (7 - s)) % 2) := by
+  have h :
+      ∀ old idx : Fin 256, ∀ r s : Fin 8,
+        r.val ≠ s.val →
+        u8 (((u8 (old.val ||| ((idx.val % 2) <<< (7 - r.val)))).toNat >>>
+          (7 - s.val)) % 2) =
+          u8 ((old.val >>> (7 - s.val)) % 2) := by
+    native_decide
+  exact
+    h ⟨old.toNat, UInt8.toNat_lt old⟩ ⟨idx.toNat, UInt8.toNat_lt idx⟩ ⟨r, hr⟩ ⟨s, hs⟩ hne
+
+private lemma packedFieldWriteOther2 (old idx : UInt8) (r s : Nat)
+    (hr : r < 4) (hs : s < 4) (hne : r ≠ s) :
+    u8 (((u8 (old.toNat ||| ((idx.toNat % 4) <<< (6 - 2 * r)))).toNat >>>
+      (6 - 2 * s)) % 4) =
+      u8 ((old.toNat >>> (6 - 2 * s)) % 4) := by
+  have h :
+      ∀ old idx : Fin 256, ∀ r s : Fin 4,
+        r.val ≠ s.val →
+        u8 (((u8 (old.val ||| ((idx.val % 4) <<< (6 - 2 * r.val)))).toNat >>>
+          (6 - 2 * s.val)) % 4) =
+          u8 ((old.val >>> (6 - 2 * s.val)) % 4) := by
+    native_decide
+  exact
+    h ⟨old.toNat, UInt8.toNat_lt old⟩ ⟨idx.toNat, UInt8.toNat_lt idx⟩ ⟨r, hr⟩ ⟨s, hs⟩ hne
+
+private lemma packedFieldWriteOther4 (old idx : UInt8) (r s : Nat)
+    (hr : r < 2) (hs : s < 2) (hne : r ≠ s) :
+    u8 (((u8 (old.toNat ||| ((idx.toNat % 16) <<< (4 - 4 * r)))).toNat >>>
+      (4 - 4 * s)) % 16) =
+      u8 ((old.toNat >>> (4 - 4 * s)) % 16) := by
+  have h :
+      ∀ old idx : Fin 256, ∀ r s : Fin 2,
+        r.val ≠ s.val →
+        u8 (((u8 (old.val ||| ((idx.val % 16) <<< (4 - 4 * r.val)))).toNat >>>
+          (4 - 4 * s.val)) % 16) =
+          u8 ((old.val >>> (4 - 4 * s.val)) % 16) := by
+    native_decide
+  exact
+    h ⟨old.toNat, UInt8.toNat_lt old⟩ ⟨idx.toNat, UInt8.toNat_lt idx⟩ ⟨r, hr⟩ ⟨s, hs⟩ hne
 
 /-- A packed palette row uses the PNG/RFC byte count formula.
 This pins the row-size helper shared by indexed encode and decode. -/
@@ -192,6 +314,325 @@ lemma palettePackedIndexAt_lt_entries (row : ByteArray) (bitDepth x entries : Na
     (hentries : paletteIndexLimit bitDepth ≤ entries) :
     (palettePackedIndexAt row bitDepth x).toNat < entries :=
   Nat.lt_of_lt_of_le (palettePackedIndexAt_lt_indexLimit row bitDepth x hbd) hentries
+
+private lemma packedZeroNat1 (row : ByteArray) (x : Nat)
+    (hzero : palettePackedIndexAt row 1 x = 0) :
+    ((row.get! (x / 8)).toNat >>> (7 - x % 8)) % 2 = 0 := by
+  have hz :
+      u8 (((row.get! (x / 8)).toNat >>> (7 - x % 8)) % 2) = 0 := by
+    simpa [palettePackedIndexAt, palettePackedShift, paletteIndexLimit] using hzero
+  have hzNat := congrArg UInt8.toNat hz
+  have hlt : ((row.get! (x / 8)).toNat >>> (7 - x % 8)) % 2 < 256 := by
+    have hmod :
+        ((row.get! (x / 8)).toNat >>> (7 - x % 8)) % 2 < 2 :=
+      Nat.mod_lt _ (by decide : 0 < 2)
+    omega
+  simpa [u8_toNat_of_lt _ hlt] using hzNat
+
+private lemma packedZeroNat2 (row : ByteArray) (x : Nat)
+    (hzero : palettePackedIndexAt row 2 x = 0) :
+    ((row.get! (x / 4)).toNat >>> (6 - 2 * (x % 4))) % 4 = 0 := by
+  have hz :
+      u8 (((row.get! (x / 4)).toNat >>> (6 - 2 * (x % 4))) % 4) = 0 := by
+    simpa [palettePackedIndexAt, palettePackedShift, paletteIndexLimit] using hzero
+  have hzNat := congrArg UInt8.toNat hz
+  have hlt : ((row.get! (x / 4)).toNat >>> (6 - 2 * (x % 4))) % 4 < 256 := by
+    have hmod :
+        ((row.get! (x / 4)).toNat >>> (6 - 2 * (x % 4))) % 4 < 4 :=
+      Nat.mod_lt _ (by decide : 0 < 4)
+    omega
+  simpa [u8_toNat_of_lt _ hlt] using hzNat
+
+private lemma packedZeroNat4 (row : ByteArray) (x : Nat)
+    (hzero : palettePackedIndexAt row 4 x = 0) :
+    ((row.get! (x / 2)).toNat >>> (4 - 4 * (x % 2))) % 16 = 0 := by
+  have hz :
+      u8 (((row.get! (x / 2)).toNat >>> (4 - 4 * (x % 2))) % 16) = 0 := by
+    simpa [palettePackedIndexAt, palettePackedShift, paletteIndexLimit] using hzero
+  have hzNat := congrArg UInt8.toNat hz
+  have hlt : ((row.get! (x / 2)).toNat >>> (4 - 4 * (x % 2))) % 16 < 256 := by
+    have hmod :
+        ((row.get! (x / 2)).toNat >>> (4 - 4 * (x % 2))) % 16 < 16 :=
+      Nat.mod_lt _ (by decide : 0 < 16)
+    omega
+  simpa [u8_toNat_of_lt _ hlt] using hzNat
+
+private lemma div_mod_ne_of_ne_of_div_eq (x y d : Nat) (_hpos : 0 < d)
+    (hdiv : x / d = y / d) (hne : x ≠ y) :
+    x % d ≠ y % d := by
+  intro hmod
+  have hx := (Nat.div_add_mod x d).symm
+  have hy := (Nat.div_add_mod y d).symm
+  apply hne
+  calc
+    x = x / d * d + x % d := by simpa [Nat.mul_comm] using hx
+    _ = y / d * d + y % d := by rw [hdiv, hmod]
+    _ = y := by simpa [Nat.mul_comm] using hy.symm
+
+/-- Reading the same packed palette position just written returns the written
+index for every supported indexed bit depth. This is the single-sample inverse
+used by packed indexed row round-trip proofs. -/
+lemma palettePackedIndexAt_pack_same (row : ByteArray) (bitDepth x : Nat) (idx : UInt8)
+    (hbd : bitDepth = 1 ∨ bitDepth = 2 ∨ bitDepth = 4 ∨ bitDepth = 8)
+    (hidx : idx.toNat < paletteIndexLimit bitDepth)
+    (hbyte : x / (8 / bitDepth) < row.size)
+    (hzero : palettePackedIndexAt row bitDepth x = 0) :
+    palettePackedIndexAt (palettePackIndexIntoRow row bitDepth x idx) bitDepth x = idx := by
+  rcases hbd with rfl | rfl | rfl | rfl
+  · have hbyte' : x / 8 < row.size := by simpa using hbyte
+    have hidx' : idx.toNat < 2 := by simpa [paletteIndexLimit] using hidx
+    have hz := packedZeroNat1 row x hzero
+    unfold palettePackedIndexAt palettePackIndexIntoRow
+    simp [palettePackedShift, paletteIndexLimit, byteArray_get!_set!_self _ _ _ hbyte']
+    exact packedFieldWriteSame1 (row.get! (x / 8)) idx (x % 8)
+      (Nat.mod_lt _ (by decide : 0 < 8)) hidx' hz
+  · have hbyte' : x / 4 < row.size := by simpa using hbyte
+    have hidx' : idx.toNat < 4 := by simpa [paletteIndexLimit] using hidx
+    have hz := packedZeroNat2 row x hzero
+    unfold palettePackedIndexAt palettePackIndexIntoRow
+    simp [palettePackedShift, paletteIndexLimit, byteArray_get!_set!_self _ _ _ hbyte']
+    exact packedFieldWriteSame2 (row.get! (x / 4)) idx (x % 4)
+      (Nat.mod_lt _ (by decide : 0 < 4)) hidx' hz
+  · have hbyte' : x / 2 < row.size := by simpa using hbyte
+    have hidx' : idx.toNat < 16 := by simpa [paletteIndexLimit] using hidx
+    have hz := packedZeroNat4 row x hzero
+    unfold palettePackedIndexAt palettePackIndexIntoRow
+    simp [palettePackedShift, paletteIndexLimit, byteArray_get!_set!_self _ _ _ hbyte']
+    exact packedFieldWriteSame4 (row.get! (x / 2)) idx (x % 2)
+      (Nat.mod_lt _ (by decide : 0 < 2)) hidx' hz
+  · have hbyte' : x < row.size := by simpa using hbyte
+    unfold palettePackedIndexAt palettePackIndexIntoRow
+    simp [byteArray_get!_set!_self _ _ _ hbyte']
+
+/-- Packing one palette index does not change any other packed sample in the
+row. This is the non-overlap fact needed by packed row induction and Adam7
+scatter proofs. -/
+lemma palettePackedIndexAt_pack_other (row : ByteArray) (bitDepth x y : Nat) (idx : UInt8)
+    (hbd : bitDepth = 1 ∨ bitDepth = 2 ∨ bitDepth = 4 ∨ bitDepth = 8)
+    (hbyte : x / (8 / bitDepth) < row.size)
+    (hne : x ≠ y) :
+    palettePackedIndexAt (palettePackIndexIntoRow row bitDepth x idx) bitDepth y =
+      palettePackedIndexAt row bitDepth y := by
+  rcases hbd with rfl | rfl | rfl | rfl
+  · have hxbyte : x / 8 < row.size := by simpa using hbyte
+    unfold palettePackedIndexAt palettePackIndexIntoRow
+    by_cases hsame : x / 8 = y / 8
+    · have hmodne : x % 8 ≠ y % 8 :=
+        div_mod_ne_of_ne_of_div_eq x y 8 (by decide) hsame hne
+      rw [← hsame]
+      simp [palettePackedShift, paletteIndexLimit,
+        byteArray_get!_set!_self _ _ _ hxbyte]
+      exact packedFieldWriteOther1 (row.get! (x / 8)) idx (x % 8) (y % 8)
+        (Nat.mod_lt _ (by decide : 0 < 8)) (Nat.mod_lt _ (by decide : 0 < 8)) hmodne
+    · simp [palettePackedShift, paletteIndexLimit,
+        byteArray_get!_set!_ne _ _ _ _ hsame]
+  · have hxbyte : x / 4 < row.size := by simpa using hbyte
+    unfold palettePackedIndexAt palettePackIndexIntoRow
+    by_cases hsame : x / 4 = y / 4
+    · have hmodne : x % 4 ≠ y % 4 :=
+        div_mod_ne_of_ne_of_div_eq x y 4 (by decide) hsame hne
+      rw [← hsame]
+      simp [palettePackedShift, paletteIndexLimit,
+        byteArray_get!_set!_self _ _ _ hxbyte]
+      exact packedFieldWriteOther2 (row.get! (x / 4)) idx (x % 4) (y % 4)
+        (Nat.mod_lt _ (by decide : 0 < 4)) (Nat.mod_lt _ (by decide : 0 < 4)) hmodne
+    · simp [palettePackedShift, paletteIndexLimit,
+        byteArray_get!_set!_ne _ _ _ _ hsame]
+  · have hxbyte : x / 2 < row.size := by simpa using hbyte
+    unfold palettePackedIndexAt palettePackIndexIntoRow
+    by_cases hsame : x / 2 = y / 2
+    · have hmodne : x % 2 ≠ y % 2 :=
+        div_mod_ne_of_ne_of_div_eq x y 2 (by decide) hsame hne
+      rw [← hsame]
+      simp [palettePackedShift, paletteIndexLimit,
+        byteArray_get!_set!_self _ _ _ hxbyte]
+      exact packedFieldWriteOther4 (row.get! (x / 2)) idx (x % 2) (y % 2)
+        (Nat.mod_lt _ (by decide : 0 < 2)) (Nat.mod_lt _ (by decide : 0 < 2)) hmodne
+    · simp [palettePackedShift, paletteIndexLimit,
+        byteArray_get!_set!_ne _ _ _ _ hsame]
+  · unfold palettePackedIndexAt palettePackIndexIntoRow
+    simp [byteArray_get!_set!_ne _ _ _ _ hne]
+
+private lemma palettePackIndexIntoRow_size_core
+    (row : ByteArray) (bitDepth x : Nat) (idx : UInt8) :
+    (palettePackIndexIntoRow row bitDepth x idx).size = row.size := by
+  unfold palettePackIndexIntoRow
+  by_cases h8 : bitDepth == 8
+  · rw [if_pos h8]
+    exact byteArray_size_set! row x idx
+  · rw [if_neg h8]
+    exact byteArray_size_set! row (x / (8 / bitDepth))
+        (u8 ((row.get! (x / (8 / bitDepth))).toNat |||
+          (idx.toNat % paletteIndexLimit bitDepth) <<< palettePackedShift bitDepth x))
+
+/-- The byte containing a supported packed palette sample lies inside the
+allocated packed row. This is the bounds bridge from image width to row bytes. -/
+lemma palettePackedByteIndex_lt_rowBytes (w bitDepth x : Nat)
+    (hbd : bitDepth = 1 ∨ bitDepth = 2 ∨ bitDepth = 4 ∨ bitDepth = 8)
+    (hx : x < w) :
+    x / (8 / bitDepth) < paletteRowBytes w bitDepth := by
+  rcases hbd with rfl | rfl | rfl | rfl
+  · rw [paletteRowBytes_1]
+    change x / 8 < (w + 7) / 8
+    apply Nat.div_lt_of_lt_mul
+    have hceil : w ≤ ((w + 7) / 8) * 8 := by omega
+    exact Nat.lt_of_lt_of_le hx (by simpa [Nat.mul_comm] using hceil)
+  · rw [paletteRowBytes_2]
+    change x / 4 < (w + 3) / 4
+    apply Nat.div_lt_of_lt_mul
+    have hceil : w ≤ ((w + 3) / 4) * 4 := by omega
+    exact Nat.lt_of_lt_of_le hx (by simpa [Nat.mul_comm] using hceil)
+  · rw [paletteRowBytes_4]
+    change x / 2 < (w + 1) / 2
+    apply Nat.div_lt_of_lt_mul
+    have hceil : w ≤ ((w + 1) / 2) * 2 := by omega
+    exact Nat.lt_of_lt_of_le hx (by simpa [Nat.mul_comm] using hceil)
+  · rw [paletteRowBytes_8]
+    simpa using hx
+
+private lemma palettePackedIndexAt_zeroRow (rowBytes bitDepth x : Nat)
+    (hbd : bitDepth = 1 ∨ bitDepth = 2 ∨ bitDepth = 4 ∨ bitDepth = 8) :
+    palettePackedIndexAt (ByteArray.mk <| Array.replicate rowBytes 0) bitDepth x = 0 := by
+  rcases hbd with rfl | rfl | rfl | rfl <;>
+    simp [palettePackedIndexAt, palettePackedShift, paletteIndexLimit,
+      byteArray_get!_replicate_zero, u8]
+
+/-- Packing the remaining indices of one row preserves already-written samples,
+writes every later sample, and leaves no source index changed. This is the
+row-local arbitrary-width inverse for supported packed palette bit depths. -/
+lemma encodeIndexedPackedRowLoop_indices
+    (bmp : PngIndexedBitmap)
+    (hbd : bmp.bitDepth = 1 ∨ bmp.bitDepth = 2 ∨ bmp.bitDepth = 4 ∨ bmp.bitDepth = 8)
+    (rowBytes y x : Nat) (row : ByteArray)
+    (hrowBytes : rowBytes = paletteRowBytes bmp.size.width bmp.bitDepth)
+    (hrow : row.size = rowBytes)
+    (hrange :
+      ∀ z, z < bmp.size.width →
+        (bmp.data.get! (y * bmp.size.width + z)).toNat < paletteIndexLimit bmp.bitDepth)
+    (hprefix :
+      ∀ z, z < bmp.size.width → z < x →
+        palettePackedIndexAt row bmp.bitDepth z =
+          bmp.data.get! (y * bmp.size.width + z))
+    (hzero :
+      ∀ z, z < bmp.size.width → x ≤ z →
+        palettePackedIndexAt row bmp.bitDepth z = 0) :
+    ∀ z, z < bmp.size.width →
+      palettePackedIndexAt (encodeIndexedPackedRowLoop bmp rowBytes y x row)
+        bmp.bitDepth z = bmp.data.get! (y * bmp.size.width + z) := by
+  have hk :
+      ∀ k, ∀ x row,
+        bmp.size.width - x = k →
+        row.size = rowBytes →
+        (∀ z, z < bmp.size.width → z < x →
+          palettePackedIndexAt row bmp.bitDepth z =
+            bmp.data.get! (y * bmp.size.width + z)) →
+        (∀ z, z < bmp.size.width → x ≤ z →
+          palettePackedIndexAt row bmp.bitDepth z = 0) →
+        ∀ z, z < bmp.size.width →
+          palettePackedIndexAt (encodeIndexedPackedRowLoop bmp rowBytes y x row)
+            bmp.bitDepth z = bmp.data.get! (y * bmp.size.width + z) := by
+    intro k
+    induction k with
+    | zero =>
+        intro x row hk hrow hprefix hzero z hz
+        have hxge : bmp.size.width ≤ x := Nat.le_of_sub_eq_zero hk
+        have hlt : ¬ x < bmp.size.width := not_lt_of_ge hxge
+        have hzltx : z < x := Nat.lt_of_lt_of_le hz hxge
+        simp [encodeIndexedPackedRowLoop, hlt, hprefix z hz hzltx]
+    | succ k ih =>
+        intro x row hk hrow hprefix hzero z hz
+        have hlt : x < bmp.size.width := Nat.lt_of_sub_eq_succ hk
+        let idx := bmp.data.get! (y * bmp.size.width + x)
+        let row' := palettePackIndexIntoRow row bmp.bitDepth x idx
+        have hbyte : x / (8 / bmp.bitDepth) < row.size := by
+          rw [hrow, hrowBytes]
+          exact palettePackedByteIndex_lt_rowBytes bmp.size.width bmp.bitDepth x hbd hlt
+        have hsame :
+            palettePackedIndexAt row' bmp.bitDepth x = idx := by
+          simpa [row'] using
+            palettePackedIndexAt_pack_same row bmp.bitDepth x idx hbd (hrange x hlt)
+              hbyte (hzero x hlt le_rfl)
+        have hrow' : row'.size = rowBytes := by
+          simpa [row'] using
+            (palettePackIndexIntoRow_size_core row bmp.bitDepth x idx).trans hrow
+        have hprefix' :
+            ∀ z, z < bmp.size.width → z < x + 1 →
+              palettePackedIndexAt row' bmp.bitDepth z =
+                bmp.data.get! (y * bmp.size.width + z) := by
+          intro z hz hzlt
+          by_cases hzx : z = x
+          · subst z
+            simpa [idx] using hsame
+          · have hzltx : z < x := by omega
+            have hother :
+                palettePackedIndexAt row' bmp.bitDepth z =
+                  palettePackedIndexAt row bmp.bitDepth z := by
+              simpa [row'] using
+                palettePackedIndexAt_pack_other row bmp.bitDepth x z idx hbd hbyte
+                  (by exact fun h => hzx h.symm)
+            exact hother.trans (hprefix z hz hzltx)
+        have hzero' :
+            ∀ z, z < bmp.size.width → x + 1 ≤ z →
+              palettePackedIndexAt row' bmp.bitDepth z = 0 := by
+          intro z hz hxz
+          have hne : x ≠ z := by omega
+          have hother :
+              palettePackedIndexAt row' bmp.bitDepth z =
+                palettePackedIndexAt row bmp.bitDepth z := by
+            simpa [row'] using
+              palettePackedIndexAt_pack_other row bmp.bitDepth x z idx hbd hbyte hne
+          exact hother.trans (hzero z hz (by omega))
+        have hk' : bmp.size.width - (x + 1) = k := by
+          have hsum : bmp.size.width = Nat.succ k + x :=
+            Nat.eq_add_of_sub_eq (Nat.le_of_lt hlt) hk
+          calc
+            bmp.size.width - (x + 1) = (Nat.succ k + x) - (x + 1) := by simp [hsum]
+            _ = k := by omega
+        have hnext :=
+          ih (x := x + 1) (row := row') hk' hrow' hprefix' hzero' z hz
+        have hdef :=
+          congrArg (fun f => palettePackedIndexAt f bmp.bitDepth z)
+            (encodeIndexedPackedRowLoop.eq_1
+              (bmp := bmp) (rowBytes := rowBytes) (y := y) (x := x) (row := row))
+        calc
+          palettePackedIndexAt (encodeIndexedPackedRowLoop bmp rowBytes y x row)
+              bmp.bitDepth z =
+            palettePackedIndexAt
+              (if x < bmp.size.width then
+                encodeIndexedPackedRowLoop bmp rowBytes y (x + 1) row'
+               else row) bmp.bitDepth z := by
+                simpa [row'] using hdef
+          _ = palettePackedIndexAt
+              (encodeIndexedPackedRowLoop bmp rowBytes y (x + 1) row')
+              bmp.bitDepth z := by simp [hlt]
+          _ = bmp.data.get! (y * bmp.size.width + z) := hnext
+  exact hk (bmp.size.width - x) x row rfl hrow hprefix hzero
+
+/-- Starting from a zero row, packing one indexed source row round-trips through
+`palettePackedIndexAt` at every column for every supported palette bit depth. -/
+lemma encodeIndexedPackedRowLoop_zeroRow_indices
+    (bmp : PngIndexedBitmap)
+    (hbd : bmp.bitDepth = 1 ∨ bmp.bitDepth = 2 ∨ bmp.bitDepth = 4 ∨ bmp.bitDepth = 8)
+    (y : Nat)
+    (hrange :
+      ∀ z, z < bmp.size.width →
+        (bmp.data.get! (y * bmp.size.width + z)).toNat < paletteIndexLimit bmp.bitDepth) :
+    let rowBytes := paletteRowBytes bmp.size.width bmp.bitDepth
+    let row0 := ByteArray.mk <| Array.replicate rowBytes 0
+    ∀ z, z < bmp.size.width →
+      palettePackedIndexAt (encodeIndexedPackedRowLoop bmp rowBytes y 0 row0)
+        bmp.bitDepth z = bmp.data.get! (y * bmp.size.width + z) := by
+  intro rowBytes row0
+  have hrow : row0.size = rowBytes := by
+    simp [row0, ByteArray.size, Array.size_replicate]
+  exact
+    encodeIndexedPackedRowLoop_indices
+      (bmp := bmp) hbd (rowBytes := rowBytes) (y := y) (x := 0) (row := row0)
+      (by rfl) hrow hrange
+      (by intro z _ hzlt; omega)
+      (by
+        intro z hz _
+        exact palettePackedIndexAt_zeroRow rowBytes bmp.bitDepth z hbd)
 
 private lemma u8_mul257_div256_eq_self (sample : UInt8) :
     u8 (sample.toNat * 257 / 256) = sample := by
