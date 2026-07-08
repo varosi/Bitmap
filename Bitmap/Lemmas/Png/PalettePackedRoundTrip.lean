@@ -361,6 +361,44 @@ private def decodeIndexedMetadataDataAfterCheckedEncodeWithOptions
       (decodeIndexedBitmapWithMetadata bytes).map (fun result => result.bitmap.data)
   | .error _ => none
 
+private def indexedBitmapRuntimeMatches (actual expected : PngIndexedBitmap) : Bool :=
+  actual.size == expected.size &&
+    actual.bitDepth == expected.bitDepth &&
+    decide (actual.palette = expected.palette) &&
+    decide (actual.data = expected.data) &&
+    decide (actual.transparency = expected.transparency) &&
+    decide (actual.background = expected.background)
+
+private def decodeIndexedShapeMatchesAfterCheckedEncodeWithOptions
+    (bmp : PngIndexedBitmap) (options : PngEncodeOptions) : Bool :=
+  match encodeIndexedBitmapWithOptionsChecked bmp options with
+  | .ok bytes =>
+      match decodeIndexedBitmap bytes with
+      | some decoded => indexedBitmapRuntimeMatches decoded bmp
+      | none => false
+  | .error _ => false
+
+private def decodeIndexedMetadataShapeMatchesAfterCheckedEncodeWithOptions
+    (bmp : PngIndexedBitmap) (expectedMetadata : PngMetadata)
+    (options : PngEncodeOptions) : Bool :=
+  match encodeIndexedBitmapWithOptionsChecked bmp options with
+  | .ok bytes =>
+      match decodeIndexedBitmapWithMetadata bytes with
+      | some decoded =>
+          indexedBitmapRuntimeMatches decoded.bitmap bmp &&
+            decide (decoded.metadata = expectedMetadata)
+      | none => false
+  | .error _ => false
+
+private def paletteOnlyMetadata (palette : PngPalette) : PngMetadata :=
+  { PngMetadata.empty with palette := some palette }
+
+private def alphaFixtureMetadata : PngMetadata :=
+  { PngMetadata.empty with
+    palette := some alphaFixtureBitmap.palette
+    transparency := some (.paletteAlpha alphaFixture)
+    background := some (.paletteIndex (u8 1)) }
+
 /-- For every supported PNG palette bit depth, there is an explicit indexed
 bitmap whose checked encoder round-trips through both exact indexed decoders.
 This quantifies over all compression modes and covers the packed 1/2/4-bit
@@ -390,6 +428,26 @@ theorem checked_fixed_filter_roundtrip_fixture_for_supported_bitDepth
           { mode := .fixed, filter := .fixed rowFilter } = some bmp.data ∧
         decodeIndexedMetadataDataAfterCheckedEncodeWithOptions bmp
           { mode := .fixed, filter := .fixed rowFilter } = some bmp.data := by
+  rcases hbd with rfl | rfl | rfl | rfl
+  · refine ⟨indexed1, rfl, ?_, ?_⟩ <;> cases rowFilter <;> native_decide
+  · refine ⟨indexed2, rfl, ?_, ?_⟩ <;> cases rowFilter <;> native_decide
+  · refine ⟨indexed4, rfl, ?_, ?_⟩ <;> cases rowFilter <;> native_decide
+  · refine ⟨indexed8, rfl, ?_, ?_⟩ <;> cases rowFilter <;> native_decide
+
+/-- For every supported PNG palette bit depth and every fixed PNG row filter, a
+concrete checked indexed encode/decode round-trip preserves the complete exact
+indexed bitmap shape and parsed palette metadata. This strengthens the
+data-only fixed-filter fixture theorem. -/
+theorem checked_fixed_filter_shape_fixture_for_supported_bitDepth
+    (bitDepth : Nat) (rowFilter : PngRowFilter)
+    (hbd : bitDepth = 1 ∨ bitDepth = 2 ∨ bitDepth = 4 ∨ bitDepth = 8) :
+    ∃ bmp,
+      bmp.bitDepth = bitDepth ∧
+        decodeIndexedShapeMatchesAfterCheckedEncodeWithOptions bmp
+          { mode := .fixed, filter := .fixed rowFilter } = true ∧
+        decodeIndexedMetadataShapeMatchesAfterCheckedEncodeWithOptions bmp
+          (paletteOnlyMetadata bmp.palette)
+          { mode := .fixed, filter := .fixed rowFilter } = true := by
   rcases hbd with rfl | rfl | rfl | rfl
   · refine ⟨indexed1, rfl, ?_, ?_⟩ <;> cases rowFilter <;> native_decide
   · refine ⟨indexed2, rfl, ?_, ?_⟩ <;> cases rowFilter <;> native_decide
@@ -493,6 +551,21 @@ theorem decodeIndexedBitmap_adam7_fixture_for_supported_bitDepth
             fixtureData 9 7 (paletteIndexLimit bitDepth)) := by
   rcases hbd with rfl | rfl | rfl | rfl <;> native_decide
 
+/-- For every supported indexed bit depth, metadata-aware Adam7 palette fixture
+decoding reconstructs the complete exact indexed bitmap shape and preserves the
+parsed palette metadata. -/
+theorem decodeIndexedBitmapWithMetadata_adam7_fixture_for_supported_bitDepth_shape
+    (bitDepth : Nat)
+    (hbd : bitDepth = 1 ∨ bitDepth = 2 ∨ bitDepth = 4 ∨ bitDepth = 8) :
+    (match decodeIndexedBitmapWithMetadata (fixtureAdam7BytesFor bitDepth) with
+    | some decoded =>
+        indexedBitmapRuntimeMatches decoded.bitmap
+          (fixtureBitmap 9 7 bitDepth (paletteIndexLimit bitDepth)) &&
+          decide (decoded.metadata = paletteOnlyMetadata
+            (fixturePalette (paletteIndexLimit bitDepth)))
+    | none => false) = true := by
+  rcases hbd with rfl | rfl | rfl | rfl <;> native_decide
+
 /-- Adam7 interlaced 2-bit palette fixture decoding reconstructs the exact
 one-byte-per-pixel index buffer. This compatibility wrapper is covered by the
 all-supported-bit-depth Adam7 theorem. -/
@@ -509,6 +582,16 @@ theorem decodeIndexedBitmap_multiIDAT_4bit_fixture :
     (decodeIndexedBitmap multiIdatFixtureBytes).map
       (fun decoded => (decoded.bitDepth, decoded.palette, decoded.data)) =
         some (4, multiIdatFixtureBitmap.palette, multiIdatFixtureBitmap.data) := by
+  native_decide
+
+/-- Split-IDAT 4-bit palette fixture decoding also reconstructs the complete
+metadata-aware indexed bitmap shape. -/
+theorem decodeIndexedBitmapWithMetadata_multiIDAT_4bit_fixture_shape :
+    (match decodeIndexedBitmapWithMetadata multiIdatFixtureBytes with
+    | some decoded =>
+        indexedBitmapRuntimeMatches decoded.bitmap multiIdatFixtureBitmap &&
+          decide (decoded.metadata = paletteOnlyMetadata multiIdatFixtureBitmap.palette)
+    | none => false) = true := by
   native_decide
 
 /-- Palette `tRNS` metadata expands to RGBA8 alpha bytes for the fixture and
@@ -532,6 +615,13 @@ theorem decodeBitmapWithMetadata_palette_tRNS_bKGD_RGB8_fixture :
         some (fixtureExpectedRGB8Data 5 4 4 (some alphaFixture) (some (u8 1))) := by
   native_decide
 
+/-- Pixel-only palette bitmap decode rejects `tRNS` for the alpha fixture; callers
+must use the metadata-aware API to opt into palette transparency handling. -/
+theorem decodeBitmap_palette_tRNS_pixelOnly_rejects_RGBA8_fixture :
+    (alphaFixtureBytes?.bind (fun bytes =>
+      (decodeBitmap (px := PixelRGBA8) bytes).map (fun _ => ()))) = none := by
+  native_decide
+
 /-- Exact indexed metadata decode preserves palette alpha and background index
 fields on the returned indexed bitmap without expanding the index buffer. -/
 theorem decodeIndexedBitmapWithMetadata_palette_tRNS_bKGD_fixture :
@@ -549,6 +639,15 @@ theorem decodeIndexedBitmapWithMetadata_palette_metadata_fixture :
       (decodeIndexedBitmapWithMetadata bytes).map
         (fun decoded => (decoded.metadata.transparency, decoded.metadata.background)))) =
         some (some (.paletteAlpha alphaFixture), some (.paletteIndex (u8 1))) := by
+  native_decide
+
+/-- Exact indexed metadata decode preserves the complete indexed bitmap runtime
+shape and parsed palette alpha/background metadata for the alpha fixture. -/
+theorem decodeIndexedBitmapWithMetadata_palette_tRNS_bKGD_shape_fixture :
+    (alphaFixtureBytes?.bind (fun bytes =>
+      (decodeIndexedBitmapWithMetadata bytes).map (fun decoded =>
+        indexedBitmapRuntimeMatches decoded.bitmap alphaFixtureBitmap &&
+          decide (decoded.metadata = alphaFixtureMetadata)))) = some true := by
   native_decide
 
 /-- Palette decode expands 8-bit `PLTE` entries into full-range RGB16 samples

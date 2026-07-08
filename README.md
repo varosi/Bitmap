@@ -19,6 +19,7 @@ subset carry full round-trip correctness proofs; packed 1-bit grayscale and
 explicit indexed-palette paths currently have focused layout, validation,
 packed-row, raw decoder, parsed/container, exact indexed runtime-shape, and
 checked-encoder filter-0 round-trip proofs for supported bit depths, plus
+fixed-filter, Adam7, multi-IDAT, palette-transparency/background, and expansion
 runtime fixture coverage.
 
 ### Encoder
@@ -334,6 +335,7 @@ This library has proofs about:
   `PaletteEncoderRoundTrip.decodeIndexedBitmap_encodeIndexedBitmapChecked_paletteRange_shape`,
   `PalettePackedRoundTrip.checked_roundtrip_fixture_for_supported_bitDepth`,
   `PalettePackedRoundTrip.checked_fixed_filter_roundtrip_fixture_for_supported_bitDepth`,
+  `PalettePackedRoundTrip.checked_fixed_filter_shape_fixture_for_supported_bitDepth`,
   `PalettePackedRoundTrip.checked_stored_1bit_fixture_data`,
   `PalettePackedRoundTrip.checked_fixed_1bit_fixture_data`,
   `PalettePackedRoundTrip.checked_dynamic_1bit_fixture_data`,
@@ -347,12 +349,16 @@ This library has proofs about:
   `PalettePackedRoundTrip.checked_fixed_8bit_fixture_data`,
   `PalettePackedRoundTrip.checked_dynamic_8bit_fixture_data`,
   `PalettePackedRoundTrip.decodeIndexedBitmap_adam7_fixture_for_supported_bitDepth`,
+  `PalettePackedRoundTrip.decodeIndexedBitmapWithMetadata_adam7_fixture_for_supported_bitDepth_shape`,
   `PalettePackedRoundTrip.decodeIndexedBitmap_adam7_2bit_fixture`,
   `PalettePackedRoundTrip.decodeIndexedBitmap_multiIDAT_4bit_fixture`,
+  `PalettePackedRoundTrip.decodeIndexedBitmapWithMetadata_multiIDAT_4bit_fixture_shape`,
   `PalettePackedRoundTrip.decodeBitmapWithMetadata_palette_tRNS_RGBA8_fixture`,
   `PalettePackedRoundTrip.decodeBitmapWithMetadata_palette_tRNS_bKGD_RGB8_fixture`,
+  `PalettePackedRoundTrip.decodeBitmap_palette_tRNS_pixelOnly_rejects_RGBA8_fixture`,
   `PalettePackedRoundTrip.decodeIndexedBitmapWithMetadata_palette_tRNS_bKGD_fixture`,
   `PalettePackedRoundTrip.decodeIndexedBitmapWithMetadata_palette_metadata_fixture`,
+  `PalettePackedRoundTrip.decodeIndexedBitmapWithMetadata_palette_tRNS_bKGD_shape_fixture`,
   `PalettePackedRoundTrip.decodeBitmap_palette_RGB16_fixture`,
   `PalettePackedRoundTrip.decodeBitmap_palette_RGBA16_fixture`,
   `PalettePackedRoundTrip.decodeBitmap_palette_Gray16_fixture`,
