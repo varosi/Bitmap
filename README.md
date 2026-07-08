@@ -279,6 +279,8 @@ This library has proofs about:
   `PaletteContainerSpec.decodeIndexedBitmap_stored_encodeRawIndexed_none_8_256_data`,
   `PaletteContainerSpec.decodeIndexedBitmap_fixed_encodeRawIndexed_none_8_256_data`,
   `PaletteContainerSpec.decodeIndexedBitmap_dynamic_encodeRawIndexed_none_8_256_data`,
+  `ExternalIndexedPalettePngSpec.decodeIndexedBitmapWithMetadata_external_correct`,
+  `ExternalIndexedPalettePngSpec.decodeIndexedBitmap_external_correct`,
   `PaletteEncoderRoundTrip.decodeIndexedBitmap_encodeIndexedBitmapChecked_8_256_data`,
   `PaletteEncoderRoundTrip.decodeIndexedBitmap_encodeIndexedBitmapChecked_stored_8_256_data`,
   `PaletteEncoderRoundTrip.decodeIndexedBitmap_encodeIndexedBitmapChecked_fixed_8_256_data`,
