@@ -266,10 +266,14 @@ private def fixtureExpectedGrayAlpha16Data (w h entryCount : Nat)
         out := pushU16Full out (fixtureAlphaAt alpha? idx)
     return out
 
+private def fixtureAdam7BytesFor (bitDepth : Nat) : ByteArray :=
+  let entryCount := paletteIndexLimit bitDepth
+  fixturePngWithChunks 9 7 bitDepth 1
+    (mkChunkBytes plteTypeBytes (fixturePaletteEntries entryCount))
+    (fixtureAdam7Raw 9 7 bitDepth entryCount)
+
 private def fixtureAdam7Bytes : ByteArray :=
-  fixturePngWithChunks 9 7 2 1
-    (mkChunkBytes plteTypeBytes (fixturePaletteEntries 4))
-    (fixtureAdam7Raw 9 7 2 4)
+  fixtureAdam7BytesFor 2
 
 private def multiIdatFixtureBitmap : PngIndexedBitmap :=
   fixtureBitmap 7 3 4 16
@@ -476,13 +480,28 @@ theorem checked_dynamic_8bit_fixture_data :
       decodeIndexedMetadataDataAfterCheckedEncode indexed8 .dynamic = some indexed8.data := by
   native_decide
 
+/-- For every supported indexed bit depth, Adam7 palette fixture decoding
+reconstructs the exact one-byte-per-pixel index buffer. This generalizes the
+interlaced packed-path fixture beyond the original 2-bit case. -/
+theorem decodeIndexedBitmap_adam7_fixture_for_supported_bitDepth
+    (bitDepth : Nat)
+    (hbd : bitDepth = 1 ∨ bitDepth = 2 ∨ bitDepth = 4 ∨ bitDepth = 8) :
+    (decodeIndexedBitmap (fixtureAdam7BytesFor bitDepth)).map
+      (fun decoded => (decoded.bitDepth, decoded.palette, decoded.data)) =
+        some
+          (bitDepth, fixturePalette (paletteIndexLimit bitDepth),
+            fixtureData 9 7 (paletteIndexLimit bitDepth)) := by
+  rcases hbd with rfl | rfl | rfl | rfl <;> native_decide
+
 /-- Adam7 interlaced 2-bit palette fixture decoding reconstructs the exact
-one-byte-per-pixel index buffer. This covers the packed interlace path. -/
+one-byte-per-pixel index buffer. This compatibility wrapper is covered by the
+all-supported-bit-depth Adam7 theorem. -/
 theorem decodeIndexedBitmap_adam7_2bit_fixture :
     (decodeIndexedBitmap fixtureAdam7Bytes).map
       (fun decoded => (decoded.bitDepth, decoded.palette, decoded.data)) =
         some (2, fixturePalette 4, fixtureData 9 7 4) := by
-  native_decide
+  simpa [fixtureAdam7Bytes, fixtureAdam7BytesFor, paletteIndexLimit] using
+    decodeIndexedBitmap_adam7_fixture_for_supported_bitDepth 2 (by simp)
 
 /-- Split-IDAT 4-bit palette fixture decoding reconstructs the exact indexed
 bitmap data and palette. This pins multi-IDAT palette accumulation. -/

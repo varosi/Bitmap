@@ -296,6 +296,7 @@ This library has proofs about:
   `PalettePackedRoundTrip.checked_stored_8bit_fixture_data`,
   `PalettePackedRoundTrip.checked_fixed_8bit_fixture_data`,
   `PalettePackedRoundTrip.checked_dynamic_8bit_fixture_data`,
+  `PalettePackedRoundTrip.decodeIndexedBitmap_adam7_fixture_for_supported_bitDepth`,
   `PalettePackedRoundTrip.decodeIndexedBitmap_adam7_2bit_fixture`,
   `PalettePackedRoundTrip.decodeIndexedBitmap_multiIDAT_4bit_fixture`,
   `PalettePackedRoundTrip.decodeBitmapWithMetadata_palette_tRNS_RGBA8_fixture`,
