@@ -591,6 +591,53 @@ theorem decodeIndexedBitmap_encodeIndexedBitmapChecked_non8_data
   · exact decodeIndexedBitmap_encodeIndexedBitmapChecked_dynamic_non8_data
       bmp hw hh hbd hpalSize hrange htrans hbg hIdatSize
 
+/-- Checked indexed encode/decode round-trips every supported palette bit depth
+when the explicit palette fills that bit depth's addressable index range. This
+packages the 8-bit byte path and 1/2/4-bit packed path behind one theorem. -/
+theorem decodeIndexedBitmap_encodeIndexedBitmapChecked_supported_bitDepth_data
+    (mode : PngEncodeMode)
+    (bmp : PngIndexedBitmap)
+    (hw : bmp.size.width < UInt32.size) (hh : bmp.size.height < UInt32.size)
+    (hbd : bmp.bitDepth = 1 ∨ bmp.bitDepth = 2 ∨ bmp.bitDepth = 4 ∨ bmp.bitDepth = 8)
+    (hpalSize : bmp.palette.entries.size = paletteIndexLimit bmp.bitDepth * 3)
+    (hrange :
+      ∀ y, y < bmp.size.height → ∀ x, x < bmp.size.width →
+        (bmp.data.get! (y * bmp.size.width + x)).toNat <
+          paletteIndexLimit bmp.bitDepth)
+    (htrans : bmp.transparency = none)
+    (hbg : bmp.background = none)
+    (hIdatSize :
+      (match mode with
+       | .stored => zlibCompressStored (encodeRawIndexedWithFilter bmp .none)
+       | .fixed => zlibCompressFixed (encodeRawIndexedWithFilter bmp .none)
+       | .dynamic => zlibCompressDynamic (encodeRawIndexedWithFilter bmp .none)).size
+        < 2 ^ 32) :
+    ∃ bytes,
+      encodeIndexedBitmapChecked bmp mode = Except.ok bytes ∧
+        (decodeIndexedBitmapWithMetadata bytes).map (fun result => result.bitmap.data) =
+          some bmp.data ∧
+        (decodeIndexedBitmap bytes).map (fun bitmap => bitmap.data) = some bmp.data := by
+  rcases hbd with hbd | hbd | hbd | hbd
+  · exact decodeIndexedBitmap_encodeIndexedBitmapChecked_non8_data
+      mode bmp hw hh (Or.inl hbd) hpalSize hrange htrans hbg hIdatSize
+  · exact decodeIndexedBitmap_encodeIndexedBitmapChecked_non8_data
+      mode bmp hw hh (Or.inr (Or.inl hbd)) hpalSize hrange htrans hbg hIdatSize
+  · exact decodeIndexedBitmap_encodeIndexedBitmapChecked_non8_data
+      mode bmp hw hh (Or.inr (Or.inr hbd)) hpalSize hrange htrans hbg hIdatSize
+  · have hpalSize256 : bmp.palette.entries.size = 256 * 3 := by
+      simpa [hbd, paletteIndexLimit] using hpalSize
+    have hpal : bmp.palette.entryCount = 256 :=
+      entryCount_of_entries_size_256 bmp.palette hpalSize256
+    have hrangeChecked : indexedDataInRange bmp.data bmp.palette.entryCount = true := by
+      have hchecked :
+          indexedDataInRange bmp.data 256 = true := by
+        apply PaletteValidation.indexedDataInRange_true_of_valid_coordinates
+        intro y hy x hx
+        simpa [hbd, paletteIndexLimit] using hrange y hy x hx
+      simpa [hpal] using hchecked
+    exact decodeIndexedBitmap_encodeIndexedBitmapChecked_8_256_data
+      mode bmp hw hh hbd hpalSize256 hrangeChecked htrans hbg hIdatSize
+
 end PaletteEncoderRoundTrip
 
 end Lemmas

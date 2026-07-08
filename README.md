@@ -195,9 +195,9 @@ This library has proofs about:
   acceptance/rejection, palette `tRNS`/`bKGD` parsing, metadata chunk-order
   acceptance, checked encoder validation rejection paths, Boolean range
   validation from flat and coordinate-wise pixel bounds, symbolic packed-row
-  round trips for all supported palette bit depths, and packed 1/2/4-bit public
-  API round-trip theorems whose checked range predicate is derived from the
-  indexed bitmap shape
+  round trips for all supported palette bit depths, and public checked indexed
+  encoder round-trip theorems for all palette bit depths whose checked range
+  predicate is derived from the indexed bitmap shape
   (`pngColorTypeBitDepthSupported_palette1`,
   `pngColorTypeBitDepthSupported_palette2`,
   `pngColorTypeBitDepthSupported_palette4`,
@@ -305,6 +305,7 @@ This library has proofs about:
   `PaletteEncoderRoundTrip.decodeIndexedBitmap_encodeIndexedBitmapChecked_stored_non8_data`,
   `PaletteEncoderRoundTrip.decodeIndexedBitmap_encodeIndexedBitmapChecked_fixed_non8_data`,
   `PaletteEncoderRoundTrip.decodeIndexedBitmap_encodeIndexedBitmapChecked_dynamic_non8_data`,
+  `PaletteEncoderRoundTrip.decodeIndexedBitmap_encodeIndexedBitmapChecked_supported_bitDepth_data`,
   `PalettePackedRoundTrip.checked_roundtrip_fixture_for_supported_bitDepth`,
   `PalettePackedRoundTrip.checked_fixed_filter_roundtrip_fixture_for_supported_bitDepth`,
   `PalettePackedRoundTrip.checked_stored_1bit_fixture_data`,
