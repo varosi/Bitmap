@@ -20,8 +20,8 @@ explicit indexed-palette paths currently have focused layout, validation,
 packed-row, raw decoder, parsed/container, exact indexed runtime-shape, and
 checked-encoder filter-0 round-trip proofs for supported bit depths, plus
 encoder-side fixed/adaptive row-filter reconstruction contracts, Adam7,
-multi-IDAT, palette-transparency/background, and expansion runtime fixture
-coverage.
+multi-IDAT fixture coverage, and all-image symbolic
+palette-transparency/background expansion coverage.
 
 ### Encoder
 
@@ -205,7 +205,8 @@ This library has proofs about:
   indexed runtime-shape round trips through parsed/container/public checked
   encoder layers, symbolic filtered-row decode under the row reconstruction
   contract, encoder-side fixed/adaptive row serialization proof that establishes
-  that contract, symbolic palette transparency/background expansion, and public
+  that contract, all-image symbolic palette transparency/background expansion
+  for 8- and 16-bit grayscale/RGB/gray-alpha/RGBA targets, and public
   checked indexed encoder round-trip theorems for all palette bit depths whose
   checked range predicate is derived from the indexed bitmap shape
   (`pngColorTypeBitDepthSupported_palette1`,
@@ -371,14 +372,10 @@ This library has proofs about:
   `PalettePackedRoundTrip.decodeIndexedBitmapWithMetadata_palette_tRNS_bKGD_fixture`,
   `PalettePackedRoundTrip.decodeIndexedBitmapWithMetadata_palette_metadata_fixture`,
   `PalettePackedRoundTrip.decodeIndexedBitmapWithMetadata_palette_tRNS_bKGD_shape_fixture`,
-  `expandPaletteIndicesToPixels_paletteAlpha_bKGD_RGB8_singleton`,
-  `expandPaletteIndicesToPixels_paletteAlpha_no_bKGD_RGB8_singleton`,
-  `expandPaletteIndicesToPixels_paletteAlpha_bKGD_Gray8_singleton`,
-  `expandPaletteIndicesToPixels_paletteAlpha_no_bKGD_Gray8_singleton`,
-  `expandPaletteIndicesToPixels_paletteAlpha_RGBA8_singleton`,
-  `expandPaletteIndicesToPixels_paletteAlpha_GrayAlpha8_singleton`,
-  `expandPaletteIndicesToPixels_paletteAlpha_bKGD_RGB16_singleton`,
-  `expandPaletteIndicesToPixels_paletteAlpha_RGBA16_singleton`,
+  `expandPaletteIndicesToPixels8_paletteAlpha_symbolic`,
+  `expandPaletteIndicesToPixels16_paletteAlpha_symbolic`,
+  `expandPaletteIndicesToPixels_paletteAlpha_no_bKGD_symbolic`,
+  `expandPaletteIndicesToPixels_paletteAlpha_bKGD_symbolic`,
   `PalettePackedRoundTrip.decodeBitmap_palette_RGB16_fixture`,
   `PalettePackedRoundTrip.decodeBitmap_palette_RGBA16_fixture`,
   `PalettePackedRoundTrip.decodeBitmap_palette_Gray16_fixture`,

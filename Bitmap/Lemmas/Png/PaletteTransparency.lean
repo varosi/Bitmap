@@ -10,7 +10,182 @@ open Png
 
 These theorems generalize the concrete palette `tRNS`/`bKGD` runtime fixtures:
 they prove the expansion branch for arbitrary palette entries, alpha payloads,
-and palette background indices on a one-sample indexed image. -/
+palette background indices, and indexed image data. -/
+
+/-- Symbolic 8-bit palette-alpha expansion over an arbitrary index buffer.
+This records how `tRNS` and an optional resolved `bKGD` affect each output byte. -/
+def paletteAlphaExpansion8Spec (indices : ByteArray) (palette : PngPalette)
+    (alpha : ByteArray) (background? : Option (UInt8 × UInt8 × UInt8))
+    (targetColorType : UInt8) : Option ByteArray :=
+  Id.run do
+    let alpha? := some alpha
+    let count := indices.size
+    let outBpp :=
+      if targetColorType == u8 0 then bytesPerPixelGray
+      else if targetColorType == u8 2 then bytesPerPixelRGB
+      else if targetColorType == u8 4 then bytesPerPixelGrayAlpha
+      else if targetColorType == u8 6 then bytesPerPixelRGBA
+      else 0
+    if outBpp == 0 then
+      none
+    else
+      let needsBackground :=
+        alpha?.isSome && (targetColorType == u8 0 || targetColorType == u8 2)
+      let mut out := ByteArray.emptyWithCapacity (count * outBpp)
+      let mut ok := true
+      for i in [0:count] do
+        let idx := (indices.get! i).toNat
+        match palette.rgbAt? idx with
+        | some (r0, g0, b0) =>
+            let a := paletteAlphaAt alpha? idx
+            let mut r := r0
+            let mut g := g0
+            let mut b := b0
+            if needsBackground then
+              match background? with
+              | some (br, bg, bb) =>
+                  r := alphaCompositeByte r0 br a
+                  g := alphaCompositeByte g0 bg a
+                  b := alphaCompositeByte b0 bb a
+              | none =>
+                  ok := false
+            if targetColorType == u8 0 then
+              out := out.push (grayFromRGB8 r g b)
+            else if targetColorType == u8 2 then
+              out := out.push r
+              out := out.push g
+              out := out.push b
+            else if targetColorType == u8 4 then
+              out := out.push (grayFromRGB8 r g b)
+              out := out.push a
+            else
+              out := out.push r
+              out := out.push g
+              out := out.push b
+              out := out.push a
+        | none =>
+            ok := false
+      if ok then
+        some out
+      else
+        none
+
+/-- Symbolic 16-bit palette-alpha expansion over an arbitrary index buffer.
+This is the full-range `u8 * 257` counterpart of `paletteAlphaExpansion8Spec`. -/
+def paletteAlphaExpansion16Spec (indices : ByteArray) (palette : PngPalette)
+    (alpha : ByteArray) (background? : Option (UInt8 × UInt8 × UInt8))
+    (targetColorType : UInt8) : Option ByteArray :=
+  Id.run do
+    let alpha? := some alpha
+    let count := indices.size
+    let outBpp :=
+      if targetColorType == u8 0 then bytesPerPixelGray16
+      else if targetColorType == u8 2 then bytesPerPixelRGB16
+      else if targetColorType == u8 4 then bytesPerPixelGrayAlpha16
+      else if targetColorType == u8 6 then bytesPerPixelRGBA16
+      else 0
+    if outBpp == 0 then
+      none
+    else
+      let needsBackground :=
+        alpha?.isSome && (targetColorType == u8 0 || targetColorType == u8 2)
+      let mut out := ByteArray.emptyWithCapacity (count * outBpp)
+      let mut ok := true
+      for i in [0:count] do
+        let idx := (indices.get! i).toNat
+        match palette.rgbAt? idx with
+        | some (r0, g0, b0) =>
+            let a := paletteAlphaAt alpha? idx
+            let mut r := r0
+            let mut g := g0
+            let mut b := b0
+            if needsBackground then
+              match background? with
+              | some (br, bg, bb) =>
+                  r := alphaCompositeByte r0 br a
+                  g := alphaCompositeByte g0 bg a
+                  b := alphaCompositeByte b0 bb a
+              | none =>
+                  ok := false
+            if targetColorType == u8 0 then
+              out := pushU16Full out (grayFromRGB8 r g b)
+            else if targetColorType == u8 2 then
+              out := pushU16Full out r
+              out := pushU16Full out g
+              out := pushU16Full out b
+            else if targetColorType == u8 4 then
+              out := pushU16Full out (grayFromRGB8 r g b)
+              out := pushU16Full out a
+            else
+              out := pushU16Full out r
+              out := pushU16Full out g
+              out := pushU16Full out b
+              out := pushU16Full out a
+        | none =>
+            ok := false
+      if ok then
+        some out
+      else
+        none
+
+/-- The 8-bit implementation agrees with the symbolic palette-alpha expansion
+spec for every index buffer and every target color type. -/
+lemma expandPaletteIndicesToPixels8_paletteAlpha_symbolic
+    (indices : ByteArray) (palette : PngPalette) (alpha : ByteArray)
+    (background? : Option (UInt8 × UInt8 × UInt8)) (targetColorType : UInt8) :
+    expandPaletteIndicesToPixels8 indices palette (some alpha) background? targetColorType =
+      paletteAlphaExpansion8Spec indices palette alpha background? targetColorType := by
+  rfl
+
+/-- The 16-bit implementation agrees with the symbolic palette-alpha expansion
+spec for every index buffer and every target color type. -/
+lemma expandPaletteIndicesToPixels16_paletteAlpha_symbolic
+    (indices : ByteArray) (palette : PngPalette) (alpha : ByteArray)
+    (background? : Option (UInt8 × UInt8 × UInt8)) (targetColorType : UInt8) :
+    expandPaletteIndicesToPixels16 indices palette (some alpha) background? targetColorType =
+      paletteAlphaExpansion16Spec indices palette alpha background? targetColorType := by
+  rfl
+
+/-- Palette `tRNS` without a palette `bKGD` has an all-image symbolic expansion
+for every supported output bit depth and target color type. -/
+lemma expandPaletteIndicesToPixels_paletteAlpha_no_bKGD_symbolic
+    (indices : ByteArray) (palette : PngPalette) (alpha : ByteArray)
+    (targetColorType targetBitDepth : UInt8) :
+    expandPaletteIndicesToPixels indices palette
+      { PngMetadata.empty with transparency := some (.paletteAlpha alpha) }
+      targetColorType targetBitDepth =
+        if targetBitDepth == u8 8 then
+          paletteAlphaExpansion8Spec indices palette alpha none targetColorType
+        else if targetBitDepth == u8 16 then
+          paletteAlphaExpansion16Spec indices palette alpha none targetColorType
+        else
+          none := by
+  unfold expandPaletteIndicesToPixels
+  simp [PngMetadata.empty, paletteAlphaBytes?, paletteBackgroundRGB?,
+    expandPaletteIndicesToPixels8_paletteAlpha_symbolic,
+    expandPaletteIndicesToPixels16_paletteAlpha_symbolic]
+
+/-- Palette `tRNS` plus a valid palette `bKGD` has an all-image symbolic
+expansion for every supported output bit depth and target color type. -/
+lemma expandPaletteIndicesToPixels_paletteAlpha_bKGD_symbolic
+    (indices : ByteArray) (palette : PngPalette) (alpha : ByteArray)
+    (bgIdx br bg bb targetColorType targetBitDepth : UInt8)
+    (hbg : palette.rgbAt? bgIdx.toNat = some (br, bg, bb)) :
+    expandPaletteIndicesToPixels indices palette
+      { PngMetadata.empty with
+        transparency := some (.paletteAlpha alpha)
+        background := some (.paletteIndex bgIdx) }
+      targetColorType targetBitDepth =
+        if targetBitDepth == u8 8 then
+          paletteAlphaExpansion8Spec indices palette alpha (some (br, bg, bb)) targetColorType
+        else if targetBitDepth == u8 16 then
+          paletteAlphaExpansion16Spec indices palette alpha (some (br, bg, bb)) targetColorType
+        else
+          none := by
+  unfold expandPaletteIndicesToPixels
+  simp [paletteAlphaBytes?, paletteBackgroundRGB?, hbg,
+    expandPaletteIndicesToPixels8_paletteAlpha_symbolic,
+    expandPaletteIndicesToPixels16_paletteAlpha_symbolic]
 
 private lemma singleton_index_get! (idx : UInt8) :
     (ByteArray.mk #[idx]).get! 0 = idx := by
