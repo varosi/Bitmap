@@ -95,7 +95,7 @@ through the runtime, so callers do not need a `filter.toNat ≤ 4` premise. -/
 lemma reconstructRowSpec_size (filter : UInt8) (row prev : ByteArray) (bpp : Nat) :
     (reconstructRowSpec filter row prev bpp).size = row.size := by
   unfold reconstructRowSpec reconstructRowStep
-  simpa using foldl_pushStep_size (List.range' 0 row.size 1)
+  simpa [reconstructByteAt] using foldl_pushStep_size (List.range' 0 row.size 1)
     (fun out i =>
       reconstructByteAt filter (row.get! i)
         (if bpp ≤ i then out.get! (i - bpp) else (0 : UInt8))

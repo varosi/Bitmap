@@ -19,8 +19,9 @@ subset carry full round-trip correctness proofs; packed 1-bit grayscale and
 explicit indexed-palette paths currently have focused layout, validation,
 packed-row, raw decoder, parsed/container, exact indexed runtime-shape, and
 checked-encoder filter-0 round-trip proofs for supported bit depths, plus
-fixed/adaptive-filter, Adam7, multi-IDAT, palette-transparency/background, and
-expansion runtime fixture coverage.
+encoder-side fixed/adaptive row-filter reconstruction contracts, Adam7,
+multi-IDAT, palette-transparency/background, and expansion runtime fixture
+coverage.
 
 ### Encoder
 
@@ -203,7 +204,8 @@ This library has proofs about:
   when every source index is below the actual palette entry count, exact
   indexed runtime-shape round trips through parsed/container/public checked
   encoder layers, symbolic filtered-row decode under the row reconstruction
-  contract, symbolic palette transparency/background expansion, and public
+  contract, encoder-side fixed/adaptive row serialization proof that establishes
+  that contract, symbolic palette transparency/background expansion, and public
   checked indexed encoder round-trip theorems for all palette bit depths whose
   checked range predicate is derived from the indexed bitmap shape
   (`pngColorTypeBitDepthSupported_palette1`,
@@ -281,6 +283,9 @@ This library has proofs about:
   `decodePaletteIndicesByInterlace_encodeRawIndexedWithFilter_none_non8`,
   `decodePaletteIndicesByInterlace_encodeRawIndexedWithFilter_none_non8_paletteRange`,
   `paletteRowDecoderContract`,
+  `filterResidualByte_inverse`,
+  `filterRowForStrategy_decodes_one_byte_distance`,
+  `paletteRowDecoderContract_encodeIndexedRowsWithFilterLoop`,
   `decodePaletteRowsLoop_eq_of_paletteRowDecoderContract_nonfast`,
   `decodeParsedIndexedBitmapWithMetadata_stored_encodeRawIndexed_none_8_256_data`,
   `decodeParsedIndexedBitmapWithMetadata_stored_encodeRawIndexed_none_8_paletteRange_data`,
@@ -403,10 +408,13 @@ This library has proofs about:
   `parseTrnsData_accepts_paletteAlpha`,
   `parseBkgdData_accepts_paletteIndex`);
 - focused encoder-filter helper facts for valid filter bytes, filter row size
-  preservation, fixed-filter option sizing, adaptive filter-byte validity, and
-  default filter-0 raw compatibility (`pngRowFilter_toByte_valid`,
+  preservation, row-filter residual inversion, fixed/adaptive row reconstruction,
+  fixed-filter option sizing, adaptive filter-byte validity, and default
+  filter-0 raw compatibility (`pngRowFilter_toByte_valid`,
   `filterRow_size`, `filterRowForStrategy_fixed_size`,
   `filterRowForStrategy_size`,
+  `filterResidualByte_inverse`,
+  `filterRowForStrategy_decodes_one_byte_distance`,
   `adaptiveFilterRow_toByte_valid`, `encodeRawWithFilter_none_size`);
 - stored DEFLATE block forward correctness against an inductive
   `StoredDeflateStreamSpec` independent of the encoder

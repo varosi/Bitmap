@@ -347,6 +347,155 @@ lemma byteArray_get!_extract
     _ = a.get! (start + i) := by
       simpa using (byteArray_get!_eq_get (a := a) (i := start + i) hsrc).symm
 
+/-- Reading before the appended byte of a `ByteArray.push` returns the original
+byte. This is the `get!` form of `ByteArray.get_push_lt`. -/
+lemma byteArray_get!_push_lt (a : ByteArray) (b : UInt8) (i : Nat)
+    (hi : i < a.size) :
+    (a.push b).get! i = a.get! i := by
+  have hpush : i < (a.push b).size := by
+    simpa [ByteArray.size_push] using Nat.lt_trans hi (Nat.lt_succ_self a.size)
+  calc
+    (a.push b).get! i = (a.push b)[i]'hpush := by
+      simpa using byteArray_get!_eq_get (a := a.push b) (i := i) hpush
+    _ = a[i]'hi := ByteArray.get_push_lt a b i hi
+    _ = a.get! i := by
+      simpa using (byteArray_get!_eq_get (a := a) (i := i) hi).symm
+
+/-- Reading at the appended byte of a `ByteArray.push` returns that byte.
+This is the `get!` form of `ByteArray.get_push_eq`. -/
+lemma byteArray_get!_push_eq (a : ByteArray) (b : UInt8) :
+    (a.push b).get! a.size = b := by
+  have hpush : a.size < (a.push b).size := by
+    simp [ByteArray.size_push]
+  calc
+    (a.push b).get! a.size = (a.push b)[a.size]'hpush := by
+      simpa using byteArray_get!_eq_get (a := a.push b) (i := a.size) hpush
+    _ = b := ByteArray.get_push_eq a b
+
+/-- Extracting the original length after `push` returns the original array. -/
+lemma byteArray_extract_push_prefix (a : ByteArray) (b : UInt8) :
+    (a.push b).extract 0 a.size = a := by
+  have hsize : ((a.push b).extract 0 a.size).size = a.size := by
+    simp [ByteArray.size_extract]
+  refine byteArray_eq_of_size_get! _ _ hsize ?_
+  intro i hi
+  have hiA : i < a.size := by
+    simpa [hsize] using hi
+  have hsrc : 0 + i < (a.push b).size := by
+    simpa [ByteArray.size_push] using Nat.lt_trans hiA (Nat.lt_succ_self a.size)
+  have hslice : i < ((a.push b).extract 0 a.size).size := by
+    simpa [hsize] using hi
+  calc
+    ((a.push b).extract 0 a.size).get! i =
+        (a.push b).get! (0 + i) :=
+          byteArray_get!_extract (a.push b) 0 a.size i hslice hsrc
+    _ = (a.push b).get! i := by simp
+    _ = a.get! i := byteArray_get!_push_lt a b i hiA
+
+/-- Extending a zero-based extract by one byte is the previous extract with
+that next source byte appended. This is the prefix step used by row proofs. -/
+lemma byteArray_extract_zero_succ_eq_push_get! (a : ByteArray) (n : Nat)
+    (hn : n < a.size) :
+    (a.extract 0 n).push (a.get! n) = a.extract 0 (n + 1) := by
+  have hnle : n ≤ a.size := Nat.le_of_lt hn
+  have hsucc : n + 1 ≤ a.size := Nat.succ_le_of_lt hn
+  have hleftSize : (a.extract 0 n).size = n := by
+    simp [ByteArray.size_extract, Nat.min_eq_left hnle]
+  have hrightSize : (a.extract 0 (n + 1)).size = n + 1 := by
+    simp [ByteArray.size_extract, Nat.min_eq_left hsucc]
+  refine byteArray_eq_of_size_get! _ _ ?_ ?_
+  · simp [ByteArray.size_push, hleftSize, hrightSize]
+  · intro i hi
+    have hiRight : i < (a.extract 0 (n + 1)).size := by
+      simpa [ByteArray.size_push, hleftSize, hrightSize] using hi
+    by_cases hin : i < n
+    · have hiLeft : i < (a.extract 0 n).size := by
+        simpa [hleftSize] using hin
+      have hsrc : 0 + i < a.size := by
+        simpa using Nat.lt_of_lt_of_le hin hnle
+      calc
+        ((a.extract 0 n).push (a.get! n)).get! i =
+            (a.extract 0 n).get! i := by
+              exact byteArray_get!_push_lt (a.extract 0 n) (a.get! n) i hiLeft
+        _ = a.get! (0 + i) := byteArray_get!_extract a 0 n i hiLeft hsrc
+        _ = (a.extract 0 (n + 1)).get! i := by
+              exact (byteArray_get!_extract a 0 (n + 1) i hiRight hsrc).symm
+    · have hieq : i = n := by
+        have hi' : i < n + 1 := by
+          simpa [ByteArray.size_push, hleftSize] using hi
+        omega
+      subst i
+      have hsrc : 0 + n < a.size := by
+        simpa using hn
+      calc
+        ((a.extract 0 n).push (a.get! n)).get! n =
+            ((a.extract 0 n).push (a.get! n)).get! (a.extract 0 n).size := by
+              simp [hleftSize]
+        _ = a.get! n := byteArray_get!_push_eq (a.extract 0 n) (a.get! n)
+        _ = a.get! (0 + n) := by simp
+        _ = (a.extract 0 (n + 1)).get! n := by
+              exact (byteArray_get!_extract a 0 (n + 1) n hiRight hsrc).symm
+
+/-- Reading from the left side of an append with `get!` returns the same byte
+as reading from the left array. -/
+lemma byteArray_get!_append_left (a b : ByteArray) (i : Nat)
+    (hi : i < a.size) :
+    (a ++ b).get! i = a.get! i := by
+  have happ : i < (a ++ b).size := by
+    simpa [ByteArray.size_append] using Nat.lt_of_lt_of_le hi (Nat.le_add_right _ _)
+  calc
+    (a ++ b).get! i = (a ++ b)[i]'happ := by
+      simpa using byteArray_get!_eq_get (a := a ++ b) (i := i) happ
+    _ = a[i]'hi := ByteArray.get_append_left (a := a) (b := b) (i := i) hi
+    _ = a.get! i := by
+      simpa using (byteArray_get!_eq_get (a := a) (i := i) hi).symm
+
+/-- Any slice contained in a known zero-prefix can be read from that prefix.
+This transfers row-block extracts from a final encoder buffer to its
+accumulated raw prefix. -/
+lemma byteArray_extract_slice_of_prefix (a pref : ByteArray) (n i j : Nat)
+    (hprefix : a.extract 0 n = pref) (hj : j ≤ n) :
+    a.extract i j = pref.extract i j := by
+  have hslice :
+      (a.extract 0 n).extract i j = a.extract i j := by
+    simpa [Nat.min_eq_left hj] using
+      (ByteArray.extract_extract (a := a) (i := 0) (j := n) (k := i) (l := j))
+  calc
+    a.extract i j = (a.extract 0 n).extract i j := hslice.symm
+    _ = pref.extract i j := by rw [hprefix]
+
+/-- A `get!` inside a known zero-prefix can be read from that prefix. -/
+lemma byteArray_get!_of_prefix (a pref : ByteArray) (n i : Nat)
+    (hprefix : a.extract 0 n = pref) (hi : i < pref.size) :
+    a.get! i = pref.get! i := by
+  have hslice : i < (a.extract 0 n).size := by
+    simpa [hprefix] using hi
+  have hsrc : 0 + i < a.size := by
+    have hslice' := hslice
+    simp [ByteArray.size_extract] at hslice'
+    omega
+  calc
+    a.get! i = a.get! (0 + i) := by simp
+    _ = (a.extract 0 n).get! i := by
+          exact (byteArray_get!_extract a 0 n i hslice hsrc).symm
+    _ = pref.get! i := by rw [hprefix]
+
+/-- In a buffer shaped as `(a ++ b) ++ tail`, extracting exactly the middle
+segment returns `b`. This is the row-payload layout fact for serialized
+filtered PNG rows. -/
+lemma byteArray_extract_append_middle_full (a b tail : ByteArray) :
+    ((a ++ b) ++ tail).extract a.size (a.size + b.size) = b := by
+  have h1 :
+      ((a ++ b) ++ tail).extract a.size (a.size + b.size) =
+        (b ++ tail).extract 0 b.size := by
+    simpa [ByteArray.append_assoc] using
+      (ByteArray.extract_append_size_add (a := a) (b := b ++ tail)
+        (i := 0) (j := b.size))
+  have h2 : (b ++ tail).extract 0 b.size = b := by
+    simpa using
+      (ByteArray.extract_append_eq_left (a := b) (b := tail) (i := b.size) rfl)
+  rw [h1, h2]
+
 lemma byteArray_get!_extract0 (a : ByteArray) (start : Nat) (h : start + 1 ≤ a.size) :
     (a.extract start (start + 1)).get! 0 = a.get! start := by
   have hlt : start < a.size := Nat.lt_of_lt_of_le (Nat.lt_succ_self start) h
