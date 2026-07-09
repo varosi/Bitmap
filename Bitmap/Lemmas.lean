@@ -11,6 +11,7 @@ import Bitmap.Lemmas.Png.PaletteContainerRoundTrip
 import Bitmap.Lemmas.Png.PaletteEncoderRoundTrip
 import Bitmap.Lemmas.Png.PalettePackedRoundTrip
 import Bitmap.Lemmas.Png.PaletteTransparency
+import Bitmap.Lemmas.Png.PaletteFilteredRows
 import Bitmap.Lemmas.PaletteExternalPngSpec
 import Bitmap.Lemmas.Png.EncodeFilter
 import Bitmap.Lemmas.Png.DynamicEncoder

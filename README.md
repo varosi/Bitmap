@@ -202,9 +202,10 @@ This library has proofs about:
   round trips for all supported palette bit depths, smaller-palette raw decode
   when every source index is below the actual palette entry count, exact
   indexed runtime-shape round trips through parsed/container/public checked
-  encoder layers, symbolic palette transparency/background expansion, and
-  public checked indexed encoder round-trip theorems for all palette bit depths
-  whose checked range predicate is derived from the indexed bitmap shape
+  encoder layers, symbolic filtered-row decode under the row reconstruction
+  contract, symbolic palette transparency/background expansion, and public
+  checked indexed encoder round-trip theorems for all palette bit depths whose
+  checked range predicate is derived from the indexed bitmap shape
   (`pngColorTypeBitDepthSupported_palette1`,
   `pngColorTypeBitDepthSupported_palette2`,
   `pngColorTypeBitDepthSupported_palette4`,
@@ -279,6 +280,8 @@ This library has proofs about:
   `decodePaletteIndicesByInterlace_encodeRawIndexedWithFilter_none_8_paletteRange`,
   `decodePaletteIndicesByInterlace_encodeRawIndexedWithFilter_none_non8`,
   `decodePaletteIndicesByInterlace_encodeRawIndexedWithFilter_none_non8_paletteRange`,
+  `paletteRowDecoderContract`,
+  `decodePaletteRowsLoop_eq_of_paletteRowDecoderContract_nonfast`,
   `decodeParsedIndexedBitmapWithMetadata_stored_encodeRawIndexed_none_8_256_data`,
   `decodeParsedIndexedBitmapWithMetadata_stored_encodeRawIndexed_none_8_paletteRange_data`,
   `decodeParsedIndexedBitmapWithMetadata_stored_encodeRawIndexed_none_non8_data`,

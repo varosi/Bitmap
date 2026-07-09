@@ -151,6 +151,28 @@ lemma byteArray_extract_split (a : ByteArray) (n : Nat) (hn : n ≤ a.size) :
             (a.extract n a.size)[i - n] := hget_right
         _ = a[i] := hget_extract
 
+/-- Two byte arrays are equal when their sizes and all in-bounds `get!` bytes
+match. This packages the extensionality pattern used by PNG row proofs. -/
+lemma byteArray_eq_of_size_get!
+    (a b : ByteArray)
+    (hsize : a.size = b.size)
+    (hget : ∀ i, i < a.size → a.get! i = b.get! i) :
+    a = b := by
+  cases a with
+  | mk adata =>
+      cases b with
+      | mk bdata =>
+          simp [ByteArray.size] at hsize hget ⊢
+          apply Array.ext
+          · exact hsize
+          · intro i hia hib
+            have hget' := hget i (by simpa [ByteArray.size] using hia)
+            have ha : adata[i]! = adata[i] := by
+              exact getElem!_pos adata i hia
+            have hb : bdata[i]! = bdata[i] := by
+              exact getElem!_pos bdata i hib
+            simpa [ByteArray.get!, ha, hb] using hget'
+
 -- Copying a slice preserves the prefix before the destination offset.
 lemma byteArray_copySlice_extract_prefix (src dest : ByteArray)
     (srcOff destOff len : Nat) (hdest : destOff + len ≤ dest.size) :
@@ -307,6 +329,23 @@ lemma byteArray_get!_eq_get (a : ByteArray) (i : Nat) (h : i < a.size) :
         arr[i]! = arr[i]'h' := by
           simp [getElem!_pos, h']
         _ = arr[i] := rfl
+
+/-- Reading from an extracted byte slice with `get!` is the same as reading the
+corresponding source byte when both indices are in bounds. -/
+lemma byteArray_get!_extract
+    (a : ByteArray) (start stop i : Nat)
+    (hi : i < (a.extract start stop).size)
+    (hsrc : start + i < a.size) :
+    (a.extract start stop).get! i = a.get! (start + i) := by
+  have hget :
+      (a.extract start stop)[i]'hi = a[start + i]'hsrc := by
+    exact ByteArray.get_extract (a := a) (start := start) (stop := stop) (i := i) hi
+  calc
+    (a.extract start stop).get! i = (a.extract start stop)[i]'hi := by
+      simpa using byteArray_get!_eq_get (a := a.extract start stop) (i := i) hi
+    _ = a[start + i]'hsrc := hget
+    _ = a.get! (start + i) := by
+      simpa using (byteArray_get!_eq_get (a := a) (i := start + i) hsrc).symm
 
 lemma byteArray_get!_extract0 (a : ByteArray) (start : Nat) (h : start + 1 ≤ a.size) :
     (a.extract start (start + 1)).get! 0 = a.get! start := by
