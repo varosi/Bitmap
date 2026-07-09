@@ -202,9 +202,9 @@ This library has proofs about:
   round trips for all supported palette bit depths, smaller-palette raw decode
   when every source index is below the actual palette entry count, exact
   indexed runtime-shape round trips through parsed/container/public checked
-  encoder layers, and public checked indexed encoder round-trip theorems for
-  all palette bit depths whose checked range predicate is derived from the
-  indexed bitmap shape
+  encoder layers, symbolic palette transparency/background expansion, and
+  public checked indexed encoder round-trip theorems for all palette bit depths
+  whose checked range predicate is derived from the indexed bitmap shape
   (`pngColorTypeBitDepthSupported_palette1`,
   `pngColorTypeBitDepthSupported_palette2`,
   `pngColorTypeBitDepthSupported_palette4`,
@@ -363,6 +363,14 @@ This library has proofs about:
   `PalettePackedRoundTrip.decodeIndexedBitmapWithMetadata_palette_tRNS_bKGD_fixture`,
   `PalettePackedRoundTrip.decodeIndexedBitmapWithMetadata_palette_metadata_fixture`,
   `PalettePackedRoundTrip.decodeIndexedBitmapWithMetadata_palette_tRNS_bKGD_shape_fixture`,
+  `expandPaletteIndicesToPixels_paletteAlpha_bKGD_RGB8_singleton`,
+  `expandPaletteIndicesToPixels_paletteAlpha_no_bKGD_RGB8_singleton`,
+  `expandPaletteIndicesToPixels_paletteAlpha_bKGD_Gray8_singleton`,
+  `expandPaletteIndicesToPixels_paletteAlpha_no_bKGD_Gray8_singleton`,
+  `expandPaletteIndicesToPixels_paletteAlpha_RGBA8_singleton`,
+  `expandPaletteIndicesToPixels_paletteAlpha_GrayAlpha8_singleton`,
+  `expandPaletteIndicesToPixels_paletteAlpha_bKGD_RGB16_singleton`,
+  `expandPaletteIndicesToPixels_paletteAlpha_RGBA16_singleton`,
   `PalettePackedRoundTrip.decodeBitmap_palette_RGB16_fixture`,
   `PalettePackedRoundTrip.decodeBitmap_palette_RGBA16_fixture`,
   `PalettePackedRoundTrip.decodeBitmap_palette_Gray16_fixture`,
