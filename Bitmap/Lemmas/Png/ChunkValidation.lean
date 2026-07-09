@@ -1506,6 +1506,53 @@ lemma parsePngLoopFuel_idat_appends_when_open (fuel : Nat)
     unfold parsePngLoopFuel
   simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hIDAT, hclosed, hpalette]
 
+/-- Two consecutive `IDAT` chunks in an open IDAT run append both payloads in
+order. This packages the one-chunk branch lemma for arbitrary split payloads. -/
+lemma parsePngLoopFuel_idat_appends_two_when_open (fuel : Nat)
+    (bytes : ByteArray) (pos0 pos1 pos2 : Nat) (state : PngParseState)
+    (hdr : PngHeader) (chunkData0 chunkData1 : ByteArray)
+    (hpos0 : pos0 + 8 ≤ bytes.size) (hLen0 : pos0 + 3 < bytes.size)
+    (hread0 : readChunk bytes pos0 hLen0 = some (idatTypeBytes, chunkData0, pos1))
+    (hpos1 : pos1 + 8 ≤ bytes.size) (hLen1 : pos1 + 3 < bytes.size)
+    (hread1 : readChunk bytes pos1 hLen1 = some (idatTypeBytes, chunkData1, pos2))
+    (hheader : state.header = some hdr)
+    (hclosed : state.closedIDAT = false)
+    (hpalette : (hdr.colorType == 3 && !state.seenPLTE) = false) :
+    parsePngLoopFuel (fuel + 2) bytes pos0 state =
+      parsePngLoopFuel fuel bytes pos2
+        { header := some hdr
+          idat := state.idat ++ chunkData0 ++ chunkData1
+          seenPLTE := state.seenPLTE
+          seenIDAT := true
+          closedIDAT := false
+          metadata := state.metadata } := by
+  let state1 : PngParseState :=
+    { header := some hdr
+      idat := state.idat ++ chunkData0
+      seenPLTE := state.seenPLTE
+      seenIDAT := true
+      closedIDAT := false
+      metadata := state.metadata }
+  have hStep0 :=
+    parsePngLoopFuel_idat_appends_when_open (fuel + 1) bytes pos0 state hdr
+      idatTypeBytes chunkData0 pos1 hpos0 hLen0 hread0 hheader
+      (by decide) (by decide) (by decide) hclosed hpalette
+  rw [show fuel + 2 = (fuel + 1) + 1 by omega, hStep0]
+  change parsePngLoopFuel (fuel + 1) bytes pos1 state1 =
+    parsePngLoopFuel fuel bytes pos2
+      { header := some hdr
+        idat := state.idat ++ chunkData0 ++ chunkData1
+        seenPLTE := state.seenPLTE
+        seenIDAT := true
+        closedIDAT := false
+        metadata := state.metadata }
+  have hStep1 :=
+    parsePngLoopFuel_idat_appends_when_open fuel bytes pos1 state1 hdr
+      idatTypeBytes chunkData1 pos2 hpos1 hLen1 hread1
+      (by rfl) (by decide) (by decide) (by decide) (by rfl)
+      (by simpa [state1] using hpalette)
+  rw [hStep1]
+
 /-- Metadata-aware analogue of `parsePngLoopFuel_idat_appends_when_open`:
 an `IDAT` chunk in an open `IDAT` run appends its payload and continues,
 preserving the accumulated metadata. -/
@@ -1532,6 +1579,53 @@ lemma parsePngLoopFuelWithMetadata_idat_appends_when_open (fuel : Nat)
     lhs
     unfold parsePngLoopFuelWithMetadata
   simp [hpos, hLen, hread, hheader, hnotIHDR, hnotPLTE, hIDAT, hclosed, hpalette]
+
+/-- Metadata-aware two-`IDAT` analogue: consecutive `IDAT` chunks append both
+payloads in order while preserving the accumulated metadata. -/
+lemma parsePngLoopFuelWithMetadata_idat_appends_two_when_open (fuel : Nat)
+    (bytes : ByteArray) (pos0 pos1 pos2 : Nat) (state : PngMetadataParseState)
+    (hdr : PngHeader) (chunkData0 chunkData1 : ByteArray)
+    (hpos0 : pos0 + 8 ≤ bytes.size) (hLen0 : pos0 + 3 < bytes.size)
+    (hread0 : readChunk bytes pos0 hLen0 = some (idatTypeBytes, chunkData0, pos1))
+    (hpos1 : pos1 + 8 ≤ bytes.size) (hLen1 : pos1 + 3 < bytes.size)
+    (hread1 : readChunk bytes pos1 hLen1 = some (idatTypeBytes, chunkData1, pos2))
+    (hheader : state.header = some hdr)
+    (hclosed : state.closedIDAT = false)
+    (hpalette : (hdr.colorType == 3 && !state.seenPLTE) = false) :
+    parsePngLoopFuelWithMetadata (fuel + 2) bytes pos0 state =
+      parsePngLoopFuelWithMetadata fuel bytes pos2
+        { header := some hdr
+          idat := state.idat ++ chunkData0 ++ chunkData1
+          seenPLTE := state.seenPLTE
+          seenIDAT := true
+          closedIDAT := false
+          metadata := state.metadata } := by
+  let state1 : PngMetadataParseState :=
+    { header := some hdr
+      idat := state.idat ++ chunkData0
+      seenPLTE := state.seenPLTE
+      seenIDAT := true
+      closedIDAT := false
+      metadata := state.metadata }
+  have hStep0 :=
+    parsePngLoopFuelWithMetadata_idat_appends_when_open (fuel + 1) bytes pos0 state hdr
+      idatTypeBytes chunkData0 pos1 hpos0 hLen0 hread0 hheader
+      (by decide) (by decide) (by decide) hclosed hpalette
+  rw [show fuel + 2 = (fuel + 1) + 1 by omega, hStep0]
+  change parsePngLoopFuelWithMetadata (fuel + 1) bytes pos1 state1 =
+    parsePngLoopFuelWithMetadata fuel bytes pos2
+      { header := some hdr
+        idat := state.idat ++ chunkData0 ++ chunkData1
+        seenPLTE := state.seenPLTE
+        seenIDAT := true
+        closedIDAT := false
+        metadata := state.metadata }
+  have hStep1 :=
+    parsePngLoopFuelWithMetadata_idat_appends_when_open fuel bytes pos1 state1 hdr
+      idatTypeBytes chunkData1 pos2 hpos1 hLen1 hread1
+      (by rfl) (by decide) (by decide) (by decide) (by rfl)
+      (by simpa [state1] using hpalette)
+  rw [hStep1]
 
 end Lemmas
 

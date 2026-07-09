@@ -178,7 +178,9 @@ This library has proofs about:
   `applyGamma16ToPixels_preserves_grayAlpha_alpha_sample`,
   `parsePngLoopFuelWithMetadata_rejects_plte_after_metadata`,
   `parsePngLoopFuel_ignores_ancillary_before_idat`,
-  `parsePngLoopFuel_idat_appends_when_open`);
+  `parsePngLoopFuel_idat_appends_when_open`,
+  `parsePngLoopFuel_idat_appends_two_when_open`,
+  `parsePngLoopFuelWithMetadata_idat_appends_two_when_open`);
 - dynamic DEFLATE decoder correctness for proof-specified dynamic table reads,
   payload traces, dynamic-only multi-block streams, and zlib envelopes
   (`dynamicTableReaderSpec_readDynamicTables`, `dynamicPayloadTrace_decode_correct`,
