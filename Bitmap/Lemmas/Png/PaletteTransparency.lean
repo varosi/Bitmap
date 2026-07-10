@@ -12,13 +12,12 @@ These theorems generalize the concrete palette `tRNS`/`bKGD` runtime fixtures:
 they prove the expansion branch for arbitrary palette entries, alpha payloads,
 palette background indices, and indexed image data. -/
 
-/-- Symbolic 8-bit palette-alpha expansion over an arbitrary index buffer.
-This records how `tRNS` and an optional resolved `bKGD` affect each output byte. -/
-def paletteAlphaExpansion8Spec (indices : ByteArray) (palette : PngPalette)
-    (alpha : ByteArray) (background? : Option (UInt8 × UInt8 × UInt8))
+/-- Symbolic 8-bit palette expansion over an arbitrary index buffer. This records
+plain `PLTE` expansion, optional `tRNS` alpha, and optional resolved `bKGD`. -/
+def paletteExpansion8Spec (indices : ByteArray) (palette : PngPalette)
+    (alpha? : Option ByteArray) (background? : Option (UInt8 × UInt8 × UInt8))
     (targetColorType : UInt8) : Option ByteArray :=
   Id.run do
-    let alpha? := some alpha
     let count := indices.size
     let outBpp :=
       if targetColorType == u8 0 then bytesPerPixelGray
@@ -70,13 +69,19 @@ def paletteAlphaExpansion8Spec (indices : ByteArray) (palette : PngPalette)
       else
         none
 
-/-- Symbolic 16-bit palette-alpha expansion over an arbitrary index buffer.
-This is the full-range `u8 * 257` counterpart of `paletteAlphaExpansion8Spec`. -/
-def paletteAlphaExpansion16Spec (indices : ByteArray) (palette : PngPalette)
+/-- Symbolic 8-bit palette-alpha expansion over an arbitrary index buffer.
+This records how `tRNS` and an optional resolved `bKGD` affect each output byte. -/
+def paletteAlphaExpansion8Spec (indices : ByteArray) (palette : PngPalette)
     (alpha : ByteArray) (background? : Option (UInt8 × UInt8 × UInt8))
     (targetColorType : UInt8) : Option ByteArray :=
+  paletteExpansion8Spec indices palette (some alpha) background? targetColorType
+
+/-- Symbolic 16-bit palette expansion over an arbitrary index buffer. This is the
+full-range `u8 * 257` counterpart of `paletteExpansion8Spec`. -/
+def paletteExpansion16Spec (indices : ByteArray) (palette : PngPalette)
+    (alpha? : Option ByteArray) (background? : Option (UInt8 × UInt8 × UInt8))
+    (targetColorType : UInt8) : Option ByteArray :=
   Id.run do
-    let alpha? := some alpha
     let count := indices.size
     let outBpp :=
       if targetColorType == u8 0 then bytesPerPixelGray16
@@ -127,6 +132,150 @@ def paletteAlphaExpansion16Spec (indices : ByteArray) (palette : PngPalette)
         some out
       else
         none
+
+/-- Symbolic 16-bit palette-alpha expansion over an arbitrary index buffer.
+This is the full-range `u8 * 257` counterpart of `paletteAlphaExpansion8Spec`. -/
+def paletteAlphaExpansion16Spec (indices : ByteArray) (palette : PngPalette)
+    (alpha : ByteArray) (background? : Option (UInt8 × UInt8 × UInt8))
+    (targetColorType : UInt8) : Option ByteArray :=
+  paletteExpansion16Spec indices palette (some alpha) background? targetColorType
+
+/-- The 8-bit implementation agrees with the symbolic palette expansion spec for
+plain `PLTE`, palette `tRNS`, and palette `bKGD` cases over every index buffer. -/
+lemma expandPaletteIndicesToPixels8_symbolic
+    (indices : ByteArray) (palette : PngPalette) (alpha? : Option ByteArray)
+    (background? : Option (UInt8 × UInt8 × UInt8)) (targetColorType : UInt8) :
+    expandPaletteIndicesToPixels8 indices palette alpha? background? targetColorType =
+      paletteExpansion8Spec indices palette alpha? background? targetColorType := by
+  rfl
+
+/-- The 16-bit implementation agrees with the symbolic palette expansion spec for
+all supported target formats, using full-range `u8 * 257` sample expansion. -/
+lemma expandPaletteIndicesToPixels16_symbolic
+    (indices : ByteArray) (palette : PngPalette) (alpha? : Option ByteArray)
+    (background? : Option (UInt8 × UInt8 × UInt8)) (targetColorType : UInt8) :
+    expandPaletteIndicesToPixels16 indices palette alpha? background? targetColorType =
+      paletteExpansion16Spec indices palette alpha? background? targetColorType := by
+  rfl
+
+/-- When metadata contributes no palette alpha and no palette background, public
+palette expansion is exactly the symbolic plain-`PLTE` expansion for 8/16-bit
+RGB, gray, RGBA, and gray-alpha targets. -/
+lemma expandPaletteIndicesToPixels_plain_symbolic
+    (indices : ByteArray) (palette : PngPalette) (metadata : PngMetadata)
+    (targetColorType targetBitDepth : UInt8)
+    (halpha : paletteAlphaBytes? metadata = none)
+    (hbackground : paletteBackgroundRGB? palette metadata = none) :
+    expandPaletteIndicesToPixels indices palette metadata targetColorType targetBitDepth =
+        if targetBitDepth == u8 8 then
+          paletteExpansion8Spec indices palette none none targetColorType
+        else if targetBitDepth == u8 16 then
+          paletteExpansion16Spec indices palette none none targetColorType
+        else
+          none := by
+  unfold expandPaletteIndicesToPixels
+  simp [halpha, hbackground, expandPaletteIndicesToPixels8_symbolic,
+    expandPaletteIndicesToPixels16_symbolic]
+
+/-- Palette-only metadata, the normal metadata shape after parsing `PLTE` without
+`tRNS`/`bKGD`, expands symbolically for every target color type and bit depth. -/
+lemma expandPaletteIndicesToPixels_paletteOnly_symbolic
+    (indices : ByteArray) (palette : PngPalette)
+    (targetColorType targetBitDepth : UInt8) :
+    expandPaletteIndicesToPixels indices palette
+      { PngMetadata.empty with palette := some palette }
+      targetColorType targetBitDepth =
+        if targetBitDepth == u8 8 then
+          paletteExpansion8Spec indices palette none none targetColorType
+        else if targetBitDepth == u8 16 then
+          paletteExpansion16Spec indices palette none none targetColorType
+        else
+          none := by
+  exact
+    expandPaletteIndicesToPixels_plain_symbolic indices palette
+      { PngMetadata.empty with palette := some palette } targetColorType targetBitDepth
+      (by simp [PngMetadata.empty, paletteAlphaBytes?])
+      (by simp [PngMetadata.empty, paletteBackgroundRGB?])
+
+/-- Plain palette expansion to RGB8 is the symbolic `PLTE` RGB byte stream for
+every indexed image, not just the runtime RGB8 fixture. -/
+lemma expandPaletteIndicesToPixels_paletteOnly_RGB8_symbolic
+    (indices : ByteArray) (palette : PngPalette) :
+    expandPaletteIndicesToPixels indices palette
+      { PngMetadata.empty with palette := some palette } (u8 2) (u8 8) =
+        paletteExpansion8Spec indices palette none none (u8 2) := by
+  simpa [u8] using
+    expandPaletteIndicesToPixels_paletteOnly_symbolic indices palette (u8 2) (u8 8)
+
+/-- Plain palette expansion to Gray8 is the symbolic grayscale conversion of
+every looked-up `PLTE` entry. -/
+lemma expandPaletteIndicesToPixels_paletteOnly_Gray8_symbolic
+    (indices : ByteArray) (palette : PngPalette) :
+    expandPaletteIndicesToPixels indices palette
+      { PngMetadata.empty with palette := some palette } (u8 0) (u8 8) =
+        paletteExpansion8Spec indices palette none none (u8 0) := by
+  simpa [u8] using
+    expandPaletteIndicesToPixels_paletteOnly_symbolic indices palette (u8 0) (u8 8)
+
+/-- Plain palette expansion to RGBA8 appends the default opaque alpha byte for
+every indexed image. -/
+lemma expandPaletteIndicesToPixels_paletteOnly_RGBA8_symbolic
+    (indices : ByteArray) (palette : PngPalette) :
+    expandPaletteIndicesToPixels indices palette
+      { PngMetadata.empty with palette := some palette } (u8 6) (u8 8) =
+        paletteExpansion8Spec indices palette none none (u8 6) := by
+  simpa [u8] using
+    expandPaletteIndicesToPixels_paletteOnly_symbolic indices palette (u8 6) (u8 8)
+
+/-- Plain palette expansion to GrayAlpha8 combines symbolic grayscale conversion
+with the default opaque alpha byte for every indexed image. -/
+lemma expandPaletteIndicesToPixels_paletteOnly_GrayAlpha8_symbolic
+    (indices : ByteArray) (palette : PngPalette) :
+    expandPaletteIndicesToPixels indices palette
+      { PngMetadata.empty with palette := some palette } (u8 4) (u8 8) =
+        paletteExpansion8Spec indices palette none none (u8 4) := by
+  simpa [u8] using
+    expandPaletteIndicesToPixels_paletteOnly_symbolic indices palette (u8 4) (u8 8)
+
+/-- Plain palette expansion to RGB16 is the symbolic full-range expansion of
+each looked-up RGB palette sample. -/
+lemma expandPaletteIndicesToPixels_paletteOnly_RGB16_symbolic
+    (indices : ByteArray) (palette : PngPalette) :
+    expandPaletteIndicesToPixels indices palette
+      { PngMetadata.empty with palette := some palette } (u8 2) (u8 16) =
+        paletteExpansion16Spec indices palette none none (u8 2) := by
+  simpa [u8] using
+    expandPaletteIndicesToPixels_paletteOnly_symbolic indices palette (u8 2) (u8 16)
+
+/-- Plain palette expansion to Gray16 is the symbolic full-range expansion of the
+grayscale conversion of every `PLTE` entry. -/
+lemma expandPaletteIndicesToPixels_paletteOnly_Gray16_symbolic
+    (indices : ByteArray) (palette : PngPalette) :
+    expandPaletteIndicesToPixels indices palette
+      { PngMetadata.empty with palette := some palette } (u8 0) (u8 16) =
+        paletteExpansion16Spec indices palette none none (u8 0) := by
+  simpa [u8] using
+    expandPaletteIndicesToPixels_paletteOnly_symbolic indices palette (u8 0) (u8 16)
+
+/-- Plain palette expansion to RGBA16 adds a full-range opaque alpha sample after
+the symbolic full-range RGB samples. -/
+lemma expandPaletteIndicesToPixels_paletteOnly_RGBA16_symbolic
+    (indices : ByteArray) (palette : PngPalette) :
+    expandPaletteIndicesToPixels indices palette
+      { PngMetadata.empty with palette := some palette } (u8 6) (u8 16) =
+        paletteExpansion16Spec indices palette none none (u8 6) := by
+  simpa [u8] using
+    expandPaletteIndicesToPixels_paletteOnly_symbolic indices palette (u8 6) (u8 16)
+
+/-- Plain palette expansion to GrayAlpha16 combines symbolic full-range grayscale
+conversion with a full-range opaque alpha sample. -/
+lemma expandPaletteIndicesToPixels_paletteOnly_GrayAlpha16_symbolic
+    (indices : ByteArray) (palette : PngPalette) :
+    expandPaletteIndicesToPixels indices palette
+      { PngMetadata.empty with palette := some palette } (u8 4) (u8 16) =
+        paletteExpansion16Spec indices palette none none (u8 4) := by
+  simpa [u8] using
+    expandPaletteIndicesToPixels_paletteOnly_symbolic indices palette (u8 4) (u8 16)
 
 /-- The 8-bit implementation agrees with the symbolic palette-alpha expansion
 spec for every index buffer and every target color type. -/

@@ -21,7 +21,7 @@ packed-row, raw decoder, parsed/container, exact indexed runtime-shape, and
 checked-encoder filter-0 round-trip proofs for supported bit depths, plus
 encoder-side fixed/adaptive row-filter reconstruction contracts, Adam7,
 multi-IDAT fixture coverage, and all-image symbolic
-palette-transparency/background expansion coverage.
+plain-palette and palette-transparency/background expansion coverage.
 
 ### Encoder
 
@@ -205,8 +205,9 @@ This library has proofs about:
   indexed runtime-shape round trips through parsed/container/public checked
   encoder layers, symbolic filtered-row decode under the row reconstruction
   contract, encoder-side fixed/adaptive row serialization proof that establishes
-  that contract, all-image symbolic palette transparency/background expansion
-  for 8- and 16-bit grayscale/RGB/gray-alpha/RGBA targets, and public
+  that contract, all-image symbolic plain palette and palette
+  transparency/background expansion for 8- and 16-bit
+  grayscale/RGB/gray-alpha/RGBA targets, and public
   checked indexed encoder round-trip theorems for all palette bit depths whose
   checked range predicate is derived from the indexed bitmap shape
   (`pngColorTypeBitDepthSupported_palette1`,
@@ -372,6 +373,18 @@ This library has proofs about:
   `PalettePackedRoundTrip.decodeIndexedBitmapWithMetadata_palette_tRNS_bKGD_fixture`,
   `PalettePackedRoundTrip.decodeIndexedBitmapWithMetadata_palette_metadata_fixture`,
   `PalettePackedRoundTrip.decodeIndexedBitmapWithMetadata_palette_tRNS_bKGD_shape_fixture`,
+  `expandPaletteIndicesToPixels8_symbolic`,
+  `expandPaletteIndicesToPixels16_symbolic`,
+  `expandPaletteIndicesToPixels_plain_symbolic`,
+  `expandPaletteIndicesToPixels_paletteOnly_symbolic`,
+  `expandPaletteIndicesToPixels_paletteOnly_RGB8_symbolic`,
+  `expandPaletteIndicesToPixels_paletteOnly_Gray8_symbolic`,
+  `expandPaletteIndicesToPixels_paletteOnly_RGBA8_symbolic`,
+  `expandPaletteIndicesToPixels_paletteOnly_GrayAlpha8_symbolic`,
+  `expandPaletteIndicesToPixels_paletteOnly_RGB16_symbolic`,
+  `expandPaletteIndicesToPixels_paletteOnly_Gray16_symbolic`,
+  `expandPaletteIndicesToPixels_paletteOnly_RGBA16_symbolic`,
+  `expandPaletteIndicesToPixels_paletteOnly_GrayAlpha16_symbolic`,
   `expandPaletteIndicesToPixels8_paletteAlpha_symbolic`,
   `expandPaletteIndicesToPixels16_paletteAlpha_symbolic`,
   `expandPaletteIndicesToPixels_paletteAlpha_no_bKGD_symbolic`,
