@@ -1187,6 +1187,497 @@ private def expectGray1Fixtures : IO Unit := do
         | none =>
             throw (IO.userError "Gray1 encode/decode round-trip failed")
 
+private def indexedPaletteRGB (idx : Nat) : UInt8 × UInt8 × UInt8 :=
+  match idx with
+  | 0 => (Png.u8 0, Png.u8 0, Png.u8 0)
+  | 1 => (Png.u8 220, Png.u8 20, Png.u8 30)
+  | 2 => (Png.u8 20, Png.u8 180, Png.u8 70)
+  | 3 => (Png.u8 30, Png.u8 60, Png.u8 210)
+  | n => (Png.u8 (17 * n + 11), Png.u8 (29 * n + 7), Png.u8 (43 * n + 19))
+
+private def indexedPaletteEntries (count : Nat) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (count * 3)
+    for i in [0:count] do
+      let (r, g, b) := indexedPaletteRGB i
+      out := out.push r
+      out := out.push g
+      out := out.push b
+    return out
+
+private def indexedPalette (count : Nat) : Png.PngPalette :=
+  { entries := indexedPaletteEntries count }
+
+private def indexedFixtureIndex (entryCount x y : Nat) : UInt8 :=
+  Png.u8 ((x * 3 + y * 5 + x * y) % entryCount)
+
+private def indexedFixtureData (w h entryCount : Nat) : ByteArray :=
+  ByteArray.mk <| Array.ofFn (fun i : Fin (w * h) =>
+    let x := i.val % w
+    let y := i.val / w
+    indexedFixtureIndex entryCount x y)
+
+private def indexedFixtureBitmap (w h bitDepth entryCount : Nat)
+    (transparency : Option ByteArray := none) (background : Option UInt8 := none) :
+    Png.PngIndexedBitmap :=
+  let data := indexedFixtureData w h entryCount
+  have hvalid : data.size = w * h := by
+    simp [data, indexedFixtureData, ByteArray.size]
+  { size := { width := w, height := h }
+    bitDepth
+    palette := indexedPalette entryCount
+    data
+    transparency
+    background
+    valid := hvalid }
+
+private def paletteAlphaAtTest (alpha? : Option ByteArray) (idx : Nat) : UInt8 :=
+  match alpha? with
+  | some alpha =>
+      if idx < alpha.size then alpha.get! idx else 0xff
+  | none => 0xff
+
+private def indexedExpectedRGB8Data (w h entryCount : Nat)
+    (alpha? : Option ByteArray := none) (background? : Option UInt8 := none) :
+    ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelRGB)
+    let bgRGB :=
+      match background? with
+      | some bg => indexedPaletteRGB bg.toNat
+      | none => (Png.u8 0, Png.u8 0, Png.u8 0)
+    for y in [0:h] do
+      for x in [0:w] do
+        let idx := (indexedFixtureIndex entryCount x y).toNat
+        let (r0, g0, b0) := indexedPaletteRGB idx
+        let a := paletteAlphaAtTest alpha? idx
+        let (r, g, b) :=
+          if alpha?.isSome then
+            let (br, bg, bb) := bgRGB
+            (Png.alphaCompositeByte r0 br a,
+              Png.alphaCompositeByte g0 bg a,
+              Png.alphaCompositeByte b0 bb a)
+          else
+            (r0, g0, b0)
+        out := out.push r
+        out := out.push g
+        out := out.push b
+    return out
+
+private def indexedExpectedRGBA8Data (w h entryCount : Nat)
+    (alpha? : Option ByteArray := none) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelRGBA)
+    for y in [0:h] do
+      for x in [0:w] do
+        let idx := (indexedFixtureIndex entryCount x y).toNat
+        let (r, g, b) := indexedPaletteRGB idx
+        out := out.push r
+        out := out.push g
+        out := out.push b
+        out := out.push (paletteAlphaAtTest alpha? idx)
+    return out
+
+private def indexedExpectedGray8Data (w h entryCount : Nat) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelGray)
+    for y in [0:h] do
+      for x in [0:w] do
+        let idx := (indexedFixtureIndex entryCount x y).toNat
+        let (r, g, b) := indexedPaletteRGB idx
+        out := out.push (Png.grayFromRGB8 r g b)
+    return out
+
+private def indexedExpectedGrayAlpha8Data (w h entryCount : Nat)
+    (alpha? : Option ByteArray := none) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelGrayAlpha)
+    for y in [0:h] do
+      for x in [0:w] do
+        let idx := (indexedFixtureIndex entryCount x y).toNat
+        let (r, g, b) := indexedPaletteRGB idx
+        out := out.push (Png.grayFromRGB8 r g b)
+        out := out.push (paletteAlphaAtTest alpha? idx)
+    return out
+
+private def indexedExpectedRGB16Data (w h entryCount : Nat) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelRGB16)
+    for y in [0:h] do
+      for x in [0:w] do
+        let idx := (indexedFixtureIndex entryCount x y).toNat
+        let (r, g, b) := indexedPaletteRGB idx
+        out := Png.pushU16Full out r
+        out := Png.pushU16Full out g
+        out := Png.pushU16Full out b
+    return out
+
+private def indexedExpectedRGBA16Data (w h entryCount : Nat)
+    (alpha? : Option ByteArray := none) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelRGBA16)
+    for y in [0:h] do
+      for x in [0:w] do
+        let idx := (indexedFixtureIndex entryCount x y).toNat
+        let (r, g, b) := indexedPaletteRGB idx
+        out := Png.pushU16Full out r
+        out := Png.pushU16Full out g
+        out := Png.pushU16Full out b
+        out := Png.pushU16Full out (paletteAlphaAtTest alpha? idx)
+    return out
+
+private def indexedExpectedGray16Data (w h entryCount : Nat) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelGray16)
+    for y in [0:h] do
+      for x in [0:w] do
+        let idx := (indexedFixtureIndex entryCount x y).toNat
+        let (r, g, b) := indexedPaletteRGB idx
+        out := Png.pushU16Full out (Png.grayFromRGB8 r g b)
+    return out
+
+private def indexedExpectedGrayAlpha16Data (w h entryCount : Nat)
+    (alpha? : Option ByteArray := none) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelGrayAlpha16)
+    for y in [0:h] do
+      for x in [0:w] do
+        let idx := (indexedFixtureIndex entryCount x y).toNat
+        let (r, g, b) := indexedPaletteRGB idx
+        out := Png.pushU16Full out (Png.grayFromRGB8 r g b)
+        out := Png.pushU16Full out (paletteAlphaAtTest alpha? idx)
+    return out
+
+private def indexedPngWithChunks (w h bitDepth interlace : Nat)
+    (preIdat : ByteArray) (raw : ByteArray) : ByteArray :=
+  let ihdr := Png.u32be w ++ Png.u32be h ++
+    ByteArray.mk #[Png.u8 bitDepth, Png.u8 3, Png.u8 0, Png.u8 0, Png.u8 interlace]
+  Png.pngSignature ++ Png.mkChunkBytes Png.ihdrTypeBytes ihdr ++ preIdat ++
+    Png.mkChunkBytes Png.idatTypeBytes (Png.zlibCompressFixed raw) ++
+    Png.mkChunkBytes Png.iendTypeBytes ByteArray.empty
+
+private def indexedPngWithSplitIdat (w h bitDepth interlace : Nat)
+    (preIdat : ByteArray) (raw : ByteArray) : ByteArray :=
+  let ihdr := Png.u32be w ++ Png.u32be h ++
+    ByteArray.mk #[Png.u8 bitDepth, Png.u8 3, Png.u8 0, Png.u8 0, Png.u8 interlace]
+  let idat := Png.zlibCompressFixed raw
+  let split := idat.size / 2
+  Png.pngSignature ++ Png.mkChunkBytes Png.ihdrTypeBytes ihdr ++ preIdat ++
+    Png.mkChunkBytes Png.idatTypeBytes (idat.extract 0 split) ++
+    Png.mkChunkBytes Png.idatTypeBytes (idat.extract split idat.size) ++
+    Png.mkChunkBytes Png.iendTypeBytes ByteArray.empty
+
+private def packIndexedRowFromFn (width bitDepth : Nat) (f : Nat -> UInt8) :
+    ByteArray :=
+  Id.run do
+    let rowBytes := Png.paletteRowBytes width bitDepth
+    let mut row := ByteArray.mk <| Array.replicate rowBytes 0
+    for x in [0:width] do
+      row := Png.palettePackIndexIntoRow row bitDepth x (f x)
+    return row
+
+private def indexedAdam7Raw (w h bitDepth entryCount : Nat) : ByteArray :=
+  Id.run do
+    let mut raw := ByteArray.empty
+    for pass in Png.adam7Passes do
+      let passWidth := Png.adam7PassDim w pass.startX pass.stepX
+      let passHeight :=
+        if passWidth == 0 then
+          0
+        else
+          Png.adam7PassDim h pass.startY pass.stepY
+      for passY in [0:passHeight] do
+        raw := raw.push 0
+        raw := raw ++ packIndexedRowFromFn passWidth bitDepth (fun passX =>
+          let x := pass.startX + passX * pass.stepX
+          let y := pass.startY + passY * pass.stepY
+          indexedFixtureIndex entryCount x y)
+    return raw
+
+private def expectPaletteInvalidDecode (bytes : ByteArray) (label : String) : IO Unit := do
+  if (Png.decodeIndexedBitmapWithMetadata bytes).isSome then
+    throw (IO.userError s!"palette invalid decode accepted: {label}")
+  if (Png.decodeBitmapWithMetadata (px := PixelRGB8) bytes).isSome then
+    throw (IO.userError s!"palette RGB invalid decode accepted: {label}")
+
+private def expectPaletteRawFilterByte (name : String) (bytes : ByteArray)
+    (rowBytes h : Nat) (filter : UInt8) : IO Unit := do
+  match inflatedPngRaw? bytes with
+  | some raw =>
+      if raw.size != h * (rowBytes + 1) then
+        throw (IO.userError s!"{name}: filtered raw size mismatch")
+      if !allRowsHaveFilter raw rowBytes h filter then
+        throw (IO.userError s!"{name}: unexpected filter byte")
+  | none =>
+      throw (IO.userError s!"{name}: failed to inflate encoded PNG")
+
+private def expectPalettePng : IO Unit := do
+  let filters : List Png.PngRowFilter := [.none, .sub, .up, .average, .paeth]
+  let modes : List Png.PngEncodeMode := [.stored, .fixed, .dynamic]
+  for cfg in [(1, 2), (2, 4), (4, 16), (8, 16)] do
+    let bitDepth := cfg.1
+    let entryCount := cfg.2
+    let bmp := indexedFixtureBitmap 9 5 bitDepth entryCount
+    for mode in modes do
+      let bytes ←
+        match Png.encodeIndexedBitmapChecked bmp mode with
+        | Except.ok bytes => pure bytes
+        | Except.error err =>
+            throw (IO.userError s!"palette encode failed for bit depth {bitDepth}, mode {repr mode}: {err}")
+      match Png.decodeIndexedBitmap bytes with
+      | some decoded =>
+          if decoded.bitDepth != bitDepth || decoded.palette != bmp.palette ||
+              decoded.data != bmp.data then
+            throw (IO.userError s!"palette compression round-trip mismatch for bit depth {bitDepth}, mode {repr mode}")
+      | none =>
+          throw (IO.userError s!"palette compression decode failed for bit depth {bitDepth}, mode {repr mode}")
+    for filter in filters do
+      let strategy := Png.PngFilterStrategy.fixed filter
+      let bytes ←
+        match Png.encodeIndexedBitmapWithOptionsChecked bmp
+            { mode := .fixed, filter := strategy } with
+        | Except.ok bytes => pure bytes
+        | Except.error err =>
+            throw (IO.userError s!"palette encode failed for bit depth {bitDepth}: {err}")
+      match Png.decodeIndexedBitmap bytes with
+      | some decoded =>
+          if decoded.bitDepth != bitDepth || decoded.palette != bmp.palette ||
+              decoded.data != bmp.data then
+            throw (IO.userError s!"palette exact round-trip mismatch for bit depth {bitDepth}")
+      | none =>
+          throw (IO.userError s!"palette exact decode failed for bit depth {bitDepth}")
+      match Png.decodeBitmap (px := PixelRGB8) bytes with
+      | some decoded =>
+          if decoded.data != indexedExpectedRGB8Data 9 5 entryCount then
+            throw (IO.userError s!"palette RGB8 expansion mismatch for bit depth {bitDepth}")
+      | none =>
+          throw (IO.userError s!"palette RGB8 expansion failed for bit depth {bitDepth}")
+      match Png.decodeBitmap (px := PixelRGBA8) bytes with
+      | some decoded =>
+          if decoded.data != indexedExpectedRGBA8Data 9 5 entryCount then
+            throw (IO.userError s!"palette RGBA8 expansion mismatch for bit depth {bitDepth}")
+      | none =>
+          throw (IO.userError s!"palette RGBA8 expansion failed for bit depth {bitDepth}")
+      match Png.decodeBitmap (px := PixelGray8) bytes with
+      | some decoded =>
+          if decoded.data != indexedExpectedGray8Data 9 5 entryCount then
+            throw (IO.userError s!"palette Gray8 expansion mismatch for bit depth {bitDepth}")
+      | none =>
+          throw (IO.userError s!"palette Gray8 expansion failed for bit depth {bitDepth}")
+      match Png.decodeBitmap (px := PixelGrayAlpha8) bytes with
+      | some decoded =>
+          if decoded.data != indexedExpectedGrayAlpha8Data 9 5 entryCount then
+            throw (IO.userError s!"palette GrayAlpha8 expansion mismatch for bit depth {bitDepth}")
+      | none =>
+          throw (IO.userError s!"palette GrayAlpha8 expansion failed for bit depth {bitDepth}")
+      expectPaletteRawFilterByte "indexed fixed filter" bytes
+        (Png.paletteRowBytes bmp.size.width bitDepth) bmp.size.height filter.toByte
+  let bmp16 := indexedFixtureBitmap 7 3 4 16
+  let bytes16 ←
+    match Png.encodeIndexedBitmapChecked bmp16 .fixed with
+    | Except.ok bytes => pure bytes
+    | Except.error err => throw (IO.userError s!"palette RGB16 encode failed: {err}")
+  match Png.decodeBitmap (px := PixelRGB16) bytes16 with
+  | some decoded =>
+      if decoded.data != indexedExpectedRGB16Data 7 3 16 then
+        throw (IO.userError "palette RGB16 expansion mismatch")
+  | none =>
+      throw (IO.userError "palette RGB16 expansion failed")
+  match Png.decodeBitmap (px := PixelRGBA16) bytes16 with
+  | some decoded =>
+      if decoded.data != indexedExpectedRGBA16Data 7 3 16 then
+        throw (IO.userError "palette RGBA16 expansion mismatch")
+  | none =>
+      throw (IO.userError "palette RGBA16 expansion failed")
+  match Png.decodeBitmap (px := PixelGray16) bytes16 with
+  | some decoded =>
+      if decoded.data != indexedExpectedGray16Data 7 3 16 then
+        throw (IO.userError "palette Gray16 expansion mismatch")
+  | none =>
+      throw (IO.userError "palette Gray16 expansion failed")
+  match Png.decodeBitmap (px := PixelGrayAlpha16) bytes16 with
+  | some decoded =>
+      if decoded.data != indexedExpectedGrayAlpha16Data 7 3 16 then
+        throw (IO.userError "palette GrayAlpha16 expansion mismatch")
+  | none =>
+      throw (IO.userError "palette GrayAlpha16 expansion failed")
+
+  let alpha := ByteArray.mk #[Png.u8 0, Png.u8 255, Png.u8 128, Png.u8 255]
+  let alphaBmp := indexedFixtureBitmap 5 4 2 4 (some alpha) (some (Png.u8 1))
+  let alphaBytes ←
+    match Png.encodeIndexedBitmapChecked alphaBmp .fixed with
+    | Except.ok bytes => pure bytes
+    | Except.error err => throw (IO.userError s!"palette alpha encode failed: {err}")
+  if (Png.decodeBitmap (px := PixelRGBA8) alphaBytes).isSome then
+    throw (IO.userError "pixel-only palette decode accepted tRNS")
+  match Png.decodeBitmapWithMetadata (px := PixelRGBA8) alphaBytes with
+  | some decoded =>
+      if decoded.bitmap.data != indexedExpectedRGBA8Data 5 4 4 (some alpha) then
+        throw (IO.userError "palette tRNS RGBA expansion mismatch")
+      match decoded.metadata.transparency, decoded.metadata.background with
+      | some (.paletteAlpha a), some (.paletteIndex bg) =>
+          if a != alpha || bg != Png.u8 1 then
+            throw (IO.userError "palette metadata values mismatch")
+      | _, _ =>
+          throw (IO.userError "palette metadata missing")
+  | none =>
+      throw (IO.userError "palette tRNS RGBA metadata decode failed")
+  match Png.decodeBitmapWithMetadata (px := PixelRGB8) alphaBytes with
+  | some decoded =>
+      if decoded.bitmap.data != indexedExpectedRGB8Data 5 4 4 (some alpha) (some (Png.u8 1)) then
+        throw (IO.userError "palette tRNS+bKGD RGB composition mismatch")
+  | none =>
+      throw (IO.userError "palette tRNS+bKGD RGB metadata decode failed")
+  match Png.decodeIndexedBitmapWithMetadata alphaBytes with
+  | some decoded =>
+      if decoded.bitmap.transparency != some alpha || decoded.bitmap.background != some (Png.u8 1) then
+        throw (IO.userError "palette exact metadata decode mismatch")
+  | none =>
+      throw (IO.userError "palette exact metadata decode failed")
+
+  let adam7Pre := Png.mkChunkBytes Png.plteTypeBytes (indexedPaletteEntries 4)
+  let adam7Bytes := indexedPngWithChunks 9 7 2 1 adam7Pre (indexedAdam7Raw 9 7 2 4)
+  match Png.decodeIndexedBitmap adam7Bytes with
+  | some decoded =>
+      if decoded.data != indexedFixtureData 9 7 4 then
+        throw (IO.userError "palette Adam7 exact decode mismatch")
+  | none =>
+      throw (IO.userError "palette Adam7 exact decode failed")
+  let multiRaw := Png.encodeRawIndexedWithFilter bmp16 .none
+  let multiPre := Png.mkChunkBytes Png.plteTypeBytes bmp16.palette.entries
+  let multiBytes := indexedPngWithSplitIdat 7 3 4 0 multiPre multiRaw
+  match Png.decodeIndexedBitmap multiBytes with
+  | some decoded =>
+      if decoded.data != bmp16.data || decoded.palette != bmp16.palette then
+        throw (IO.userError "palette multi-IDAT exact decode mismatch")
+  | none =>
+      throw (IO.userError "palette multi-IDAT exact decode failed")
+
+  let colorSpaceBmp := indexedFixtureBitmap 4 2 2 4
+  let gamma := 100000
+  let gammaBytes ←
+    match Png.encodeIndexedBitmapWithOptionsChecked colorSpaceBmp
+        { mode := .fixed, colorSpace := some (.gamma gamma) } with
+    | Except.ok bytes => pure bytes
+    | Except.error err => throw (IO.userError s!"palette gAMA encode failed: {err}")
+  match Png.decodeBitmapWithMetadata (px := PixelRGB8) gammaBytes with
+  | some decoded =>
+      if decoded.bitmap.data != gammaTransformRgb8Data gamma (indexedExpectedRGB8Data 4 2 4) then
+        throw (IO.userError "palette gAMA RGB8 decode did not convert samples")
+      if decoded.metadata.gamma != some gamma then
+        throw (IO.userError "palette gAMA metadata was not preserved")
+  | none =>
+      throw (IO.userError "palette gAMA RGB8 metadata decode failed")
+  let srgbBytes ←
+    match Png.encodeIndexedBitmapWithOptionsChecked colorSpaceBmp
+        { mode := .fixed, colorSpace := some (.srgb .perceptual true),
+          chromaticities := some Png.PngChromaticities.srgb } with
+    | Except.ok bytes => pure bytes
+    | Except.error err => throw (IO.userError s!"palette sRGB encode failed: {err}")
+  match Png.decodeBitmapWithMetadata (px := PixelRGB8) srgbBytes with
+  | some decoded =>
+      if decoded.bitmap.data != indexedExpectedRGB8Data 4 2 4 then
+        throw (IO.userError "palette sRGB decode changed already-sRGB samples")
+      if decoded.metadata.srgb != some .perceptual ||
+          decoded.metadata.gamma != some 45455 ||
+          decoded.metadata.chromaticities != some Png.PngChromaticities.srgb then
+        throw (IO.userError "palette sRGB metadata was not preserved")
+  | none =>
+      throw (IO.userError "palette sRGB metadata decode failed")
+  let chrmBytes ←
+    match Png.encodeIndexedBitmapWithOptionsChecked colorSpaceBmp
+        { mode := .fixed, colorSpace := some (.gamma gamma),
+          chromaticities := some wideChromaticities } with
+    | Except.ok bytes => pure bytes
+    | Except.error err => throw (IO.userError s!"palette cHRM encode failed: {err}")
+  match Png.decodeBitmapWithMetadata (px := PixelRGB8) chrmBytes with
+  | some decoded =>
+      if decoded.bitmap.data !=
+          chrmTransformRgb8Data wideChromaticities (some gamma)
+            (indexedExpectedRGB8Data 4 2 4) then
+        throw (IO.userError "palette cHRM+gAMA RGB8 decode did not convert samples")
+      if decoded.metadata.chromaticities != some wideChromaticities ||
+          decoded.metadata.gamma != some gamma then
+        throw (IO.userError "palette cHRM+gAMA metadata was not preserved")
+  | none =>
+      throw (IO.userError "palette cHRM+gAMA metadata decode failed")
+
+  let badPaletteSizeBmp := indexedFixtureBitmap 1 1 1 3
+  match Png.encodeIndexedBitmapChecked badPaletteSizeBmp .fixed with
+  | Except.error _ => pure ()
+  | Except.ok _ => throw (IO.userError "palette encoder accepted too many entries for bit depth")
+  let badIndexBmp : Png.PngIndexedBitmap :=
+    { size := { width := 1, height := 1 }
+      bitDepth := 1
+      palette := indexedPalette 2
+      data := ByteArray.mk #[Png.u8 2]
+      transparency := none
+      background := none
+      valid := by decide }
+  match Png.encodeIndexedBitmapChecked badIndexBmp .fixed with
+  | Except.error _ => pure ()
+  | Except.ok _ => throw (IO.userError "palette encoder accepted out-of-range index")
+  let badAlphaBmp := { badIndexBmp with data := ByteArray.mk #[Png.u8 0], transparency := some (ByteArray.mk #[0, 1, 2]) }
+  match Png.encodeIndexedBitmapChecked badAlphaBmp .fixed with
+  | Except.error _ => pure ()
+  | Except.ok _ => throw (IO.userError "palette encoder accepted too-long alpha data")
+  let badBackgroundBmp := { badIndexBmp with data := ByteArray.mk #[Png.u8 0], background := some (Png.u8 2) }
+  match Png.encodeIndexedBitmapChecked badBackgroundBmp .fixed with
+  | Except.error _ => pure ()
+  | Except.ok _ => throw (IO.userError "palette encoder accepted out-of-range background")
+
+  let plte2 := Png.mkChunkBytes Png.plteTypeBytes (indexedPaletteEntries 2)
+  let plteBadLen := Png.mkChunkBytes Png.plteTypeBytes (ByteArray.mk #[Png.u8 0])
+  let plteEmpty := Png.mkChunkBytes Png.plteTypeBytes ByteArray.empty
+  let plteOversize := Png.mkChunkBytes Png.plteTypeBytes
+    (ByteArray.mk <| Array.replicate (257 * 3) (Png.u8 0))
+  let raw1 := ByteArray.mk #[Png.u8 0, Png.u8 0]
+  expectPaletteInvalidDecode (indexedPngWithChunks 1 1 1 0 ByteArray.empty raw1) "missing PLTE"
+  expectPaletteInvalidDecode (indexedPngWithChunks 1 1 1 0 plteBadLen raw1) "bad PLTE length"
+  expectPaletteInvalidDecode (indexedPngWithChunks 1 1 1 0 plteEmpty raw1) "empty PLTE"
+  expectPaletteInvalidDecode (indexedPngWithChunks 1 1 8 0 plteOversize raw1) "oversized PLTE"
+  expectPaletteInvalidDecode (indexedPngWithChunks 1 1 2 0 plte2 (ByteArray.mk #[0, Png.u8 0xc0]))
+    "out-of-range decoded index"
+  expectPaletteInvalidDecode (indexedPngWithChunks 1 1 1 0 (plte2 ++ plte2) raw1) "duplicate PLTE"
+  expectPaletteInvalidDecode
+    (indexedPngWithChunks 1 1 1 0
+      (Png.mkChunkBytes Png.trnsTypeBytes (ByteArray.mk #[0]) ++ plte2) raw1)
+    "tRNS before PLTE"
+  expectPaletteInvalidDecode
+    (indexedPngWithChunks 1 1 1 0
+      (Png.mkChunkBytes Png.bkgdTypeBytes (ByteArray.mk #[0]) ++ plte2) raw1)
+    "bKGD before PLTE"
+  expectPaletteInvalidDecode
+    (indexedPngWithChunks 1 1 1 0
+      (plte2 ++ Png.mkChunkBytes Png.trnsTypeBytes (ByteArray.mk #[0, 1, 2])) raw1)
+    "palette tRNS too long"
+  expectPaletteInvalidDecode
+    (indexedPngWithChunks 1 1 1 0
+      (plte2 ++ Png.mkChunkBytes Png.trnsTypeBytes (ByteArray.mk #[0]) ++
+        Png.mkChunkBytes Png.trnsTypeBytes (ByteArray.mk #[1])) raw1)
+    "duplicate palette tRNS"
+  expectPaletteInvalidDecode
+    (indexedPngWithChunks 1 1 1 0
+      (plte2 ++ Png.mkChunkBytes Png.bkgdTypeBytes (ByteArray.mk #[2])) raw1)
+    "palette bKGD out of range"
+  expectPaletteInvalidDecode
+    (indexedPngWithChunks 1 1 1 0
+      (plte2 ++ Png.mkChunkBytes Png.bkgdTypeBytes (ByteArray.mk #[0]) ++
+        Png.mkChunkBytes Png.bkgdTypeBytes (ByteArray.mk #[1])) raw1)
+    "duplicate palette bKGD"
+  expectPaletteInvalidDecode
+    (indexedPngWithChunks 1 1 1 0
+      (plte2 ++ Png.mkChunkBytes Png.idatTypeBytes raw1 ++
+        Png.mkChunkBytes Png.trnsTypeBytes (ByteArray.mk #[0]))
+      ByteArray.empty)
+    "palette tRNS after IDAT"
+  expectPaletteInvalidDecode
+    (indexedPngWithChunks 1 1 1 0
+      (plte2 ++ Png.mkChunkBytes Png.idatTypeBytes raw1 ++
+        Png.mkChunkBytes Png.bkgdTypeBytes (ByteArray.mk #[0]))
+      ByteArray.empty)
+    "palette bKGD after IDAT"
+
 private def filterRGB8Fixture : BitmapRGB8 :=
   Bitmap.ofPixelFn 6 4 (fun idx : Fin (6 * 4) =>
     let x := idx.val % 6
@@ -2211,6 +2702,8 @@ def run : IO Unit := do
   IO.println "png Adam7 fixtures: ok"
   expectGray1Fixtures
   IO.println "png Gray1 fixtures: ok"
+  expectPalettePng
+  IO.println "png palette fixtures: ok"
   expectPngEncodeFilters
   IO.println "png encoder filter fixtures: ok"
   expectColorSpaceChunks

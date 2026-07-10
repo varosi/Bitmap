@@ -1,7 +1,6 @@
+import Bitmap.Compat
 import Bitmap.Basic.U16
 import Bitmap.Lemmas.BasicU16
-import Mathlib.Data.Nat.Basic
-import Mathlib.Data.Nat.BinaryRec
 import Init.Tactics
 import Init.Data.Array.Lemmas
 import Init.Data.Array.Set
@@ -12,6 +11,8 @@ deriving instance Repr for ByteArray
 
 open Lean
 open System (FilePath)
+
+universe u
 
 instance : ToJson ByteArray where
   toJson bs := Json.arr <| bs.data.map (fun b => toJson b.toNat)
@@ -39,15 +40,13 @@ instance : FromJson UInt16 where
     else
       throw s!"uint16 out of range: {n}"
 
-universe u
-
 namespace Bitmaps
 
 open Lemmas
 
 structure Size where
-  width  : ℕ
-  height : ℕ
+  width  : Nat
+  height : Nat
 deriving Repr, BEq, DecidableEq, ReflBEq, LawfulBEq
 
 -------------------------------------------------------------------------------
@@ -764,14 +763,14 @@ def Bitmap.ofPixelFn {px : Type u} [Pixel px] (w h : Nat) (f : Fin (w * h) → p
   refine { size := { width := w, height := h }, data := filled.1, valid := ?_ }
   simpa [total] using filled.2
 
-def mkBlankBitmap (w h : ℕ) (color : PixelRGB8) [Pixel PixelRGB8] : BitmapRGB8 :=
+def mkBlankBitmap (w h : Nat) (color : PixelRGB8) [Pixel PixelRGB8] : BitmapRGB8 :=
   Bitmap.ofPixelFn w h (fun _ => color)
 
 def BitmapRGB16.ofPixelFn (w h : Nat) (f : Fin (w * h) → PixelRGB16)
     [Pixel PixelRGB16] : BitmapRGB16 :=
   Bitmap.ofPixelFn w h f
 
-def mkBlankBitmapRGB16 (w h : ℕ) (color : PixelRGB16)
+def mkBlankBitmapRGB16 (w h : Nat) (color : PixelRGB16)
     [Pixel PixelRGB16] : BitmapRGB16 :=
   BitmapRGB16.ofPixelFn w h (fun _ => color)
 
@@ -779,14 +778,14 @@ def BitmapRGBA8.ofPixelFn (w h : Nat) (f : Fin (w * h) → PixelRGBA8) [Pixel Pi
     BitmapRGBA8 :=
   Bitmap.ofPixelFn w h f
 
-def mkBlankBitmapRGBA (w h : ℕ) (color : PixelRGBA8) [Pixel PixelRGBA8] : BitmapRGBA8 :=
+def mkBlankBitmapRGBA (w h : Nat) (color : PixelRGBA8) [Pixel PixelRGBA8] : BitmapRGBA8 :=
   BitmapRGBA8.ofPixelFn w h (fun _ => color)
 
 def BitmapRGBA16.ofPixelFn (w h : Nat) (f : Fin (w * h) → PixelRGBA16)
     [Pixel PixelRGBA16] : BitmapRGBA16 :=
   Bitmap.ofPixelFn w h f
 
-def mkBlankBitmapRGBA16 (w h : ℕ) (color : PixelRGBA16)
+def mkBlankBitmapRGBA16 (w h : Nat) (color : PixelRGBA16)
     [Pixel PixelRGBA16] : BitmapRGBA16 :=
   BitmapRGBA16.ofPixelFn w h (fun _ => color)
 
@@ -794,14 +793,14 @@ def BitmapGray8.ofPixelFn (w h : Nat) (f : Fin (w * h) → PixelGray8) [Pixel Pi
     BitmapGray8 :=
   Bitmap.ofPixelFn w h f
 
-def mkBlankBitmapGray (w h : ℕ) (color : PixelGray8) [Pixel PixelGray8] : BitmapGray8 :=
+def mkBlankBitmapGray (w h : Nat) (color : PixelGray8) [Pixel PixelGray8] : BitmapGray8 :=
   BitmapGray8.ofPixelFn w h (fun _ => color)
 
 def BitmapGray16.ofPixelFn (w h : Nat) (f : Fin (w * h) → PixelGray16)
     [Pixel PixelGray16] : BitmapGray16 :=
   Bitmap.ofPixelFn w h f
 
-def mkBlankBitmapGray16 (w h : ℕ) (color : PixelGray16)
+def mkBlankBitmapGray16 (w h : Nat) (color : PixelGray16)
     [Pixel PixelGray16] : BitmapGray16 :=
   BitmapGray16.ofPixelFn w h (fun _ => color)
 
@@ -810,7 +809,7 @@ def BitmapGrayAlpha8.ofPixelFn (w h : Nat)
     BitmapGrayAlpha8 :=
   Bitmap.ofPixelFn w h f
 
-def mkBlankBitmapGrayAlpha (w h : ℕ) (color : PixelGrayAlpha8)
+def mkBlankBitmapGrayAlpha (w h : Nat) (color : PixelGrayAlpha8)
     [Pixel PixelGrayAlpha8] : BitmapGrayAlpha8 :=
   BitmapGrayAlpha8.ofPixelFn w h (fun _ => color)
 
@@ -819,7 +818,7 @@ def BitmapGrayAlpha16.ofPixelFn (w h : Nat)
     BitmapGrayAlpha16 :=
   Bitmap.ofPixelFn w h f
 
-def mkBlankBitmapGrayAlpha16 (w h : ℕ) (color : PixelGrayAlpha16)
+def mkBlankBitmapGrayAlpha16 (w h : Nat) (color : PixelGrayAlpha16)
     [Pixel PixelGrayAlpha16] : BitmapGrayAlpha16 :=
   BitmapGrayAlpha16.ofPixelFn w h (fun _ => color)
 

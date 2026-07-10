@@ -87,6 +87,44 @@ lemma filterRowForStrategy_fixed_size (filter : PngRowFilter)
     (filterRowForStrategy (.fixed filter) row prev bpp).2.size = row.size := by
   simp [filterRowForStrategy, filterRow_size]
 
+/-- Choosing the lower-score candidate preserves a known payload-size invariant.
+This isolates the conditional used by adaptive row-filter selection. -/
+lemma chooseLowerFilterScore_size (best candidate : PngRowFilter × ByteArray)
+    (n : Nat) (hbest : best.2.size = n) (hcandidate : candidate.2.size = n) :
+    (chooseLowerFilterScore best candidate).2.size = n := by
+  unfold chooseLowerFilterScore
+  by_cases hlt : filterRowScore candidate.2 < filterRowScore best.2
+  · simp [hlt, hcandidate]
+  · simp [hlt, hbest]
+
+/-- Adaptive row filtering preserves the row payload size.
+This lets encoder proofs treat adaptive filtering like any fixed PNG filter. -/
+lemma adaptiveFilterRow_size (row prev : ByteArray) (bpp : Nat) :
+    (adaptiveFilterRow row prev bpp).2.size = row.size := by
+  unfold adaptiveFilterRow
+  apply chooseLowerFilterScore_size
+  · apply chooseLowerFilterScore_size
+    · apply chooseLowerFilterScore_size
+      · apply chooseLowerFilterScore_size
+        · rfl
+        · simp [filterRow_size]
+      · simp [filterRow_size]
+    · simp [filterRow_size]
+  · simp [filterRow_size]
+
+/-- Any public filter strategy preserves the row payload size.
+This is the strategy-level invariant used by indexed raw encode size proofs. -/
+lemma filterRowForStrategy_size (strategy : PngFilterStrategy)
+    (row prev : ByteArray) (bpp : Nat) :
+    (filterRowForStrategy strategy row prev bpp).2.size = row.size := by
+  cases strategy with
+  | none =>
+      rfl
+  | fixed filter =>
+      simpa using filterRowForStrategy_fixed_size filter row prev bpp
+  | adaptive =>
+      simp [filterRowForStrategy, adaptiveFilterRow_size]
+
 /-- The generic bitmap filtered encoder delegates to the proven fast filter-0
 path when filtering is left at its default. -/
 @[simp] lemma encodeRawWithFilter_none {px : Type u} [Pixel px] (bmp : Bitmap px) :

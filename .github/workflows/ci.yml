@@ -11,75 +11,19 @@ permissions:
   contents: read
 
 jobs:
-  lean_toolchains:
-    name: Resolve Lean/Lake toolchains
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.resolve.outputs.matrix }}
-    steps:
-      - name: Resolve latest stable Lean releases
-        id: resolve
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const releases = await github.paginate(github.rest.repos.listReleases, {
-              owner: 'leanprover',
-              repo: 'lean4',
-              per_page: 100,
-            });
-
-            function parseStableTag(tag) {
-              const match = /^v(\d+)\.(\d+)\.(\d+)$/.exec(tag);
-              return match ? match.slice(1).map(Number) : null;
-            }
-
-            function compareStableTagsDesc(a, b) {
-              const aParts = parseStableTag(a);
-              const bParts = parseStableTag(b);
-              for (let i = 0; i < 3; i += 1) {
-                if (aParts[i] !== bParts[i]) {
-                  return bParts[i] - aParts[i];
-                }
-              }
-              return 0;
-            }
-
-            const stableTags = [...new Set(
-              releases
-                .filter((release) => !release.draft && !release.prerelease)
-                .map((release) => release.tag_name)
-                .filter((tag) => parseStableTag(tag) !== null)
-            )].sort(compareStableTagsDesc);
-
-            if (stableTags.length < 2) {
-              throw new Error(`Expected at least two stable Lean releases, got ${stableTags.length}`);
-            }
-
-            const matrix = {
-              include: [
-                {
-                  lane: 'latest-stable',
-                  lean_version: stableTags[0],
-                  toolchain: `leanprover/lean4:${stableTags[0]}`,
-                },
-                {
-                  lane: 'previous-stable',
-                  lean_version: stableTags[1],
-                  toolchain: `leanprover/lean4:${stableTags[1]}`,
-                },
-              ],
-            };
-
-            core.info(`Resolved Lean/Lake toolchains: ${stableTags[0]}, ${stableTags[1]}`);
-            core.setOutput('matrix', JSON.stringify(matrix));
-
   build-test:
     name: Build and test (${{ matrix.lane }} ${{ matrix.lean_version }})
-    needs: lean_toolchains
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.lean_toolchains.outputs.matrix) }}
+      matrix:
+        include:
+          - lane: lean-4.30
+            lean_version: v4.30.0
+            toolchain: leanprover/lean4:v4.30.0
+          - lane: lean-4.31
+            lean_version: v4.31.0
+            toolchain: leanprover/lean4:v4.31.0
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -95,10 +39,8 @@ jobs:
 
       - name: Select Lean/Lake toolchain
         run: |
-          export LEAN_VERSION="${{ matrix.lean_version }}"
           printf '%s\n' "${{ matrix.toolchain }}" > lean-toolchain
-          perl -0pi -e 's/(name = "mathlib"\nscope = "leanprover-community"\nrev = ")[^"]+(")/$1$ENV{LEAN_VERSION}$2/' lakefile.toml
-          grep -A2 'name = "mathlib"' lakefile.toml | grep "rev = \"${LEAN_VERSION}\""
+          cat lean-toolchain
 
       - name: Cache Lake dependencies
         uses: actions/cache@v4

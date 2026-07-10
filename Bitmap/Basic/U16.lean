@@ -1,4 +1,5 @@
-import Mathlib.Data.Nat.Basic
+import Bitmap.Compat
+import Init.Tactics
 import Init.Data.ByteArray
 
 namespace Bitmaps

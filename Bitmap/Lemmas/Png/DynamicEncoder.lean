@@ -1,4 +1,3 @@
-import Batteries.Data.Array.Lemmas
 import Bitmap.Lemmas.Png.FixedBlockProofsRunEncode
 
 namespace Bitmaps
@@ -3658,7 +3657,12 @@ lemma generatedDynamicHeaderCodeLengths_extract_dist_full
   have hdistSize : distLengths.size = 30 := by
     simp [distLengths, generatedDynamicDistLengths_size, distSymbolFreqs_size]
   rw [hfull]
-  simp [hlitSize, hdistSize]
+  have hleft : litLenLengths.extract 286 286 = #[] := by
+    rw [Array.extract_eq_empty_iff]
+    omega
+  have hright : distLengths.extract 0 30 = distLengths := by
+    simp [hdistSize]
+  simp [hlitSize, hleft, hright]
 
 /-- Repeating a natural value appends exactly the requested number of entries.
 This is the size invariant for code-length token expansion. -/

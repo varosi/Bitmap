@@ -1,7 +1,6 @@
 import Bitmap.Lemmas.Png.DynamicEncoder
 import Bitmap.Lemmas.Png.DynamicBlockProofsSpec
 import Bitmap.Lemmas.Png.DynamicBlockProofsPayloadBase
-import Batteries.Data.Array.Lemmas
 
 namespace Bitmaps
 
