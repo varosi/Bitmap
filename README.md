@@ -20,7 +20,8 @@ explicit indexed-palette paths currently have focused layout, validation,
 packed-row, raw decoder, parsed/container, exact indexed runtime-shape, and
 checked-encoder filter-0 round-trip proofs for supported bit depths, plus
 encoder-side fixed/adaptive row-filter reconstruction contracts, Adam7,
-multi-IDAT fixture coverage, and all-image symbolic
+symbolic palette Adam7 dispatcher coverage, symbolic palette multi-IDAT parser
+coverage, and all-image symbolic
 plain-palette and palette-transparency/background expansion coverage.
 
 ### Encoder
@@ -181,7 +182,9 @@ This library has proofs about:
   `parsePngLoopFuel_ignores_ancillary_before_idat`,
   `parsePngLoopFuel_idat_appends_when_open`,
   `parsePngLoopFuel_idat_appends_two_when_open`,
-  `parsePngLoopFuelWithMetadata_idat_appends_two_when_open`);
+  `parsePngLoopFuelWithMetadata_idat_appends_two_when_open`,
+  `parsePngLoopFuel_palette_idat_appends_two_after_PLTE`,
+  `parsePngLoopFuelWithMetadata_palette_idat_appends_two_after_PLTE`);
 - dynamic DEFLATE decoder correctness for proof-specified dynamic table reads,
   payload traces, dynamic-only multi-block streams, and zlib envelopes
   (`dynamicTableReaderSpec_readDynamicTables`, `dynamicPayloadTrace_decode_correct`,
@@ -238,6 +241,8 @@ This library has proofs about:
   `adam7ScatterRowPalette_get!_of_indexLimit`,
   `decodeAdam7PalettePassRows_empty_height`,
   `decodeAdam7PalettePasses_nil`,
+  `decodePaletteIndicesByInterlace_adam7_eq_of_passes`,
+  `decodePaletteIndicesByInterlace_adam7_of_passes`,
   `palettePackedIndexAt_lt_indexLimit`,
   `palettePackedIndexAt_lt_entries`,
   `palettePackedIndexAt_pack_same`,

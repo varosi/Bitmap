@@ -1627,6 +1627,60 @@ lemma parsePngLoopFuelWithMetadata_idat_appends_two_when_open (fuel : Nat)
       (by simpa [state1] using hpalette)
   rw [hStep1]
 
+/-- For indexed-color PNGs after `PLTE`, two consecutive `IDAT` chunks append
+both compressed payload fragments. This is the palette-specific multi-IDAT
+parser invariant used by exact indexed decode. -/
+lemma parsePngLoopFuel_palette_idat_appends_two_after_PLTE (fuel : Nat)
+    (bytes : ByteArray) (pos0 pos1 pos2 : Nat) (state : PngParseState)
+    (hdr : PngHeader) (chunkData0 chunkData1 : ByteArray)
+    (hpos0 : pos0 + 8 ≤ bytes.size) (hLen0 : pos0 + 3 < bytes.size)
+    (hread0 : readChunk bytes pos0 hLen0 = some (idatTypeBytes, chunkData0, pos1))
+    (hpos1 : pos1 + 8 ≤ bytes.size) (hLen1 : pos1 + 3 < bytes.size)
+    (hread1 : readChunk bytes pos1 hLen1 = some (idatTypeBytes, chunkData1, pos2))
+    (hheader : state.header = some hdr)
+    (hclosed : state.closedIDAT = false)
+    (hcolor : hdr.colorType = 3)
+    (hplte : state.seenPLTE = true) :
+    parsePngLoopFuel (fuel + 2) bytes pos0 state =
+      parsePngLoopFuel fuel bytes pos2
+        { header := some hdr
+          idat := state.idat ++ chunkData0 ++ chunkData1
+          seenPLTE := state.seenPLTE
+          seenIDAT := true
+          closedIDAT := false
+          metadata := state.metadata } := by
+  exact
+    parsePngLoopFuel_idat_appends_two_when_open fuel bytes pos0 pos1 pos2 state hdr
+      chunkData0 chunkData1 hpos0 hLen0 hread0 hpos1 hLen1 hread1
+      hheader hclosed (by simp [hcolor, hplte])
+
+/-- Metadata-aware indexed-color analogue of
+`parsePngLoopFuel_palette_idat_appends_two_after_PLTE`: split `IDAT` payloads
+are concatenated after `PLTE` while accumulated metadata is preserved. -/
+lemma parsePngLoopFuelWithMetadata_palette_idat_appends_two_after_PLTE (fuel : Nat)
+    (bytes : ByteArray) (pos0 pos1 pos2 : Nat) (state : PngMetadataParseState)
+    (hdr : PngHeader) (chunkData0 chunkData1 : ByteArray)
+    (hpos0 : pos0 + 8 ≤ bytes.size) (hLen0 : pos0 + 3 < bytes.size)
+    (hread0 : readChunk bytes pos0 hLen0 = some (idatTypeBytes, chunkData0, pos1))
+    (hpos1 : pos1 + 8 ≤ bytes.size) (hLen1 : pos1 + 3 < bytes.size)
+    (hread1 : readChunk bytes pos1 hLen1 = some (idatTypeBytes, chunkData1, pos2))
+    (hheader : state.header = some hdr)
+    (hclosed : state.closedIDAT = false)
+    (hcolor : hdr.colorType = 3)
+    (hplte : state.seenPLTE = true) :
+    parsePngLoopFuelWithMetadata (fuel + 2) bytes pos0 state =
+      parsePngLoopFuelWithMetadata fuel bytes pos2
+        { header := some hdr
+          idat := state.idat ++ chunkData0 ++ chunkData1
+          seenPLTE := state.seenPLTE
+          seenIDAT := true
+          closedIDAT := false
+          metadata := state.metadata } := by
+  exact
+    parsePngLoopFuelWithMetadata_idat_appends_two_when_open fuel bytes pos0 pos1 pos2
+      state hdr chunkData0 chunkData1 hpos0 hLen0 hread0 hpos1 hLen1 hread1
+      hheader hclosed (by simp [hcolor, hplte])
+
 end Lemmas
 
 end Bitmaps

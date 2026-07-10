@@ -324,6 +324,37 @@ lemma decodeAdam7PalettePasses_nil
       some (offset, flat) := by
   rfl
 
+/-- The public palette interlace dispatcher exposes the Adam7 pass decoder
+result, accepting only when the pass decoder consumes the full raw payload.
+This is the general wrapper fact for symbolic Adam7 palette proofs. -/
+lemma decodePaletteIndicesByInterlace_adam7_eq_of_passes
+    (raw : ByteArray) (hdr : PngHeader) (paletteEntries offset : Nat)
+    (flat : ByteArray)
+    (hpasses :
+      decodeAdam7PalettePasses raw hdr.width hdr.height hdr.bitDepth paletteEntries 0
+        (ByteArray.mk <| Array.replicate (hdr.width * hdr.height) 0) adam7Passes =
+          some (offset, flat))
+    (hinterlace : hdr.interlace = 1) :
+    decodePaletteIndicesByInterlace? raw hdr paletteEntries =
+      if offset == raw.size then some flat else none := by
+  unfold decodePaletteIndicesByInterlace?
+  simp [hinterlace, hpasses]
+
+/-- If symbolic Adam7 pass decoding consumes exactly the raw payload, the
+palette interlace dispatcher returns the same flat index buffer. This is the
+success corollary used to lift pass-level proofs to exact indexed decode. -/
+lemma decodePaletteIndicesByInterlace_adam7_of_passes
+    (raw : ByteArray) (hdr : PngHeader) (paletteEntries : Nat) (flat : ByteArray)
+    (hpasses :
+      decodeAdam7PalettePasses raw hdr.width hdr.height hdr.bitDepth paletteEntries 0
+        (ByteArray.mk <| Array.replicate (hdr.width * hdr.height) 0) adam7Passes =
+          some (raw.size, flat))
+    (hinterlace : hdr.interlace = 1) :
+    decodePaletteIndicesByInterlace? raw hdr paletteEntries = some flat := by
+  simpa using
+    decodePaletteIndicesByInterlace_adam7_eq_of_passes raw hdr paletteEntries raw.size
+      flat hpasses hinterlace
+
 /-- Reading a packed palette index is always within the addressable range for
 the selected PNG bit depth. This is the core per-sample safety fact for
 arbitrary packed 1/2/4/8-bit palette rows. -/
