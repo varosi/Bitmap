@@ -69,9 +69,6 @@ jobs:
       - name: Update dependencies
         run: lake update
 
-      - name: Download mathlib cache
-        run: lake exe cache get
-
       - name: Build
         run: lake build
 
