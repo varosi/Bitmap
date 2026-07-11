@@ -74,6 +74,13 @@ plain-palette and palette-transparency/background expansion coverage.
 import Bitmap
 ```
 
+Parallel PNG entry points live in `Bitmap.Png.Parallel`. The regular
+`*Parallel` encoders preserve the exact sequential bytes by theorem. For
+throughput-oriented fixed-Huffman encoding, use
+`encodeBitmapFixedSegmentedCheckedParallel`; it emits ordered fixed DEFLATE
+blocks from independent shards, so multi-shard compressed bytes may differ from
+the sequential encoder while preserving PNG decode round trips.
+
 ## Tests
 
 ```sh

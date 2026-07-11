@@ -189,11 +189,57 @@ def zlibCompressStoredParallel
     (raw : ByteArray) (parallel : PngParallelOptions := {}) : ByteArray :=
   zlibCompressWithParallel (fun raw => deflateStoredParallel raw parallel) raw parallel
 
+/-- Write one fixed-Huffman DEFLATE block from already-tokenized LZ77 data.
+The writer is not flushed here so callers can concatenate multiple fixed blocks
+in one bit stream and mark only the final block with `BFINAL = 1`. -/
+def writeFixedLz77Block
+    (bw : BitWriter) (tokens : Array Lz77Token) (final : Bool) : BitWriter :=
+  let bw1 := bw.writeBits (if final then 1 else 0) 1
+  let bw2 := bw1.writeBits 1 2
+  let bw3 := writeFixedPayloadLz77 bw2 tokens
+  let (eobCode, eobLen) := fixedLitLenCode 256
+  bw3.writeBits (reverseBits eobCode eobLen) eobLen
+
+/-- Tokenize one byte-range shard independently for segmented fixed-Huffman
+DEFLATE. Independent tokenization avoids cross-shard LZ77 dependencies. -/
+def fixedLz77ShardTokens (raw : ByteArray) (shard : PngShard) : Array Lz77Token :=
+  deflateTokensLz77 (raw.extract shard.start shard.stop)
+
+/-- Write an ordered list of fixed-Huffman LZ77 token chunks as independent
+DEFLATE blocks. The empty-list case still emits a valid empty final block. -/
+def writeFixedLz77Blocks : BitWriter → List (Array Lz77Token) → BitWriter
+  | bw, [] => writeFixedLz77Block bw #[] true
+  | bw, tokens :: [] => writeFixedLz77Block bw tokens true
+  | bw, tokens :: next :: rest =>
+      writeFixedLz77Blocks (writeFixedLz77Block bw tokens false) (next :: rest)
+
+/-- Build a fixed-Huffman DEFLATE stream by tokenizing byte-range shards in
+tasks and emitting one ordered fixed block per shard. This is semantically
+equivalent after inflate, but not byte-for-byte equal to `deflateFixed` when
+more than one shard is used because LZ77 matches intentionally do not cross
+shard boundaries. -/
+def deflateFixedSegmentedParallel
+    (raw : ByteArray) (parallel : PngParallelOptions := {}) : ByteArray :=
+  let shards := byteShardRanges parallel raw.size
+  let tokenChunks :=
+    if parallel.useParallel shards.length raw.size then
+      mapShardsParallel shards (fixedLz77ShardTokens raw)
+    else
+      shards.map (fixedLz77ShardTokens raw)
+  (writeFixedLz77Blocks BitWriter.empty tokenChunks).flush
+
 /-- Build a fixed-Huffman zlib stream with independent tasks for deflate and
 Adler checksum. The fixed bitstream itself remains sequential and unchanged. -/
 def zlibCompressFixedParallel
     (raw : ByteArray) (parallel : PngParallelOptions := {}) : ByteArray :=
   zlibCompressWithParallel deflateFixed raw parallel
+
+/-- Build a fixed-Huffman zlib stream whose DEFLATE payload is segmented into
+ordered fixed blocks. This enables true shard-level tokenization parallelism
+while preserving inflate semantics rather than exact compressed bytes. -/
+def zlibCompressFixedSegmentedParallel
+    (raw : ByteArray) (parallel : PngParallelOptions := {}) : ByteArray :=
+  zlibCompressWithParallel (fun raw => deflateFixedSegmentedParallel raw parallel) raw parallel
 
 /-- Build a dynamic-Huffman zlib stream with independent tasks for deflate and
 Adler checksum. The dynamic bitstream itself remains sequential and unchanged. -/
@@ -297,6 +343,36 @@ def encodeBitmapCheckedParallel {px : Type u} [Bitmaps.PixelFormat px] [Png.Pixe
   if hw : bmp.size.width < UInt32.size then
     if hh : bmp.size.height < UInt32.size then
       Except.ok (encodeBitmapParallel (px := px) bmp hw hh mode parallel)
+    else
+      Except.error "bitmap height exceeds PNG limit (2^32)"
+  else
+    Except.error "bitmap width exceeds PNG limit (2^32)"
+
+/-- Encode a bitmap using the segmented fixed-Huffman parallel compressor.
+This path preserves PNG round-trip semantics but may produce different IDAT
+bytes from the sequential fixed encoder for multi-shard inputs. -/
+def encodeBitmapFixedSegmentedParallel {px : Type u}
+    [Bitmaps.PixelFormat px] [Png.PixelFormat px]
+    (bmp : Bitmap px)
+    (hw : bmp.size.width < UInt32.size) (hh : bmp.size.height < UInt32.size)
+    (parallel : PngParallelOptions := {}) : ByteArray :=
+  have _ := hw
+  have _ := hh
+  let raw := Png.PixelFormat.encodeRaw (α := px) bmp
+  let ihdr := u32be bmp.size.width ++ u32be bmp.size.height ++
+    ByteArray.mk #[Png.PixelFormat.bitDepth (α := px), Png.PixelFormat.colorType (α := px),
+      u8 0, u8 0, u8 0]
+  let idat := zlibCompressFixedSegmentedParallel raw parallel
+  encodeBitmapChunksParallel ihdr ByteArray.empty idat parallel
+
+/-- Checked entry point for segmented fixed-Huffman parallel bitmap encoding. -/
+def encodeBitmapFixedSegmentedCheckedParallel {px : Type u}
+    [Bitmaps.PixelFormat px] [Png.PixelFormat px]
+    (bmp : Bitmap px) (parallel : PngParallelOptions := {}) :
+    Except String ByteArray :=
+  if hw : bmp.size.width < UInt32.size then
+    if hh : bmp.size.height < UInt32.size then
+      Except.ok (encodeBitmapFixedSegmentedParallel (px := px) bmp hw hh parallel)
     else
       Except.error "bitmap height exceeds PNG limit (2^32)"
   else

@@ -2610,6 +2610,15 @@ private def expectParallelApiEquality : IO Unit := do
       throw (IO.userError s!"parallel stored deflate block mismatch for maxShards {maxShards}")
     if Png.zlibCompressStoredParallel storedRaw storedParallel != Png.zlibCompressStored storedRaw then
       throw (IO.userError s!"parallel stored zlib block mismatch for maxShards {maxShards}")
+    let segmentedFixed := Png.zlibCompressFixedSegmentedParallel storedRaw storedParallel
+    if maxShards == 1 && segmentedFixed != Png.zlibCompressFixed storedRaw then
+      throw (IO.userError "segmented fixed one-shard zlib did not match sequential fixed zlib")
+    match zlibDecompressFixture segmentedFixed with
+    | some raw' =>
+        if raw' != storedRaw then
+          throw (IO.userError s!"segmented fixed zlib decompressed to the wrong raw payload for maxShards {maxShards}")
+    | none =>
+        throw (IO.userError s!"segmented fixed zlib failed to decompress for maxShards {maxShards}")
 
   let rgbBmp := filterRGB8Fixture
   for mode in [Png.PngEncodeMode.stored, .fixed, .dynamic] do
@@ -2630,6 +2639,20 @@ private def expectParallelApiEquality : IO Unit := do
           throw (IO.userError "parallel RGB checked encode error mismatch")
     | _, _ =>
         throw (IO.userError "parallel RGB checked encode shape mismatch")
+
+  for maxShards in [1, 2, 4, 8, 16, 32, 64, 128] do
+    let segmentedParallel : Png.PngParallelOptions :=
+      { maxShards := maxShards, minRowsPerShard := 1, targetBytesPerShard := 1 }
+    match Png.encodeBitmapFixedSegmentedCheckedParallel (px := RGB8) rgbBmp segmentedParallel with
+    | Except.ok bytes =>
+        match Png.decodeBitmapParallel (px := RGB8) bytes segmentedParallel with
+        | some decoded =>
+            if decoded != rgbBmp then
+              throw (IO.userError s!"segmented fixed parallel RGB round-trip mismatch for maxShards {maxShards}")
+        | none =>
+            throw (IO.userError s!"segmented fixed parallel RGB decode failed for maxShards {maxShards}")
+    | Except.error err =>
+        throw (IO.userError s!"segmented fixed parallel RGB encode failed: {err}")
 
   let optionConfig : Png.PngEncodeOptions :=
     { mode := .fixed, filter := .adaptive, colorSpace := some (.srgb .perceptual false) }
@@ -2804,6 +2827,9 @@ private def runPngStagePerfTest : IO Unit := do
     pure (byteArrayChecksum (Png.zlibCompressStoredParallel input.rawNone storedParallelOptions))
   let _ ← measurePngStageInputs "zlib compress fixed" iters inputs <| fun input => do
     pure (byteArrayChecksum (Png.zlibCompressFixed input.rawNone))
+  let _ ← measurePngStageInputs "zlib compress fixed segmented parallel" iters inputs <| fun input => do
+    pure (byteArrayChecksum
+      (Png.zlibCompressFixedSegmentedParallel input.rawNone storedParallelOptions))
   let _ ← measurePngStageInputs "zlib compress dynamic" iters inputs <| fun input => do
     pure (byteArrayChecksum (Png.zlibCompressDynamic input.rawNone))
   let _ ← measurePngStageInputs "zlib decompress stored" iters inputs <| fun input => do
@@ -2862,6 +2888,26 @@ private def perfPngRoundTripParallel (w h : Nat) (maxShards : Nat) : IO (Nat × 
   let t1 <- IO.monoNanosNow
   return (t1 - t0, true)
 
+private def perfPngRoundTripFixedSegmentedParallel
+    (w h : Nat) (maxShards : Nat) : IO (Nat × Bool) := do
+  let parallel : Png.PngParallelOptions :=
+    { maxShards := maxShards, minRowsPerShard := 1, targetBytesPerShard := 1 }
+  let t0 <- IO.monoNanosNow
+  let bmp := perfContentBitmap w h
+  let bytes ←
+    match Png.encodeBitmapFixedSegmentedCheckedParallel (px := RGB8) bmp parallel with
+    | Except.ok bytes => pure bytes
+    | Except.error err =>
+        throw (IO.userError s!"png segmented fixed parallel perf encode failed: {err}")
+  match Png.decodeBitmapParallel (px := RGB8) bytes parallel with
+  | some bmp' =>
+      if bmp' != bmp then
+        throw (IO.userError "png segmented fixed parallel perf exact bitmap mismatch")
+  | none =>
+      throw (IO.userError "png segmented fixed parallel perf decode failed")
+  let t1 <- IO.monoNanosNow
+  return (t1 - t0, true)
+
 private def runPngParallelPerfTest : IO Unit := do
   let w := perfPngParallelResolution
   let h := perfPngParallelResolution
@@ -2883,6 +2929,17 @@ private def runPngParallelPerfTest : IO Unit := do
   if sweepTotalNs < perfPngParallelMinTotalNs then
     throw (IO.userError
       s!"png parallel round-trip sweep too small: total {sweepTotalNs / 1_000_000} ms is below 20000 ms")
+  for maxShards in [1, 2, 4, 8, 16, 32, 64, 128] do
+    let hb0 <- IO.getNumHeartbeats
+    let mut totalNs : Nat := 0
+    for _ in [0:iters] do
+      let (elapsedNs, ok) <- perfPngRoundTripFixedSegmentedParallel w h maxShards
+      if !ok then
+        throw (IO.userError "png segmented fixed parallel perf round-trip failed")
+      totalNs := totalNs + elapsedNs
+    let hb1 <- IO.getNumHeartbeats
+    let avgNs := totalNs / iters
+    IO.println s!"perf png segmented fixed parallel round-trip: {w}x{h}, maxShards {maxShards}, avg {avgNs / 1_000_000} ms over {iters} runs, heartbeats {hb1 - hb0}"
 
 -- Encode a deterministic content bitmap to PNG and decode it back.
 -- Returns elapsed time in nanoseconds and whether the round-trip was exact.
