@@ -2835,11 +2835,14 @@ private def runPngStagePerfTest : IO Unit := do
   if input0.rawAdaptive.size == 0 then
     throw (IO.userError "adaptive raw stage unexpectedly empty")
 
--- Keep this large enough that the shard sweep measures real round-trip work,
--- but bounded so `lake test` remains practical on smaller machines.
-private def perfPngParallelResolution : Nat := 256
+-- Keep this large enough that the shard sweep measures real round-trip work.
+-- The sweep below requires at least 20 seconds total so shard settings are
+-- measured on a workload large enough to show meaningful timing differences.
+private def perfPngParallelResolution : Nat := 512
 
 private def perfPngParallelIters : Nat := 5
+
+private def perfPngParallelMinTotalNs : Nat := 20_000_000_000
 
 private def perfPngRoundTripParallel (w h : Nat) (maxShards : Nat) : IO (Nat × Bool) := do
   let parallel : Png.PngParallelOptions :=
@@ -2863,6 +2866,7 @@ private def runPngParallelPerfTest : IO Unit := do
   let w := perfPngParallelResolution
   let h := perfPngParallelResolution
   let iters := perfPngParallelIters
+  let mut sweepTotalNs : Nat := 0
   for maxShards in [1, 2, 4, 8, 16, 32, 64, 128] do
     let hb0 <- IO.getNumHeartbeats
     let mut totalNs : Nat := 0
@@ -2873,7 +2877,12 @@ private def runPngParallelPerfTest : IO Unit := do
       totalNs := totalNs + elapsedNs
     let hb1 <- IO.getNumHeartbeats
     let avgNs := totalNs / iters
+    sweepTotalNs := sweepTotalNs + totalNs
     IO.println s!"perf png parallel round-trip: {w}x{h}, maxShards {maxShards}, avg {avgNs / 1_000_000} ms over {iters} runs, heartbeats {hb1 - hb0}"
+  IO.println s!"perf png parallel round-trip sweep total: {sweepTotalNs / 1_000_000} ms"
+  if sweepTotalNs < perfPngParallelMinTotalNs then
+    throw (IO.userError
+      s!"png parallel round-trip sweep too small: total {sweepTotalNs / 1_000_000} ms is below 20000 ms")
 
 -- Encode a deterministic content bitmap to PNG and decode it back.
 -- Returns elapsed time in nanoseconds and whether the round-trip was exact.
