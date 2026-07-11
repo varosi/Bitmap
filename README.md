@@ -101,7 +101,11 @@ This library has proofs about:
   (`Bitmap.Lemmas.encodeBitmapParallel_eq`,
   `Bitmap.Lemmas.decodeBitmapParallel_eq`,
   `Bitmap.Lemmas.decodeBitmapParallel_encodeBitmapParallel`,
-  `Bitmap.Lemmas.decodeIndexedBitmapParallel_encodeIndexedBitmapCheckedParallel_paletteRange_data`);
+  `Bitmap.Lemmas.decodeIndexedBitmapParallel_encodeIndexedBitmapCheckedParallel_paletteRange_data`),
+  plus one-shard byte equality for the segmented fixed-Huffman encoder
+  (`Bitmap.Lemmas.deflateFixedSegmentedParallel_oneShard_eq`,
+  `Bitmap.Lemmas.zlibCompressFixedSegmentedParallel_oneShard_eq`,
+  `Bitmap.Lemmas.encodeBitmapFixedSegmentedCheckedParallel_oneShard_eq`);
 - PNG chunk validation properties for CRC checks and chunk-order state transitions
   (`readChunk_rejects_crc_mismatch`, `readChunk_success_crc_matches`,
   `parsePngLoopFuel_rejects_non_ihdr_before_header`,

@@ -43,6 +43,33 @@ parallelism uses this to recover the ordered sequential block stream. -/
   | cons x xs ih =>
       simp [ih]
 
+/-- Canonical one-shard options for segmented fixed-Huffman proof reductions.
+With these options, the segmented encoder must collapse to the sequential path. -/
+def oneShardPngParallelOptions : PngParallelOptions :=
+  { maxShards := 1, minRowsPerShard := 1, targetBytesPerShard := 1 }
+
+/-- Simplifies the scheduler cap when `maxShards = 1`.
+This small arithmetic fact keeps one-shard segmented proofs local. -/
+lemma nat_max_one_min_one (n : Nat) : Nat.max 1 (Nat.min 1 n) = 1 := by
+  cases n <;> rfl
+
+/-- One-shard parallel options always select exactly one shard.
+This proves the segmented fixed encoder has no extra block split in that mode. -/
+@[simp] lemma shardCountForWork_oneShardPngParallelOptions
+    (workUnits workBytes : Nat) :
+    PngParallelOptions.shardCountForWork oneShardPngParallelOptions
+        workUnits workBytes = 1 := by
+  simp [oneShardPngParallelOptions, PngParallelOptions.shardCountForWork,
+    PngParallelOptions.normalizedMaxShards, Png.parallelCeilDiv,
+    nat_max_one_min_one]
+
+/-- Byte sharding with one-shard options returns the whole input range.
+This bridges segmented fixed-Huffman tokenization back to the sequential input. -/
+@[simp] lemma byteShardRanges_oneShardPngParallelOptions (raw : ByteArray) :
+    Png.byteShardRanges oneShardPngParallelOptions raw.size =
+      [{ start := 0, stop := raw.size }] := by
+  simp [Png.byteShardRanges, Png.shardRanges]
+
 /-- Stored-block range descriptors materialize to the same bytes as running
 the existing stored DEFLATE encoder on the corresponding raw-buffer slice. -/
 lemma storedDeflateBlockRangesFrom_correct
@@ -166,6 +193,22 @@ independently without changing bytes. -/
     Png.zlibCompressFixedParallel raw parallel = Png.zlibCompressFixed raw := by
   simp [Png.zlibCompressFixedParallel, Png.zlibCompressFixed]
 
+/-- One-shard segmented fixed-Huffman DEFLATE is byte-for-byte equal to the
+existing fixed-Huffman encoder. It validates the segmented path's base case. -/
+@[simp] lemma deflateFixedSegmentedParallel_oneShard_eq (raw : ByteArray) :
+    Png.deflateFixedSegmentedParallel raw oneShardPngParallelOptions =
+      Png.deflateFixed raw := by
+  simp [Png.deflateFixedSegmentedParallel, Png.PngParallelOptions.useParallel,
+    Png.fixedLz77ShardTokens, Png.writeFixedLz77Blocks, Png.writeFixedLz77Block,
+    Png.deflateFixed, Png.deflateFixedLz77, ByteArray.extract_zero_size]
+
+/-- One-shard segmented fixed-Huffman zlib compression preserves the existing
+fixed zlib bytes, including the wrapper and Adler checksum. -/
+@[simp] lemma zlibCompressFixedSegmentedParallel_oneShard_eq (raw : ByteArray) :
+    Png.zlibCompressFixedSegmentedParallel raw oneShardPngParallelOptions =
+      Png.zlibCompressFixed raw := by
+  simp [Png.zlibCompressFixedSegmentedParallel, Png.zlibCompressFixed]
+
 /-- Parallel dynamic compression preserves the existing dynamic-Huffman zlib stream. -/
 @[simp] lemma zlibCompressDynamicParallel_eq
     (raw : ByteArray) (parallel : PngParallelOptions) :
@@ -232,6 +275,18 @@ existing sequential encoder core. -/
   cases mode <;>
     simp [Png.encodeBitmapParallel, Png.encodeBitmap, Png.compressIdatParallel, Id.run]
 
+/-- One-shard segmented fixed-Huffman bitmap encoding is byte-for-byte equal to
+the existing fixed-Huffman bitmap encoder. Multi-shard mode keeps only semantic
+round-trip compatibility because LZ77 matches are shard-local. -/
+@[simp] lemma encodeBitmapFixedSegmentedParallel_oneShard_eq {px : Type u}
+    [PixelFormat px] [Png.PixelFormat px]
+    (bmp : Bitmap px)
+    (hw : bmp.size.width < UInt32.size) (hh : bmp.size.height < UInt32.size) :
+    Png.encodeBitmapFixedSegmentedParallel (px := px) bmp hw hh
+        oneShardPngParallelOptions =
+      Png.encodeBitmap (px := px) bmp hw hh .fixed := by
+  simp [Png.encodeBitmapFixedSegmentedParallel, Png.encodeBitmap, Id.run]
+
 /-- Parallel option-aware bitmap encoding is equal to the existing encoder. -/
 @[simp] lemma encodeBitmapWithOptionsParallel_eq {px : Type u}
     [PixelFormat px] [Png.PixelFormat px]
@@ -250,6 +305,19 @@ existing sequential encoder core. -/
     Png.encodeBitmapCheckedParallel (px := px) bmp mode parallel =
       Png.encodeBitmapChecked (px := px) bmp mode := by
   unfold Png.encodeBitmapCheckedParallel Png.encodeBitmapChecked
+  by_cases hw : bmp.size.width < UInt32.size
+  · by_cases hh : bmp.size.height < UInt32.size <;> simp [hw, hh]
+  · simp [hw]
+
+/-- One-shard segmented fixed-Huffman checked bitmap encoding preserves the
+existing checked fixed-Huffman encoder result. -/
+@[simp] lemma encodeBitmapFixedSegmentedCheckedParallel_oneShard_eq {px : Type u}
+    [PixelFormat px] [Png.PixelFormat px]
+    (bmp : Bitmap px) :
+    Png.encodeBitmapFixedSegmentedCheckedParallel (px := px) bmp
+        oneShardPngParallelOptions =
+      Png.encodeBitmapChecked (px := px) bmp .fixed := by
+  unfold Png.encodeBitmapFixedSegmentedCheckedParallel Png.encodeBitmapChecked
   by_cases hw : bmp.size.width < UInt32.size
   · by_cases hh : bmp.size.height < UInt32.size <;> simp [hw, hh]
   · simp [hw]
