@@ -1,5 +1,6 @@
 import Bitmap.Basic
 import Bitmap.Png
+import Bitmap.Png.Parallel
 import Bitmap.Widget
 
 open Bitmaps
@@ -2581,6 +2582,240 @@ private def perfContentBitmap (w h : Nat) : Bitmap.RGB8 :=
     exact hsize
   { size := { width := w, height := h }, data, valid := hvalid }
 
+private def expectParallelScheduling : IO Unit := do
+  let options : Png.PngParallelOptions :=
+    { maxShards := 8, minRowsPerShard := 2, targetBytesPerShard := 100 }
+  if options.shardCountForWork 16 1600 != 8 then
+    throw (IO.userError "parallel scheduler did not cap at maxShards")
+  if options.shardCountForWork 1 1 != 1 then
+    throw (IO.userError "parallel scheduler did not keep tiny work sequential")
+  let ranges := Png.rowShardRanges options 16 9
+  if ranges.length != 8 then
+    throw (IO.userError "parallel scheduler row shard count mismatch")
+  let covered := ranges.foldl (fun acc shard => acc + shard.size) 0
+  if covered != 16 then
+    throw (IO.userError "parallel scheduler row shard coverage mismatch")
+  let shardSizes := Png.mapShardsParallel ranges (fun shard => shard.size)
+  if shardSizes.foldl (· + ·) 0 != 16 then
+    throw (IO.userError "parallel shard task result ordering/coverage mismatch")
+
+private def expectParallelApiEquality : IO Unit := do
+  let parallel : Png.PngParallelOptions :=
+    { maxShards := 32, minRowsPerShard := 1, targetBytesPerShard := 1 }
+  let rgbBmp := filterRGB8Fixture
+  for mode in [Png.PngEncodeMode.stored, .fixed, .dynamic] do
+    match Png.encodeBitmapChecked (px := RGB8) rgbBmp mode,
+        Png.encodeBitmapCheckedParallel (px := RGB8) rgbBmp mode parallel with
+    | Except.ok seq, Except.ok par =>
+        if seq != par then
+          throw (IO.userError "parallel RGB checked encode mismatch")
+        match Png.decodeBitmap (px := RGB8) seq,
+            Png.decodeBitmapParallel (px := RGB8) seq parallel with
+        | some seqBmp, some parBmp =>
+            if seqBmp != parBmp then
+              throw (IO.userError "parallel RGB decode mismatch")
+        | _, _ =>
+            throw (IO.userError "parallel RGB decode success mismatch")
+    | Except.error seqErr, Except.error parErr =>
+        if seqErr != parErr then
+          throw (IO.userError "parallel RGB checked encode error mismatch")
+    | _, _ =>
+        throw (IO.userError "parallel RGB checked encode shape mismatch")
+
+  let optionConfig : Png.PngEncodeOptions :=
+    { mode := .fixed, filter := .adaptive, colorSpace := some (.srgb .perceptual false) }
+  match Png.encodeBitmapWithOptionsChecked (px := RGB8) adaptiveNonzeroFixture optionConfig,
+      Png.encodeBitmapWithOptionsCheckedParallel (px := RGB8) adaptiveNonzeroFixture
+        optionConfig parallel with
+  | Except.ok seq, Except.ok par =>
+      if seq != par then
+        throw (IO.userError "parallel RGB option encode mismatch")
+      match Png.decodeBitmapWithMetadata (px := RGB8) seq,
+          Png.decodeBitmapWithMetadataParallel (px := RGB8) seq parallel with
+      | some seqDecoded, some parDecoded =>
+          if seqDecoded.bitmap != parDecoded.bitmap ||
+              seqDecoded.metadata.srgb != parDecoded.metadata.srgb then
+            throw (IO.userError "parallel RGB metadata decode mismatch")
+      | _, _ =>
+          throw (IO.userError "parallel RGB metadata decode success mismatch")
+  | Except.error seqErr, Except.error parErr =>
+      if seqErr != parErr then
+        throw (IO.userError "parallel RGB option encode error mismatch")
+  | _, _ =>
+      throw (IO.userError "parallel RGB option encode shape mismatch")
+
+  let gray1Bmp := gray1FixtureBitmap 17 4
+  match Png.encodeGray1BitmapChecked gray1Bmp .fixed,
+      Png.encodeGray1BitmapCheckedParallel gray1Bmp .fixed parallel with
+  | Except.ok seq, Except.ok par =>
+      if seq != par then
+        throw (IO.userError "parallel Gray1 checked encode mismatch")
+      match Png.decodeGray1Bitmap seq, Png.decodeGray1BitmapParallel seq parallel with
+      | some seqBmp, some parBmp =>
+          if seqBmp != parBmp then
+            throw (IO.userError "parallel Gray1 decode mismatch")
+      | _, _ =>
+          throw (IO.userError "parallel Gray1 decode success mismatch")
+  | Except.error seqErr, Except.error parErr =>
+      if seqErr != parErr then
+        throw (IO.userError "parallel Gray1 checked encode error mismatch")
+  | _, _ =>
+      throw (IO.userError "parallel Gray1 checked encode shape mismatch")
+
+  let indexedBmp := indexedFixtureBitmap 9 5 4 12
+  match Png.encodeIndexedBitmapChecked indexedBmp .fixed,
+      Png.encodeIndexedBitmapCheckedParallel indexedBmp .fixed parallel with
+  | Except.ok seq, Except.ok par =>
+      if seq != par then
+        throw (IO.userError "parallel indexed checked encode mismatch")
+      match Png.decodeIndexedBitmap seq, Png.decodeIndexedBitmapParallel seq parallel with
+      | some seqBmp, some parBmp =>
+          if seqBmp.data != parBmp.data || seqBmp.palette != parBmp.palette then
+            throw (IO.userError "parallel indexed decode mismatch")
+      | _, _ =>
+          throw (IO.userError "parallel indexed decode success mismatch")
+      match Png.decodeIndexedBitmapWithMetadata seq,
+          Png.decodeIndexedBitmapWithMetadataParallel seq parallel with
+      | some seqDecoded, some parDecoded =>
+          if seqDecoded.bitmap.data != parDecoded.bitmap.data ||
+              seqDecoded.metadata.palette != parDecoded.metadata.palette then
+            throw (IO.userError "parallel indexed metadata decode mismatch")
+      | _, _ =>
+          throw (IO.userError "parallel indexed metadata decode success mismatch")
+  | Except.error seqErr, Except.error parErr =>
+      if seqErr != parErr then
+        throw (IO.userError "parallel indexed checked encode error mismatch")
+  | _, _ =>
+      throw (IO.userError "parallel indexed checked encode shape mismatch")
+
+private def measurePngStage (label : String) (iters : Nat) (act : IO Nat) : IO Nat := do
+  let hb0 <- IO.getNumHeartbeats
+  let mut totalNs : Nat := 0
+  let mut checksum : Nat := 0
+  for _ in [0:iters] do
+    let t0 <- IO.monoNanosNow
+    let value <- act
+    let t1 <- IO.monoNanosNow
+    totalNs := totalNs + (t1 - t0)
+    checksum := checksum + value
+  let hb1 <- IO.getNumHeartbeats
+  let avgNs := totalNs / iters
+  IO.println s!"perf png stage {label}: avg {avgNs} ns ({avgNs / 1_000} us) over {iters} runs, checksum {checksum}, heartbeats {hb1 - hb0}"
+  return avgNs
+
+private def byteArrayChecksum (bytes : ByteArray) : Nat :=
+  Id.run do
+    let mut checksum := bytes.size
+    for i in [0:bytes.size] do
+      checksum := checksum + (bytes.get! i).toNat
+    return checksum
+
+private def perfPngStageResolution : Nat := 192
+
+private def perfPngStageIters : Nat := 5
+
+private def runPngStagePerfTest : IO Unit := do
+  let w := perfPngStageResolution
+  let h := perfPngStageResolution
+  let iters := perfPngStageIters
+  let bmp := perfContentBitmap w h
+  let rawNone := Png.PixelFormat.encodeRaw (α := RGB8) bmp
+  let rawAdaptive := Png.encodeRawWithFilter bmp .adaptive
+  let gray1Bmp := gray1FixtureBitmap 193 17
+  let indexedBmp := indexedFixtureBitmap 65 17 4 12
+  let stored := Png.zlibCompressStored rawNone
+  let fixed := Png.zlibCompressFixed rawNone
+  let dynamic := Png.zlibCompressDynamic rawNone
+  let fixedBytes ←
+    match Png.encodeBitmapChecked (px := RGB8) bmp .fixed with
+    | Except.ok bytes => pure bytes
+    | Except.error err => throw (IO.userError s!"png stage fixed encode failed: {err}")
+  let colorBytes ←
+    match Png.encodeBitmapWithOptionsChecked (px := RGB8) bmp
+        { mode := .fixed, colorSpace := some (.srgb .perceptual false) } with
+    | Except.ok bytes => pure bytes
+    | Except.error err => throw (IO.userError s!"png stage color encode failed: {err}")
+  let _ ← measurePngStage "row encode filter none" iters <| do
+    pure (byteArrayChecksum (Png.PixelFormat.encodeRaw (α := RGB8) bmp))
+  let _ ← measurePngStage "row encode adaptive" iters <| do
+    pure (byteArrayChecksum (Png.encodeRawWithFilter bmp .adaptive))
+  let _ ← measurePngStage "Gray1 row packing adaptive" iters <| do
+    pure (byteArrayChecksum (Png.encodeRawGray1WithFilter gray1Bmp .adaptive))
+  let _ ← measurePngStage "indexed row packing adaptive" iters <| do
+    pure (byteArrayChecksum (Png.encodeRawIndexedWithFilter indexedBmp .adaptive))
+  let _ ← measurePngStage "zlib compress stored" iters <| do
+    pure (byteArrayChecksum (Png.zlibCompressStored rawNone))
+  let _ ← measurePngStage "zlib compress fixed" iters <| do
+    pure (byteArrayChecksum (Png.zlibCompressFixed rawNone))
+  let _ ← measurePngStage "zlib compress dynamic" iters <| do
+    pure (byteArrayChecksum (Png.zlibCompressDynamic rawNone))
+  let _ ← measurePngStage "zlib decompress stored" iters <| do
+    match if hsize : 2 <= stored.size then Png.zlibDecompressStored stored hsize else none with
+    | some raw => pure (byteArrayChecksum raw)
+    | none => throw (IO.userError "stored zlib stage failed")
+  let _ ← measurePngStage "zlib decompress fixed" iters <| do
+    match if hsize : 2 <= fixed.size then Png.zlibDecompress fixed hsize else none with
+    | some raw => pure (byteArrayChecksum raw)
+    | none => throw (IO.userError "fixed zlib stage failed")
+  let _ ← measurePngStage "zlib decompress dynamic" iters <| do
+    match if hsize : 2 <= dynamic.size then Png.zlibDecompress dynamic hsize else none with
+    | some raw => pure (byteArrayChecksum raw)
+    | none => throw (IO.userError "dynamic zlib stage failed")
+  let _ ← measurePngStage "chunk CRC construction" iters <| do
+    pure (byteArrayChecksum (Png.mkChunkBytes Png.idatTypeBytes fixed))
+  let _ ← measurePngStage "PNG parse" iters <| do
+    match if hsize : 8 <= fixedBytes.size then Png.parsePngForDecode fixedBytes hsize else none with
+    | some parsed => pure (byteArrayChecksum parsed.idat)
+    | none => throw (IO.userError "PNG parse stage failed")
+  let _ ← measurePngStage "unfilter and pixel decode" iters <| do
+    match Png.decodeBitmap (px := RGB8) fixedBytes with
+    | some decoded => pure (byteArrayChecksum decoded.data)
+    | none => throw (IO.userError "PNG decode stage failed")
+  let _ ← measurePngStage "metadata color-space decode" iters <| do
+    match Png.decodeBitmapWithMetadata (px := RGB8) colorBytes with
+    | some decoded => pure (byteArrayChecksum decoded.bitmap.data)
+    | none => throw (IO.userError "PNG color-space decode stage failed")
+  if rawAdaptive.size == 0 then
+    throw (IO.userError "adaptive raw stage unexpectedly empty")
+
+private def perfPngParallelResolution : Nat := 128
+
+private def perfPngParallelIters : Nat := 5
+
+private def perfPngRoundTripParallel (w h : Nat) (maxShards : Nat) : IO (Nat × Bool) := do
+  let parallel : Png.PngParallelOptions :=
+    { maxShards := maxShards, minRowsPerShard := 1, targetBytesPerShard := 1 }
+  let t0 <- IO.monoNanosNow
+  let bmp := perfContentBitmap w h
+  let bytes ←
+    match Png.encodeBitmapCheckedParallel (px := RGB8) bmp .fixed parallel with
+    | Except.ok bytes => pure bytes
+    | Except.error err => throw (IO.userError s!"png parallel perf encode failed: {err}")
+  match Png.decodeBitmapParallel (px := RGB8) bytes parallel with
+  | some bmp' =>
+      if bmp' != bmp then
+        throw (IO.userError "png parallel perf exact bitmap mismatch")
+  | none =>
+      throw (IO.userError "png parallel perf decode failed")
+  let t1 <- IO.monoNanosNow
+  return (t1 - t0, true)
+
+private def runPngParallelPerfTest : IO Unit := do
+  let w := perfPngParallelResolution
+  let h := perfPngParallelResolution
+  let iters := perfPngParallelIters
+  for maxShards in [1, 2, 4, 8, 16, 32, 64, 128] do
+    let hb0 <- IO.getNumHeartbeats
+    let mut totalNs : Nat := 0
+    for _ in [0:iters] do
+      let (elapsedNs, ok) <- perfPngRoundTripParallel w h maxShards
+      if !ok then
+        throw (IO.userError "png parallel perf round-trip failed")
+      totalNs := totalNs + elapsedNs
+    let hb1 <- IO.getNumHeartbeats
+    let avgNs := totalNs / iters
+    IO.println s!"perf png parallel round-trip: {w}x{h}, maxShards {maxShards}, avg {avgNs / 1_000_000} ms over {iters} runs, heartbeats {hb1 - hb0}"
+
 -- Encode a deterministic content bitmap to PNG and decode it back.
 -- Returns elapsed time in nanoseconds and whether the round-trip was exact.
 private def perfPngRoundTrip (w h : Nat) : IO (Nat × Bool) := do
@@ -2739,6 +2974,10 @@ def run : IO Unit := do
   IO.println "png palette fixtures: ok"
   expectPngEncodeFilters
   IO.println "png encoder filter fixtures: ok"
+  expectParallelScheduling
+  IO.println "png parallel scheduler: ok"
+  expectParallelApiEquality
+  IO.println "png parallel API equality: ok"
   expectColorSpaceChunks
   IO.println "png sRGB/gAMA/cHRM fixtures: ok"
   expectTimeChunks
@@ -2756,9 +2995,11 @@ def run : IO Unit := do
   validateMalformedDynamicFixtures
   validateCopyDistanceFast
   runPerfTest
+  runPngStagePerfTest
   let fixedAvgNs <- runPngPerfTest
   let _dynamicAvgNs <- runPngPerfTestDynamic fixedAvgNs
   runPngPerfTestStored
+  runPngParallelPerfTest
 
 end Bitmap.Tests
 

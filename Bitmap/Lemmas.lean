@@ -23,4 +23,5 @@ import Bitmap.Lemmas.Png.Lz77Dynamic
 import Bitmap.Lemmas.Png.FixedLiteral
 import Bitmap.Lemmas.Png.FixedBlock
 import Bitmap.Lemmas.Png.EncodeDecode
+import Bitmap.Lemmas.Png.Parallel
 import Bitmap.Lemmas.Bitmap

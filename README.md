@@ -2,7 +2,7 @@
 
 Lean 4 bitmap image utilities with verified PNG encode/decode support, plus a small widget for visualization.
 
-Current library version: `0.10.0`.
+Current library version: `0.11.0`.
 
 The widget accepts the supported 8-bit bitmap formats and displays 16-bit bitmap
 formats by downsampling each channel to its high byte for browser canvas output.
@@ -89,6 +89,12 @@ This library has proofs about:
   `RGBA8`, `GrayAlpha8`, `Gray16`, `RGB16`,
   `RGBA16`, and `GrayAlpha16`
   (Bitmap.Lemmas.decodeBitmap_encodeBitmap);
+- Parallel PNG public API equivalence and round-trip wrappers for the
+  task-based encode/decode entry points
+  (`Bitmap.Lemmas.encodeBitmapParallel_eq`,
+  `Bitmap.Lemmas.decodeBitmapParallel_eq`,
+  `Bitmap.Lemmas.decodeBitmapParallel_encodeBitmapParallel`,
+  `Bitmap.Lemmas.decodeIndexedBitmapParallel_encodeIndexedBitmapCheckedParallel_paletteRange_data`);
 - PNG chunk validation properties for CRC checks and chunk-order state transitions
   (`readChunk_rejects_crc_mismatch`, `readChunk_success_crc_matches`,
   `parsePngLoopFuel_rejects_non_ihdr_before_header`,
