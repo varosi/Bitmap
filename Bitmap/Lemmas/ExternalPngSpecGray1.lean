@@ -25,7 +25,7 @@ into the gray1 core. The closure theorems are one-line corollaries of
 /-- Common witness bundle shared by `ExternalPngSpecGray1To{8,16}`.
 Captures the container layer, zlib inflate, and the intermediate
 `flat` byte array produced by `decodeRowsLoopGray1Packed`. -/
-structure ExternalPngSpecGray1Common (px : Type u) [Pixel px] [PngPixel px] where
+structure ExternalPngSpecGray1Common (px : Type u) [PixelFormat px] [Png.PixelFormat px] where
   bitmap : Bitmap px
   container : SimpleContainerSpec
   hSourceBitDepth : container.header.bitDepth = 1
@@ -33,7 +33,7 @@ structure ExternalPngSpecGray1Common (px : Type u) [Pixel px] [PngPixel px] wher
   hWidth : container.header.width = bitmap.size.width
   hHeight : container.header.height = bitmap.size.height
   hInterlace : container.header.interlace = 0
-  hPxColorType : PngPixel.colorType (α := px) = u8 0
+  hPxColorType : Png.PixelFormat.colorType (α := px) = u8 0
   hIdatSize : container.idatData.size < 2 ^ 32
   hIdatMin : 2 ≤ container.idatData.size
   inflatedRaw : ByteArray
@@ -53,7 +53,7 @@ structure ExternalPngSpecGray1Common (px : Type u) [Pixel px] [PngPixel px] wher
 
 namespace ExternalPngSpecGray1Common
 
-variable {px : Type u} [Pixel px] [PngPixel px]
+variable {px : Type u} [PixelFormat px] [Png.PixelFormat px]
 
 /-- Phase 3 routing: `parsePngForDecode` accepts the container bytes
 and produces the parsed header + IDAT data + empty metadata. -/
@@ -74,24 +74,24 @@ end ExternalPngSpecGray1Common
 
 /-- 1-bit grayscale → 8-bit target. Mirrors the
 `decodeBitmap_correct_of_witnesses_gray1_to8` witness chain. -/
-structure ExternalPngSpecGray1To8 (px : Type u) [Pixel px] [PngPixel px]
+structure ExternalPngSpecGray1To8 (px : Type u) [PixelFormat px] [Png.PixelFormat px]
     extends ExternalPngSpecGray1Common px where
-  hTargetBitDepth : PngPixel.bitDepth (α := px) = u8 8
+  hTargetBitDepth : Png.PixelFormat.bitDepth (α := px) = u8 8
   /-- The pixel-extraction loop on the 8-bit-expanded raw. -/
   hPixels :
-    PngPixel.decodeRowsLoop (α := px)
+    Png.PixelFormat.decodeRowsLoop (α := px)
         (gray1FlatToSampleRaw toExternalPngSpecGray1Common.flat
           bitmap.size.width bitmap.size.height 8)
         bitmap.size.width bitmap.size.height 1 bitmap.size.width
         0 0 ByteArray.empty
         { data := Array.replicate
             (bitmap.size.width * bitmap.size.height *
-              Pixel.bytesPerPixel (α := px)) 0 } =
+              PixelFormat.bytesPerPixel (α := px)) 0 } =
       some bitmap.data
 
 namespace ExternalPngSpecGray1To8
 
-variable {px : Type u} [Pixel px] [PngPixel px]
+variable {px : Type u} [PixelFormat px] [Png.PixelFormat px]
 
 /-- End-to-end closure: any `ExternalPngSpecGray1To8` is accepted by
 `decodeBitmap` and decodes to the spec's bitmap. -/
@@ -101,8 +101,8 @@ theorem decodeBitmap_external_gray1_to8_correct
   have hTransform :
       applyPngColorSpaceTransform
         (PngMetadata.pixelOnlyColorSpace PngMetadata.empty)
-        s.container.header.colorType (PngPixel.colorType (α := px))
-        (PngPixel.bitDepth (α := px)) s.bitmap.data = some s.bitmap.data := by
+        s.container.header.colorType (Png.PixelFormat.colorType (α := px))
+        (Png.PixelFormat.bitDepth (α := px)) s.bitmap.data = some s.bitmap.data := by
     unfold applyPngColorSpaceTransform PngMetadata.pixelOnlyColorSpace
     rfl
   exact decodeBitmap_correct_of_witnesses_gray1_to8
@@ -115,24 +115,24 @@ theorem decodeBitmap_external_gray1_to8_correct
 end ExternalPngSpecGray1To8
 
 /-- 1-bit grayscale → 16-bit target. -/
-structure ExternalPngSpecGray1To16 (px : Type u) [Pixel px] [PngPixel px]
+structure ExternalPngSpecGray1To16 (px : Type u) [PixelFormat px] [Png.PixelFormat px]
     extends ExternalPngSpecGray1Common px where
-  hTargetBitDepth : PngPixel.bitDepth (α := px) = u8 16
+  hTargetBitDepth : Png.PixelFormat.bitDepth (α := px) = u8 16
   /-- The pixel-extraction loop on the 16-bit-expanded raw. -/
   hPixels :
-    PngPixel.decodeRowsLoop (α := px)
+    Png.PixelFormat.decodeRowsLoop (α := px)
         (gray1FlatToSampleRaw toExternalPngSpecGray1Common.flat
           bitmap.size.width bitmap.size.height 16)
         bitmap.size.width bitmap.size.height 2 (bitmap.size.width * 2)
         0 0 ByteArray.empty
         { data := Array.replicate
             (bitmap.size.width * bitmap.size.height *
-              Pixel.bytesPerPixel (α := px)) 0 } =
+              PixelFormat.bytesPerPixel (α := px)) 0 } =
       some bitmap.data
 
 namespace ExternalPngSpecGray1To16
 
-variable {px : Type u} [Pixel px] [PngPixel px]
+variable {px : Type u} [PixelFormat px] [Png.PixelFormat px]
 
 theorem decodeBitmap_external_gray1_to16_correct
     (s : ExternalPngSpecGray1To16 px) :
@@ -140,8 +140,8 @@ theorem decodeBitmap_external_gray1_to16_correct
   have hTransform :
       applyPngColorSpaceTransform
         (PngMetadata.pixelOnlyColorSpace PngMetadata.empty)
-        s.container.header.colorType (PngPixel.colorType (α := px))
-        (PngPixel.bitDepth (α := px)) s.bitmap.data = some s.bitmap.data := by
+        s.container.header.colorType (Png.PixelFormat.colorType (α := px))
+        (Png.PixelFormat.bitDepth (α := px)) s.bitmap.data = some s.bitmap.data := by
     unfold applyPngColorSpaceTransform PngMetadata.pixelOnlyColorSpace
     rfl
   exact decodeBitmap_correct_of_witnesses_gray1_to16

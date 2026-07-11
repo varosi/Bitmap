@@ -22,23 +22,23 @@ the multi-IDAT one with the empty-metadata discharge swapped for the
 
 /-- A description of an external PNG byte stream with multiple IDAT
 chunks plus an optional `tIME` chunk between IHDR and the first IDAT. -/
-structure ExternalPngMultiIdatTimeSpec (px : Type u) [Pixel px] [PngPixel px] where
+structure ExternalPngMultiIdatTimeSpec (px : Type u) [PixelFormat px] [Png.PixelFormat px] where
   bitmap : Bitmap px
   container : MultiIdatTimeContainerSpec
   hWidth : container.header.width = bitmap.size.width
   hHeight : container.header.height = bitmap.size.height
   hColorType :
-    container.header.colorType = (PngPixel.colorType (α := px)).toNat
+    container.header.colorType = (Png.PixelFormat.colorType (α := px)).toNat
   hInterlace : container.header.interlace = 0
-  hPxColorType : PngPixel.colorType (α := px) = u8 container.header.colorType
+  hPxColorType : Png.PixelFormat.colorType (α := px) = u8 container.header.colorType
   hTargetBitDepth :
-    PngPixel.bitDepth (α := px) = u8 8 ∨ PngPixel.bitDepth (α := px) = u8 16
+    Png.PixelFormat.bitDepth (α := px) = u8 8 ∨ Png.PixelFormat.bitDepth (α := px) = u8 16
   hBitDepthMatch :
-    container.header.bitDepth = (PngPixel.bitDepth (α := px)).toNat
+    container.header.bitDepth = (Png.PixelFormat.bitDepth (α := px)).toNat
   hBppLookup :
     pngBytesPerPixelForColorTypeAndBitDepth?
       container.header.colorType container.header.bitDepth =
-        some (Pixel.bytesPerPixel (α := px))
+        some (PixelFormat.bytesPerPixel (α := px))
   hIdatMin : 2 ≤ container.idatData.size
   inflatedRaw : ByteArray
   hInflated :
@@ -48,20 +48,20 @@ structure ExternalPngMultiIdatTimeSpec (px : Type u) [Pixel px] [PngPixel px] wh
   hRawSize :
     inflatedRaw.size =
       bitmap.size.height *
-        (bitmap.size.width * Pixel.bytesPerPixel (α := px) + 1)
+        (bitmap.size.width * PixelFormat.bytesPerPixel (α := px) + 1)
   hPixels :
-    PngPixel.decodeRowsLoop (α := px) inflatedRaw bitmap.size.width
-        bitmap.size.height (Pixel.bytesPerPixel (α := px))
-        (bitmap.size.width * Pixel.bytesPerPixel (α := px))
+    Png.PixelFormat.decodeRowsLoop (α := px) inflatedRaw bitmap.size.width
+        bitmap.size.height (PixelFormat.bytesPerPixel (α := px))
+        (bitmap.size.width * PixelFormat.bytesPerPixel (α := px))
         0 0 ByteArray.empty
         { data := Array.replicate
             (bitmap.size.width * bitmap.size.height *
-              Pixel.bytesPerPixel (α := px)) 0 } =
+              PixelFormat.bytesPerPixel (α := px)) 0 } =
       some bitmap.data
 
 namespace ExternalPngMultiIdatTimeSpec
 
-variable {px : Type u} [Pixel px] [PngPixel px]
+variable {px : Type u} [PixelFormat px] [Png.PixelFormat px]
 
 /-- For our spec the `expectedMetadata` has at most a `modificationTime`
 set; the color-space-affecting fields (srgb / chromaticities / gamma)
@@ -69,22 +69,30 @@ are all `none`. -/
 lemma expectedMetadata_srgb_none (s : ExternalPngMultiIdatTimeSpec px) :
     s.container.expectedMetadata.srgb = none := by
   unfold MultiIdatTimeContainerSpec.expectedMetadata
-  rcases s.container.tIME with _ | _ <;> simp [PngMetadata.empty]
+    MultiIdatTimeContainerSpec.toGeneric
+    MultiIdatGenericPreChunkContainerSpec.expectedMetadata
+  rcases s.container.tIME with _ | _ <;> rfl
 
 lemma expectedMetadata_chromaticities_none (s : ExternalPngMultiIdatTimeSpec px) :
     s.container.expectedMetadata.chromaticities = none := by
   unfold MultiIdatTimeContainerSpec.expectedMetadata
-  rcases s.container.tIME with _ | _ <;> simp [PngMetadata.empty]
+    MultiIdatTimeContainerSpec.toGeneric
+    MultiIdatGenericPreChunkContainerSpec.expectedMetadata
+  rcases s.container.tIME with _ | _ <;> rfl
 
 lemma expectedMetadata_gamma_none (s : ExternalPngMultiIdatTimeSpec px) :
     s.container.expectedMetadata.gamma = none := by
   unfold MultiIdatTimeContainerSpec.expectedMetadata
-  rcases s.container.tIME with _ | _ <;> simp [PngMetadata.empty]
+    MultiIdatTimeContainerSpec.toGeneric
+    MultiIdatGenericPreChunkContainerSpec.expectedMetadata
+  rcases s.container.tIME with _ | _ <;> rfl
 
 lemma expectedMetadata_transparency_none (s : ExternalPngMultiIdatTimeSpec px) :
     s.container.expectedMetadata.transparency = none := by
   unfold MultiIdatTimeContainerSpec.expectedMetadata
-  rcases s.container.tIME with _ | _ <;> simp [PngMetadata.empty]
+    MultiIdatTimeContainerSpec.toGeneric
+    MultiIdatGenericPreChunkContainerSpec.expectedMetadata
+  rcases s.container.tIME with _ | _ <;> rfl
 
 lemma expectedMetadata_chromaticities_isSome (s : ExternalPngMultiIdatTimeSpec px) :
     (s.container.expectedMetadata.chromaticities.isSome : Bool) = false := by
@@ -135,7 +143,7 @@ theorem decodeBitmap_external_multiIdatTime_correct (s : ExternalPngMultiIdatTim
       ¬ (((s.container.expectedMetadata.pixelOnlyColorSpace.srgb = none ∧
             s.container.expectedMetadata.pixelOnlyColorSpace.chromaticities.isSome = true) ∧
           (s.container.header.colorType = 2 ∨ s.container.header.colorType = 6)) ∧
-        (PngPixel.colorType (α := px) = u8 0 ∨ PngPixel.colorType (α := px) = u8 4)) := by
+        (Png.PixelFormat.colorType (α := px) = u8 0 ∨ Png.PixelFormat.colorType (α := px) = u8 4)) := by
     intro ⟨⟨⟨_, h⟩, _⟩, _⟩
     have : s.container.expectedMetadata.pixelOnlyColorSpace.chromaticities.isSome = false := by
       unfold PngMetadata.pixelOnlyColorSpace
@@ -154,8 +162,8 @@ theorem decodeBitmap_external_multiIdatTime_correct (s : ExternalPngMultiIdatTim
   have hTransform :
       applyPngColorSpaceTransform
         (PngMetadata.pixelOnlyColorSpace s.container.expectedMetadata)
-        s.container.header.colorType (PngPixel.colorType (α := px))
-        (PngPixel.bitDepth (α := px)) s.bitmap.data = some s.bitmap.data := by
+        s.container.header.colorType (Png.PixelFormat.colorType (α := px))
+        (Png.PixelFormat.bitDepth (α := px)) s.bitmap.data = some s.bitmap.data := by
     unfold applyPngColorSpaceTransform
     rw [hPixelOnlySrgb, hPixelOnlyChrm, hPixelOnlyGamma]
   exact decodeBitmap_correct_of_witnesses s.container.bytes_size_ge_8

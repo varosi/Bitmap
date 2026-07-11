@@ -127,27 +127,27 @@ lemma filterRowForStrategy_size (strategy : PngFilterStrategy)
 
 /-- The generic bitmap filtered encoder delegates to the proven fast filter-0
 path when filtering is left at its default. -/
-@[simp] lemma encodeRawWithFilter_none {px : Type u} [Pixel px] (bmp : Bitmap px) :
+@[simp] lemma encodeRawWithFilter_none {px : Type u} [PixelFormat px] (bmp : Bitmap px) :
     encodeRawWithFilter bmp .none = encodeRawFast bmp := by
   rfl
 
 /-- The Gray1 filtered encoder delegates to the packed filter-0 encoder when
 filtering is left at its default. -/
-@[simp] lemma encodeRawGray1WithFilter_none (bmp : BitmapGray1) :
+@[simp] lemma encodeRawGray1WithFilter_none (bmp : Bitmap.Gray1) :
     encodeRawGray1WithFilter bmp .none = encodeRawGray1 bmp := by
   rfl
 
 /-- Default filtered raw encoding has the same size theorem as the existing
 filter-0 encoder. This is the bridge needed by round-trip clients that opt out. -/
-lemma encodeRawWithFilter_none_size {px : Type u} [Pixel px] (bmp : Bitmap px) :
+lemma encodeRawWithFilter_none_size {px : Type u} [PixelFormat px] (bmp : Bitmap px) :
     (encodeRawWithFilter bmp .none).size =
-      bmp.size.height * (bmp.size.width * Pixel.bytesPerPixel (α := px) + 1) := by
+      bmp.size.height * (bmp.size.width * PixelFormat.bytesPerPixel (α := px) + 1) := by
   rw [encodeRawWithFilter_none, encodeRawFast_eq]
   exact encodeRaw_size (bmp := bmp)
 
 /-- Default filtered Gray1 raw encoding has the packed row size already proved
 for the filter-0 Gray1 encoder. -/
-lemma encodeRawGray1WithFilter_none_size (bmp : BitmapGray1) :
+lemma encodeRawGray1WithFilter_none_size (bmp : Bitmap.Gray1) :
     (encodeRawGray1WithFilter bmp .none).size =
       bmp.size.height * (gray1RowBytes bmp.size.width + 1) := by
   simp [encodeRawGray1WithFilter_none, encodeRawGray1_size]

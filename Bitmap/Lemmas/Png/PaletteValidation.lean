@@ -293,7 +293,7 @@ lemma validateIndexedBitmap_rejects_palette_too_large_for_depth1
     paletteMaxEntriesForBitDepth]
   rfl
 
-/-- Pixel indices are validated against the palette entry count before raw rows
+/-- pixel indices are validated against the palette entry count before raw rows
 are packed. -/
 lemma validateIndexedBitmap_rejects_out_of_range_indices
     (bmp : PngIndexedBitmap)

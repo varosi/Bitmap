@@ -180,7 +180,7 @@ private def fixtureAlphaAt (alpha? : Option ByteArray) (idx : Nat) : UInt8 :=
 private def fixtureExpectedRGBA8Data (w h entryCount : Nat)
     (alpha? : Option ByteArray := none) : ByteArray :=
   Id.run do
-    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelRGBA)
+    let mut out := ByteArray.emptyWithCapacity (w * h * RGBA8.bytesPerPixel)
     for y in [0:h] do
       for x in [0:w] do
         let idx := (fixtureIndex entryCount x y).toNat
@@ -195,7 +195,7 @@ private def fixtureExpectedRGB8Data (w h entryCount : Nat)
     (alpha? : Option ByteArray := none) (background? : Option UInt8 := none) :
     ByteArray :=
   Id.run do
-    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelRGB)
+    let mut out := ByteArray.emptyWithCapacity (w * h * RGB8.bytesPerPixel)
     let bgRGB :=
       match background? with
       | some bg => fixturePaletteRGB bg.toNat
@@ -220,7 +220,7 @@ private def fixtureExpectedRGB8Data (w h entryCount : Nat)
 
 private def fixtureExpectedGray8Data (w h entryCount : Nat) : ByteArray :=
   Id.run do
-    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelGray)
+    let mut out := ByteArray.emptyWithCapacity (w * h * Gray8.bytesPerPixel)
     for y in [0:h] do
       for x in [0:w] do
         let idx := (fixtureIndex entryCount x y).toNat
@@ -231,7 +231,7 @@ private def fixtureExpectedGray8Data (w h entryCount : Nat) : ByteArray :=
 private def fixtureExpectedGrayAlpha8Data (w h entryCount : Nat)
     (alpha? : Option ByteArray := none) : ByteArray :=
   Id.run do
-    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelGrayAlpha)
+    let mut out := ByteArray.emptyWithCapacity (w * h * GrayAlpha8.bytesPerPixel)
     for y in [0:h] do
       for x in [0:w] do
         let idx := (fixtureIndex entryCount x y).toNat
@@ -242,7 +242,7 @@ private def fixtureExpectedGrayAlpha8Data (w h entryCount : Nat)
 
 private def fixtureExpectedRGB16Data (w h entryCount : Nat) : ByteArray :=
   Id.run do
-    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelRGB16)
+    let mut out := ByteArray.emptyWithCapacity (w * h * RGB16.bytesPerPixel)
     for y in [0:h] do
       for x in [0:w] do
         let idx := (fixtureIndex entryCount x y).toNat
@@ -255,7 +255,7 @@ private def fixtureExpectedRGB16Data (w h entryCount : Nat) : ByteArray :=
 private def fixtureExpectedRGBA16Data (w h entryCount : Nat)
     (alpha? : Option ByteArray := none) : ByteArray :=
   Id.run do
-    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelRGBA16)
+    let mut out := ByteArray.emptyWithCapacity (w * h * RGBA16.bytesPerPixel)
     for y in [0:h] do
       for x in [0:w] do
         let idx := (fixtureIndex entryCount x y).toNat
@@ -268,7 +268,7 @@ private def fixtureExpectedRGBA16Data (w h entryCount : Nat)
 
 private def fixtureExpectedGray16Data (w h entryCount : Nat) : ByteArray :=
   Id.run do
-    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelGray16)
+    let mut out := ByteArray.emptyWithCapacity (w * h * Gray16.bytesPerPixel)
     for y in [0:h] do
       for x in [0:w] do
         let idx := (fixtureIndex entryCount x y).toNat
@@ -279,7 +279,7 @@ private def fixtureExpectedGray16Data (w h entryCount : Nat) : ByteArray :=
 private def fixtureExpectedGrayAlpha16Data (w h entryCount : Nat)
     (alpha? : Option ByteArray := none) : ByteArray :=
   Id.run do
-    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelGrayAlpha16)
+    let mut out := ByteArray.emptyWithCapacity (w * h * GrayAlpha16.bytesPerPixel)
     for y in [0:h] do
       for x in [0:w] do
         let idx := (fixtureIndex entryCount x y).toNat
@@ -358,7 +358,7 @@ private def chrmGammaExpectedRGB8? : Option ByteArray := do
   applyChrm8ToPixels matrix (some paletteGamma) (u8 2) (fixtureExpectedRGB8Data 4 2 4)
 
 private def decodeBitmapDataAfterCheckedIndexedEncode
-    {px : Type} [Pixel px] [PngPixel px]
+    {px : Type} [PixelFormat px] [Png.PixelFormat px]
     (bmp : PngIndexedBitmap) (mode : PngEncodeMode) : Option ByteArray :=
   match encodeIndexedBitmapChecked bmp mode with
   | .ok bytes => (decodeBitmap (px := px) bytes).map (fun bitmap => bitmap.data)
@@ -510,21 +510,21 @@ theorem checked_palette_expansion_fixture_for_supported_bitDepth
     (hbd : bitDepth = 1 ∨ bitDepth = 2 ∨ bitDepth = 4 ∨ bitDepth = 8) :
     ∃ bmp entryCount,
       bmp.bitDepth = bitDepth ∧
-        decodeBitmapDataAfterCheckedIndexedEncode (px := PixelRGB8) bmp mode =
+        decodeBitmapDataAfterCheckedIndexedEncode (px := RGB8) bmp mode =
           some (fixtureExpectedRGB8Data 9 5 entryCount) ∧
-        decodeBitmapDataAfterCheckedIndexedEncode (px := PixelRGBA8) bmp mode =
+        decodeBitmapDataAfterCheckedIndexedEncode (px := RGBA8) bmp mode =
           some (fixtureExpectedRGBA8Data 9 5 entryCount) ∧
-        decodeBitmapDataAfterCheckedIndexedEncode (px := PixelGray8) bmp mode =
+        decodeBitmapDataAfterCheckedIndexedEncode (px := Gray8) bmp mode =
           some (fixtureExpectedGray8Data 9 5 entryCount) ∧
-        decodeBitmapDataAfterCheckedIndexedEncode (px := PixelGrayAlpha8) bmp mode =
+        decodeBitmapDataAfterCheckedIndexedEncode (px := GrayAlpha8) bmp mode =
           some (fixtureExpectedGrayAlpha8Data 9 5 entryCount) ∧
-        decodeBitmapDataAfterCheckedIndexedEncode (px := PixelRGB16) bmp mode =
+        decodeBitmapDataAfterCheckedIndexedEncode (px := RGB16) bmp mode =
           some (fixtureExpectedRGB16Data 9 5 entryCount) ∧
-        decodeBitmapDataAfterCheckedIndexedEncode (px := PixelRGBA16) bmp mode =
+        decodeBitmapDataAfterCheckedIndexedEncode (px := RGBA16) bmp mode =
           some (fixtureExpectedRGBA16Data 9 5 entryCount) ∧
-        decodeBitmapDataAfterCheckedIndexedEncode (px := PixelGray16) bmp mode =
+        decodeBitmapDataAfterCheckedIndexedEncode (px := Gray16) bmp mode =
           some (fixtureExpectedGray16Data 9 5 entryCount) ∧
-        decodeBitmapDataAfterCheckedIndexedEncode (px := PixelGrayAlpha16) bmp mode =
+        decodeBitmapDataAfterCheckedIndexedEncode (px := GrayAlpha16) bmp mode =
           some (fixtureExpectedGrayAlpha16Data 9 5 entryCount) := by
   rcases hbd with rfl | rfl | rfl | rfl
   · refine ⟨fixtureBitmap 9 5 1 2, 2, rfl, ?_⟩ <;> cases mode <;> native_decide
@@ -676,7 +676,7 @@ theorem decodeIndexedBitmapWithMetadata_multiIDAT_4bit_fixture_shape :
 preserves the parsed palette metadata. -/
 theorem decodeBitmapWithMetadata_palette_tRNS_RGBA8_fixture :
     (alphaFixtureBytes?.bind (fun bytes =>
-      (decodeBitmapWithMetadata (px := PixelRGBA8) bytes).map
+      (decodeBitmapWithMetadata (px := RGBA8) bytes).map
         (fun decoded =>
           (decoded.bitmap.data, decoded.metadata.transparency, decoded.metadata.background)))) =
         some
@@ -688,16 +688,16 @@ theorem decodeBitmapWithMetadata_palette_tRNS_RGBA8_fixture :
 non-alpha decode targets. -/
 theorem decodeBitmapWithMetadata_palette_tRNS_bKGD_RGB8_fixture :
     (alphaFixtureBytes?.bind (fun bytes =>
-      (decodeBitmapWithMetadata (px := PixelRGB8) bytes).map
+      (decodeBitmapWithMetadata (px := RGB8) bytes).map
         (fun decoded => decoded.bitmap.data))) =
         some (fixtureExpectedRGB8Data 5 4 4 (some alphaFixture) (some (u8 1))) := by
   native_decide
 
-/-- Pixel-only palette bitmap decode rejects `tRNS` for the alpha fixture; callers
+/-- pixel-only palette bitmap decode rejects `tRNS` for the alpha fixture; callers
 must use the metadata-aware API to opt into palette transparency handling. -/
 theorem decodeBitmap_palette_tRNS_pixelOnly_rejects_RGBA8_fixture :
     (alphaFixtureBytes?.bind (fun bytes =>
-      (decodeBitmap (px := PixelRGBA8) bytes).map (fun _ => ()))) = none := by
+      (decodeBitmap (px := RGBA8) bytes).map (fun _ => ()))) = none := by
   native_decide
 
 /-- Exact indexed metadata decode preserves palette alpha and background index
@@ -732,7 +732,7 @@ theorem decodeIndexedBitmapWithMetadata_palette_tRNS_bKGD_shape_fixture :
 for the 16-bit RGB target fixture. -/
 theorem decodeBitmap_palette_RGB16_fixture :
     (fixture16Bytes?.bind (fun bytes =>
-      (decodeBitmap (px := PixelRGB16) bytes).map (fun decoded => decoded.data))) =
+      (decodeBitmap (px := RGB16) bytes).map (fun decoded => decoded.data))) =
         some (fixtureExpectedRGB16Data 7 3 16) := by
   native_decide
 
@@ -740,7 +740,7 @@ theorem decodeBitmap_palette_RGB16_fixture :
 full-range RGBA16 samples for the 16-bit RGBA target fixture. -/
 theorem decodeBitmap_palette_RGBA16_fixture :
     (fixture16Bytes?.bind (fun bytes =>
-      (decodeBitmap (px := PixelRGBA16) bytes).map (fun decoded => decoded.data))) =
+      (decodeBitmap (px := RGBA16) bytes).map (fun decoded => decoded.data))) =
         some (fixtureExpectedRGBA16Data 7 3 16) := by
   native_decide
 
@@ -748,7 +748,7 @@ theorem decodeBitmap_palette_RGBA16_fixture :
 Gray16 samples for the 16-bit grayscale target fixture. -/
 theorem decodeBitmap_palette_Gray16_fixture :
     (fixture16Bytes?.bind (fun bytes =>
-      (decodeBitmap (px := PixelGray16) bytes).map (fun decoded => decoded.data))) =
+      (decodeBitmap (px := Gray16) bytes).map (fun decoded => decoded.data))) =
         some (fixtureExpectedGray16Data 7 3 16) := by
   native_decide
 
@@ -756,7 +756,7 @@ theorem decodeBitmap_palette_Gray16_fixture :
 opaque alpha into full-range GrayAlpha16 samples for the fixture. -/
 theorem decodeBitmap_palette_GrayAlpha16_fixture :
     (fixture16Bytes?.bind (fun bytes =>
-      (decodeBitmap (px := PixelGrayAlpha16) bytes).map (fun decoded => decoded.data))) =
+      (decodeBitmap (px := GrayAlpha16) bytes).map (fun decoded => decoded.data))) =
         some (fixtureExpectedGrayAlpha16Data 7 3 16) := by
   native_decide
 
@@ -764,7 +764,7 @@ theorem decodeBitmap_palette_GrayAlpha16_fixture :
 RGB8 fixture, and the scaled gamma value is preserved. -/
 theorem decodeBitmapWithMetadata_palette_gAMA_RGB8_fixture :
     (gammaFixtureBytes?.bind (fun bytes =>
-      (decodeBitmapWithMetadata (px := PixelRGB8) bytes).map
+      (decodeBitmapWithMetadata (px := RGB8) bytes).map
         (fun decoded => (decoded.bitmap.data, decoded.metadata.gamma)))) =
         (applyGamma8ToPixels paletteGamma (u8 2) (fixtureExpectedRGB8Data 4 2 4)).map
           (fun expected => (expected, some paletteGamma)) := by
@@ -774,7 +774,7 @@ theorem decodeBitmapWithMetadata_palette_gAMA_RGB8_fixture :
 `PLTE` lookup when decoding the RGB8 fixture. -/
 theorem decodeBitmapWithMetadata_palette_sRGB_RGB8_fixture :
     (srgbFixtureBytes?.bind (fun bytes =>
-      (decodeBitmapWithMetadata (px := PixelRGB8) bytes).map
+      (decodeBitmapWithMetadata (px := RGB8) bytes).map
         (fun decoded => decoded.bitmap.data))) =
         some (fixtureExpectedRGB8Data 4 2 4) := by
   native_decide
@@ -783,7 +783,7 @@ theorem decodeBitmapWithMetadata_palette_sRGB_RGB8_fixture :
 gamma, and compatible chromaticities metadata. -/
 theorem decodeBitmapWithMetadata_palette_sRGB_metadata_fixture :
     (srgbFixtureBytes?.bind (fun bytes =>
-      (decodeBitmapWithMetadata (px := PixelRGB8) bytes).map
+      (decodeBitmapWithMetadata (px := RGB8) bytes).map
         (fun decoded =>
           (decoded.metadata.srgb, decoded.metadata.gamma, decoded.metadata.chromaticities)))) =
         some (some .perceptual, some 45455, some PngChromaticities.srgb) := by
@@ -793,7 +793,7 @@ theorem decodeBitmapWithMetadata_palette_sRGB_metadata_fixture :
 decoding the RGB8 fixture. -/
 theorem decodeBitmapWithMetadata_palette_cHRM_gAMA_RGB8_fixture :
     (chrmGammaFixtureBytes?.bind (fun bytes =>
-      (decodeBitmapWithMetadata (px := PixelRGB8) bytes).map
+      (decodeBitmapWithMetadata (px := RGB8) bytes).map
         (fun decoded => decoded.bitmap.data))) =
         chrmGammaExpectedRGB8? := by
   native_decide
@@ -802,7 +802,7 @@ theorem decodeBitmapWithMetadata_palette_cHRM_gAMA_RGB8_fixture :
 metadata values. -/
 theorem decodeBitmapWithMetadata_palette_cHRM_gAMA_metadata_fixture :
     (chrmGammaFixtureBytes?.bind (fun bytes =>
-      (decodeBitmapWithMetadata (px := PixelRGB8) bytes).map
+      (decodeBitmapWithMetadata (px := RGB8) bytes).map
         (fun decoded => (decoded.metadata.chromaticities, decoded.metadata.gamma)))) =
         some (some wideChromaticities, some paletteGamma) := by
   native_decide

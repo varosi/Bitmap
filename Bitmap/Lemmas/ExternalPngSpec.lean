@@ -45,17 +45,17 @@ Each layer is captured via a witness:
   * `container` (Phase 3) — the PNG byte layout.
   * `hInflated` — zlib decompression of `container.idatData` returns
     `inflatedRaw`.
-  * `hPixels` — `PngPixel.decodeRowsLoop` over `inflatedRaw` returns
+  * `hPixels` — `Png.PixelFormat.decodeRowsLoop` over `inflatedRaw` returns
     the bitmap's pixel data. This single witness combines RFC 2083
     §6.2 row-filter reconstruction with pixel-format unpacking; the
     `RowFilterSpec.lean` lemmas can be composed to discharge it.
 
 Color-type-specific witnesses (`hBppLookup`, `hTargetBitDepth`,
 `hPxColorType`) account for the typeclass-dispatched
-`Pixel.bytesPerPixel` and `PngPixel.bitDepth` values; each concrete
-pixel type (`PixelGray8`, `PixelRGB8`, `PixelGrayAlpha8`, `PixelRGBA8`)
+`PixelFormat.bytesPerPixel` and `Png.PixelFormat.bitDepth` values; each concrete
+pixel type (`Gray8`, `RGB8`, `GrayAlpha8`, `RGBA8`)
 satisfies them by `rfl` / `decide`. -/
-structure ExternalPngSpec (px : Type u) [Pixel px] [PngPixel px] where
+structure ExternalPngSpec (px : Type u) [PixelFormat px] [Png.PixelFormat px] where
   /-- The bitmap the byte stream should decode to. -/
   bitmap : Bitmap px
   /-- The container layer (signature + IHDR + IDAT + IEND chunks). -/
@@ -64,27 +64,27 @@ structure ExternalPngSpec (px : Type u) [Pixel px] [PngPixel px] where
   hWidth : container.header.width = bitmap.size.width
   /-- Container height matches bitmap height. -/
   hHeight : container.header.height = bitmap.size.height
-  /-- Container color type matches the pixel type's `PngPixel.colorType`. -/
+  /-- Container color type matches the pixel type's `Png.PixelFormat.colorType`. -/
   hColorType :
-    container.header.colorType = (PngPixel.colorType (α := px)).toNat
+    container.header.colorType = (Png.PixelFormat.colorType (α := px)).toNat
   /-- Non-interlaced. -/
   hInterlace : container.header.interlace = 0
   /-- Target pixel type matches source color type. Used by the decoder
       to avoid alpha-drop/add conversions and to follow the
-      `PngPixel.decodeRowsLoop` path. -/
-  hPxColorType : PngPixel.colorType (α := px) = u8 container.header.colorType
+      `Png.PixelFormat.decodeRowsLoop` path. -/
+  hPxColorType : Png.PixelFormat.colorType (α := px) = u8 container.header.colorType
   /-- Target pixel type uses 8-bit or 16-bit depth. -/
   hTargetBitDepth :
-    PngPixel.bitDepth (α := px) = u8 8 ∨ PngPixel.bitDepth (α := px) = u8 16
+    Png.PixelFormat.bitDepth (α := px) = u8 8 ∨ Png.PixelFormat.bitDepth (α := px) = u8 16
   /-- Consistency between container's bit depth and the pixel type. -/
   hBitDepthMatch :
-    container.header.bitDepth = (PngPixel.bitDepth (α := px)).toNat
-  /-- `Pixel.bytesPerPixel` matches the PNG bpp table for the
+    container.header.bitDepth = (Png.PixelFormat.bitDepth (α := px)).toNat
+  /-- `PixelFormat.bytesPerPixel` matches the PNG bpp table for the
       container's (colorType, bitDepth) pair. -/
   hBppLookup :
     pngBytesPerPixelForColorTypeAndBitDepth?
       container.header.colorType container.header.bitDepth =
-        some (Pixel.bytesPerPixel (α := px))
+        some (PixelFormat.bytesPerPixel (α := px))
   /-- The IDAT data size fits in the PNG u32 length field. -/
   hIdatSize : container.idatData.size < 2 ^ 32
   /-- The IDAT data has at least two bytes (the zlib CMF + FLG header). -/
@@ -104,25 +104,25 @@ structure ExternalPngSpec (px : Type u) [Pixel px] [PngPixel px] where
   hRawSize :
     inflatedRaw.size =
       bitmap.size.height *
-        (bitmap.size.width * Pixel.bytesPerPixel (α := px) + 1)
+        (bitmap.size.width * PixelFormat.bytesPerPixel (α := px) + 1)
   /-- The pixel-extraction loop on `inflatedRaw` produces the bitmap's
       pixel data. This is the row-filter-reconstruction + pixel-format
       decoding obligation. The `RowFilterSpec.lean` lemmas can build
       this witness by chaining `unfilterRow_eq_spec` with the
       pixel-extraction loop. -/
   hPixels :
-    PngPixel.decodeRowsLoop (α := px) inflatedRaw bitmap.size.width
-        bitmap.size.height (Pixel.bytesPerPixel (α := px))
-        (bitmap.size.width * Pixel.bytesPerPixel (α := px))
+    Png.PixelFormat.decodeRowsLoop (α := px) inflatedRaw bitmap.size.width
+        bitmap.size.height (PixelFormat.bytesPerPixel (α := px))
+        (bitmap.size.width * PixelFormat.bytesPerPixel (α := px))
         0 0 ByteArray.empty
         { data := Array.replicate
             (bitmap.size.width * bitmap.size.height *
-              Pixel.bytesPerPixel (α := px)) 0 } =
+              PixelFormat.bytesPerPixel (α := px)) 0 } =
       some bitmap.data
 
 namespace ExternalPngSpec
 
-variable {px : Type u} [Pixel px] [PngPixel px]
+variable {px : Type u} [PixelFormat px] [Png.PixelFormat px]
 
 /-! ### Layer-1 (container) composition
 
@@ -177,13 +177,13 @@ theorem decodeBitmap_external_correct (s : ExternalPngSpec px) :
       ¬ (((PngMetadata.empty.pixelOnlyColorSpace.srgb = none ∧
             PngMetadata.empty.pixelOnlyColorSpace.chromaticities.isSome = true) ∧
           (s.container.header.colorType = 2 ∨ s.container.header.colorType = 6)) ∧
-        (PngPixel.colorType (α := px) = u8 0 ∨ PngPixel.colorType (α := px) = u8 4)) := by
+        (Png.PixelFormat.colorType (α := px) = u8 0 ∨ Png.PixelFormat.colorType (α := px) = u8 4)) := by
     intro ⟨⟨⟨_, h⟩, _⟩, _⟩; exact absurd h (by decide)
   have hTransform :
       applyPngColorSpaceTransform
         (PngMetadata.pixelOnlyColorSpace PngMetadata.empty)
-        s.container.header.colorType (PngPixel.colorType (α := px))
-        (PngPixel.bitDepth (α := px)) s.bitmap.data = some s.bitmap.data := by
+        s.container.header.colorType (Png.PixelFormat.colorType (α := px))
+        (Png.PixelFormat.bitDepth (α := px)) s.bitmap.data = some s.bitmap.data := by
     unfold applyPngColorSpaceTransform PngMetadata.pixelOnlyColorSpace
     rfl
   exact decodeBitmap_correct_of_witnesses s.container.bytes_size_ge_8
@@ -198,37 +198,37 @@ end ExternalPngSpec
 
 /-! ## 16-bit support sanity check
 
-The disjunction-based spec admits 16-bit pixel types (e.g. `PixelGray16`)
+The disjunction-based spec allows 16-bit pixel types (e.g. `Gray16`)
 on the same footing as 8-bit ones. The two examples below show that the
 typeclass-level witnesses (`hTargetBitDepth`, `hBitDepthMatch`,
 `hPxColorType`, `hBppLookup`) compose by `rfl`/`decide` for both
 bit depths; only the data-dependent witnesses (`hInflated`, `hPixels`,
 etc.) remain user-supplied. -/
 
-example : PngPixel.bitDepth (α := PixelGray8) = u8 8 ∨
-    PngPixel.bitDepth (α := PixelGray8) = u8 16 := Or.inl rfl
+example : Png.PixelFormat.bitDepth (α := Gray8) = u8 8 ∨
+    Png.PixelFormat.bitDepth (α := Gray8) = u8 16 := Or.inl rfl
 
-example : PngPixel.bitDepth (α := PixelGray16) = u8 8 ∨
-    PngPixel.bitDepth (α := PixelGray16) = u8 16 := Or.inr rfl
+example : Png.PixelFormat.bitDepth (α := Gray16) = u8 8 ∨
+    Png.PixelFormat.bitDepth (α := Gray16) = u8 16 := Or.inr rfl
 
-/-- For `PixelGray16` and a header with `bitDepth = 16`, the
+/-- For `Gray16` and a header with `bitDepth = 16`, the
 `hBitDepthMatch` consistency witness is discharged by `decide`. -/
 example {h : PngHeader} (hbd : h.bitDepth = 16) :
-    h.bitDepth = (PngPixel.bitDepth (α := PixelGray16)).toNat := by
+    h.bitDepth = (Png.PixelFormat.bitDepth (α := Gray16)).toNat := by
   rw [hbd]; decide
 
 /-- The bpp lookup for the 16-bit-grayscale (colorType, bitDepth) pair
-matches `PixelGray16.bytesPerPixel`. -/
+matches `Gray16.bytesPerPixel`. -/
 example :
     pngBytesPerPixelForColorTypeAndBitDepth? 0 16 =
-      some (Pixel.bytesPerPixel (α := PixelGray16)) := by decide
+      some (PixelFormat.bytesPerPixel (α := Gray16)) := by decide
 
 /-- End-to-end forward correctness specialised to 16-bit grayscale.
 Demonstrates that `decodeBitmap_external_correct` applies uniformly at
-`px := PixelGray16`; the user supplies only the data-dependent witnesses
-through `ExternalPngSpec PixelGray16`. -/
+`px := Gray16`; the user supplies only the data-dependent witnesses
+through `ExternalPngSpec Gray16`. -/
 theorem decodeBitmap_external_gray16_correct
-    (s : ExternalPngSpec PixelGray16) :
+    (s : ExternalPngSpec Gray16) :
     Png.decodeBitmap s.container.bytes = some s.bitmap :=
   s.decodeBitmap_external_correct
 

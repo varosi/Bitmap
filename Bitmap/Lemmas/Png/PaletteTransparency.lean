@@ -20,10 +20,10 @@ def paletteExpansion8Spec (indices : ByteArray) (palette : PngPalette)
   Id.run do
     let count := indices.size
     let outBpp :=
-      if targetColorType == u8 0 then bytesPerPixelGray
-      else if targetColorType == u8 2 then bytesPerPixelRGB
-      else if targetColorType == u8 4 then bytesPerPixelGrayAlpha
-      else if targetColorType == u8 6 then bytesPerPixelRGBA
+      if targetColorType == u8 0 then Gray8.bytesPerPixel
+      else if targetColorType == u8 2 then RGB8.bytesPerPixel
+      else if targetColorType == u8 4 then GrayAlpha8.bytesPerPixel
+      else if targetColorType == u8 6 then RGBA8.bytesPerPixel
       else 0
     if outBpp == 0 then
       none
@@ -84,10 +84,10 @@ def paletteExpansion16Spec (indices : ByteArray) (palette : PngPalette)
   Id.run do
     let count := indices.size
     let outBpp :=
-      if targetColorType == u8 0 then bytesPerPixelGray16
-      else if targetColorType == u8 2 then bytesPerPixelRGB16
-      else if targetColorType == u8 4 then bytesPerPixelGrayAlpha16
-      else if targetColorType == u8 6 then bytesPerPixelRGBA16
+      if targetColorType == u8 0 then Gray16.bytesPerPixel
+      else if targetColorType == u8 2 then RGB16.bytesPerPixel
+      else if targetColorType == u8 4 then GrayAlpha16.bytesPerPixel
+      else if targetColorType == u8 6 then RGBA16.bytesPerPixel
       else 0
     if outBpp == 0 then
       none
@@ -359,7 +359,7 @@ lemma expandPaletteIndicesToPixels_paletteAlpha_bKGD_RGB8_singleton
   unfold expandPaletteIndicesToPixels expandPaletteIndicesToPixels8
   simp [paletteAlphaBytes?, paletteBackgroundRGB?,
     Std.Legacy.Range.forIn_eq_forIn_range', ByteArray.size, hget, hrgb, hbg, u8,
-    bytesPerPixelRGB]
+    RGB8.bytesPerPixel]
   rfl
 
 /-- Palette `tRNS` without a valid background rejects RGB8 expansion.
@@ -374,7 +374,7 @@ lemma expandPaletteIndicesToPixels_paletteAlpha_no_bKGD_RGB8_singleton
   unfold expandPaletteIndicesToPixels expandPaletteIndicesToPixels8
   simp [PngMetadata.empty, paletteAlphaBytes?, paletteBackgroundRGB?,
     Std.Legacy.Range.forIn_eq_forIn_range', ByteArray.size, hget, hrgb, u8,
-    bytesPerPixelRGB]
+    RGB8.bytesPerPixel]
   rfl
 
 /-- Palette `tRNS` plus a valid palette `bKGD` composites arbitrary Gray8 output.
@@ -397,7 +397,7 @@ lemma expandPaletteIndicesToPixels_paletteAlpha_bKGD_Gray8_singleton
   unfold expandPaletteIndicesToPixels expandPaletteIndicesToPixels8
   simp [paletteAlphaBytes?, paletteBackgroundRGB?,
     Std.Legacy.Range.forIn_eq_forIn_range', ByteArray.size, hget, hrgb, hbg, u8,
-    bytesPerPixelGray]
+    Gray8.bytesPerPixel]
   rfl
 
 /-- Palette `tRNS` without a valid background rejects Gray8 expansion.
@@ -412,7 +412,7 @@ lemma expandPaletteIndicesToPixels_paletteAlpha_no_bKGD_Gray8_singleton
   unfold expandPaletteIndicesToPixels expandPaletteIndicesToPixels8
   simp [PngMetadata.empty, paletteAlphaBytes?, paletteBackgroundRGB?,
     Std.Legacy.Range.forIn_eq_forIn_range', ByteArray.size, hget, hrgb, u8,
-    bytesPerPixelGray]
+    Gray8.bytesPerPixel]
   rfl
 
 /-- Palette `tRNS` expands directly to RGBA8 alpha output without requiring
@@ -428,7 +428,7 @@ lemma expandPaletteIndicesToPixels_paletteAlpha_RGBA8_singleton
   unfold expandPaletteIndicesToPixels expandPaletteIndicesToPixels8
   simp [paletteAlphaBytes?,
     Std.Legacy.Range.forIn_eq_forIn_range', ByteArray.size, hget, hrgb, u8,
-    bytesPerPixelRGBA]
+    RGBA8.bytesPerPixel]
   rfl
 
 /-- Palette `tRNS` expands directly to GrayAlpha8 without requiring `bKGD`.
@@ -446,7 +446,7 @@ lemma expandPaletteIndicesToPixels_paletteAlpha_GrayAlpha8_singleton
   unfold expandPaletteIndicesToPixels expandPaletteIndicesToPixels8
   simp [paletteAlphaBytes?,
     Std.Legacy.Range.forIn_eq_forIn_range', ByteArray.size, hget, hrgb, u8,
-    bytesPerPixelGrayAlpha]
+    GrayAlpha8.bytesPerPixel]
   rfl
 
 /-- Palette `tRNS` plus `bKGD` composites arbitrary RGB16 output using the
@@ -471,7 +471,7 @@ lemma expandPaletteIndicesToPixels_paletteAlpha_bKGD_RGB16_singleton
   unfold expandPaletteIndicesToPixels expandPaletteIndicesToPixels16
   simp [paletteAlphaBytes?, paletteBackgroundRGB?,
     Std.Legacy.Range.forIn_eq_forIn_range', ByteArray.size, hget, hrgb, hbg, u8,
-    bytesPerPixelRGB16]
+    RGB16.bytesPerPixel]
   rfl
 
 /-- Palette `tRNS` expands directly to RGBA16 alpha output without requiring
@@ -494,7 +494,7 @@ lemma expandPaletteIndicesToPixels_paletteAlpha_RGBA16_singleton
   unfold expandPaletteIndicesToPixels expandPaletteIndicesToPixels16
   simp [paletteAlphaBytes?,
     Std.Legacy.Range.forIn_eq_forIn_range', ByteArray.size, hget, hrgb, u8,
-    bytesPerPixelRGBA16]
+    RGBA16.bytesPerPixel]
   rfl
 
 end Lemmas

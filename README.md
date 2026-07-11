@@ -2,7 +2,7 @@
 
 Lean 4 bitmap image utilities with verified PNG encode/decode support, plus a small widget for visualization.
 
-Current library version: `0.9.0`.
+Current library version: `0.10.0`.
 
 The widget accepts the supported 8-bit bitmap formats and displays 16-bit bitmap
 formats by downsampling each channel to its high byte for browser canvas output.
@@ -30,11 +30,11 @@ plain-palette and palette-transparency/background expansion coverage.
 |---|---|
 | Color types | `0` Grayscale, `2` RGB, `3` indexed-color palette, `4` Grayscale+Alpha, `6` RGBA |
 | Bit depth | Grayscale: 1, 8, or 16 bits per channel. Indexed palette: 1, 2, 4, or 8 bits per index. RGB, Grayscale+Alpha, and RGBA: 8 or 16 bits per channel |
-| Pixel formats | `PixelGray1`/`BitmapGray1`, `PixelGray8`, `PixelRGB8`, `PixelGrayAlpha8`, `PixelRGBA8`, `PixelGray16`, `PixelRGB16`, `PixelGrayAlpha16`, `PixelRGBA16`, plus explicit `PngIndexedBitmap` input for palette PNGs |
-| Filter type | Existing `encodeBitmap` APIs emit filter `0` rows. `encodeBitmapWithOptionsChecked`, `encodeBitmapGray1WithOptionsChecked`, and `encodeIndexedBitmapWithOptionsChecked` can opt into fixed filters `0` None, `1` Sub, `2` Up, `3` Average, `4` Paeth, or deterministic adaptive per-row selection |
+| Bitmap formats | `Gray1`/`Bitmap.Gray1`, `Gray8`, `RGB8`, `GrayAlpha8`, `RGBA8`, `Gray16`, `RGB16`, `GrayAlpha16`, `RGBA16`, plus explicit `PngIndexedBitmap` input for palette PNGs |
+| Filter type | Existing `encodeBitmap` APIs emit filter `0` rows. `encodeBitmapWithOptionsChecked`, `encodeGray1BitmapWithOptionsChecked`, and `encodeIndexedBitmapWithOptionsChecked` can opt into fixed filters `0` None, `1` Sub, `2` Up, `3` Average, `4` Paeth, or deterministic adaptive per-row selection |
 | Compression modes | `.stored` (uncompressed DEFLATE), `.fixed` (fixed-Huffman with greedy 32 KiB-window LZ77 encoding), `.dynamic` (generated dynamic-Huffman tables and dynamic-Huffman payload codes, using greedy 32 KiB-window LZ77 encoding) |
 | Interlace | None (encoder always emits non-interlaced PNGs) |
-| Chunks emitted | Existing pure `encodeBitmap` APIs emit `IHDR`, one `IDAT`, `IEND` only. `encodeBitmapWithOptionsChecked`, `encodeBitmapGray1WithOptionsChecked`, and `encodeIndexedBitmapWithOptionsChecked` can also emit validated `gAMA`, `cHRM`, `sRGB`, `pHYs`, or explicit `tIME` chunks, with optional compatible `gAMA=45455` before `sRGB` and compatible sRGB chromaticities before `sRGB`. The indexed encoder emits required `PLTE` plus optional palette `tRNS` and palette `bKGD` chunks. File-writing helpers emit the current UTC `tIME` by default; `writePngWithoutTime` keeps deterministic no-`tIME` output |
+| Chunks emitted | Existing pure `encodeBitmap` APIs emit `IHDR`, one `IDAT`, `IEND` only. `encodeBitmapWithOptionsChecked`, `encodeGray1BitmapWithOptionsChecked`, and `encodeIndexedBitmapWithOptionsChecked` can also emit validated `gAMA`, `cHRM`, `sRGB`, `pHYs`, or explicit `tIME` chunks, with optional compatible `gAMA=45455` before `sRGB` and compatible sRGB chromaticities before `sRGB`. The indexed encoder emits required `PLTE` plus optional palette `tRNS` and palette `bKGD` chunks. File-writing helpers emit the current UTC `tIME` by default; `writePngWithoutTime` keeps deterministic no-`tIME` output |
 | Integrity | CRC-32 per chunk, Adler-32 in the zlib trailer |
 | Dimension limits | width and height each `< 2^32`, enforced by checked bitmap and indexed encoder APIs |
 
@@ -48,7 +48,7 @@ plain-palette and palette-transparency/background expansion coverage.
 | Interlace | None and Adam7 |
 | Compression | `inflateStored` tried first, then fixed- and dynamic-Huffman zlib streams (full `HLIT`/`HDIST`/`HCLEN` + code-length-code + literal/length and distance tables) |
 | LZ77 | Length codes 257–285 and distance codes 0–29 with extra bits; `copyDistance` supports overlap (distance < length) |
-| Color conversion | 1-bit grayscale PNGs can be decoded into `BitmapGray1` exactly or expanded into 8-/16-bit grayscale, RGB, or RGBA targets using full-range black/white samples. Indexed palette PNGs can be decoded exactly with `decodeIndexedBitmap`/`decodeIndexedBitmapWithMetadata`, or expanded through `PLTE` into 8-/16-bit grayscale, RGB, grayscale+alpha, or RGBA targets; 16-bit targets use full-range `u8 * 257` channel expansion. RGB PNGs can be decoded into `BitmapRGBA8` (fills α = 255), gray+alpha PNGs into `BitmapRGBA8` (preserves alpha as expanded gray), and RGBA PNGs into `BitmapRGB8` (drops alpha). 16-bit PNGs may be decoded into matching 8-bit bitmap formats by taking the high byte of each sample |
+| Color conversion | 1-bit grayscale PNGs can be decoded into `Bitmap.Gray1` exactly or expanded into 8-/16-bit grayscale, RGB, or RGBA targets using full-range black/white samples. Indexed palette PNGs can be decoded exactly with `decodeIndexedBitmap`/`decodeIndexedBitmapWithMetadata`, or expanded through `PLTE` into 8-/16-bit grayscale, RGB, grayscale+alpha, or RGBA targets; 16-bit targets use full-range `u8 * 257` channel expansion. RGB PNGs can be decoded into `Bitmap.RGBA8` (fills α = 255), gray+alpha PNGs into `Bitmap.RGBA8` (preserves alpha as expanded gray), and RGBA PNGs into `Bitmap.RGB8` (drops alpha). 16-bit PNGs may be decoded into matching 8-bit bitmap formats by taking the high byte of each sample |
 | Color space | `sRGB` chunks are validated, preserved in metadata-aware decode, and treated as already-sRGB samples. `gAMA` chunks are validated and preserved. `cHRM` chunks are validated, preserved, and when no `sRGB` chunk is present, RGB/RGBA source samples are converted to sRGB using cHRM primaries plus `gAMA` when present, or linear-light source samples when `gAMA` is absent. Palette samples are expanded through `PLTE` before color-space conversion. `sRGB` with `gAMA` is accepted only for compatible `gAMA=45455`; `sRGB` with `cHRM` is accepted only for compatible sRGB chromaticities; `sRGB` takes precedence |
 | Physical density | `pHYs` chunks are validated, preserved in metadata-aware decode, and exposed as exact pixels-per-unit values plus helper DPI conversion for metre-based density. The widget uses metre-based `pHYs` for CSS physical size and unknown-unit `pHYs` for pixel-aspect correction |
 | PNG structure | 8-byte signature, `IHDR` first, multiple consecutive `IDAT` chunks accepted and concatenated, `IEND` last, required `PLTE` ordering checks, required valid `PLTE` before `IDAT` for palette PNGs, rejects unknown critical chunks, compression/filter method ≠ 0, and interlace methods other than `0` or `1` |
@@ -62,8 +62,8 @@ plain-palette and palette-transparency/background expansion coverage.
 - Truecolor RGB bit depth 1 (PNG forbids color type 2 at bit depth 1)
 - Encoder-side Adam7 interlacing
 - Automatic palette quantization from RGB/RGBA bitmap input — palette encoding requires explicit `PngIndexedBitmap` input
-- `tRNS` through the pixel-only `decodeBitmap` API — use `decodeBitmapWithMetadata` for transparent-color decoding into `BitmapRGBA8`, or into `BitmapRGB8` when a valid `bKGD` background is present
-- Gray+alpha through the pixel-only `decodeBitmap` API into non-alpha targets — use `decodeBitmapWithMetadata` for `BitmapRGB8` or `BitmapGray8` when a valid grayscale `bKGD` background is present
+- `tRNS` through the pixel-only `decodeBitmap` API — use `decodeBitmapWithMetadata` for transparent-color decoding into `Bitmap.RGBA8`, or into `Bitmap.RGB8` when a valid `bKGD` background is present
+- Gray+alpha through the pixel-only `decodeBitmap` API into non-alpha targets — use `decodeBitmapWithMetadata` for `Bitmap.RGB8` or `Bitmap.Gray8` when a valid grayscale `bKGD` background is present
 - `sBIT` chunks — explicitly **rejected** (decoder returns `none`) rather than silently ignored, to avoid the silent-corruption hazard of dropping precision metadata that affects pixel semantics
 - Unknown critical chunks (any chunk type whose first byte is uppercase and not `IHDR`/`PLTE`/`IDAT`/`IEND`) — rejected per the PNG spec
 - Reading-back of most ancillary chunk **content** (`tEXt`, `iCCP`, etc.) — those chunks are validated and skipped; `decodeBitmapWithMetadata` preserves supported `PLTE`, `gAMA`, `cHRM`, `sRGB`, `pHYs`, `tIME`, `bKGD`, and `tRNS`
@@ -83,10 +83,11 @@ lake test
 ## Proofs
 
 This library has proofs about:
-- putPixel and getPixel correspondence (Bitmap.Lemmas.putPixel_getPixel);
-- PNG format encode and decode correspondence for `PixelGray8`, `PixelRGB8`,
-  `PixelRGBA8`, `PixelGrayAlpha8`, `PixelGray16`, `PixelRGB16`,
-  `PixelRGBA16`, and `PixelGrayAlpha16`
+- Bitmap.setPixel and Bitmap.getPixel correspondence for lawful pixel formats
+  (Bitmap.Lemmas.getPixel_setPixel_eq);
+- PNG format encode and decode correspondence for `Gray8`, `RGB8`,
+  `RGBA8`, `GrayAlpha8`, `Gray16`, `RGB16`,
+  `RGBA16`, and `GrayAlpha16`
   (Bitmap.Lemmas.decodeBitmap_encodeBitmap);
 - PNG chunk validation properties for CRC checks and chunk-order state transitions
   (`readChunk_rejects_crc_mismatch`, `readChunk_success_crc_matches`,

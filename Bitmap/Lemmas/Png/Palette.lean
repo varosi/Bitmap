@@ -2338,18 +2338,18 @@ lemma encodeRawIndexedWithFilter_empty_height (bmp : PngIndexedBitmap)
 when the packed index bytes are viewed as an 8-bit grayscale bitmap. -/
 lemma encodeIndexedRowsWithFilter_none_eq_encodeRawGray8
     (packedRows : ByteArray) (w h : Nat) (hpacked : packedRows.size = h * w) :
-    let rawBmp : BitmapGray8 :=
+    let rawBmp : Bitmap.Gray8 :=
       { size := { width := w, height := h }
         data := packedRows
         valid := by
           calc
             packedRows.size = h * w := hpacked
-            _ = w * h * Pixel.bytesPerPixel (α := PixelGray8) := by
-                  simp [bytesPerPixel_gray, bytesPerPixelGray, Nat.mul_comm] }
+            _ = w * h * PixelFormat.bytesPerPixel (α := Gray8) := by
+                  simp [bytesPerPixel_gray, Gray8.bytesPerPixel, Nat.mul_comm] }
     encodeIndexedRowsWithFilter packedRows w h .none = encodeRaw rawBmp := by
   intro rawBmp
   unfold encodeIndexedRowsWithFilter encodeRaw
-  simp [rawBmp, bytesPerPixel_gray, bytesPerPixelGray]
+  simp [rawBmp, bytesPerPixel_gray, Gray8.bytesPerPixel]
 
 /-- Decoding filter-0 8-bit indexed raw rows with a full palette reconstructs
 the packed index byte stream. This is the raw-payload layer of palette round-trip
@@ -2359,14 +2359,14 @@ lemma decodePaletteRowsLoop_encodeIndexedRowsWithFilter_none_8_256
     let raw := encodeIndexedRowsWithFilter packedRows w h .none
     let flat0 := ByteArray.mk <| Array.replicate (h * w) (0 : UInt8)
     decodePaletteRowsLoop raw w h 8 w 256 0 0 ByteArray.empty flat0 = some packedRows := by
-  let rawBmp : BitmapGray8 :=
+  let rawBmp : Bitmap.Gray8 :=
     { size := { width := w, height := h }
       data := packedRows
       valid := by
         calc
           packedRows.size = h * w := hpacked
-          _ = w * h * Pixel.bytesPerPixel (α := PixelGray8) := by
-                simp [bytesPerPixel_gray, bytesPerPixelGray, Nat.mul_comm] }
+          _ = w * h * PixelFormat.bytesPerPixel (α := Gray8) := by
+                simp [bytesPerPixel_gray, Gray8.bytesPerPixel, Nat.mul_comm] }
   let raw := encodeIndexedRowsWithFilter packedRows w h .none
   let flat0 := ByteArray.mk <| Array.replicate (h * w) (0 : UInt8)
   have hrawEq : raw = encodeRaw rawBmp := by
@@ -2378,7 +2378,7 @@ lemma decodePaletteRowsLoop_encodeIndexedRowsWithFilter_none_8_256
       raw.size = (encodeRaw rawBmp).size := by simp [hrawEq]
       _ = h * (w + 1) := by
             have hsize := encodeRaw_size (bmp := rawBmp)
-            simpa [rawBmp, bytesPerPixel_gray, bytesPerPixelGray] using hsize
+            simpa [rawBmp, bytesPerPixel_gray, Gray8.bytesPerPixel] using hsize
   have hflat0 : flat0.size = h * w := by
     simp [flat0, ByteArray.size, Array.size_replicate]
   let loop := decodePaletteRowsLoop raw w h 8 w 256
@@ -2444,12 +2444,12 @@ lemma decodePaletteRowsLoop_encodeIndexedRowsWithFilter_none_8_256
           simpa [hcalc] using hmul'
         have hfilter0 : raw.get! offset = 0 := by
           have hzero := encodeRaw_filter_zero (bmp := rawBmp) (y := y) hlt
-          simpa [raw, hrawEq, rawBmp, bytesPerPixel_gray, bytesPerPixelGray, hoff] using hzero
+          simpa [raw, hrawEq, rawBmp, bytesPerPixel_gray, Gray8.bytesPerPixel, hoff] using hzero
         have hrowData :
             raw.extract (offset + 1) (offset + 1 + w) =
               packedRows.extract (y * w) (y * w + w) := by
           have hrow := encodeRaw_row_extract (bmp := rawBmp) (y := y) hlt
-          simpa [raw, hrawEq, rawBmp, bytesPerPixel_gray, bytesPerPixelGray, hoff] using hrow
+          simpa [raw, hrawEq, rawBmp, bytesPerPixel_gray, Gray8.bytesPerPixel, hoff] using hrow
         let rowData := raw.extract (offset + 1) (offset + 1 + w)
         have hrowData' :
             rowData = packedRows.extract (y * w) (y * w + w) := by
@@ -2598,14 +2598,14 @@ lemma decodePaletteIndicesByInterlace_encodeIndexedRowsWithFilter_none_of_packed
   intro hdr
   let raw := encodeIndexedRowsWithFilter packedRows rowBytes h .none
   let flat0 := ByteArray.mk <| Array.replicate (w * h) 0
-  let rawBmp : BitmapGray8 :=
+  let rawBmp : Bitmap.Gray8 :=
     { size := { width := rowBytes, height := h }
       data := packedRows
       valid := by
         calc
           packedRows.size = h * rowBytes := hpacked
-          _ = rowBytes * h * Pixel.bytesPerPixel (α := PixelGray8) := by
-                simp [bytesPerPixel_gray, bytesPerPixelGray, Nat.mul_comm] }
+          _ = rowBytes * h * PixelFormat.bytesPerPixel (α := Gray8) := by
+                simp [bytesPerPixel_gray, Gray8.bytesPerPixel, Nat.mul_comm] }
   have hrawEq : raw = encodeRaw rawBmp := by
     simpa [raw, rawBmp] using
       encodeIndexedRowsWithFilter_none_eq_encodeRawGray8 packedRows rowBytes h hpacked
@@ -2614,7 +2614,7 @@ lemma decodePaletteIndicesByInterlace_encodeIndexedRowsWithFilter_none_of_packed
       raw.size = (encodeRaw rawBmp).size := by simp [hrawEq]
       _ = h * (rowBytes + 1) := by
             have hsize := encodeRaw_size (bmp := rawBmp)
-            simpa [rawBmp, bytesPerPixel_gray, bytesPerPixelGray] using hsize
+            simpa [rawBmp, bytesPerPixel_gray, Gray8.bytesPerPixel] using hsize
   have hflat0 : flat0.size = w * h := by
     simp [flat0, ByteArray.size, Array.size_replicate]
   have hloop :
@@ -2689,13 +2689,13 @@ lemma decodePaletteIndicesByInterlace_encodeIndexedRowsWithFilter_none_of_packed
             simpa [hcalc] using hmul'
           have hfilter0 : raw.get! offset = 0 := by
             have hzero := encodeRaw_filter_zero (bmp := rawBmp) (y := y) hlt
-            simpa [raw, hrawEq, rawBmp, bytesPerPixel_gray, bytesPerPixelGray, hoff]
+            simpa [raw, hrawEq, rawBmp, bytesPerPixel_gray, Gray8.bytesPerPixel, hoff]
               using hzero
           have hrowData :
               raw.extract (offset + 1) (offset + 1 + rowBytes) =
                 packedRows.extract (y * rowBytes) (y * rowBytes + rowBytes) := by
             have hrow := encodeRaw_row_extract (bmp := rawBmp) (y := y) hlt
-            simpa [raw, hrawEq, rawBmp, bytesPerPixel_gray, bytesPerPixelGray, hoff]
+            simpa [raw, hrawEq, rawBmp, bytesPerPixel_gray, Gray8.bytesPerPixel, hoff]
               using hrow
           let rowData := raw.extract (offset + 1) (offset + 1 + rowBytes)
           have hrowData' :
@@ -2933,7 +2933,7 @@ lemma decodePaletteIndicesByInterlace_encodeRawIndexedWithFilter_none_non8
   let packedRows := encodeIndexedPackedRows bmp
   let raw := encodeIndexedRowsWithFilter packedRows rowBytes bmp.size.height .none
   let flat0 := ByteArray.mk <| Array.replicate (bmp.size.width * bmp.size.height) 0
-  let rawBmp : BitmapGray8 :=
+  let rawBmp : Bitmap.Gray8 :=
     { size := { width := rowBytes, height := bmp.size.height }
       data := packedRows
       valid := by
@@ -2941,8 +2941,8 @@ lemma decodePaletteIndicesByInterlace_encodeRawIndexedWithFilter_none_non8
           simpa [packedRows, rowBytes] using encodeIndexedPackedRows_size bmp
         calc
           packedRows.size = bmp.size.height * rowBytes := hpacked
-          _ = rowBytes * bmp.size.height * Pixel.bytesPerPixel (α := PixelGray8) := by
-                simp [bytesPerPixel_gray, bytesPerPixelGray, Nat.mul_comm] }
+          _ = rowBytes * bmp.size.height * PixelFormat.bytesPerPixel (α := Gray8) := by
+                simp [bytesPerPixel_gray, Gray8.bytesPerPixel, Nat.mul_comm] }
   have hrawEq : raw = encodeRaw rawBmp := by
     have hpacked : packedRows.size = bmp.size.height * rowBytes := by
       simpa [packedRows, rowBytes] using encodeIndexedPackedRows_size bmp
@@ -2954,7 +2954,7 @@ lemma decodePaletteIndicesByInterlace_encodeRawIndexedWithFilter_none_non8
       raw.size = (encodeRaw rawBmp).size := by simp [hrawEq]
       _ = bmp.size.height * (rowBytes + 1) := by
             have hsize := encodeRaw_size (bmp := rawBmp)
-            simpa [rawBmp, bytesPerPixel_gray, bytesPerPixelGray] using hsize
+            simpa [rawBmp, bytesPerPixel_gray, Gray8.bytesPerPixel] using hsize
   have hflat0 : flat0.size = bmp.size.width * bmp.size.height := by
     simp [flat0, ByteArray.size, Array.size_replicate]
   have hdataSize : bmp.data.size = bmp.size.width * bmp.size.height := bmp.valid
@@ -3044,13 +3044,13 @@ lemma decodePaletteIndicesByInterlace_encodeRawIndexedWithFilter_none_non8
             simpa [hcalc] using hmul'
           have hfilter0 : raw.get! offset = 0 := by
             have hzero := encodeRaw_filter_zero (bmp := rawBmp) (y := y) hlt
-            simpa [raw, hrawEq, rawBmp, bytesPerPixel_gray, bytesPerPixelGray, hoff]
+            simpa [raw, hrawEq, rawBmp, bytesPerPixel_gray, Gray8.bytesPerPixel, hoff]
               using hzero
           have hrowData :
               raw.extract (offset + 1) (offset + 1 + rowBytes) =
                 packedRows.extract (y * rowBytes) (y * rowBytes + rowBytes) := by
             have hrow := encodeRaw_row_extract (bmp := rawBmp) (y := y) hlt
-            simpa [raw, hrawEq, rawBmp, bytesPerPixel_gray, bytesPerPixelGray, hoff]
+            simpa [raw, hrawEq, rawBmp, bytesPerPixel_gray, Gray8.bytesPerPixel, hoff]
               using hrow
           let rowData := raw.extract (offset + 1) (offset + 1 + rowBytes)
           have hrowData' :

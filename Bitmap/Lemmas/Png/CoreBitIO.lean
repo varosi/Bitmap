@@ -3251,10 +3251,12 @@ lemma bit1Inv_deflateFixedAux (data : Array UInt8) (i : Nat) (bw : BitWriter)
 
 lemma bit1Inv_writeFixedLiteralFast (bw : BitWriter) (b : UInt8) (h : bit1Inv bw) :
     bit1Inv (BitWriter.writeFixedLiteralFast bw b) := by
-  unfold BitWriter.writeFixedLiteralFast
-  simp [writeBitsFast_eq_writeBits]
-  exact bit1Inv_writeBits bw (fixedLitLenRevCodeFast b.toNat).1
-    (fixedLitLenRevCodeFast b.toNat).2 h
+  rw [show BitWriter.writeFixedLiteralFast bw b =
+      let codeLen := fixedLitLenCode b.toNat
+      BitWriter.writeBits bw (reverseBits codeLen.1 codeLen.2) codeLen.2 by
+    unfold BitWriter.writeFixedLiteralFast fixedLitLenRevCode
+    simp [writeBitsFast_eq_writeBits]]
+  exact bit1Inv_writeBits bw _ _ h
 
 set_option maxRecDepth 200000 in
 lemma bit1Inv_writeFixedMatchDist1Fast (bw : BitWriter) (matchLen : Nat) (h : bit1Inv bw) :
