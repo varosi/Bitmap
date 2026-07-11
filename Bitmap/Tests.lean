@@ -2822,7 +2822,9 @@ private def runPngStagePerfTest : IO Unit := do
   if input0.rawAdaptive.size == 0 then
     throw (IO.userError "adaptive raw stage unexpectedly empty")
 
-private def perfPngParallelResolution : Nat := 128
+-- Keep this large enough that the shard sweep measures real round-trip work,
+-- but bounded so `lake test` remains practical on smaller machines.
+private def perfPngParallelResolution : Nat := 256
 
 private def perfPngParallelIters : Nat := 5
 
