@@ -953,12 +953,26 @@ deriving Repr, DecidableEq
 def lz77EmptyBuckets : Array (Array Nat) :=
   Array.replicate deflateHashBucketCount #[]
 
+abbrev Lz77Buckets :=
+  { buckets : Array (Array Nat) // deflateHashBucketCount ≤ buckets.size }
+
+def lz77EmptyBucketsSized : Lz77Buckets :=
+  ⟨lz77EmptyBuckets, by simp [lz77EmptyBuckets, deflateHashBucketCount]⟩
+
 @[inline] def lz77HashAtKnown (data : Array UInt8) (i : Nat)
     (h : i + 2 < data.size) : Nat :=
   let b0 := data[i]
   let b1 := data[i + 1]
   let b2 := data[i + 2]
   (((b0.toNat * 257 + b1.toNat) * 257 + b2.toNat) % deflateHashBucketCount)
+
+/-- The LZ77 three-byte hash always lands inside the fixed bucket range.
+This lets tokenizer loops carry one table-size invariant instead of checking every hash lookup. -/
+private theorem lz77HashAtKnown_lt_bucketCount (data : Array UInt8) (i : Nat)
+    (h : i + 2 < data.size) :
+    lz77HashAtKnown data i h < deflateHashBucketCount := by
+  unfold lz77HashAtKnown
+  exact Nat.mod_lt _ (by decide)
 
 @[inline] def lz77HashAt (data : Array UInt8) (i : Nat) : Nat :=
   if h : i + 2 < data.size then
@@ -974,6 +988,16 @@ def lz77EmptyBuckets : Array (Array Nat) :=
     buckets.set hash (bucket.push pos) hbuckets
   else
     buckets
+
+@[inline] def lz77InsertPositionSized (data : Array UInt8) (buckets : Lz77Buckets)
+    (pos : Nat) (h : pos + 2 < data.size) : Lz77Buckets :=
+  let hash := lz77HashAtKnown data pos h
+  have hhash : hash < deflateHashBucketCount := by
+    simpa [hash] using lz77HashAtKnown_lt_bucketCount data pos h
+  have hbuckets : hash < buckets.val.size := Nat.lt_of_lt_of_le hhash buckets.property
+  let bucket := buckets.val[hash]'hbuckets
+  ⟨buckets.val.set hash (bucket.push pos) hbuckets, by
+    simpa using buckets.property⟩
 
 @[inline] def lz77InsertPosition (data : Array UInt8) (buckets : Array (Array Nat))
     (pos : Nat) : Array (Array Nat) :=
@@ -991,6 +1015,21 @@ def lz77InsertPositions (data : Array UInt8) (stop pos : Nat)
 termination_by stop - pos
 decreasing_by
   exact Nat.sub_lt_sub_left (k := pos) (m := stop) (n := pos + 1) h (Nat.lt_succ_self pos)
+
+def lz77InsertPositionsSized (data : Array UInt8) (stop pos : Nat)
+    (buckets : Lz77Buckets) : Lz77Buckets :=
+  if hpos : pos < stop then
+    if hdata : pos + 2 < data.size then
+      lz77InsertPositionsSized data stop (pos + 1)
+        (lz77InsertPositionSized data buckets pos hdata)
+    else
+      buckets
+  else
+    buckets
+termination_by stop - pos
+decreasing_by
+  exact Nat.sub_lt_sub_left (k := pos) (m := stop) (n := pos + 1) hpos
+    (Nat.lt_succ_self pos)
 
 def lz77CommonLenAux (data : Array UInt8) (i candidate maxLen len : Nat) : Nat :=
   if h : len < maxLen then
@@ -1080,25 +1119,37 @@ decreasing_by
   else
     none
 
+@[inline] def lz77FindBestSized (data : Array UInt8) (i : Nat)
+    (buckets : Lz77Buckets) : Option (Nat × Nat) :=
+  if h : i + 2 < data.size then
+    let hash := lz77HashAtKnown data i h
+    have hhash : hash < deflateHashBucketCount := by
+      simpa [hash] using lz77HashAtKnown_lt_bucketCount data i h
+    have hbuckets : hash < buckets.val.size := Nat.lt_of_lt_of_le hhash buckets.property
+    let bucket := buckets.val[hash]'hbuckets
+    lz77FindBestInBucket data i (by omega) bucket bucket.size le_rfl 0 0
+  else
+    none
+
 def deflateTokensLz77Aux (fuel : Nat) (data : Array UInt8) (i : Nat)
-    (buckets : Array (Array Nat)) (tokens : Array Lz77Token) : Array Lz77Token :=
+    (buckets : Lz77Buckets) (tokens : Array Lz77Token) : Array Lz77Token :=
   match fuel with
   | 0 => tokens
   | fuel + 1 =>
       if _h : i < data.size then
-        match lz77FindBest data i buckets with
+        match lz77FindBestSized data i buckets with
         | some (len, distance) =>
             let j := Nat.min data.size (i + len)
-            let buckets := lz77InsertPositions data j i buckets
+            let buckets := lz77InsertPositionsSized data j i buckets
             deflateTokensLz77Aux fuel data j buckets (tokens.push (.match len distance))
         | none =>
-            let buckets := lz77InsertPositions data (i + 1) i buckets
+            let buckets := lz77InsertPositionsSized data (i + 1) i buckets
             deflateTokensLz77Aux fuel data (i + 1) buckets (tokens.push (.literal data[i]))
       else
         tokens
 
 def deflateTokensLz77FastCandidate (raw : ByteArray) : Array Lz77Token :=
-  deflateTokensLz77Aux raw.size raw.data 0 lz77EmptyBuckets #[]
+  deflateTokensLz77Aux raw.size raw.data 0 lz77EmptyBucketsSized #[]
 
 def deflateTokensLz77Literal (raw : ByteArray) : Array Lz77Token :=
   Array.ofFn (fun i : Fin raw.data.size => Lz77Token.literal raw.data[i])
