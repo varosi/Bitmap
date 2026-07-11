@@ -861,17 +861,23 @@ def Bitmap.Gray1.ofFn (w h : Nat) (f : Fin (w * h) → Bitmaps.Gray1) :
 def Bitmap.Gray1.fill (w h : Nat) (color : Bitmaps.Gray1) : Bitmap.Gray1 :=
   Bitmap.Gray1.ofFn w h (fun _ => color)
 
-def Bitmap.Gray1.getBitLinear (bmp : Bitmap.Gray1) (i : Nat) : Bool :=
-  if _hpix : i < bmp.size.width * bmp.size.height then
-    if bmp.size.width == 0 then
-      false
-    else
-      let x := i % bmp.size.width
-      let y := i / bmp.size.width
-      let byte := bmp.data.get! (gray1ByteIndex bmp.size.width x y)
-      gray1BitIsSet byte x
+def Bitmap.Gray1.getBitLinear (bmp : Bitmap.Gray1)
+    (i : Fin (bmp.size.width * bmp.size.height)) : Bool :=
+  have hwidth : bmp.size.width ≠ 0 := by
+    intro hzero
+    have hlt : i.val < 0 := by
+      simpa [hzero] using i.isLt
+    exact Nat.not_lt_zero _ hlt
+  let x := i.val % bmp.size.width
+  let y := i.val / bmp.size.width
+  let byte := bmp.data.get! (gray1ByteIndex bmp.size.width x y)
+  gray1BitIsSet byte x
+
+def Bitmap.Gray1.getBitLinear? (bmp : Bitmap.Gray1) (i : Nat) : Option Bool :=
+  if hpix : i < bmp.size.width * bmp.size.height then
+    some (bmp.getBitLinear ⟨i, hpix⟩)
   else
-    false
+    none
 
 def Bitmap.Gray1.getPixel? (bmp : Bitmap.Gray1) (x y : Nat) : Option Bitmaps.Gray1 :=
   if _hx : x < bmp.size.width then
@@ -915,7 +921,7 @@ class Gray1Expansion (px : Type u) where
 def Bitmap.Gray1.expand {px : Type u} [PixelFormat px] [Gray1Expansion px]
     (bmp : Bitmap.Gray1) : Bitmap px :=
   Bitmap.ofFn bmp.size.width bmp.size.height (fun idx =>
-    Gray1Expansion.ofBit (px := px) (bmp.getBitLinear idx.val))
+    Gray1Expansion.ofBit (px := px) (bmp.getBitLinear idx))
 
 def Bitmap.Gray8.toGray1Threshold [PixelFormat Bitmaps.Gray8] (bmp : Bitmap.Gray8)
     (threshold : UInt8 := 128) :

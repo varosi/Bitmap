@@ -34,13 +34,11 @@ lemma fixedLitLenRevCodeFast_eq (sym : Nat) (h : sym < 288) :
   rfl
 
 @[simp] lemma writeFixedLiteralFast_eq_writeBits (bw : BitWriter) (b : UInt8) :
-    BitWriter.writeFixedLiteralFast bw b =
+  BitWriter.writeFixedLiteralFast bw b =
       let codeLen := fixedLitLenCode b.toNat
       BitWriter.writeBits bw (reverseBits codeLen.1 codeLen.2) codeLen.2 := by
-  unfold BitWriter.writeFixedLiteralFast
-  have hsym : b.toNat < 288 := by
-    exact lt_trans (UInt8.toNat_lt b) (by decide)
-  simp [fixedLitLenRevCodeFast_eq, hsym]
+  unfold BitWriter.writeFixedLiteralFast fixedLitLenRevCode
+  simp [writeBitsFast_eq_writeBits]
 
 lemma readBitsFastU32_readerAt_writeBits_prefix (bw : BitWriter) (bits len k : Nat)
     (hk : k ≤ len) (hbit : bw.bitPos < 8) (hcur : bw.curClearAbove) :

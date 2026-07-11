@@ -470,12 +470,19 @@ private def validateLz77Tokenizer : IO Unit := do
       if lz77HasDistance tokens 32769 then
         throw (IO.userError "lz77 tokenizer boundary: used distance 32769"))
   let tieRaw := "ABCXABCYABCZ".toUTF8
-  match Png.lz77FindBestInBucket tieRaw.data 8 #[0, 4] 2 0 0 with
+  have hTieRaw : 8 < tieRaw.data.size := by native_decide
+  let tieBucket : Array Nat := #[0, 4]
+  have hTieBucket : 2 ≤ tieBucket.size := by native_decide
+  match Png.lz77FindBestInBucket tieRaw.data 8 hTieRaw tieBucket 2 hTieBucket 0 0 with
   | some (3, 4) => pure ()
   | other =>
       throw (IO.userError s!"lz77 nearest tie break failed: {repr other}")
   let longestRaw := "ABCDABCXABCD".toUTF8
-  match Png.lz77FindBestInBucket longestRaw.data 8 #[4, 0] 2 0 0 with
+  have hLongestRaw : 8 < longestRaw.data.size := by native_decide
+  let longestBucket : Array Nat := #[4, 0]
+  have hLongestBucket : 2 ≤ longestBucket.size := by native_decide
+  match Png.lz77FindBestInBucket longestRaw.data 8 hLongestRaw
+      longestBucket 2 hLongestBucket 0 0 with
   | some (4, 8) => pure ()
   | other =>
       throw (IO.userError s!"lz77 longest match failed: {repr other}")

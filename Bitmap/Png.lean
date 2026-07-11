@@ -156,12 +156,15 @@ def PngTime.valid (time : PngTime) : Bool :=
   decide (time.minute < 60) &&
   decide (time.second ≤ 60)
 
+def encodeTimeData (time : PngTime) (_hvalid : time.valid = true) : ByteArray :=
+  ByteArray.mk #[
+    u8 (time.year / 256), u8 time.year,
+    u8 time.month, u8 time.day, u8 time.hour, u8 time.minute, u8 time.second
+  ]
+
 def encodeTimeData? (time : PngTime) : Option ByteArray :=
-  if time.valid then
-    some <| ByteArray.mk #[
-      u8 (time.year / 256), u8 time.year,
-      u8 time.month, u8 time.day, u8 time.hour, u8 time.minute, u8 time.second
-    ]
+  if hvalid : time.valid = true then
+    some (encodeTimeData time hvalid)
   else
     none
 
@@ -214,9 +217,12 @@ def PngPhysicalPixelDimensions.dpi? (physical : PngPhysicalPixelDimensions) :
 def signed32InRange (n : Int) : Bool :=
   decide (Int32.minValue.toInt ≤ n ∧ n ≤ Int32.maxValue.toInt)
 
+def signed32ToU32 (n : Int) (_hvalid : signed32InRange n = true) : Nat :=
+  (Int32.ofInt n).toUInt32.toNat
+
 def signed32ToU32? (n : Int) : Option Nat :=
-  if signed32InRange n then
-    some (Int32.ofInt n).toUInt32.toNat
+  if hvalid : signed32InRange n = true then
+    some (signed32ToU32 n hvalid)
   else
     none
 
@@ -475,6 +481,10 @@ def fixedLitLenRevTable : Array (Nat × Nat) :=
     let (code, len) := fixedLitLenCode i.val
     (reverseBits code len, len))
 
+@[inline] def fixedLitLenRevCode (sym : Fin 288) : Nat × Nat :=
+  let (code, len) := fixedLitLenCode sym.val
+  (reverseBits code len, len)
+
 def fixedLitLenRevCodeFast (sym : Nat) : Nat × Nat :=
   if h : sym < fixedLitLenRevTable.size then
     Array.getInternal fixedLitLenRevTable sym h
@@ -602,7 +612,9 @@ def deflateDistanceInfo (distance : Nat) : Nat × Nat × Nat :=
   | none => (0, 0, 0)
 
 @[inline] def BitWriter.writeFixedLiteralFast (bw : BitWriter) (b : UInt8) : BitWriter :=
-  let (bits, len) := fixedLitLenRevCodeFast b.toNat
+  let hsym : b.toNat < 288 := by
+    exact Nat.lt_trans (UInt8.toNat_lt b) (by decide)
+  let (bits, len) := fixedLitLenRevCode ⟨b.toNat, hsym⟩
   bw.writeBitsFast bits len
 
 @[inline] def BitWriter.writeFixedMatchDist1Fast (bw : BitWriter) (matchLen : Nat) : BitWriter :=
@@ -941,19 +953,32 @@ deriving Repr, DecidableEq
 def lz77EmptyBuckets : Array (Array Nat) :=
   Array.replicate deflateHashBucketCount #[]
 
+@[inline] def lz77HashAtKnown (data : Array UInt8) (i : Nat)
+    (h : i + 2 < data.size) : Nat :=
+  let b0 := data[i]
+  let b1 := data[i + 1]
+  let b2 := data[i + 2]
+  (((b0.toNat * 257 + b1.toNat) * 257 + b2.toNat) % deflateHashBucketCount)
+
 @[inline] def lz77HashAt (data : Array UInt8) (i : Nat) : Nat :=
-  if i + 2 < data.size then
-    (((data[i]!.toNat * 257 + data[i + 1]!.toNat) * 257 + data[i + 2]!.toNat) %
-      deflateHashBucketCount)
+  if h : i + 2 < data.size then
+    lz77HashAtKnown data i h
   else
     0
 
+@[inline] def lz77InsertPositionKnown (data : Array UInt8) (buckets : Array (Array Nat))
+    (pos : Nat) (h : pos + 2 < data.size) : Array (Array Nat) :=
+  let hash := lz77HashAtKnown data pos h
+  if hbuckets : hash < buckets.size then
+    let bucket := buckets[hash]
+    buckets.set hash (bucket.push pos) hbuckets
+  else
+    buckets
+
 @[inline] def lz77InsertPosition (data : Array UInt8) (buckets : Array (Array Nat))
     (pos : Nat) : Array (Array Nat) :=
-  if pos + 2 < data.size then
-    let hash := lz77HashAt data pos
-    let bucket := buckets[hash]!
-    buckets.set! hash (bucket.push pos)
+  if h : pos + 2 < data.size then
+    lz77InsertPositionKnown data buckets pos h
   else
     buckets
 
@@ -982,19 +1007,46 @@ decreasing_by
 @[inline] def lz77CommonLen (data : Array UInt8) (i candidate maxLen : Nat) : Nat :=
   lz77CommonLenAux data i candidate maxLen 0
 
+def lz77CommonLenBoundedAux (data : Array UInt8) (i candidate maxLen len : Nat)
+    (hi : i + maxLen ≤ data.size) (hcandidate : candidate + maxLen ≤ data.size) : Nat :=
+  if h : len < maxLen then
+    if data[i + len] == data[candidate + len] then
+      lz77CommonLenBoundedAux data i candidate maxLen (len + 1) hi hcandidate
+    else
+      len
+  else
+    len
+termination_by maxLen - len
+decreasing_by
+  exact Nat.sub_lt_sub_left (k := len) (m := maxLen) (n := len + 1) h (Nat.lt_succ_self len)
+
+@[inline] def lz77CommonLenBounded (data : Array UInt8) (i candidate maxLen : Nat)
+    (hi : i + maxLen ≤ data.size)
+    (hcandidate : candidate + maxLen ≤ data.size) : Nat :=
+  lz77CommonLenBoundedAux data i candidate maxLen 0 hi hcandidate
+
 @[inline] def lz77BetterMatch (bestLen bestDistance len distance : Nat) : Bool :=
   len > bestLen || (len == bestLen && (bestDistance == 0 || distance < bestDistance))
 
-def lz77FindBestInBucket (data : Array UInt8) (i : Nat) (bucket : Array Nat)
-    (revIdx bestLen bestDistance : Nat) : Option (Nat × Nat) :=
-  if 0 < revIdx then
-    let candidate := bucket[revIdx - 1]!
+def lz77FindBestInBucket (data : Array UInt8) (i : Nat) (hiData : i < data.size)
+    (bucket : Array Nat) (revIdx : Nat) (hRevIdx : revIdx ≤ bucket.size)
+    (bestLen bestDistance : Nat) : Option (Nat × Nat) :=
+  if hPos : 0 < revIdx then
+    let candidate := bucket[revIdx - 1]'(by omega)
     let (bestLen, bestDistance) :=
-      if candidate < i then
+      if hCandidate : candidate < i then
         let distance := i - candidate
         if distance ≤ deflateMaxDistance then
           let maxLen := Nat.min deflateMaxMatchLen (data.size - i)
-          let len := lz77CommonLen data i candidate maxLen
+          have hi : i + maxLen ≤ data.size := by
+            have hmax : maxLen ≤ data.size - i := by
+              exact Nat.min_le_right _ _
+            omega
+          have hcandidate : candidate + maxLen ≤ data.size := by
+            have hmax : maxLen ≤ data.size - i := by
+              exact Nat.min_le_right _ _
+            omega
+          let len := lz77CommonLenBounded data i candidate maxLen hi hcandidate
           if deflateMinMatchLen ≤ len && lz77BetterMatch bestLen bestDistance len distance then
             (len, distance)
           else
@@ -1006,7 +1058,8 @@ def lz77FindBestInBucket (data : Array UInt8) (i : Nat) (bucket : Array Nat)
     if bestLen == deflateMaxMatchLen then
       some (bestLen, bestDistance)
     else
-      lz77FindBestInBucket data i bucket (revIdx - 1) bestLen bestDistance
+      lz77FindBestInBucket data i hiData bucket (revIdx - 1) (by omega)
+        bestLen bestDistance
   else if deflateMinMatchLen ≤ bestLen then
     some (bestLen, bestDistance)
   else
@@ -1017,9 +1070,13 @@ decreasing_by
 
 @[inline] def lz77FindBest (data : Array UInt8) (i : Nat)
     (buckets : Array (Array Nat)) : Option (Nat × Nat) :=
-  if i + 2 < data.size then
-    let bucket := buckets[lz77HashAt data i]!
-    lz77FindBestInBucket data i bucket bucket.size 0 0
+  if h : i + 2 < data.size then
+    let hash := lz77HashAtKnown data i h
+    if hbuckets : hash < buckets.size then
+      let bucket := buckets[hash]
+      lz77FindBestInBucket data i (by omega) bucket bucket.size le_rfl 0 0
+    else
+      none
   else
     none
 
@@ -5921,22 +5978,56 @@ def encodeRawGray1WithFilter (bmp : Bitmap.Gray1) (strategy : PngFilterStrategy)
       let raw := ByteArray.emptyWithCapacity rawSize
       encodeRawFilteredRows bmp.data rowBytes bmp.size.height 0 ByteArray.empty raw strategy 1
 
-def encodeI32BE? (n : Int) : Option ByteArray := do
-  let encoded ← signed32ToU32? n
-  some (u32be encoded)
+def encodeI32BE (n : Int) (hvalid : signed32InRange n = true) : ByteArray :=
+  u32be (signed32ToU32 n hvalid)
 
-def encodeChrmData? (chromaticities : PngChromaticities) : Option ByteArray := do
-  if !chromaticities.valid then
+def encodeI32BE? (n : Int) : Option ByteArray :=
+  if hvalid : signed32InRange n = true then
+    some (encodeI32BE n hvalid)
+  else
     none
-  let wx ← encodeI32BE? chromaticities.white.x
-  let wy ← encodeI32BE? chromaticities.white.y
-  let rx ← encodeI32BE? chromaticities.red.x
-  let ry ← encodeI32BE? chromaticities.red.y
-  let gx ← encodeI32BE? chromaticities.green.x
-  let gy ← encodeI32BE? chromaticities.green.y
-  let bx ← encodeI32BE? chromaticities.blue.x
-  let byBytes ← encodeI32BE? chromaticities.blue.y
-  some (wx ++ wy ++ rx ++ ry ++ gx ++ gy ++ bx ++ byBytes)
+
+def encodeChrmData (chromaticities : PngChromaticities)
+    (hvalid : chromaticities.valid = true) : ByteArray :=
+  have hWhiteX : signed32InRange chromaticities.white.x = true := by
+    simp [PngChromaticities.valid, PngChromaticityPoint.valid] at hvalid
+    exact hvalid.left.left.left.left
+  have hWhiteY : signed32InRange chromaticities.white.y = true := by
+    simp [PngChromaticities.valid, PngChromaticityPoint.valid] at hvalid
+    exact hvalid.left.left.left.right
+  have hRedX : signed32InRange chromaticities.red.x = true := by
+    simp [PngChromaticities.valid, PngChromaticityPoint.valid] at hvalid
+    exact hvalid.left.left.right.left
+  have hRedY : signed32InRange chromaticities.red.y = true := by
+    simp [PngChromaticities.valid, PngChromaticityPoint.valid] at hvalid
+    exact hvalid.left.left.right.right
+  have hGreenX : signed32InRange chromaticities.green.x = true := by
+    simp [PngChromaticities.valid, PngChromaticityPoint.valid] at hvalid
+    exact hvalid.left.right.left
+  have hGreenY : signed32InRange chromaticities.green.y = true := by
+    simp [PngChromaticities.valid, PngChromaticityPoint.valid] at hvalid
+    exact hvalid.left.right.right
+  have hBlueX : signed32InRange chromaticities.blue.x = true := by
+    simp [PngChromaticities.valid, PngChromaticityPoint.valid] at hvalid
+    exact hvalid.right.left
+  have hBlueY : signed32InRange chromaticities.blue.y = true := by
+    simp [PngChromaticities.valid, PngChromaticityPoint.valid] at hvalid
+    exact hvalid.right.right
+  let wx := encodeI32BE chromaticities.white.x hWhiteX
+  let wy := encodeI32BE chromaticities.white.y hWhiteY
+  let rx := encodeI32BE chromaticities.red.x hRedX
+  let ry := encodeI32BE chromaticities.red.y hRedY
+  let gx := encodeI32BE chromaticities.green.x hGreenX
+  let gy := encodeI32BE chromaticities.green.y hGreenY
+  let bx := encodeI32BE chromaticities.blue.x hBlueX
+  let byBytes := encodeI32BE chromaticities.blue.y hBlueY
+  wx ++ wy ++ rx ++ ry ++ gx ++ gy ++ bx ++ byBytes
+
+def encodeChrmData? (chromaticities : PngChromaticities) : Option ByteArray :=
+  if hvalid : chromaticities.valid = true then
+    some (encodeChrmData chromaticities hvalid)
+  else
+    none
 
 def encodeChrmChunk? (chromaticities : Option PngChromaticities) : Option ByteArray := do
   match chromaticities with
@@ -5977,10 +6068,14 @@ def encodeTimeChunk? (modificationTime : Option PngTime) : Option ByteArray := d
       let data ← encodeTimeData? time
       some (mkChunkBytes timeTypeBytes data)
 
+def encodePhysData (physical : PngPhysicalPixelDimensions)
+    (_hvalid : physical.valid = true) : ByteArray :=
+  u32be physical.xPixelsPerUnit ++ u32be physical.yPixelsPerUnit ++
+    ByteArray.mk #[physical.unit.toByte]
+
 def encodePhysData? (physical : PngPhysicalPixelDimensions) : Option ByteArray :=
-  if physical.valid then
-    some <| u32be physical.xPixelsPerUnit ++ u32be physical.yPixelsPerUnit ++
-      ByteArray.mk #[physical.unit.toByte]
+  if hvalid : physical.valid = true then
+    some (encodePhysData physical hvalid)
   else
     none
 

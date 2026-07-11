@@ -111,12 +111,8 @@ def Bitmap.GrayAlpha8.widgetProps (bmp : Bitmap.GrayAlpha8)
   props.withPhysical physical
 
 private def expandGray1ToGray8Data (bmp : Bitmap.Gray1) : ByteArray :=
-  Id.run do
-    let count := bmp.size.width * bmp.size.height
-    let mut out := ByteArray.emptyWithCapacity count
-    for i in [0:count] do
-      out := out.push (if bmp.getBitLinear i then 0xff else 0)
-    return out
+  ByteArray.mk <| Array.ofFn (fun i : Fin (bmp.size.width * bmp.size.height) =>
+    if bmp.getBitLinear i then 0xff else 0)
 
 def Bitmap.Gray1.widgetProps (bmp : Bitmap.Gray1)
     (pixelSize : Nat := 12)
