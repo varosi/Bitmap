@@ -105,7 +105,8 @@ This library has proofs about:
   plus one-shard byte equality for the segmented fixed-Huffman encoder
   (`Bitmap.Lemmas.deflateFixedSegmentedParallel_oneShard_eq`,
   `Bitmap.Lemmas.zlibCompressFixedSegmentedParallel_oneShard_eq`,
-  `Bitmap.Lemmas.encodeBitmapFixedSegmentedCheckedParallel_oneShard_eq`);
+  `Bitmap.Lemmas.encodeBitmapFixedSegmentedCheckedParallel_oneShard_eq`,
+  `Bitmap.Lemmas.decodeBitmapParallel_encodeBitmapFixedSegmentedParallel_oneShard`);
 - PNG chunk validation properties for CRC checks and chunk-order state transitions
   (`readChunk_rejects_crc_mismatch`, `readChunk_success_crc_matches`,
   `parsePngLoopFuel_rejects_non_ihdr_before_header`,

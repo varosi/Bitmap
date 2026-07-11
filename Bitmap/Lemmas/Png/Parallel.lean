@@ -473,6 +473,25 @@ lemma decodeBitmapParallel_encodeBitmapParallel {px : Type u}
     (hh := by simpa [UInt32.size] using hh)
     (mode := mode) hidat
 
+/-- One-shard segmented fixed-Huffman encode plus parallel decode round trips by
+reducing to the established sequential fixed-Huffman round-trip theorem. -/
+lemma decodeBitmapParallel_encodeBitmapFixedSegmentedParallel_oneShard {px : Type u}
+    [PixelFormat px] [Png.PixelFormat px] [PngRoundTrip px]
+    (bmp : Bitmap px)
+    (hw : bmp.size.width < UInt32.size) (hh : bmp.size.height < UInt32.size)
+    (parallelDecode : PngParallelOptions)
+    (hidat : (encodeBitmapIdat (bmp := bmp) (mode := .fixed)).size < 2 ^ 32) :
+    Png.decodeBitmapParallel (px := px)
+        (Png.encodeBitmapFixedSegmentedParallel (px := px) bmp hw hh
+          oneShardPngParallelOptions)
+        parallelDecode =
+      some bmp := by
+  rw [decodeBitmapParallel_eq, encodeBitmapFixedSegmentedParallel_oneShard_eq]
+  exact decodeBitmap_encodeBitmap (bmp := bmp)
+    (hw := by simpa [UInt32.size] using hw)
+    (hh := by simpa [UInt32.size] using hh)
+    (mode := .fixed) hidat
+
 /-- Indexed-palette data round trips through parallel checked encode and
 parallel decode whenever the existing sequential palette theorem applies. -/
 theorem decodeIndexedBitmapParallel_encodeIndexedBitmapCheckedParallel_paletteRange_data
