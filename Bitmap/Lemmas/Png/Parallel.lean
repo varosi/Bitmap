@@ -32,16 +32,41 @@ helper proofs small when several independent PNG chunks are spawned together. -/
     (Task.spawn f).get = f () := by
   rfl
 
-/-- Parallel stored compression preserves the existing stored zlib stream. This
-justifies spawning the stored payload and Adler checksum independently. -/
+/-- Parallel zlib wrapper construction preserves the existing envelope shape.
+This justifies spawning deflate payload generation and Adler checksum
+independently without changing bytes. -/
+@[simp] lemma zlibCompressWithParallel_eq
+    (deflate : ByteArray → ByteArray) (raw : ByteArray) (parallel : PngParallelOptions) :
+    Png.zlibCompressWithParallel deflate raw parallel =
+      (let header := ByteArray.mk #[Png.u8 0x78, Png.u8 0x01]
+       let deflated := deflate raw
+       let adler := Png.u32be (Png.adler32 raw).toNat
+       let outSize := header.size + deflated.size + adler.size
+       let out := ByteArray.emptyWithCapacity outSize
+       out ++ header ++ deflated ++ adler) := by
+  unfold Png.zlibCompressWithParallel
+  split <;> rfl
+
+/-- Parallel stored compression preserves the existing stored zlib stream. -/
 @[simp] lemma zlibCompressStoredParallel_eq
     (raw : ByteArray) (parallel : PngParallelOptions) :
     Png.zlibCompressStoredParallel raw parallel = Png.zlibCompressStored raw := by
-  unfold Png.zlibCompressStoredParallel Png.zlibCompressStored
-  split <;> rfl
+  simp [Png.zlibCompressStoredParallel, Png.zlibCompressStored]
+
+/-- Parallel fixed compression preserves the existing fixed-Huffman zlib stream. -/
+@[simp] lemma zlibCompressFixedParallel_eq
+    (raw : ByteArray) (parallel : PngParallelOptions) :
+    Png.zlibCompressFixedParallel raw parallel = Png.zlibCompressFixed raw := by
+  simp [Png.zlibCompressFixedParallel, Png.zlibCompressFixed]
+
+/-- Parallel dynamic compression preserves the existing dynamic-Huffman zlib stream. -/
+@[simp] lemma zlibCompressDynamicParallel_eq
+    (raw : ByteArray) (parallel : PngParallelOptions) :
+    Png.zlibCompressDynamicParallel raw parallel = Png.zlibCompressDynamic raw := by
+  simp [Png.zlibCompressDynamicParallel, Png.zlibCompressDynamic]
 
 /-- Parallel IDAT compression is equal to the sequential mode-specific
-compressor. Fixed and dynamic modes remain sequential in this phase. -/
+compressor. Each mode preserves the exact zlib bytes of the existing encoder. -/
 @[simp] lemma compressIdatParallel_eq
     (mode : PngEncodeMode) (raw : ByteArray) (parallel : PngParallelOptions) :
     Png.compressIdatParallel mode raw parallel =

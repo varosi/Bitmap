@@ -87,13 +87,14 @@ def parallelEval {α : Type u}
   else
     f ()
 
-/-- Build a stored zlib stream with independent tasks for the stored deflate
-payload and Adler checksum when the configured thresholds allow parallel work. -/
-def zlibCompressStoredParallel
-    (raw : ByteArray) (parallel : PngParallelOptions := {}) : ByteArray :=
+/-- Build a zlib stream with independent tasks for the deflated payload and
+Adler checksum when the configured thresholds allow parallel work. -/
+def zlibCompressWithParallel
+    (deflate : ByteArray → ByteArray) (raw : ByteArray)
+    (parallel : PngParallelOptions := {}) : ByteArray :=
   if parallel.useParallel 2 raw.size then
     let header := ByteArray.mk #[u8 0x78, u8 0x01]
-    let deflatedTask := Task.spawn fun _ => deflateStored raw
+    let deflatedTask := Task.spawn fun _ => deflate raw
     let adlerTask := Task.spawn fun _ => u32be (adler32 raw).toNat
     let deflated := deflatedTask.get
     let adler := adlerTask.get
@@ -101,18 +102,41 @@ def zlibCompressStoredParallel
     let out := ByteArray.emptyWithCapacity outSize
     out ++ header ++ deflated ++ adler
   else
-    zlibCompressStored raw
+    let header := ByteArray.mk #[u8 0x78, u8 0x01]
+    let deflated := deflate raw
+    let adler := u32be (adler32 raw).toNat
+    let outSize := header.size + deflated.size + adler.size
+    let out := ByteArray.emptyWithCapacity outSize
+    out ++ header ++ deflated ++ adler
 
-/-- Compress IDAT payloads. Stored mode has dependency-safe internal tasks;
-fixed and dynamic DEFLATE stay sequential because their bitstream state is not
-segmented in this phase. -/
+/-- Build a stored zlib stream with independent tasks for the stored deflate
+payload and Adler checksum when the configured thresholds allow parallel work. -/
+def zlibCompressStoredParallel
+    (raw : ByteArray) (parallel : PngParallelOptions := {}) : ByteArray :=
+  zlibCompressWithParallel deflateStored raw parallel
+
+/-- Build a fixed-Huffman zlib stream with independent tasks for deflate and
+Adler checksum. The fixed bitstream itself remains sequential and unchanged. -/
+def zlibCompressFixedParallel
+    (raw : ByteArray) (parallel : PngParallelOptions := {}) : ByteArray :=
+  zlibCompressWithParallel deflateFixed raw parallel
+
+/-- Build a dynamic-Huffman zlib stream with independent tasks for deflate and
+Adler checksum. The dynamic bitstream itself remains sequential and unchanged. -/
+def zlibCompressDynamicParallel
+    (raw : ByteArray) (parallel : PngParallelOptions := {}) : ByteArray :=
+  zlibCompressWithParallel deflateDynamic raw parallel
+
+/-- Compress IDAT payloads. Each zlib wrapper can compute the deflated payload
+and Adler checksum independently; the deflate bitstream algorithms themselves
+remain byte-for-byte unchanged. -/
 def compressIdatParallel
     (mode : PngEncodeMode) (raw : ByteArray) (parallel : PngParallelOptions := {}) :
     ByteArray :=
   match mode with
   | .stored => zlibCompressStoredParallel raw parallel
-  | .fixed => zlibCompressFixed raw
-  | .dynamic => zlibCompressDynamic raw
+  | .fixed => zlibCompressFixedParallel raw parallel
+  | .dynamic => zlibCompressDynamicParallel raw parallel
 
 /-- Construct a PNG chunk while computing the CRC in a task when useful. -/
 def mkChunkBytesParallel
