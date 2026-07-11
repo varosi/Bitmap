@@ -87,33 +87,136 @@ def parallelEval {α : Type u}
   else
     f ()
 
+/-- Build a stored zlib stream with independent tasks for the stored deflate
+payload and Adler checksum when the configured thresholds allow parallel work. -/
+def zlibCompressStoredParallel
+    (raw : ByteArray) (parallel : PngParallelOptions := {}) : ByteArray :=
+  if parallel.useParallel 2 raw.size then
+    let header := ByteArray.mk #[u8 0x78, u8 0x01]
+    let deflatedTask := Task.spawn fun _ => deflateStored raw
+    let adlerTask := Task.spawn fun _ => u32be (adler32 raw).toNat
+    let deflated := deflatedTask.get
+    let adler := adlerTask.get
+    let outSize := header.size + deflated.size + adler.size
+    let out := ByteArray.emptyWithCapacity outSize
+    out ++ header ++ deflated ++ adler
+  else
+    zlibCompressStored raw
+
+/-- Compress IDAT payloads. Stored mode has dependency-safe internal tasks;
+fixed and dynamic DEFLATE stay sequential because their bitstream state is not
+segmented in this phase. -/
+def compressIdatParallel
+    (mode : PngEncodeMode) (raw : ByteArray) (parallel : PngParallelOptions := {}) :
+    ByteArray :=
+  match mode with
+  | .stored => zlibCompressStoredParallel raw parallel
+  | .fixed => zlibCompressFixed raw
+  | .dynamic => zlibCompressDynamic raw
+
+/-- Construct a PNG chunk while computing the CRC in a task when useful. -/
+def mkChunkBytesParallel
+    (typBytes : ByteArray) (data : ByteArray) (parallel : PngParallelOptions := {}) :
+    ByteArray :=
+  if parallel.useParallel 1 (typBytes.size + data.size) then
+    let lenBytes := u32be data.size
+    let crcTask := Task.spawn fun _ => crc32Chunk typBytes data
+    let crc := crcTask.get
+    let outSize := lenBytes.size + typBytes.size + data.size + 4
+    let out := ByteArray.emptyWithCapacity outSize
+    out ++ lenBytes ++ typBytes ++ data ++ u32be crc.toNat
+  else
+    mkChunkBytes typBytes data
+
+/-- Build the fixed PNG chunk envelope with independent IHDR, IDAT, and IEND
+chunk construction tasks while preserving deterministic output order. -/
+def encodeBitmapChunksParallel
+    (ihdr ancillary idat : ByteArray) (parallel : PngParallelOptions := {}) :
+    ByteArray :=
+  if parallel.useParallel 3 (ihdr.size + ancillary.size + idat.size) then
+    let ihdrTask := Task.spawn fun _ => mkChunkBytes ihdrTypeBytes ihdr
+    let idatTask := Task.spawn fun _ => mkChunkBytes idatTypeBytes idat
+    let iendTask := Task.spawn fun _ => mkChunkBytes iendTypeBytes ByteArray.empty
+    let ihdrChunk := ihdrTask.get
+    let idatChunk := idatTask.get
+    let iendChunk := iendTask.get
+    let outSize := pngSignature.size + ihdrChunk.size + ancillary.size +
+      idatChunk.size + iendChunk.size
+    let out := ByteArray.emptyWithCapacity outSize
+    out ++ pngSignature ++ ihdrChunk ++ ancillary ++ idatChunk ++ iendChunk
+  else
+    let ihdrChunk := mkChunkBytes ihdrTypeBytes ihdr
+    let idatChunk := mkChunkBytes idatTypeBytes idat
+    let iendChunk := mkChunkBytes iendTypeBytes ByteArray.empty
+    let outSize := pngSignature.size + ihdrChunk.size + ancillary.size +
+      idatChunk.size + iendChunk.size
+    let out := ByteArray.emptyWithCapacity outSize
+    out ++ pngSignature ++ ihdrChunk ++ ancillary ++ idatChunk ++ iendChunk
+
+/-- Option-aware encoder core used by the public parallel bitmap APIs. -/
+def encodeBitmapCoreParallel (raw ihdr : ByteArray) (mode : PngEncodeMode)
+    (colorSpace : Option PngEncodeColorSpace) (chromaticities : Option PngChromaticities)
+    (physical : Option PngPhysicalPixelDimensions)
+    (modificationTime : Option PngTime)
+    (parallel : PngParallelOptions := {}) : Option ByteArray := do
+  let ancillary ← encodeAncillaryChunks? colorSpace chromaticities physical modificationTime
+  let idat := compressIdatParallel mode raw parallel
+  some (encodeBitmapChunksParallel ihdr ancillary idat parallel)
+
 def encodeBitmapParallel {px : Type u} [Bitmaps.PixelFormat px] [Png.PixelFormat px]
     (bmp : Bitmap px)
     (hw : bmp.size.width < UInt32.size) (hh : bmp.size.height < UInt32.size)
     (mode : PngEncodeMode := .fixed) (parallel : PngParallelOptions := {}) : ByteArray :=
-  parallelEval parallel bmp.size.height bmp.data.size fun _ =>
-    encodeBitmap (px := px) bmp hw hh mode
+  have _ := hw
+  have _ := hh
+  let raw := Png.PixelFormat.encodeRaw (α := px) bmp
+  let ihdr := u32be bmp.size.width ++ u32be bmp.size.height ++
+    ByteArray.mk #[Png.PixelFormat.bitDepth (α := px), Png.PixelFormat.colorType (α := px),
+      u8 0, u8 0, u8 0]
+  let idat := compressIdatParallel mode raw parallel
+  encodeBitmapChunksParallel ihdr ByteArray.empty idat parallel
 
 def encodeBitmapWithOptionsParallel {px : Type u} [Bitmaps.PixelFormat px] [Png.PixelFormat px]
     (bmp : Bitmap px)
     (hw : bmp.size.width < UInt32.size) (hh : bmp.size.height < UInt32.size)
     (options : PngEncodeOptions := {}) (parallel : PngParallelOptions := {}) :
     Option ByteArray :=
-  parallelEval parallel bmp.size.height bmp.data.size fun _ =>
-    encodeBitmapWithOptions (px := px) bmp hw hh options
+  have _ := hw
+  have _ := hh
+  let raw :=
+    match options.filter with
+    | .none => Png.PixelFormat.encodeRaw (α := px) bmp
+    | _ => encodeRawWithFilter bmp options.filter
+  let ihdr := u32be bmp.size.width ++ u32be bmp.size.height ++
+    ByteArray.mk #[Png.PixelFormat.bitDepth (α := px), Png.PixelFormat.colorType (α := px),
+      u8 0, u8 0, u8 0]
+  encodeBitmapCoreParallel raw ihdr options.mode options.colorSpace options.chromaticities
+    options.physical options.modificationTime parallel
 
 def encodeBitmapCheckedParallel {px : Type u} [Bitmaps.PixelFormat px] [Png.PixelFormat px]
     (bmp : Bitmap px) (mode : PngEncodeMode := .fixed)
     (parallel : PngParallelOptions := {}) : Except String ByteArray :=
-  parallelEval parallel bmp.size.height bmp.data.size fun _ =>
-    encodeBitmapChecked (px := px) bmp mode
+  if hw : bmp.size.width < UInt32.size then
+    if hh : bmp.size.height < UInt32.size then
+      Except.ok (encodeBitmapParallel (px := px) bmp hw hh mode parallel)
+    else
+      Except.error "bitmap height exceeds PNG limit (2^32)"
+  else
+    Except.error "bitmap width exceeds PNG limit (2^32)"
 
 def encodeBitmapWithOptionsCheckedParallel {px : Type u}
     [Bitmaps.PixelFormat px] [Png.PixelFormat px]
     (bmp : Bitmap px) (options : PngEncodeOptions := {})
     (parallel : PngParallelOptions := {}) : Except String ByteArray :=
-  parallelEval parallel bmp.size.height bmp.data.size fun _ =>
-    encodeBitmapWithOptionsChecked (px := px) bmp options
+  if hw : bmp.size.width < UInt32.size then
+    if hh : bmp.size.height < UInt32.size then
+      match encodeBitmapWithOptionsParallel (px := px) bmp hw hh options parallel with
+      | some bytes => Except.ok bytes
+      | none => Except.error "invalid PNG ancillary encode options"
+    else
+      Except.error "bitmap height exceeds PNG limit (2^32)"
+  else
+    Except.error "bitmap width exceeds PNG limit (2^32)"
 
 def decodeBitmapParallel {px : Type u} [Bitmaps.PixelFormat px] [Png.PixelFormat px]
     (bytes : ByteArray) (parallel : PngParallelOptions := {}) : Option (Bitmap px) :=
@@ -124,34 +227,62 @@ def decodeBitmapWithMetadataParallel {px : Type u}
     [Bitmaps.PixelFormat px] [Png.PixelFormat px]
     (bytes : ByteArray) (parallel : PngParallelOptions := {}) :
     Option (PngDecodeResult px) :=
-  parallelEval parallel bytes.size bytes.size fun _ =>
-    decodeBitmapWithMetadata (px := px) bytes
+  do
+  let parsed ←
+    if hsize : 8 <= bytes.size then
+      parsePngWithMetadata bytes hsize
+    else
+      none
+  parallelEval parallel parsed.header.height parsed.idat.size fun _ =>
+    decodeParsedBitmapWithMetadata (px := px) parsed
 
 def encodeGray1BitmapParallel (bmp : Bitmap.Gray1)
     (hw : bmp.size.width < UInt32.size) (hh : bmp.size.height < UInt32.size)
     (mode : PngEncodeMode := .fixed) (parallel : PngParallelOptions := {}) :
     ByteArray :=
-  parallelEval parallel bmp.size.height bmp.data.size fun _ =>
-    encodeGray1Bitmap bmp hw hh mode
+  have _ := hw
+  have _ := hh
+  let raw := encodeRawGray1 bmp
+  let ihdr := u32be bmp.size.width ++ u32be bmp.size.height ++
+    ByteArray.mk #[u8 1, u8 0, u8 0, u8 0, u8 0]
+  let idat := compressIdatParallel mode raw parallel
+  encodeBitmapChunksParallel ihdr ByteArray.empty idat parallel
 
 def encodeGray1BitmapWithOptionsParallel (bmp : Bitmap.Gray1)
     (hw : bmp.size.width < UInt32.size) (hh : bmp.size.height < UInt32.size)
     (options : PngEncodeOptions := {}) (parallel : PngParallelOptions := {}) :
     Option ByteArray :=
-  parallelEval parallel bmp.size.height bmp.data.size fun _ =>
-    encodeGray1BitmapWithOptions bmp hw hh options
+  have _ := hw
+  have _ := hh
+  let raw := encodeRawGray1WithFilter bmp options.filter
+  let ihdr := u32be bmp.size.width ++ u32be bmp.size.height ++
+    ByteArray.mk #[u8 1, u8 0, u8 0, u8 0, u8 0]
+  encodeBitmapCoreParallel raw ihdr options.mode options.colorSpace options.chromaticities
+    options.physical options.modificationTime parallel
 
 def encodeGray1BitmapCheckedParallel (bmp : Bitmap.Gray1)
     (mode : PngEncodeMode := .fixed) (parallel : PngParallelOptions := {}) :
     Except String ByteArray :=
-  parallelEval parallel bmp.size.height bmp.data.size fun _ =>
-    encodeGray1BitmapChecked bmp mode
+  if hw : bmp.size.width < UInt32.size then
+    if hh : bmp.size.height < UInt32.size then
+      Except.ok (encodeGray1BitmapParallel bmp hw hh mode parallel)
+    else
+      Except.error "bitmap height exceeds PNG limit (2^32)"
+  else
+    Except.error "bitmap width exceeds PNG limit (2^32)"
 
 def encodeGray1BitmapWithOptionsCheckedParallel (bmp : Bitmap.Gray1)
     (options : PngEncodeOptions := {}) (parallel : PngParallelOptions := {}) :
     Except String ByteArray :=
-  parallelEval parallel bmp.size.height bmp.data.size fun _ =>
-    encodeGray1BitmapWithOptionsChecked bmp options
+  if hw : bmp.size.width < UInt32.size then
+    if hh : bmp.size.height < UInt32.size then
+      match encodeGray1BitmapWithOptionsParallel bmp hw hh options parallel with
+      | some bytes => Except.ok bytes
+      | none => Except.error "invalid PNG ancillary encode options"
+    else
+      Except.error "bitmap height exceeds PNG limit (2^32)"
+  else
+    Except.error "bitmap width exceeds PNG limit (2^32)"
 
 def decodeGray1BitmapParallel (bytes : ByteArray)
     (parallel : PngParallelOptions := {}) : Option Bitmap.Gray1 :=
@@ -166,30 +297,76 @@ def decodeGray1BitmapWithMetadataParallel (bytes : ByteArray)
 def encodeIndexedBitmapWithOptionsParallel (bmp : PngIndexedBitmap)
     (options : PngEncodeOptions := {}) (parallel : PngParallelOptions := {}) :
     Option ByteArray :=
-  parallelEval parallel bmp.size.height bmp.data.size fun _ =>
-    encodeIndexedBitmapWithOptions bmp options
+  do
+  let colorSpaceChunks ← encodeColorSpaceChunks? options.colorSpace options.chromaticities
+  let physChunk ← encodePhysChunk? options.physical
+  let timeChunk ← encodeTimeChunk? options.modificationTime
+  let raw := encodeRawIndexedWithFilter bmp options.filter
+  let idat := compressIdatParallel options.mode raw parallel
+  let ihdr := u32be bmp.size.width ++ u32be bmp.size.height ++
+    ByteArray.mk #[u8 bmp.bitDepth, u8 3, u8 0, u8 0, u8 0]
+  let plteTask := Task.spawn fun _ => mkChunkBytes plteTypeBytes bmp.palette.entries
+  let trnsTask := Task.spawn fun _ =>
+    match bmp.transparency with
+    | some alpha => mkChunkBytes trnsTypeBytes alpha
+    | none => ByteArray.empty
+  let bkgdTask := Task.spawn fun _ =>
+    match bmp.background with
+    | some idx => mkChunkBytes bkgdTypeBytes (ByteArray.mk #[idx])
+    | none => ByteArray.empty
+  let ihdrChunk := mkChunkBytesParallel ihdrTypeBytes ihdr parallel
+  let plteChunk := plteTask.get
+  let trnsChunk := trnsTask.get
+  let bkgdChunk := bkgdTask.get
+  let idatChunk := mkChunkBytesParallel idatTypeBytes idat parallel
+  let iendChunk := mkChunkBytesParallel iendTypeBytes ByteArray.empty parallel
+  let outSize := pngSignature.size + ihdrChunk.size + colorSpaceChunks.size +
+    plteChunk.size + trnsChunk.size + bkgdChunk.size + physChunk.size +
+    timeChunk.size + idatChunk.size + iendChunk.size
+  let out := ByteArray.emptyWithCapacity outSize
+  some (out ++ pngSignature ++ ihdrChunk ++ colorSpaceChunks ++ plteChunk ++
+    trnsChunk ++ bkgdChunk ++ physChunk ++ timeChunk ++ idatChunk ++ iendChunk)
 
 def encodeIndexedBitmapWithOptionsCheckedParallel (bmp : PngIndexedBitmap)
     (options : PngEncodeOptions := {}) (parallel : PngParallelOptions := {}) :
     Except String ByteArray :=
-  parallelEval parallel bmp.size.height bmp.data.size fun _ =>
-    encodeIndexedBitmapWithOptionsChecked bmp options
+  do
+  validateIndexedBitmap bmp
+  match encodeIndexedBitmapWithOptionsParallel bmp options parallel with
+  | some bytes => Except.ok bytes
+  | none => Except.error "invalid PNG ancillary encode options"
 
 def encodeIndexedBitmapCheckedParallel (bmp : PngIndexedBitmap)
     (mode : PngEncodeMode := .fixed) (parallel : PngParallelOptions := {}) :
     Except String ByteArray :=
-  parallelEval parallel bmp.size.height bmp.data.size fun _ =>
-    encodeIndexedBitmapChecked bmp mode
+  encodeIndexedBitmapWithOptionsCheckedParallel bmp { mode := mode } parallel
 
 def decodeIndexedBitmapWithMetadataParallel (bytes : ByteArray)
     (parallel : PngParallelOptions := {}) : Option PngIndexedDecodeResult :=
-  parallelEval parallel bytes.size bytes.size fun _ =>
-    decodeIndexedBitmapWithMetadata bytes
+  do
+  let parsed ←
+    if hsize : 8 <= bytes.size then
+      parsePngWithMetadata bytes hsize
+    else
+      none
+  parallelEval parallel parsed.header.height parsed.idat.size fun _ =>
+    decodeParsedIndexedBitmapWithMetadata parsed
 
 def decodeIndexedBitmapParallel (bytes : ByteArray)
     (parallel : PngParallelOptions := {}) : Option PngIndexedBitmap :=
-  parallelEval parallel bytes.size bytes.size fun _ =>
-    decodeIndexedBitmap bytes
+  do
+  let parsed ←
+    if hsize : 8 <= bytes.size then
+      parsePngForDecode bytes hsize
+    else
+      none
+  parallelEval parallel parsed.header.height parsed.idat.size fun _ => do
+    if parsed.metadata.transparency.isSome then
+      none
+    let parsed :=
+      { parsed with metadata := PngMetadata.pixelOnlyColorSpace parsed.metadata }
+    let decoded ← decodeParsedIndexedBitmapWithMetadata parsed
+    some decoded.bitmap
 
 end Png
 end Bitmaps
