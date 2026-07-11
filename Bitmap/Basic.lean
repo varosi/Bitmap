@@ -822,42 +822,6 @@ def Bitmap.ofFn {px : Type u} [PixelFormat px] (w h : Nat) (f : Fin (w * h) → 
 def Bitmap.fill {px : Type u} [PixelFormat px] (w h : Nat) (color : px) : Bitmap px :=
   Bitmap.ofFn w h (fun _ => color)
 
-def Bitmap.RGB8.ofFn (w h : Nat) (f : Fin (w * h) → Bitmaps.RGB8)
-    [PixelFormat Bitmaps.RGB8] : Bitmap.RGB8 :=
-  Bitmap.ofFn w h f
-
-def Bitmap.RGB16.ofFn (w h : Nat) (f : Fin (w * h) → Bitmaps.RGB16)
-    [PixelFormat Bitmaps.RGB16] : Bitmap.RGB16 :=
-  Bitmap.ofFn w h f
-
-def Bitmap.RGBA8.ofFn (w h : Nat) (f : Fin (w * h) → Bitmaps.RGBA8)
-    [PixelFormat Bitmaps.RGBA8] :
-    Bitmap.RGBA8 :=
-  Bitmap.ofFn w h f
-
-def Bitmap.RGBA16.ofFn (w h : Nat) (f : Fin (w * h) → Bitmaps.RGBA16)
-    [PixelFormat Bitmaps.RGBA16] : Bitmap.RGBA16 :=
-  Bitmap.ofFn w h f
-
-def Bitmap.Gray8.ofFn (w h : Nat) (f : Fin (w * h) → Bitmaps.Gray8)
-    [PixelFormat Bitmaps.Gray8] :
-    Bitmap.Gray8 :=
-  Bitmap.ofFn w h f
-
-def Bitmap.Gray16.ofFn (w h : Nat) (f : Fin (w * h) → Bitmaps.Gray16)
-    [PixelFormat Bitmaps.Gray16] : Bitmap.Gray16 :=
-  Bitmap.ofFn w h f
-
-def Bitmap.GrayAlpha8.ofFn (w h : Nat)
-    (f : Fin (w * h) → Bitmaps.GrayAlpha8) [PixelFormat Bitmaps.GrayAlpha8] :
-    Bitmap.GrayAlpha8 :=
-  Bitmap.ofFn w h f
-
-def Bitmap.GrayAlpha16.ofFn (w h : Nat)
-    (f : Fin (w * h) → Bitmaps.GrayAlpha16) [PixelFormat Bitmaps.GrayAlpha16] :
-    Bitmap.GrayAlpha16 :=
-  Bitmap.ofFn w h f
-
 private def gray1PackedByteOfFn (w h rowBytes : Nat)
     (i : Fin (h * rowBytes)) (f : Fin (w * h) → Bitmaps.Gray1) : UInt8 :=
   Id.run do
@@ -945,19 +909,13 @@ def Bitmap.Gray1.setPixel? (bmp : Bitmap.Gray1) (x y : Nat) (px : Bitmaps.Gray1)
   else
     none
 
-def Bitmap.Gray1.toGray8 (bmp : Bitmap.Gray1) [PixelFormat Bitmaps.Gray8] : Bitmap.Gray8 :=
-  Bitmap.Gray8.ofFn bmp.size.width bmp.size.height (fun idx =>
-    { v := if bmp.getBitLinear idx.val then 0xff else 0 })
+class Gray1Expansion (px : Type u) where
+  ofBit : Bool → px
 
-def Bitmap.Gray1.toRGB8 (bmp : Bitmap.Gray1) [PixelFormat Bitmaps.RGB8] : Bitmap.RGB8 :=
+def Bitmap.Gray1.expand {px : Type u} [PixelFormat px] [Gray1Expansion px]
+    (bmp : Bitmap.Gray1) : Bitmap px :=
   Bitmap.ofFn bmp.size.width bmp.size.height (fun idx =>
-    let v : UInt8 := if bmp.getBitLinear idx.val then 0xff else 0
-    { r := v, g := v, b := v })
-
-def Bitmap.Gray1.toRGBA8 (bmp : Bitmap.Gray1) [PixelFormat Bitmaps.RGBA8] : Bitmap.RGBA8 :=
-  Bitmap.RGBA8.ofFn bmp.size.width bmp.size.height (fun idx =>
-    let v : UInt8 := if bmp.getBitLinear idx.val then 0xff else 0
-    { r := v, g := v, b := v, a := 0xff })
+    Gray1Expansion.ofBit (px := px) (bmp.getBitLinear idx.val))
 
 def Bitmap.Gray8.toGray1Threshold [PixelFormat Bitmaps.Gray8] (bmp : Bitmap.Gray8)
     (threshold : UInt8 := 128) :
@@ -1004,6 +962,38 @@ instance instPixelFormatRGBA16 : PixelFormat RGBA16 :=
   ChannelLayout.pixelFormat4
     (fun r g b a => { r := r, g := g, b := b, a := a })
     RGBA.r RGBA.g RGBA.b RGBA.a
+
+instance : Gray1Expansion Gray8 where
+  ofBit bit := { v := if bit then 0xff else 0 }
+
+instance : Gray1Expansion Gray16 where
+  ofBit bit := { v := if bit then 0xffff else 0 }
+
+instance : Gray1Expansion GrayAlpha8 where
+  ofBit bit := { v := if bit then 0xff else 0, a := 0xff }
+
+instance : Gray1Expansion GrayAlpha16 where
+  ofBit bit := { v := if bit then 0xffff else 0, a := 0xffff }
+
+instance : Gray1Expansion RGB8 where
+  ofBit bit :=
+    let v : UInt8 := if bit then 0xff else 0
+    { r := v, g := v, b := v }
+
+instance : Gray1Expansion RGB16 where
+  ofBit bit :=
+    let v : UInt16 := if bit then 0xffff else 0
+    { r := v, g := v, b := v }
+
+instance : Gray1Expansion RGBA8 where
+  ofBit bit :=
+    let v : UInt8 := if bit then 0xff else 0
+    { r := v, g := v, b := v, a := 0xff }
+
+instance : Gray1Expansion RGBA16 where
+  ofBit bit :=
+    let v : UInt16 := if bit then 0xffff else 0
+    { r := v, g := v, b := v, a := 0xffff }
 
 class FileWritable (α : Type) where
   write : FilePath -> α -> IO (Except String Unit)

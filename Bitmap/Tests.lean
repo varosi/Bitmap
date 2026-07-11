@@ -579,7 +579,7 @@ private def ancFixtureRgbaOverBlueReferenceData : ByteArray :=
     return out
 
 private def grayAlphaFixture : Bitmap.GrayAlpha8 :=
-  Bitmap.GrayAlpha8.ofFn 2 2 (fun idx : Fin (2 * 2) =>
+  Bitmap.ofFn 2 2 (fun idx : Fin (2 * 2) =>
     match idx.val with
     | 0 => { v := Png.u8 0, a := Png.u8 0 }
     | 1 => { v := Png.u8 64, a := Png.u8 128 }
@@ -653,26 +653,26 @@ private def u16be (n : Nat) : ByteArray :=
   ByteArray.mk #[Png.u8 (n / 256), Png.u8 n]
 
 private def rgb16DownsampleFixture : Bitmap.RGB16 :=
-  Bitmap.RGB16.ofFn 2 1 (fun idx : Fin (2 * 1) =>
+  Bitmap.ofFn 2 1 (fun idx : Fin (2 * 1) =>
     match idx.val with
     | 0 => { r := u16 0x12ab, g := u16 0x3456, b := u16 0xfedc }
     | _ => { r := u16 0x0102, g := u16 0x8001, b := u16 0x00ff })
 
 private def rgba16DownsampleFixture : Bitmap.RGBA16 :=
-  Bitmap.RGBA16.ofFn 2 1 (fun idx : Fin (2 * 1) =>
+  Bitmap.ofFn 2 1 (fun idx : Fin (2 * 1) =>
     match idx.val with
     | 0 => { r := u16 0x12ab, g := u16 0x3456, b := u16 0xfedc, a := u16 0x7788 }
     | _ => { r := u16 0x0102, g := u16 0x8001, b := u16 0x00ff, a := u16 0xffff })
 
 private def gray16DownsampleFixture : Bitmap.Gray16 :=
-  Bitmap.Gray16.ofFn 3 1 (fun idx : Fin (3 * 1) =>
+  Bitmap.ofFn 3 1 (fun idx : Fin (3 * 1) =>
     match idx.val with
     | 0 => { v := u16 0x12ab }
     | 1 => { v := u16 0x8001 }
     | _ => { v := u16 0x00ff })
 
 private def grayAlpha16DownsampleFixture : Bitmap.GrayAlpha16 :=
-  Bitmap.GrayAlpha16.ofFn 2 1 (fun idx : Fin (2 * 1) =>
+  Bitmap.ofFn 2 1 (fun idx : Fin (2 * 1) =>
     match idx.val with
     | 0 => { v := u16 0x12ab, a := u16 0x3456 }
     | _ => { v := u16 0x8001, a := u16 0x00ff })
@@ -864,7 +864,7 @@ private def chrmTransformGrayAlpha8Data
         return out
 
 private def rgb16MetadataFixture : Bitmap.RGB16 :=
-  Bitmap.RGB16.ofFn 2 1 (fun idx : Fin (2 * 1) =>
+  Bitmap.ofFn 2 1 (fun idx : Fin (2 * 1) =>
     match idx.val with
     | 0 => { r := u16 0x1234, g := u16 0x5678, b := u16 0x9abc }
     | _ => { r := u16 0x2001, g := u16 0x4002, b := u16 0x6003 })
@@ -877,7 +877,7 @@ private def rgb16MetadataPng : ByteArray :=
         (u16be 0x2100 ++ u16be 0x4300 ++ u16be 0x6500))
 
 private def grayAlpha16MetadataFixture : Bitmap.GrayAlpha16 :=
-  Bitmap.GrayAlpha16.ofFn 2 1 (fun idx : Fin (2 * 1) =>
+  Bitmap.ofFn 2 1 (fun idx : Fin (2 * 1) =>
     match idx.val with
     | 0 => { v := u16 0x1234, a := u16 0x0000 }
     | _ => { v := u16 0x8001, a := u16 0xffff })
@@ -887,7 +887,7 @@ private def grayAlpha16MetadataPng : ByteArray :=
     (Png.mkChunkBytes Png.bkgdTypeBytes (u16be 0x3000))
 
 private def rgba16MetadataFixture : Bitmap.RGBA16 :=
-  Bitmap.RGBA16.ofFn 2 1 (fun idx : Fin (2 * 1) =>
+  Bitmap.ofFn 2 1 (fun idx : Fin (2 * 1) =>
     match idx.val with
     | 0 => { r := u16 0x1234, g := u16 0x5678, b := u16 0x9abc, a := u16 0x0000 }
     | _ => { r := u16 0x2001, g := u16 0x4002, b := u16 0x6003, a := u16 0xffff })
@@ -1126,6 +1126,32 @@ private def expectGray1Fixtures : IO Unit := do
     expectGray1ExactFixture s!"test_gray1_w{w}.png" w 3
   expectGray1ExactFixture "test_gray1_filters.png" 17 5
   expectGray1ExactFixture "test_gray1_adam7.png" 9 9
+
+  let expansionSource := gray1FixtureBitmap 9 3
+  let expandedGray8 : Bitmap.Gray8 := Bitmap.Gray1.expand expansionSource
+  if expandedGray8.data != gray1ExpandedGray8Data 9 3 then
+    throw (IO.userError "Gray1 generic expansion to Gray8 mismatch")
+  let expandedGray16 : Bitmap.Gray16 := Bitmap.Gray1.expand expansionSource
+  if expandedGray16.data.size != 9 * 3 * Gray16.bytesPerPixel then
+    throw (IO.userError "Gray1 generic expansion to Gray16 size mismatch")
+  let expandedGrayAlpha8 : Bitmap.GrayAlpha8 := Bitmap.Gray1.expand expansionSource
+  if expandedGrayAlpha8.data.size != 9 * 3 * GrayAlpha8.bytesPerPixel then
+    throw (IO.userError "Gray1 generic expansion to GrayAlpha8 size mismatch")
+  let expandedGrayAlpha16 : Bitmap.GrayAlpha16 := Bitmap.Gray1.expand expansionSource
+  if expandedGrayAlpha16.data.size != 9 * 3 * GrayAlpha16.bytesPerPixel then
+    throw (IO.userError "Gray1 generic expansion to GrayAlpha16 size mismatch")
+  let expandedRGB8 : Bitmap.RGB8 := Bitmap.Gray1.expand expansionSource
+  if expandedRGB8.data.size != 9 * 3 * RGB8.bytesPerPixel then
+    throw (IO.userError "Gray1 generic expansion to RGB8 size mismatch")
+  let expandedRGB16 : Bitmap.RGB16 := Bitmap.Gray1.expand expansionSource
+  if expandedRGB16.data.size != 9 * 3 * RGB16.bytesPerPixel then
+    throw (IO.userError "Gray1 generic expansion to RGB16 size mismatch")
+  let expandedRGBA8 : Bitmap.RGBA8 := Bitmap.Gray1.expand expansionSource
+  if expandedRGBA8.data.size != 9 * 3 * RGBA8.bytesPerPixel then
+    throw (IO.userError "Gray1 generic expansion to RGBA8 size mismatch")
+  let expandedRGBA16 : Bitmap.RGBA16 := Bitmap.Gray1.expand expansionSource
+  if expandedRGBA16.data.size != 9 * 3 * RGBA16.bytesPerPixel then
+    throw (IO.userError "Gray1 generic expansion to RGBA16 size mismatch")
 
   let filterBytes ← IO.FS.readBinFile (testFixturePath "test_gray1_filters.png")
   match Png.decodeBitmap (px := Gray8) filterBytes with
@@ -1687,7 +1713,7 @@ private def filterRGB8Fixture : Bitmap.RGB8 :=
       b := Png.u8 (200 - x * 13 + y * 5) })
 
 private def filterRGBA8Fixture : Bitmap.RGBA8 :=
-  Bitmap.RGBA8.ofFn 5 3 (fun idx : Fin (5 * 3) =>
+  Bitmap.ofFn 5 3 (fun idx : Fin (5 * 3) =>
     let x := idx.val % 5
     let y := idx.val / 5
     { r := Png.u8 (x * 40 + y * 7)
@@ -1696,13 +1722,13 @@ private def filterRGBA8Fixture : Bitmap.RGBA8 :=
       a := Png.u8 (90 + x * 19 + y * 17) })
 
 private def filterGray8Fixture : Bitmap.Gray8 :=
-  Bitmap.Gray8.ofFn 7 3 (fun idx : Fin (7 * 3) =>
+  Bitmap.ofFn 7 3 (fun idx : Fin (7 * 3) =>
     let x := idx.val % 7
     let y := idx.val / 7
     { v := Png.u8 (x * 31 + y * 37) })
 
 private def filterGray16Fixture : Bitmap.Gray16 :=
-  Bitmap.Gray16.ofFn 4 3 (fun idx : Fin (4 * 3) =>
+  Bitmap.ofFn 4 3 (fun idx : Fin (4 * 3) =>
     let x := idx.val % 4
     let y := idx.val / 4
     { v := u16 (0x1200 + x * 0x101 + y * 0x1111) })
@@ -2119,7 +2145,7 @@ private def expectColorSpaceChunks : IO Unit := do
   | none =>
       throw (IO.userError "gAMA metadata decode failed")
   let rgbaFixture : Bitmap.RGBA8 :=
-    Bitmap.RGBA8.ofFn 1 1 (fun _ =>
+    Bitmap.ofFn 1 1 (fun _ =>
       { r := Png.u8 64, g := Png.u8 128, b := Png.u8 192, a := Png.u8 77 })
   match Png.decodeBitmap (px := RGBA8) (pngWithAncillary rgbaFixture (gamaChunk gamma)) with
   | some bmp =>
@@ -2128,7 +2154,7 @@ private def expectColorSpaceChunks : IO Unit := do
   | none =>
       throw (IO.userError "gAMA RGBA8 fixture failed to decode")
   let gray16Fixture : Bitmap.Gray16 :=
-    Bitmap.Gray16.ofFn 2 1 (fun idx : Fin (2 * 1) =>
+    Bitmap.ofFn 2 1 (fun idx : Fin (2 * 1) =>
       match idx.val with
       | 0 => { v := u16 0x4000 }
       | _ => { v := u16 0x9000 })
