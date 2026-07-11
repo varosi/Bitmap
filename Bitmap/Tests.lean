@@ -2703,6 +2703,61 @@ private def measurePngStage (label : String) (iters : Nat) (act : IO Nat) : IO N
   IO.println s!"perf png stage {label}: avg {avgNs} ns ({avgNs / 1_000} us) over {iters} runs, checksum {checksum}, heartbeats {hb1 - hb0}"
   return avgNs
 
+private structure PngStageInput where
+  bmp : Bitmap.RGB8
+  rawNone : ByteArray
+  rawAdaptive : ByteArray
+  gray1Bmp : Bitmap.Gray1
+  indexedBmp : Png.PngIndexedBitmap
+  stored : ByteArray
+  fixed : ByteArray
+  dynamic : ByteArray
+  fixedBytes : ByteArray
+  colorBytes : ByteArray
+
+private def makePngStageInput (w h salt : Nat) : IO PngStageInput := do
+  let bmp := perfContentBitmap w h
+  let rawNone := Png.PixelFormat.encodeRaw (α := RGB8) bmp
+  let rawAdaptive := Png.encodeRawWithFilter bmp .adaptive
+  let gray1Bmp := gray1FixtureBitmap (193 + salt) (17 + (salt % 3))
+  let indexedBmp := indexedFixtureBitmap (65 + salt) (17 + (salt % 2)) 4 12
+  let stored := Png.zlibCompressStored rawNone
+  let fixed := Png.zlibCompressFixed rawNone
+  let dynamic := Png.zlibCompressDynamic rawNone
+  let fixedBytes ←
+    match Png.encodeBitmapChecked (px := RGB8) bmp .fixed with
+    | Except.ok bytes => pure bytes
+    | Except.error err => throw (IO.userError s!"png stage fixed encode failed: {err}")
+  let colorBytes ←
+    match Png.encodeBitmapWithOptionsChecked (px := RGB8) bmp
+        { mode := .fixed, colorSpace := some (.srgb .perceptual false) } with
+    | Except.ok bytes => pure bytes
+    | Except.error err => throw (IO.userError s!"png stage color encode failed: {err}")
+  pure
+    { bmp
+      rawNone
+      rawAdaptive
+      gray1Bmp
+      indexedBmp
+      stored
+      fixed
+      dynamic
+      fixedBytes
+      colorBytes }
+
+private def measurePngStageInputs (label : String) (iters : Nat)
+    (inputs : Array PngStageInput) (act : PngStageInput → IO Nat) : IO Nat := do
+  if hsize : inputs.size = 0 then
+    throw (IO.userError "png stage perf input set is empty")
+  else
+    let hpos : 0 < inputs.size := Nat.pos_of_ne_zero hsize
+    let iterRef ← IO.mkRef 0
+    measurePngStage label iters <| do
+      let i ← iterRef.get
+      iterRef.set (i + 1)
+      let hidx : i % inputs.size < inputs.size := Nat.mod_lt i hpos
+      act inputs[i % inputs.size]
+
 private def byteArrayChecksum (bytes : ByteArray) : Nat :=
   Id.run do
     let mut checksum := bytes.size
@@ -2718,64 +2773,53 @@ private def runPngStagePerfTest : IO Unit := do
   let w := perfPngStageResolution
   let h := perfPngStageResolution
   let iters := perfPngStageIters
-  let bmp := perfContentBitmap w h
-  let rawNone := Png.PixelFormat.encodeRaw (α := RGB8) bmp
-  let rawAdaptive := Png.encodeRawWithFilter bmp .adaptive
-  let gray1Bmp := gray1FixtureBitmap 193 17
-  let indexedBmp := indexedFixtureBitmap 65 17 4 12
-  let stored := Png.zlibCompressStored rawNone
-  let fixed := Png.zlibCompressFixed rawNone
-  let dynamic := Png.zlibCompressDynamic rawNone
-  let fixedBytes ←
-    match Png.encodeBitmapChecked (px := RGB8) bmp .fixed with
-    | Except.ok bytes => pure bytes
-    | Except.error err => throw (IO.userError s!"png stage fixed encode failed: {err}")
-  let colorBytes ←
-    match Png.encodeBitmapWithOptionsChecked (px := RGB8) bmp
-        { mode := .fixed, colorSpace := some (.srgb .perceptual false) } with
-    | Except.ok bytes => pure bytes
-    | Except.error err => throw (IO.userError s!"png stage color encode failed: {err}")
-  let _ ← measurePngStage "row encode filter none" iters <| do
-    pure (byteArrayChecksum (Png.PixelFormat.encodeRaw (α := RGB8) bmp))
-  let _ ← measurePngStage "row encode adaptive" iters <| do
-    pure (byteArrayChecksum (Png.encodeRawWithFilter bmp .adaptive))
-  let _ ← measurePngStage "Gray1 row packing adaptive" iters <| do
-    pure (byteArrayChecksum (Png.encodeRawGray1WithFilter gray1Bmp .adaptive))
-  let _ ← measurePngStage "indexed row packing adaptive" iters <| do
-    pure (byteArrayChecksum (Png.encodeRawIndexedWithFilter indexedBmp .adaptive))
-  let _ ← measurePngStage "zlib compress stored" iters <| do
-    pure (byteArrayChecksum (Png.zlibCompressStored rawNone))
-  let _ ← measurePngStage "zlib compress fixed" iters <| do
-    pure (byteArrayChecksum (Png.zlibCompressFixed rawNone))
-  let _ ← measurePngStage "zlib compress dynamic" iters <| do
-    pure (byteArrayChecksum (Png.zlibCompressDynamic rawNone))
-  let _ ← measurePngStage "zlib decompress stored" iters <| do
-    match if hsize : 2 <= stored.size then Png.zlibDecompressStored stored hsize else none with
+  let input0 ← makePngStageInput w h 0
+  let input1 ← makePngStageInput (w + 1) h 1
+  let input2 ← makePngStageInput w (h + 1) 2
+  let input3 ← makePngStageInput (w + 2) (h - 1) 3
+  let input4 ← makePngStageInput (w - 1) (h + 2) 4
+  let inputs := #[input0, input1, input2, input3, input4]
+  let _ ← measurePngStageInputs "row encode filter none" iters inputs <| fun input => do
+    pure (byteArrayChecksum (Png.PixelFormat.encodeRaw (α := RGB8) input.bmp))
+  let _ ← measurePngStageInputs "row encode adaptive" iters inputs <| fun input => do
+    pure (byteArrayChecksum (Png.encodeRawWithFilter input.bmp .adaptive))
+  let _ ← measurePngStageInputs "Gray1 row packing adaptive" iters inputs <| fun input => do
+    pure (byteArrayChecksum (Png.encodeRawGray1WithFilter input.gray1Bmp .adaptive))
+  let _ ← measurePngStageInputs "indexed row packing adaptive" iters inputs <| fun input => do
+    pure (byteArrayChecksum (Png.encodeRawIndexedWithFilter input.indexedBmp .adaptive))
+  let _ ← measurePngStageInputs "zlib compress stored" iters inputs <| fun input => do
+    pure (byteArrayChecksum (Png.zlibCompressStored input.rawNone))
+  let _ ← measurePngStageInputs "zlib compress fixed" iters inputs <| fun input => do
+    pure (byteArrayChecksum (Png.zlibCompressFixed input.rawNone))
+  let _ ← measurePngStageInputs "zlib compress dynamic" iters inputs <| fun input => do
+    pure (byteArrayChecksum (Png.zlibCompressDynamic input.rawNone))
+  let _ ← measurePngStageInputs "zlib decompress stored" iters inputs <| fun input => do
+    match if hsize : 2 <= input.stored.size then Png.zlibDecompressStored input.stored hsize else none with
     | some raw => pure (byteArrayChecksum raw)
     | none => throw (IO.userError "stored zlib stage failed")
-  let _ ← measurePngStage "zlib decompress fixed" iters <| do
-    match if hsize : 2 <= fixed.size then Png.zlibDecompress fixed hsize else none with
+  let _ ← measurePngStageInputs "zlib decompress fixed" iters inputs <| fun input => do
+    match if hsize : 2 <= input.fixed.size then Png.zlibDecompress input.fixed hsize else none with
     | some raw => pure (byteArrayChecksum raw)
     | none => throw (IO.userError "fixed zlib stage failed")
-  let _ ← measurePngStage "zlib decompress dynamic" iters <| do
-    match if hsize : 2 <= dynamic.size then Png.zlibDecompress dynamic hsize else none with
+  let _ ← measurePngStageInputs "zlib decompress dynamic" iters inputs <| fun input => do
+    match if hsize : 2 <= input.dynamic.size then Png.zlibDecompress input.dynamic hsize else none with
     | some raw => pure (byteArrayChecksum raw)
     | none => throw (IO.userError "dynamic zlib stage failed")
-  let _ ← measurePngStage "chunk CRC construction" iters <| do
-    pure (byteArrayChecksum (Png.mkChunkBytes Png.idatTypeBytes fixed))
-  let _ ← measurePngStage "PNG parse" iters <| do
-    match if hsize : 8 <= fixedBytes.size then Png.parsePngForDecode fixedBytes hsize else none with
+  let _ ← measurePngStageInputs "chunk CRC construction" iters inputs <| fun input => do
+    pure (byteArrayChecksum (Png.mkChunkBytes Png.idatTypeBytes input.fixed))
+  let _ ← measurePngStageInputs "PNG parse" iters inputs <| fun input => do
+    match if hsize : 8 <= input.fixedBytes.size then Png.parsePngForDecode input.fixedBytes hsize else none with
     | some parsed => pure (byteArrayChecksum parsed.idat)
     | none => throw (IO.userError "PNG parse stage failed")
-  let _ ← measurePngStage "unfilter and pixel decode" iters <| do
-    match Png.decodeBitmap (px := RGB8) fixedBytes with
+  let _ ← measurePngStageInputs "unfilter and pixel decode" iters inputs <| fun input => do
+    match Png.decodeBitmap (px := RGB8) input.fixedBytes with
     | some decoded => pure (byteArrayChecksum decoded.data)
     | none => throw (IO.userError "PNG decode stage failed")
-  let _ ← measurePngStage "metadata color-space decode" iters <| do
-    match Png.decodeBitmapWithMetadata (px := RGB8) colorBytes with
+  let _ ← measurePngStageInputs "metadata color-space decode" iters inputs <| fun input => do
+    match Png.decodeBitmapWithMetadata (px := RGB8) input.colorBytes with
     | some decoded => pure (byteArrayChecksum decoded.bitmap.data)
     | none => throw (IO.userError "PNG color-space decode stage failed")
-  if rawAdaptive.size == 0 then
+  if input0.rawAdaptive.size == 0 then
     throw (IO.userError "adaptive raw stage unexpectedly empty")
 
 private def perfPngParallelResolution : Nat := 128
