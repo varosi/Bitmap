@@ -1,6 +1,6 @@
 import Bitmap.Png
 
-universe u
+universe u v
 
 namespace Bitmaps
 namespace Png
@@ -78,6 +78,11 @@ def mapShardsParallel {α : Type u} (shards : List PngShard) (f : PngShard → �
   let tasks := shards.map fun shard => Task.spawn (fun _ => f shard)
   tasks.map fun task => task.get
 
+/-- Run one deterministic pure task per list element and return results in list order. -/
+def mapListParallel {α : Type u} {β : Type v} (xs : List α) (f : α → β) : List β :=
+  let tasks := xs.map fun x => Task.spawn (fun _ => f x)
+  tasks.map fun task => task.get
+
 /-- Evaluate deterministic pure work directly or through a task according to
 the configured work-size thresholds. -/
 def parallelEval {α : Type u}
@@ -86,6 +91,75 @@ def parallelEval {α : Type u}
     (Task.spawn f).get
   else
     f ()
+
+/-- Concatenate byte chunks in their existing order. -/
+def concatByteArrays (chunks : List ByteArray) : ByteArray :=
+  chunks.foldr (fun chunk out => chunk ++ out) ByteArray.empty
+
+/-- Descriptor for a stored DEFLATE block payload inside the original raw
+buffer. The final flag is stored explicitly because only the last block may set
+it in the byte stream. -/
+structure StoredDeflateBlockRange where
+  start : Nat
+  stop : Nat
+  final : Bool
+deriving Repr, DecidableEq
+
+/-- Materialize a stored DEFLATE block descriptor from the original raw buffer. -/
+def StoredDeflateBlockRange.toBlock
+    (range : StoredDeflateBlockRange) (raw : ByteArray) : ByteArray :=
+  storedBlock (raw.extract range.start range.stop) range.final
+
+/-- Build stored DEFLATE block descriptors from an offset and remaining byte
+count. This mirrors `deflateStored` without copying tail buffers. -/
+def storedDeflateBlockRangesFrom
+    (offset remaining : Nat) : List StoredDeflateBlockRange :=
+  if _hzero : remaining = 0 then
+    [{ start := offset, stop := offset, final := true }]
+  else
+    let blockLen := Nat.min uint16MaxValue remaining
+    let stop := offset + blockLen
+    if _hfinal : blockLen == remaining then
+      [{ start := offset, stop := stop, final := true }]
+    else
+      { start := offset, stop := stop, final := false } ::
+        storedDeflateBlockRangesFrom stop (remaining - blockLen)
+termination_by remaining
+decreasing_by
+  have hle : blockLen ≤ remaining := by
+    simpa [blockLen] using Nat.min_le_right uint16MaxValue remaining
+  have hpos : 0 < blockLen := by
+    have hpos_remaining : 0 < remaining := Nat.pos_of_ne_zero _hzero
+    have hpos_max : 0 < uint16MaxValue := by
+      simp [uint16MaxValue, UInt16.size]
+    rw [Nat.lt_min]
+    exact ⟨hpos_max, hpos_remaining⟩
+  exact Nat.sub_lt_self hpos hle
+
+/-- Stored DEFLATE block descriptors for the whole raw payload. -/
+def storedDeflateBlockRanges (raw : ByteArray) : List StoredDeflateBlockRange :=
+  storedDeflateBlockRangesFrom 0 raw.size
+
+/-- Sequential stored-block construction through the range representation. -/
+def deflateStoredByBlocks (raw : ByteArray) : ByteArray :=
+  concatByteArrays <| (storedDeflateBlockRanges raw).map fun range =>
+    range.toBlock raw
+
+/-- Build stored DEFLATE blocks in deterministic block-index shards. This keeps
+the wire bytes identical to `deflateStored` while allowing block payload copies
+and block headers to be prepared by independent tasks. -/
+def deflateStoredParallel
+    (raw : ByteArray) (parallel : PngParallelOptions := {}) : ByteArray :=
+  let ranges := storedDeflateBlockRanges raw
+  let blockCount := ranges.length
+  if parallel.useParallel blockCount raw.size &&
+      parallel.minRowsPerShard <= blockCount &&
+      blockCount <= parallel.normalizedMaxShards then
+    concatByteArrays <|
+      mapListParallel ranges fun range =>
+        range.toBlock raw
+  else
+    deflateStored raw
 
 /-- Build a zlib stream with independent tasks for the deflated payload and
 Adler checksum when the configured thresholds allow parallel work. -/
@@ -113,7 +187,7 @@ def zlibCompressWithParallel
 payload and Adler checksum when the configured thresholds allow parallel work. -/
 def zlibCompressStoredParallel
     (raw : ByteArray) (parallel : PngParallelOptions := {}) : ByteArray :=
-  zlibCompressWithParallel deflateStored raw parallel
+  zlibCompressWithParallel (fun raw => deflateStoredParallel raw parallel) raw parallel
 
 /-- Build a fixed-Huffman zlib stream with independent tasks for deflate and
 Adler checksum. The fixed bitstream itself remains sequential and unchanged. -/

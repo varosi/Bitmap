@@ -4,7 +4,7 @@ import Bitmap.Lemmas.Png.PaletteEncoderRoundTrip
 
 set_option lang.lemmaCmd true
 
-universe u
+universe u v
 
 namespace Bitmaps
 namespace Lemmas
@@ -31,6 +31,113 @@ helper proofs small when several independent PNG chunks are spawned together. -/
 @[simp] lemma taskSpawn_get_eq {α : Type u} (f : Unit → α) :
     (Task.spawn f).get = f () := by
   rfl
+
+/-- List-level task mapping preserves deterministic list mapping. Stored-block
+parallelism uses this to recover the ordered sequential block stream. -/
+@[simp] lemma mapListParallel_eq_map {α : Type u} {β : Type v}
+    (xs : List α) (f : α → β) :
+    Png.mapListParallel xs f = xs.map f := by
+  unfold Png.mapListParallel
+  induction xs with
+  | nil => rfl
+  | cons x xs ih =>
+      simp [ih]
+
+/-- Stored-block range descriptors materialize to the same bytes as running
+the existing stored DEFLATE encoder on the corresponding raw-buffer slice. -/
+lemma storedDeflateBlockRangesFrom_correct
+    (source : ByteArray) (offset remaining : Nat)
+    (hbound : offset + remaining ≤ source.size) :
+    Png.concatByteArrays
+        ((Png.storedDeflateBlockRangesFrom offset remaining).map
+          fun range => range.toBlock source) =
+      Png.deflateStored (source.extract offset (offset + remaining)) := by
+  classical
+  induction remaining using Nat.strong_induction_on generalizing offset with
+  | h remaining ih =>
+      by_cases hzero : remaining = 0
+      · subst remaining
+        rw [Png.storedDeflateBlockRangesFrom.eq_1]
+        simp [Png.concatByteArrays, Png.StoredDeflateBlockRange.toBlock]
+        rw [Png.deflateStored.eq_1]
+        simp
+      · have hpos_remaining : 0 < remaining := Nat.pos_of_ne_zero hzero
+        let blockLen := Nat.min Png.uint16MaxValue remaining
+        let stop := offset + blockLen
+        have hle : blockLen ≤ remaining := by
+          simpa [blockLen] using Nat.min_le_right Png.uint16MaxValue remaining
+        have hpos_block : 0 < blockLen := by
+          have hpos_max : 0 < Png.uint16MaxValue := by
+            simp [Png.uint16MaxValue, UInt16.size]
+          rw [Nat.lt_min]
+          exact ⟨hpos_max, hpos_remaining⟩
+        have hsliceSize :
+            (source.extract offset (offset + remaining)).size = remaining := by
+          simp [ByteArray.size_extract]
+          omega
+        have hpayload :
+            (source.extract offset (offset + remaining)).extract 0 blockLen =
+              source.extract offset stop := by
+          have hExt := ByteArray.extract_extract (a := source) (i := offset)
+            (j := offset + remaining) (k := 0) (l := blockLen)
+          have hmin : min (offset + blockLen) (offset + remaining) = offset + blockLen := by
+            omega
+          simpa [stop, hmin] using hExt
+        by_cases hfinal : blockLen = remaining
+        · have hbeq : (blockLen == remaining) = true := by
+            simp [hfinal]
+          have hstop : stop = offset + remaining := by
+            simp [stop, hfinal]
+          rw [Png.deflateStored.eq_1]
+          rw [Png.storedDeflateBlockRangesFrom.eq_1]
+          simp [Png.concatByteArrays, Png.StoredDeflateBlockRange.toBlock,
+            hzero, blockLen, stop, hbeq, hsliceSize, hpayload, hstop]
+        · have hbeq : (blockLen == remaining) = false := beq_false_of_ne hfinal
+          have hrestBound : stop + (remaining - blockLen) ≤ source.size := by
+            simp [stop]
+            omega
+          have hrestSize : remaining - blockLen < remaining :=
+            Nat.sub_lt_self hpos_block hle
+          have hrest :=
+            ih (remaining - blockLen) hrestSize stop hrestBound
+          have hrestExtract :
+              (source.extract offset (offset + remaining)).extract blockLen remaining =
+                source.extract stop (stop + (remaining - blockLen)) := by
+            have hExt := ByteArray.extract_extract (a := source) (i := offset)
+              (j := offset + remaining) (k := blockLen) (l := remaining)
+            have hmin : min (offset + remaining) (offset + remaining) =
+                offset + remaining := by simp
+            have hstopRemaining : offset + remaining = stop + (remaining - blockLen) := by
+              simp [stop]
+              omega
+            simpa [stop, hmin, hstopRemaining] using hExt
+          rw [Png.deflateStored.eq_1]
+          rw [Png.storedDeflateBlockRangesFrom.eq_1]
+          simp [Png.concatByteArrays, Png.StoredDeflateBlockRange.toBlock,
+            hzero, blockLen, stop, hbeq, hsliceSize, hpayload, hrestExtract]
+          simpa [Png.concatByteArrays, Png.StoredDeflateBlockRange.toBlock, stop]
+            using hrest
+
+/-- The stored-block range implementation is byte-for-byte equal to the
+existing stored DEFLATE encoder for the whole raw payload. -/
+@[simp] lemma deflateStoredByBlocks_eq (raw : ByteArray) :
+    Png.deflateStoredByBlocks raw = Png.deflateStored raw := by
+  have h := storedDeflateBlockRangesFrom_correct raw 0 raw.size (by simp)
+  simpa [Png.deflateStoredByBlocks, Png.storedDeflateBlockRanges,
+    ByteArray.extract_zero_size] using h
+
+/-- Stored block tasks preserve the exact stored DEFLATE byte stream. -/
+@[simp] lemma deflateStoredParallel_eq
+    (raw : ByteArray) (parallel : PngParallelOptions) :
+    Png.deflateStoredParallel raw parallel = Png.deflateStored raw := by
+  unfold Png.deflateStoredParallel
+  by_cases h :
+      (parallel.useParallel (Png.storedDeflateBlockRanges raw).length raw.size &&
+        decide (parallel.minRowsPerShard ≤ (Png.storedDeflateBlockRanges raw).length) &&
+        decide ((Png.storedDeflateBlockRanges raw).length ≤
+          parallel.normalizedMaxShards)) = true
+  · simpa [h, Png.deflateStoredByBlocks] using (deflateStoredByBlocks_eq raw)
+  · simp [h]
 
 /-- Parallel zlib wrapper construction preserves the existing envelope shape.
 This justifies spawning deflate payload generation and Adler checksum
