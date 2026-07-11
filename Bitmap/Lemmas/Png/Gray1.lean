@@ -20,25 +20,25 @@ This pins the row-size helper used by encoder, decoder, and Adam7 scatter. -/
   rfl
 
 /-- Packed Gray1 image data is height times packed row bytes.
-This is the storage invariant carried by `BitmapGray1`. -/
+This is the storage invariant carried by `Bitmap.Gray1`. -/
 @[simp] lemma gray1DataSize_eq (w h : Nat) :
     gray1DataSize w h = h * gray1RowBytes w := by
   rfl
 
 /-- PNG allows grayscale bit depth 1.
-This is the positive validation fact for native `BitmapGray1` files. -/
+This is the positive validation fact for native `Bitmap.Gray1` files. -/
 @[simp] lemma pngColorTypeBitDepthSupported_gray1 :
     pngColorTypeBitDepthSupported 0 1 = true := by
   rfl
 
 /-- PNG rejects truecolor RGB at bit depth 1.
-This records the spec boundary that keeps `PixelRGB1` out of scope. -/
+This records the spec boundary that keeps `RGB1` out of scope. -/
 @[simp] lemma pngColorTypeBitDepthSupported_rgb1_false :
     pngColorTypeBitDepthSupported 2 1 = false := by
   rfl
 
 /-- PNG row-byte calculation for Gray1 matches packed bitmap row storage.
-This keeps parser-side row sizing aligned with `BitmapGray1`. -/
+This keeps parser-side row sizing aligned with `Bitmap.Gray1`. -/
 lemma pngRowBytes_gray1 (w : Nat) :
     pngRowBytesForColorTypeAndBitDepth? w 0 1 = some (gray1RowBytes w) := by
   simp [pngRowBytesForColorTypeAndBitDepth?, pngBitsPerPixelForColorTypeAndBitDepth?,
@@ -73,7 +73,7 @@ lemma gray1FlatToFilterZeroRaw_size (flat : ByteArray) (w h : Nat)
 
 /-- The Gray1 encoder emits one filter byte plus one packed row per image row.
 This is the size fact needed before proving full Gray1 container round-trips. -/
-lemma encodeRawGray1_size (bmp : BitmapGray1) :
+lemma encodeRawGray1_size (bmp : Bitmap.Gray1) :
     (encodeRawGray1 bmp).size =
       bmp.size.height * (gray1RowBytes bmp.size.width + 1) := by
   let rowBytes := gray1RowBytes bmp.size.width

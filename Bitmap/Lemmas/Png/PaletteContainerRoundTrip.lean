@@ -16,7 +16,7 @@ source index is below the actual palette entry count. -/
 
 namespace PaletteContainerSpec
 
-/-- Pixel-only indexed decode calls the metadata-aware decoder after keeping
+/-- pixel-only indexed decode calls the metadata-aware decoder after keeping
 only palette color-space metadata. This bridge normalizes that parsed record
 for Lean 4.30 and 4.31. -/
 private lemma decodeParsedIndexedBitmapWithMetadata_bind_pixelOnly
@@ -245,7 +245,7 @@ theorem decodeIndexedBitmapWithMetadata_dynamic_encodeRawIndexed_none_8_256_data
       bmp hbd hpal
   simpa [parsed, metadata, hHeader, hPalette, hIdat] using hParsed
 
-/-- Pixel-only indexed decode over a stored-zlib palette container returns the
+/-- pixel-only indexed decode over a stored-zlib palette container returns the
 original index bytes for 1/2/4-bit full-addressable-palette filter-0 inputs. -/
 theorem decodeIndexedBitmap_stored_encodeRawIndexed_none_non8_data
     (s : PaletteContainerSpec) (bmp : PngIndexedBitmap)
@@ -285,7 +285,7 @@ theorem decodeIndexedBitmap_stored_encodeRawIndexed_none_non8_data
           decodeParsedIndexedBitmapWithMetadata_bind_pixelOnly (parsed s) decoded hdecoded⟩,
       hdata⟩
 
-/-- Pixel-only indexed decode over a stored-zlib palette container returns the
+/-- pixel-only indexed decode over a stored-zlib palette container returns the
 original index bytes for 8-bit full-palette filter-0 inputs. -/
 theorem decodeIndexedBitmap_stored_encodeRawIndexed_none_8_256_data
     (s : PaletteContainerSpec) (bmp : PngIndexedBitmap)
@@ -321,7 +321,7 @@ theorem decodeIndexedBitmap_stored_encodeRawIndexed_none_8_256_data
           decodeParsedIndexedBitmapWithMetadata_bind_pixelOnly (parsed s) decoded hdecoded⟩,
       hdata⟩
 
-/-- Pixel-only indexed decode over a fixed-Huffman palette container returns the
+/-- pixel-only indexed decode over a fixed-Huffman palette container returns the
 original index bytes for 1/2/4-bit full-addressable-palette filter-0 inputs. -/
 theorem decodeIndexedBitmap_fixed_encodeRawIndexed_none_non8_data
     (s : PaletteContainerSpec) (bmp : PngIndexedBitmap)
@@ -361,7 +361,7 @@ theorem decodeIndexedBitmap_fixed_encodeRawIndexed_none_non8_data
           decodeParsedIndexedBitmapWithMetadata_bind_pixelOnly (parsed s) decoded hdecoded⟩,
       hdata⟩
 
-/-- Pixel-only indexed decode over a fixed-Huffman palette container returns the
+/-- pixel-only indexed decode over a fixed-Huffman palette container returns the
 original index bytes for 8-bit full-palette filter-0 inputs. -/
 theorem decodeIndexedBitmap_fixed_encodeRawIndexed_none_8_256_data
     (s : PaletteContainerSpec) (bmp : PngIndexedBitmap)
@@ -397,7 +397,7 @@ theorem decodeIndexedBitmap_fixed_encodeRawIndexed_none_8_256_data
           decodeParsedIndexedBitmapWithMetadata_bind_pixelOnly (parsed s) decoded hdecoded⟩,
       hdata⟩
 
-/-- Pixel-only indexed decode over a dynamic-Huffman palette container returns
+/-- pixel-only indexed decode over a dynamic-Huffman palette container returns
 the original index bytes for 1/2/4-bit full-addressable-palette filter-0 inputs. -/
 theorem decodeIndexedBitmap_dynamic_encodeRawIndexed_none_non8_data
     (s : PaletteContainerSpec) (bmp : PngIndexedBitmap)
@@ -437,7 +437,7 @@ theorem decodeIndexedBitmap_dynamic_encodeRawIndexed_none_non8_data
           decodeParsedIndexedBitmapWithMetadata_bind_pixelOnly (parsed s) decoded hdecoded⟩,
       hdata⟩
 
-/-- Pixel-only indexed decode over a dynamic-Huffman palette container returns
+/-- pixel-only indexed decode over a dynamic-Huffman palette container returns
 the original index bytes for 8-bit full-palette filter-0 inputs. -/
 theorem decodeIndexedBitmap_dynamic_encodeRawIndexed_none_8_256_data
     (s : PaletteContainerSpec) (bmp : PngIndexedBitmap)
@@ -559,7 +559,7 @@ theorem decodeIndexedBitmapWithMetadata_encodeRawIndexed_none_paletteRange_data
         simpa [parsed, metadata, hHeader, hPalette, hIdat, hbd] using hp
   simpa [s.bytes_size_ge_8, hParse] using hParsed
 
-/-- Pixel-only indexed decode over a palette container returns the original
+/-- pixel-only indexed decode over a palette container returns the original
 index bytes under the same smaller-palette assumptions as the metadata-aware
 container theorem. -/
 theorem decodeIndexedBitmap_encodeRawIndexed_none_paletteRange_data
@@ -716,7 +716,7 @@ theorem decodeIndexedBitmapWithMetadata_encodeRawIndexed_none_paletteRange_shape
         cases mode <;> exact hdecoded,
       hshape⟩
 
-/-- Pixel-only indexed decode over a palette container reconstructs the
+/-- pixel-only indexed decode over a palette container reconstructs the
 complete indexed bitmap runtime shape under the source-index-safe
 smaller-palette assumptions. -/
 theorem decodeIndexedBitmap_encodeRawIndexed_none_paletteRange_shape

@@ -17,23 +17,23 @@ bKGD metadata is preserved by the parser but stripped away by
 Combined with transparency=none and srgb/chrm/gamma=none, the
 color-space transform reduces to identity. -/
 
-structure ExternalPngMultiIdatBkgdSpec (px : Type u) [Pixel px] [PngPixel px] where
+structure ExternalPngMultiIdatBkgdSpec (px : Type u) [PixelFormat px] [Png.PixelFormat px] where
   bitmap : Bitmap px
   container : MultiIdatBkgdContainerSpec
   hWidth : container.header.width = bitmap.size.width
   hHeight : container.header.height = bitmap.size.height
   hColorType :
-    container.header.colorType = (PngPixel.colorType (α := px)).toNat
+    container.header.colorType = (Png.PixelFormat.colorType (α := px)).toNat
   hInterlace : container.header.interlace = 0
-  hPxColorType : PngPixel.colorType (α := px) = u8 container.header.colorType
+  hPxColorType : Png.PixelFormat.colorType (α := px) = u8 container.header.colorType
   hTargetBitDepth :
-    PngPixel.bitDepth (α := px) = u8 8 ∨ PngPixel.bitDepth (α := px) = u8 16
+    Png.PixelFormat.bitDepth (α := px) = u8 8 ∨ Png.PixelFormat.bitDepth (α := px) = u8 16
   hBitDepthMatch :
-    container.header.bitDepth = (PngPixel.bitDepth (α := px)).toNat
+    container.header.bitDepth = (Png.PixelFormat.bitDepth (α := px)).toNat
   hBppLookup :
     pngBytesPerPixelForColorTypeAndBitDepth?
       container.header.colorType container.header.bitDepth =
-        some (Pixel.bytesPerPixel (α := px))
+        some (PixelFormat.bytesPerPixel (α := px))
   hIdatMin : 2 ≤ container.idatData.size
   inflatedRaw : ByteArray
   hInflated :
@@ -43,20 +43,20 @@ structure ExternalPngMultiIdatBkgdSpec (px : Type u) [Pixel px] [PngPixel px] wh
   hRawSize :
     inflatedRaw.size =
       bitmap.size.height *
-        (bitmap.size.width * Pixel.bytesPerPixel (α := px) + 1)
+        (bitmap.size.width * PixelFormat.bytesPerPixel (α := px) + 1)
   hPixels :
-    PngPixel.decodeRowsLoop (α := px) inflatedRaw bitmap.size.width
-        bitmap.size.height (Pixel.bytesPerPixel (α := px))
-        (bitmap.size.width * Pixel.bytesPerPixel (α := px))
+    Png.PixelFormat.decodeRowsLoop (α := px) inflatedRaw bitmap.size.width
+        bitmap.size.height (PixelFormat.bytesPerPixel (α := px))
+        (bitmap.size.width * PixelFormat.bytesPerPixel (α := px))
         0 0 ByteArray.empty
         { data := Array.replicate
             (bitmap.size.width * bitmap.size.height *
-              Pixel.bytesPerPixel (α := px)) 0 } =
+              PixelFormat.bytesPerPixel (α := px)) 0 } =
       some bitmap.data
 
 namespace ExternalPngMultiIdatBkgdSpec
 
-variable {px : Type u} [Pixel px] [PngPixel px]
+variable {px : Type u} [PixelFormat px] [Png.PixelFormat px]
 
 lemma expectedMetadata_transparency_none (s : ExternalPngMultiIdatBkgdSpec px) :
     s.container.expectedMetadata.transparency = none := by
@@ -115,14 +115,14 @@ theorem decodeBitmap_external_multiIdatBkgd_correct (s : ExternalPngMultiIdatBkg
       ¬ (((s.container.expectedMetadata.pixelOnlyColorSpace.srgb = none ∧
             s.container.expectedMetadata.pixelOnlyColorSpace.chromaticities.isSome = true) ∧
           (s.container.header.colorType = 2 ∨ s.container.header.colorType = 6)) ∧
-        (PngPixel.colorType (α := px) = u8 0 ∨ PngPixel.colorType (α := px) = u8 4)) := by
+        (Png.PixelFormat.colorType (α := px) = u8 0 ∨ Png.PixelFormat.colorType (α := px) = u8 4)) := by
     intro ⟨⟨⟨_, h⟩, _⟩, _⟩
     rw [hPixelOnlyChrm] at h; exact absurd h (by decide)
   have hTransform :
       applyPngColorSpaceTransform
         (PngMetadata.pixelOnlyColorSpace s.container.expectedMetadata)
-        s.container.header.colorType (PngPixel.colorType (α := px))
-        (PngPixel.bitDepth (α := px)) s.bitmap.data = some s.bitmap.data := by
+        s.container.header.colorType (Png.PixelFormat.colorType (α := px))
+        (Png.PixelFormat.bitDepth (α := px)) s.bitmap.data = some s.bitmap.data := by
     unfold applyPngColorSpaceTransform
     rw [hPixelOnlySrgb, hPixelOnlyChrm, hPixelOnlyGamma]
   exact decodeBitmap_correct_of_witnesses s.container.bytes_size_ge_8

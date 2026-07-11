@@ -14,7 +14,7 @@ structure BitmapWidgetProps where
   width : Nat
   height : Nat
   bytes : ByteArray
-  bytesPerPixel : Nat := bytesPerPixelRGB
+  bytesPerPixel : Nat := RGB8.bytesPerPixel
   pixelSize : Nat := 10
   showGrid : Bool := true
   background : String := "#070a16"
@@ -38,7 +38,7 @@ def BitmapWidgetProps.withPngMetadata (props : BitmapWidgetProps)
     (metadata : Png.PngMetadata) : BitmapWidgetProps :=
   props.withPhysical metadata.physical
 
-def BitmapRGB8.widgetProps (bmp : BitmapRGB8)
+def Bitmap.RGB8.widgetProps (bmp : Bitmap.RGB8)
     (pixelSize : Nat := 12)
     (showGrid : Bool := true)
     (background : String := "#050914")
@@ -49,14 +49,14 @@ def BitmapRGB8.widgetProps (bmp : BitmapRGB8)
     { width := bmp.size.width
       height := bmp.size.height
       bytes := bmp.data
-      bytesPerPixel := bytesPerPixelRGB
+      bytesPerPixel := RGB8.bytesPerPixel
       pixelSize := max pixelSize 1
       showGrid := showGrid
       background := background
       caption := caption }
   props.withPhysical physical
 
-def BitmapRGBA8.widgetProps (bmp : BitmapRGBA8)
+def Bitmap.RGBA8.widgetProps (bmp : Bitmap.RGBA8)
     (pixelSize : Nat := 12)
     (showGrid : Bool := true)
     (background : String := "#050914")
@@ -67,14 +67,14 @@ def BitmapRGBA8.widgetProps (bmp : BitmapRGBA8)
     { width := bmp.size.width
       height := bmp.size.height
       bytes := bmp.data
-      bytesPerPixel := bytesPerPixelRGBA
+      bytesPerPixel := RGBA8.bytesPerPixel
       pixelSize := max pixelSize 1
       showGrid := showGrid
       background := background
       caption := caption }
   props.withPhysical physical
 
-def BitmapGray8.widgetProps (bmp : BitmapGray8)
+def Bitmap.Gray8.widgetProps (bmp : Bitmap.Gray8)
     (pixelSize : Nat := 12)
     (showGrid : Bool := true)
     (background : String := "#050914")
@@ -85,14 +85,14 @@ def BitmapGray8.widgetProps (bmp : BitmapGray8)
     { width := bmp.size.width
       height := bmp.size.height
       bytes := bmp.data
-      bytesPerPixel := bytesPerPixelGray
+      bytesPerPixel := Gray8.bytesPerPixel
       pixelSize := max pixelSize 1
       showGrid := showGrid
       background := background
       caption := caption }
   props.withPhysical physical
 
-def BitmapGrayAlpha8.widgetProps (bmp : BitmapGrayAlpha8)
+def Bitmap.GrayAlpha8.widgetProps (bmp : Bitmap.GrayAlpha8)
     (pixelSize : Nat := 12)
     (showGrid : Bool := true)
     (background : String := "#050914")
@@ -103,14 +103,14 @@ def BitmapGrayAlpha8.widgetProps (bmp : BitmapGrayAlpha8)
     { width := bmp.size.width
       height := bmp.size.height
       bytes := bmp.data
-      bytesPerPixel := bytesPerPixelGrayAlpha
+      bytesPerPixel := GrayAlpha8.bytesPerPixel
       pixelSize := max pixelSize 1
       showGrid := showGrid
       background := background
       caption := caption }
   props.withPhysical physical
 
-private def expandGray1ToGray8Data (bmp : BitmapGray1) : ByteArray :=
+private def expandGray1ToGray8Data (bmp : Bitmap.Gray1) : ByteArray :=
   Id.run do
     let count := bmp.size.width * bmp.size.height
     let mut out := ByteArray.emptyWithCapacity count
@@ -118,7 +118,7 @@ private def expandGray1ToGray8Data (bmp : BitmapGray1) : ByteArray :=
       out := out.push (if bmp.getBitLinear i then 0xff else 0)
     return out
 
-def BitmapGray1.widgetProps (bmp : BitmapGray1)
+def Bitmap.Gray1.widgetProps (bmp : Bitmap.Gray1)
     (pixelSize : Nat := 12)
     (showGrid : Bool := true)
     (background : String := "#050914")
@@ -129,7 +129,7 @@ def BitmapGray1.widgetProps (bmp : BitmapGray1)
     { width := bmp.size.width
       height := bmp.size.height
       bytes := expandGray1ToGray8Data bmp
-      bytesPerPixel := bytesPerPixelGray
+      bytesPerPixel := Gray8.bytesPerPixel
       pixelSize := max pixelSize 1
       showGrid := showGrid
       background := background
@@ -138,10 +138,10 @@ def BitmapGray1.widgetProps (bmp : BitmapGray1)
 
 private def downsampleRGB16ToRGB8Data (data : ByteArray) : ByteArray :=
   Id.run do
-    let pixels := data.size / bytesPerPixelRGB16
-    let mut out := ByteArray.emptyWithCapacity (pixels * bytesPerPixelRGB)
+    let pixels := data.size / RGB16.bytesPerPixel
+    let mut out := ByteArray.emptyWithCapacity (pixels * RGB8.bytesPerPixel)
     for i in [0:pixels] do
-      let base := i * bytesPerPixelRGB16
+      let base := i * RGB16.bytesPerPixel
       out := out.push (data.get! base)
       out := out.push (data.get! (base + 2))
       out := out.push (data.get! (base + 4))
@@ -149,10 +149,10 @@ private def downsampleRGB16ToRGB8Data (data : ByteArray) : ByteArray :=
 
 private def downsampleRGBA16ToRGBA8Data (data : ByteArray) : ByteArray :=
   Id.run do
-    let pixels := data.size / bytesPerPixelRGBA16
-    let mut out := ByteArray.emptyWithCapacity (pixels * bytesPerPixelRGBA)
+    let pixels := data.size / RGBA16.bytesPerPixel
+    let mut out := ByteArray.emptyWithCapacity (pixels * RGBA8.bytesPerPixel)
     for i in [0:pixels] do
-      let base := i * bytesPerPixelRGBA16
+      let base := i * RGBA16.bytesPerPixel
       out := out.push (data.get! base)
       out := out.push (data.get! (base + 2))
       out := out.push (data.get! (base + 4))
@@ -161,24 +161,24 @@ private def downsampleRGBA16ToRGBA8Data (data : ByteArray) : ByteArray :=
 
 private def downsampleGray16ToGray8Data (data : ByteArray) : ByteArray :=
   Id.run do
-    let pixels := data.size / bytesPerPixelGray16
-    let mut out := ByteArray.emptyWithCapacity (pixels * bytesPerPixelGray)
+    let pixels := data.size / Gray16.bytesPerPixel
+    let mut out := ByteArray.emptyWithCapacity (pixels * Gray8.bytesPerPixel)
     for i in [0:pixels] do
-      let base := i * bytesPerPixelGray16
+      let base := i * Gray16.bytesPerPixel
       out := out.push (data.get! base)
     return out
 
 private def downsampleGrayAlpha16ToGrayAlpha8Data (data : ByteArray) : ByteArray :=
   Id.run do
-    let pixels := data.size / bytesPerPixelGrayAlpha16
-    let mut out := ByteArray.emptyWithCapacity (pixels * bytesPerPixelGrayAlpha)
+    let pixels := data.size / GrayAlpha16.bytesPerPixel
+    let mut out := ByteArray.emptyWithCapacity (pixels * GrayAlpha8.bytesPerPixel)
     for i in [0:pixels] do
-      let base := i * bytesPerPixelGrayAlpha16
+      let base := i * GrayAlpha16.bytesPerPixel
       out := out.push (data.get! base)
       out := out.push (data.get! (base + 2))
     return out
 
-def BitmapRGB16.widgetProps (bmp : BitmapRGB16)
+def Bitmap.RGB16.widgetProps (bmp : Bitmap.RGB16)
     (pixelSize : Nat := 12)
     (showGrid : Bool := true)
     (background : String := "#050914")
@@ -189,14 +189,14 @@ def BitmapRGB16.widgetProps (bmp : BitmapRGB16)
     { width := bmp.size.width
       height := bmp.size.height
       bytes := downsampleRGB16ToRGB8Data bmp.data
-      bytesPerPixel := bytesPerPixelRGB
+      bytesPerPixel := RGB8.bytesPerPixel
       pixelSize := max pixelSize 1
       showGrid := showGrid
       background := background
       caption := caption }
   props.withPhysical physical
 
-def BitmapRGBA16.widgetProps (bmp : BitmapRGBA16)
+def Bitmap.RGBA16.widgetProps (bmp : Bitmap.RGBA16)
     (pixelSize : Nat := 12)
     (showGrid : Bool := true)
     (background : String := "#050914")
@@ -207,14 +207,14 @@ def BitmapRGBA16.widgetProps (bmp : BitmapRGBA16)
     { width := bmp.size.width
       height := bmp.size.height
       bytes := downsampleRGBA16ToRGBA8Data bmp.data
-      bytesPerPixel := bytesPerPixelRGBA
+      bytesPerPixel := RGBA8.bytesPerPixel
       pixelSize := max pixelSize 1
       showGrid := showGrid
       background := background
       caption := caption }
   props.withPhysical physical
 
-def BitmapGray16.widgetProps (bmp : BitmapGray16)
+def Bitmap.Gray16.widgetProps (bmp : Bitmap.Gray16)
     (pixelSize : Nat := 12)
     (showGrid : Bool := true)
     (background : String := "#050914")
@@ -225,14 +225,14 @@ def BitmapGray16.widgetProps (bmp : BitmapGray16)
     { width := bmp.size.width
       height := bmp.size.height
       bytes := downsampleGray16ToGray8Data bmp.data
-      bytesPerPixel := bytesPerPixelGray
+      bytesPerPixel := Gray8.bytesPerPixel
       pixelSize := max pixelSize 1
       showGrid := showGrid
       background := background
       caption := caption }
   props.withPhysical physical
 
-def BitmapGrayAlpha16.widgetProps (bmp : BitmapGrayAlpha16)
+def Bitmap.GrayAlpha16.widgetProps (bmp : Bitmap.GrayAlpha16)
     (pixelSize : Nat := 12)
     (showGrid : Bool := true)
     (background : String := "#050914")
@@ -243,7 +243,7 @@ def BitmapGrayAlpha16.widgetProps (bmp : BitmapGrayAlpha16)
     { width := bmp.size.width
       height := bmp.size.height
       bytes := downsampleGrayAlpha16ToGrayAlpha8Data bmp.data
-      bytesPerPixel := bytesPerPixelGrayAlpha
+      bytesPerPixel := GrayAlpha8.bytesPerPixel
       pixelSize := max pixelSize 1
       showGrid := showGrid
       background := background
@@ -259,10 +259,10 @@ private def clampToByte (n : Nat) : UInt8 :=
 private def clampToUInt16 (n : Nat) : UInt16 :=
   UInt16.ofNat (n % 65536)
 
-def auroraBitmap : BitmapRGB8 :=
+def auroraBitmap : Bitmap.RGB8 :=
   let width := 56
   let height := 32
-  Bitmap.ofPixelFn width height (fun idx : Fin (width * height) =>
+  Bitmap.ofFn width height (fun idx : Fin (width * height) =>
     let x := idx.val % width
     let y := idx.val / width
     let diag := x + y
@@ -270,12 +270,12 @@ def auroraBitmap : BitmapRGB8 :=
     let r := clampToByte (diag * 4 + y * 2)
     let g := clampToByte (swirl + 40)
     let b := clampToByte ((width - x) * 5 + (height - y) * 3)
-    PixelRGB.mk r g b)
+    RGB.mk r g b)
 
-def auroraBitmap16 : BitmapRGB16 :=
+def auroraBitmap16 : Bitmap.RGB16 :=
   let width := 56
   let height := 32
-  BitmapRGB16.ofPixelFn width height (fun idx : Fin (width * height) =>
+  Bitmap.RGB16.ofFn width height (fun idx : Fin (width * height) =>
     let x := idx.val % width
     let y := idx.val / width
     let diag := x + y
@@ -283,7 +283,7 @@ def auroraBitmap16 : BitmapRGB16 :=
     let r := clampToUInt16 (diag * 1024 + y * 320)
     let g := clampToUInt16 (wave + 8192)
     let b := clampToUInt16 ((width - x) * 1400 + (height - y) * 900)
-    PixelRGB.mk r g b)
+    RGB.mk r g b)
 
 private def testFixturePath (name : String) : FilePath :=
   FilePath.mk s!"Bitmap/Tests/{name}"
@@ -297,7 +297,7 @@ def testPngRgbaPath : FilePath :=
 def testPngGrayPath : FilePath :=
   testFixturePath "test_gray.png"
 
-def testPngBitmapResult : Except String BitmapRGB8 :=
+def testPngBitmapResult : Except String Bitmap.RGB8 :=
   match unsafe unsafeIO (IO.FS.readBinFile testPngPath) with
   | Except.ok bytes =>
       match Png.decodeBitmap bytes with
@@ -305,18 +305,18 @@ def testPngBitmapResult : Except String BitmapRGB8 :=
       | none => Except.error "invalid PNG bitmap"
   | Except.error err => Except.error err.toString
 
-def testPngRgbaBitmapResult : Except String BitmapRGBA8 :=
+def testPngRgbaBitmapResult : Except String Bitmap.RGBA8 :=
   match unsafe unsafeIO (IO.FS.readBinFile testPngRgbaPath) with
   | Except.ok bytes =>
-      match Png.decodeBitmap (px := PixelRGBA8) bytes with
+      match Png.decodeBitmap (px := RGBA8) bytes with
       | some bmp => Except.ok bmp
       | none => Except.error "invalid PNG bitmap"
   | Except.error err => Except.error err.toString
 
-def testPngGrayBitmapResult : Except String BitmapGray8 :=
+def testPngGrayBitmapResult : Except String Bitmap.Gray8 :=
   match unsafe unsafeIO (IO.FS.readBinFile testPngGrayPath) with
   | Except.ok bytes =>
-      match Png.decodeBitmap (px := PixelGray8) bytes with
+      match Png.decodeBitmap (px := Gray8) bytes with
       | some bmp => Except.ok bmp
       | none => Except.error "invalid PNG bitmap"
   | Except.error err => Except.error err.toString
@@ -324,12 +324,12 @@ def testPngGrayBitmapResult : Except String BitmapGray8 :=
 def testPngWidgetProps : BitmapWidgetProps :=
   match testPngBitmapResult with
   | Except.ok bmp =>
-      BitmapRGB8.widgetProps bmp
+      Bitmap.RGB8.widgetProps bmp
         (pixelSize := 2)
         (background := "#07101f")
         (caption := some "test.png (256×256) loaded from disk")
   | Except.error err =>
-      BitmapRGB8.widgetProps (mkBlankBitmap 1 1 { r := 0, g := 0, b := 0 })
+      Bitmap.RGB8.widgetProps (Bitmap.fill (px := RGB8) 1 1 { r := 0, g := 0, b := 0 })
         (pixelSize := 2)
         (background := "#1b0b0b")
         (caption := some s!"PNG load failed: {err}")
@@ -337,12 +337,12 @@ def testPngWidgetProps : BitmapWidgetProps :=
 def testPngRgbaWidgetProps : BitmapWidgetProps :=
   match testPngRgbaBitmapResult with
   | Except.ok bmp =>
-      BitmapRGBA8.widgetProps bmp
+      Bitmap.RGBA8.widgetProps bmp
         (pixelSize := 18)
         (background := "#0b0b12")
         (caption := some "test_rgba.png (4×4) with alpha")
   | Except.error err =>
-      BitmapRGBA8.widgetProps (mkBlankBitmapRGBA 1 1 { r := 0, g := 0, b := 0, a := 0 })
+      Bitmap.RGBA8.widgetProps (Bitmap.fill (px := RGBA8) 1 1 { r := 0, g := 0, b := 0, a := 0 })
         (pixelSize := 18)
         (background := "#1b0b0b")
         (caption := some s!"PNG RGBA load failed: {err}")
@@ -350,12 +350,12 @@ def testPngRgbaWidgetProps : BitmapWidgetProps :=
 def testPngGrayWidgetProps : BitmapWidgetProps :=
   match testPngGrayBitmapResult with
   | Except.ok bmp =>
-      BitmapGray8.widgetProps bmp
+      Bitmap.Gray8.widgetProps bmp
         (pixelSize := 18)
         (background := "#0b0b12")
         (caption := some "test_gray.png (8×8) grayscale")
   | Except.error err =>
-      BitmapGray8.widgetProps (mkBlankBitmapGray 1 1 { v := 0 })
+      Bitmap.Gray8.widgetProps (Bitmap.fill (px := Gray8) 1 1 { v := 0 })
         (pixelSize := 18)
         (background := "#1b0b0b")
         (caption := some s!"PNG Gray load failed: {err}")
@@ -520,13 +520,13 @@ open Bitmaps
 open Bitmaps.Widget
 
 #widget bitmapWidget with
-  (BitmapRGB8.widgetProps auroraBitmap
+  (Bitmap.RGB8.widgetProps auroraBitmap
     (pixelSize := 18)
     (background := "#040b18")
     (caption := some "Aurora bitmap rendered via Lean"))
 
 #widget bitmapWidget with
-  (BitmapRGB16.widgetProps auroraBitmap16
+  (Bitmap.RGB16.widgetProps auroraBitmap16
     (pixelSize := 18)
     (background := "#040b18")
     (caption := some "16-bit aurora bitmap downsampled for canvas display"))

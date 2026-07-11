@@ -31,7 +31,7 @@ chunks, decomposed into its container / zlib / row-decoding layers.
 
 Each layer is captured via a witness — identical to `ExternalPngSpec`
 except the container field uses `MultiIdatContainerSpec`. -/
-structure ExternalPngMultiIdatSpec (px : Type u) [Pixel px] [PngPixel px] where
+structure ExternalPngMultiIdatSpec (px : Type u) [PixelFormat px] [Png.PixelFormat px] where
   /-- The bitmap the byte stream should decode to. -/
   bitmap : Bitmap px
   /-- The container layer (signature + IHDR + IDAT* + IEND chunks). -/
@@ -40,27 +40,27 @@ structure ExternalPngMultiIdatSpec (px : Type u) [Pixel px] [PngPixel px] where
   hWidth : container.header.width = bitmap.size.width
   /-- Container height matches bitmap height. -/
   hHeight : container.header.height = bitmap.size.height
-  /-- Container color type matches the pixel type's `PngPixel.colorType`. -/
+  /-- Container color type matches the pixel type's `Png.PixelFormat.colorType`. -/
   hColorType :
-    container.header.colorType = (PngPixel.colorType (α := px)).toNat
+    container.header.colorType = (Png.PixelFormat.colorType (α := px)).toNat
   /-- Non-interlaced. -/
   hInterlace : container.header.interlace = 0
   /-- Target pixel type matches source color type. Used by the decoder
       to avoid alpha-drop/add conversions and to follow the
-      `PngPixel.decodeRowsLoop` path. -/
-  hPxColorType : PngPixel.colorType (α := px) = u8 container.header.colorType
+      `Png.PixelFormat.decodeRowsLoop` path. -/
+  hPxColorType : Png.PixelFormat.colorType (α := px) = u8 container.header.colorType
   /-- Target pixel type uses 8-bit or 16-bit depth. -/
   hTargetBitDepth :
-    PngPixel.bitDepth (α := px) = u8 8 ∨ PngPixel.bitDepth (α := px) = u8 16
+    Png.PixelFormat.bitDepth (α := px) = u8 8 ∨ Png.PixelFormat.bitDepth (α := px) = u8 16
   /-- Consistency between container's bit depth and the pixel type. -/
   hBitDepthMatch :
-    container.header.bitDepth = (PngPixel.bitDepth (α := px)).toNat
-  /-- `Pixel.bytesPerPixel` matches the PNG bpp table for the
+    container.header.bitDepth = (Png.PixelFormat.bitDepth (α := px)).toNat
+  /-- `PixelFormat.bytesPerPixel` matches the PNG bpp table for the
       container's (colorType, bitDepth) pair. -/
   hBppLookup :
     pngBytesPerPixelForColorTypeAndBitDepth?
       container.header.colorType container.header.bitDepth =
-        some (Pixel.bytesPerPixel (α := px))
+        some (PixelFormat.bytesPerPixel (α := px))
   /-- The concatenated IDAT data has at least two bytes (zlib CMF+FLG). -/
   hIdatMin : 2 ≤ container.idatData.size
   /-- The deflate-inflated bytes — one filter byte plus one row payload
@@ -76,22 +76,22 @@ structure ExternalPngMultiIdatSpec (px : Type u) [Pixel px] [PngPixel px] where
   hRawSize :
     inflatedRaw.size =
       bitmap.size.height *
-        (bitmap.size.width * Pixel.bytesPerPixel (α := px) + 1)
+        (bitmap.size.width * PixelFormat.bytesPerPixel (α := px) + 1)
   /-- The pixel-extraction loop on `inflatedRaw` produces the bitmap's
       pixel data. -/
   hPixels :
-    PngPixel.decodeRowsLoop (α := px) inflatedRaw bitmap.size.width
-        bitmap.size.height (Pixel.bytesPerPixel (α := px))
-        (bitmap.size.width * Pixel.bytesPerPixel (α := px))
+    Png.PixelFormat.decodeRowsLoop (α := px) inflatedRaw bitmap.size.width
+        bitmap.size.height (PixelFormat.bytesPerPixel (α := px))
+        (bitmap.size.width * PixelFormat.bytesPerPixel (α := px))
         0 0 ByteArray.empty
         { data := Array.replicate
             (bitmap.size.width * bitmap.size.height *
-              Pixel.bytesPerPixel (α := px)) 0 } =
+              PixelFormat.bytesPerPixel (α := px)) 0 } =
       some bitmap.data
 
 namespace ExternalPngMultiIdatSpec
 
-variable {px : Type u} [Pixel px] [PngPixel px]
+variable {px : Type u} [PixelFormat px] [Png.PixelFormat px]
 
 /-! ### Layer-1 (container) composition -/
 
@@ -133,13 +133,13 @@ theorem decodeBitmap_external_multiIdat_correct (s : ExternalPngMultiIdatSpec px
       ¬ (((PngMetadata.empty.pixelOnlyColorSpace.srgb = none ∧
             PngMetadata.empty.pixelOnlyColorSpace.chromaticities.isSome = true) ∧
           (s.container.header.colorType = 2 ∨ s.container.header.colorType = 6)) ∧
-        (PngPixel.colorType (α := px) = u8 0 ∨ PngPixel.colorType (α := px) = u8 4)) := by
+        (Png.PixelFormat.colorType (α := px) = u8 0 ∨ Png.PixelFormat.colorType (α := px) = u8 4)) := by
     intro ⟨⟨⟨_, h⟩, _⟩, _⟩; exact absurd h (by decide)
   have hTransform :
       applyPngColorSpaceTransform
         (PngMetadata.pixelOnlyColorSpace PngMetadata.empty)
-        s.container.header.colorType (PngPixel.colorType (α := px))
-        (PngPixel.bitDepth (α := px)) s.bitmap.data = some s.bitmap.data := by
+        s.container.header.colorType (Png.PixelFormat.colorType (α := px))
+        (Png.PixelFormat.bitDepth (α := px)) s.bitmap.data = some s.bitmap.data := by
     unfold applyPngColorSpaceTransform PngMetadata.pixelOnlyColorSpace
     rfl
   exact decodeBitmap_correct_of_witnesses s.container.bytes_size_ge_8
@@ -161,7 +161,7 @@ a corollary of `decodeBitmap_external_multiIdat_correct`. -/
 
 /-- Lift an `ExternalPngSpec` to a singleton `ExternalPngMultiIdatSpec`,
 preserving all decode-side witnesses. -/
-def ExternalPngSpec.toMultiIdat {px : Type u} [Pixel px] [PngPixel px]
+def ExternalPngSpec.toMultiIdat {px : Type u} [PixelFormat px] [Png.PixelFormat px]
     (s : ExternalPngSpec px) : ExternalPngMultiIdatSpec px where
   bitmap := s.bitmap
   container := s.container.toMulti s.hIdatSize
@@ -185,7 +185,7 @@ def ExternalPngSpec.toMultiIdat {px : Type u} [Pixel px] [PngPixel px]
 
 /-- The lifted multi-spec's container bytes equal the simple spec's
 container bytes. -/
-lemma ExternalPngSpec.toMultiIdat_bytes {px : Type u} [Pixel px] [PngPixel px]
+lemma ExternalPngSpec.toMultiIdat_bytes {px : Type u} [PixelFormat px] [Png.PixelFormat px]
     (s : ExternalPngSpec px) :
     s.toMultiIdat.container.bytes = s.container.bytes :=
   s.container.toMulti_bytes s.hIdatSize
@@ -194,7 +194,7 @@ lemma ExternalPngSpec.toMultiIdat_bytes {px : Type u} [Pixel px] [PngPixel px]
 from `decodeBitmap_external_multiIdat_correct` applied to the singleton
 lift. -/
 theorem decodeBitmap_external_correct_via_multiIdat
-    {px : Type u} [Pixel px] [PngPixel px] (s : ExternalPngSpec px) :
+    {px : Type u} [PixelFormat px] [Png.PixelFormat px] (s : ExternalPngSpec px) :
     Png.decodeBitmap s.container.bytes = some s.bitmap := by
   have h := s.toMultiIdat.decodeBitmap_external_multiIdat_correct
   rw [s.toMultiIdat_bytes] at h

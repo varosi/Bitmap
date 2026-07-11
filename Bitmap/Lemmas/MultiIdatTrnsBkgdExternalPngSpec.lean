@@ -19,22 +19,22 @@ both `transparency` and `background`. The new
 `MultiIdatTrnsBkgdContainerSpec` provides the container and parser
 witness for this layout. -/
 
-/-! ### Source bd=8, target = `PixelRGB8` -/
+/-! ### Source bd=8, target = `RGB8` -/
 
-structure ExternalPngMultiIdatTrnsBkgdRgb8Spec (px : Type u) [Pixel px] [PngPixel px] where
+structure ExternalPngMultiIdatTrnsBkgdRgb8Spec (px : Type u) [PixelFormat px] [Png.PixelFormat px] where
   bitmap : Bitmap px
   container : MultiIdatTrnsBkgdContainerSpec
   hSourceBitDepth : container.header.bitDepth = 8
-  hTargetBitDepth : PngPixel.bitDepth (α := px) = u8 8
-  hTargetColorType : PngPixel.colorType (α := px) = u8 2
+  hTargetBitDepth : Png.PixelFormat.bitDepth (α := px) = u8 8
+  hTargetColorType : Png.PixelFormat.colorType (α := px) = u8 2
   hWidth : container.header.width = bitmap.size.width
   hHeight : container.header.height = bitmap.size.height
   hInterlace0 : container.header.interlace = 0
-  hPxColorType : PngPixel.colorType (α := px) = u8 container.header.colorType
+  hPxColorType : Png.PixelFormat.colorType (α := px) = u8 container.header.colorType
   hBppLookup :
     pngBytesPerPixelForColorTypeAndBitDepth?
       container.header.colorType container.header.bitDepth =
-        some (Pixel.bytesPerPixel (α := px))
+        some (PixelFormat.bytesPerPixel (α := px))
   hIdatMin : 2 ≤ container.idatData.size
   inflatedRaw : ByteArray
   hInflated :
@@ -44,21 +44,21 @@ structure ExternalPngMultiIdatTrnsBkgdRgb8Spec (px : Type u) [Pixel px] [PngPixe
   hRawSize :
     inflatedRaw.size =
       bitmap.size.height *
-        (bitmap.size.width * Pixel.bytesPerPixel (α := px) + 1)
+        (bitmap.size.width * PixelFormat.bytesPerPixel (α := px) + 1)
   hPixels :
     decodeRowsLoopTrnsOverBackground container.trnsWitness.trns
         container.bkgdWitness.bkgd inflatedRaw
-        bitmap.size.width bitmap.size.height (Pixel.bytesPerPixel (α := px))
-        (bitmap.size.width * Pixel.bytesPerPixel (α := px))
+        bitmap.size.width bitmap.size.height (PixelFormat.bytesPerPixel (α := px))
+        (bitmap.size.width * PixelFormat.bytesPerPixel (α := px))
         0 0 ByteArray.empty
         { data := Array.replicate
             (bitmap.size.width * bitmap.size.height *
-              Pixel.bytesPerPixel (α := px)) 0 } =
+              PixelFormat.bytesPerPixel (α := px)) 0 } =
       some bitmap.data
 
 namespace ExternalPngMultiIdatTrnsBkgdRgb8Spec
 
-variable {px : Type u} [Pixel px] [PngPixel px]
+variable {px : Type u} [PixelFormat px] [Png.PixelFormat px]
 
 theorem parsePngWithMetadata_external (s : ExternalPngMultiIdatTrnsBkgdRgb8Spec px) :
     parsePngWithMetadata s.container.bytes s.container.bytes_size_ge_8 =
@@ -101,22 +101,22 @@ theorem decodeBitmapWithMetadata_external_correct
 
 end ExternalPngMultiIdatTrnsBkgdRgb8Spec
 
-/-! ### Source bd=16, target = `PixelRGB16` -/
+/-! ### Source bd=16, target = `RGB16` -/
 
-structure ExternalPngMultiIdatTrnsBkgdRgb16Spec (px : Type u) [Pixel px] [PngPixel px] where
+structure ExternalPngMultiIdatTrnsBkgdRgb16Spec (px : Type u) [PixelFormat px] [Png.PixelFormat px] where
   bitmap : Bitmap px
   container : MultiIdatTrnsBkgdContainerSpec
   hSourceBitDepth : container.header.bitDepth = 16
-  hTargetBitDepth : PngPixel.bitDepth (α := px) = u8 16
-  hTargetColorType : PngPixel.colorType (α := px) = u8 2
+  hTargetBitDepth : Png.PixelFormat.bitDepth (α := px) = u8 16
+  hTargetColorType : Png.PixelFormat.colorType (α := px) = u8 2
   hWidth : container.header.width = bitmap.size.width
   hHeight : container.header.height = bitmap.size.height
   hInterlace0 : container.header.interlace = 0
-  hPxColorType : PngPixel.colorType (α := px) = u8 container.header.colorType
+  hPxColorType : Png.PixelFormat.colorType (α := px) = u8 container.header.colorType
   hBppLookup :
     pngBytesPerPixelForColorTypeAndBitDepth?
       container.header.colorType container.header.bitDepth =
-        some (Pixel.bytesPerPixel (α := px))
+        some (PixelFormat.bytesPerPixel (α := px))
   hIdatMin : 2 ≤ container.idatData.size
   inflatedRaw : ByteArray
   hInflated :
@@ -126,21 +126,21 @@ structure ExternalPngMultiIdatTrnsBkgdRgb16Spec (px : Type u) [Pixel px] [PngPix
   hRawSize :
     inflatedRaw.size =
       bitmap.size.height *
-        (bitmap.size.width * Pixel.bytesPerPixel (α := px) + 1)
+        (bitmap.size.width * PixelFormat.bytesPerPixel (α := px) + 1)
   hPixels :
     decodeRowsLoopTrnsOverBackground16 container.trnsWitness.trns
         container.bkgdWitness.bkgd container.header.colorType inflatedRaw
-        bitmap.size.width bitmap.size.height (Pixel.bytesPerPixel (α := px))
-        (bitmap.size.width * Pixel.bytesPerPixel (α := px))
+        bitmap.size.width bitmap.size.height (PixelFormat.bytesPerPixel (α := px))
+        (bitmap.size.width * PixelFormat.bytesPerPixel (α := px))
         0 0 ByteArray.empty
         { data := Array.replicate
             (bitmap.size.width * bitmap.size.height *
-              Pixel.bytesPerPixel (α := px)) 0 } =
+              PixelFormat.bytesPerPixel (α := px)) 0 } =
       some bitmap.data
 
 namespace ExternalPngMultiIdatTrnsBkgdRgb16Spec
 
-variable {px : Type u} [Pixel px] [PngPixel px]
+variable {px : Type u} [PixelFormat px] [Png.PixelFormat px]
 
 theorem parsePngWithMetadata_external (s : ExternalPngMultiIdatTrnsBkgdRgb16Spec px) :
     parsePngWithMetadata s.container.bytes s.container.bytes_size_ge_8 =
@@ -183,18 +183,18 @@ theorem decodeBitmapWithMetadata_external_correct
 
 end ExternalPngMultiIdatTrnsBkgdRgb16Spec
 
-/-! ### Source bd=16, target = `PixelRGB8` (downsample) -/
+/-! ### Source bd=16, target = `RGB8` (downsample) -/
 
-structure ExternalPngMultiIdatTrnsBkgdRgb16To8Spec (px : Type u) [Pixel px] [PngPixel px] where
+structure ExternalPngMultiIdatTrnsBkgdRgb16To8Spec (px : Type u) [PixelFormat px] [Png.PixelFormat px] where
   bitmap : Bitmap px
   container : MultiIdatTrnsBkgdContainerSpec
   hSourceBitDepth : container.header.bitDepth = 16
-  hTargetBitDepth : PngPixel.bitDepth (α := px) = u8 8
-  hTargetColorType : PngPixel.colorType (α := px) = u8 2
+  hTargetBitDepth : Png.PixelFormat.bitDepth (α := px) = u8 8
+  hTargetColorType : Png.PixelFormat.colorType (α := px) = u8 2
   hWidth : container.header.width = bitmap.size.width
   hHeight : container.header.height = bitmap.size.height
   hInterlace0 : container.header.interlace = 0
-  hPxColorType : PngPixel.colorType (α := px) = u8 container.header.colorType
+  hPxColorType : Png.PixelFormat.colorType (α := px) = u8 container.header.colorType
   sourceBpp : Nat
   hBppLookup :
     pngBytesPerPixelForColorTypeAndBitDepth?
@@ -215,12 +215,12 @@ structure ExternalPngMultiIdatTrnsBkgdRgb16To8Spec (px : Type u) [Pixel px] [Png
         0 0 ByteArray.empty
         { data := Array.replicate
             (bitmap.size.width * bitmap.size.height *
-              Pixel.bytesPerPixel (α := px)) 0 } =
+              PixelFormat.bytesPerPixel (α := px)) 0 } =
       some bitmap.data
 
 namespace ExternalPngMultiIdatTrnsBkgdRgb16To8Spec
 
-variable {px : Type u} [Pixel px] [PngPixel px]
+variable {px : Type u} [PixelFormat px] [Png.PixelFormat px]
 
 theorem parsePngWithMetadata_external
     (s : ExternalPngMultiIdatTrnsBkgdRgb16To8Spec px) :

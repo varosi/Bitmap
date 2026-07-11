@@ -129,7 +129,7 @@ theorem decodeIndexedBitmapWithMetadata_external_correct
       hZlib, hSupported, hIndices', hsize, s.hWidth, s.hHeight,
       s.hBitDepth, s.hPalette]
 
-/-- Pixel-only exact indexed decode accepts any external indexed-palette PNG
+/-- pixel-only exact indexed decode accepts any external indexed-palette PNG
 matching the spec when the minimal scaffold carries no transparency metadata. -/
 theorem decodeIndexedBitmap_external_correct
     (s : ExternalIndexedPalettePngSpec) :

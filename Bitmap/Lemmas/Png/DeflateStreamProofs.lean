@@ -52,7 +52,7 @@ lemma zlibDecompressLoopFuel_step_stored_final_of_spec
     subst hData hBytePos hBitPos
     rfl
   rw [zlibDecompressLoopFuel]
-  simp [hcond, hread3, ← hAligned, hbytePos_lt, hLEN, hNLEN, hsum, hstart_le,
+  simp [hcond, hread3, ← hAligned, hbytePos_lt, hLEN, hNLEN, hsum, uint16MaxValue, hstart_le,
         hPayload, hRdrEq, hOut]
 
 set_option maxHeartbeats 6000000 in
@@ -78,7 +78,7 @@ lemma zlibDecompressLoopFuel_step_stored_nonfinal_of_spec
     subst hData hBytePos hBitPos
     rfl
   rw [zlibDecompressLoopFuel]
-  simp [hcond, hread3, ← hAligned, hbytePos_lt, hLEN, hNLEN, hsum, hstart_le,
+  simp [hcond, hread3, ← hAligned, hbytePos_lt, hLEN, hNLEN, hsum, uint16MaxValue, hstart_le,
         hPayload, hRdrEq, ← hOut, hrest]
 
 /-! ### Fixed block — runtime path

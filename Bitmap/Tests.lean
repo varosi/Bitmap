@@ -506,14 +506,14 @@ private def validateLz77PublicRoundTrips : IO Unit := do
 -- Decode PNG fixtures that use fixed-Huffman deflate blocks.
 private def pngDecodeFixedHuffmanFixtures : IO Unit := do
   let grayBytes <- IO.FS.readBinFile (testFixturePath "test_gray.png")
-  match Png.decodeBitmap (px := PixelGray8) grayBytes with
+  match Png.decodeBitmap (px := Gray8) grayBytes with
   | some bmp =>
       if bmp.size.width != 8 || bmp.size.height != 8 then
         throw (IO.userError "fixed-huffman gray fixture has unexpected size")
   | none =>
       throw (IO.userError "fixed-huffman gray fixture failed to decode")
   let rgbaBytes <- IO.FS.readBinFile (testFixturePath "test_rgba.png")
-  match Png.decodeBitmap (px := PixelRGBA8) rgbaBytes with
+  match Png.decodeBitmap (px := RGBA8) rgbaBytes with
   | some bmp =>
       if bmp.size.width != 4 || bmp.size.height != 4 then
         throw (IO.userError "fixed-huffman RGBA fixture has unexpected size")
@@ -578,8 +578,8 @@ private def ancFixtureRgbaOverBlueReferenceData : ByteArray :=
       out := out.push (Png.u8 127)
     return out
 
-private def grayAlphaFixture : BitmapGrayAlpha8 :=
-  BitmapGrayAlpha8.ofPixelFn 2 2 (fun idx : Fin (2 * 2) =>
+private def grayAlphaFixture : Bitmap.GrayAlpha8 :=
+  Bitmap.GrayAlpha8.ofFn 2 2 (fun idx : Fin (2 * 2) =>
     match idx.val with
     | 0 => { v := Png.u8 0, a := Png.u8 0 }
     | 1 => { v := Png.u8 64, a := Png.u8 128 }
@@ -652,32 +652,32 @@ private def u16 (n : Nat) : UInt16 :=
 private def u16be (n : Nat) : ByteArray :=
   ByteArray.mk #[Png.u8 (n / 256), Png.u8 n]
 
-private def rgb16DownsampleFixture : BitmapRGB16 :=
-  BitmapRGB16.ofPixelFn 2 1 (fun idx : Fin (2 * 1) =>
+private def rgb16DownsampleFixture : Bitmap.RGB16 :=
+  Bitmap.RGB16.ofFn 2 1 (fun idx : Fin (2 * 1) =>
     match idx.val with
     | 0 => { r := u16 0x12ab, g := u16 0x3456, b := u16 0xfedc }
     | _ => { r := u16 0x0102, g := u16 0x8001, b := u16 0x00ff })
 
-private def rgba16DownsampleFixture : BitmapRGBA16 :=
-  BitmapRGBA16.ofPixelFn 2 1 (fun idx : Fin (2 * 1) =>
+private def rgba16DownsampleFixture : Bitmap.RGBA16 :=
+  Bitmap.RGBA16.ofFn 2 1 (fun idx : Fin (2 * 1) =>
     match idx.val with
     | 0 => { r := u16 0x12ab, g := u16 0x3456, b := u16 0xfedc, a := u16 0x7788 }
     | _ => { r := u16 0x0102, g := u16 0x8001, b := u16 0x00ff, a := u16 0xffff })
 
-private def gray16DownsampleFixture : BitmapGray16 :=
-  BitmapGray16.ofPixelFn 3 1 (fun idx : Fin (3 * 1) =>
+private def gray16DownsampleFixture : Bitmap.Gray16 :=
+  Bitmap.Gray16.ofFn 3 1 (fun idx : Fin (3 * 1) =>
     match idx.val with
     | 0 => { v := u16 0x12ab }
     | 1 => { v := u16 0x8001 }
     | _ => { v := u16 0x00ff })
 
-private def grayAlpha16DownsampleFixture : BitmapGrayAlpha16 :=
-  BitmapGrayAlpha16.ofPixelFn 2 1 (fun idx : Fin (2 * 1) =>
+private def grayAlpha16DownsampleFixture : Bitmap.GrayAlpha16 :=
+  Bitmap.GrayAlpha16.ofFn 2 1 (fun idx : Fin (2 * 1) =>
     match idx.val with
     | 0 => { v := u16 0x12ab, a := u16 0x3456 }
     | _ => { v := u16 0x8001, a := u16 0x00ff })
 
-private def pngWithAncillary {px : Type} [Pixel px] [Png.PngPixel px]
+private def pngWithAncillary {px : Type} [PixelFormat px] [Png.PixelFormat px]
     (bmp : Bitmap px) (ancillary : ByteArray) : ByteArray :=
   let raw := Png.encodeRawFast bmp
   let idat := Png.zlibCompressFixed raw
@@ -685,7 +685,7 @@ private def pngWithAncillary {px : Type} [Pixel px] [Png.PngPixel px]
     Png.u32be bmp.size.width ++
     Png.u32be bmp.size.height ++
     ByteArray.mk
-      #[Png.PngPixel.bitDepth (α := px), Png.PngPixel.colorType (α := px),
+      #[Png.PixelFormat.bitDepth (α := px), Png.PixelFormat.colorType (α := px),
         Png.u8 0, Png.u8 0, Png.u8 0]
   Png.pngSignature ++
     Png.mkChunkBytes Png.ihdrTypeBytes ihdr ++
@@ -693,7 +693,7 @@ private def pngWithAncillary {px : Type} [Pixel px] [Png.PngPixel px]
     Png.mkChunkBytes Png.idatTypeBytes idat ++
     Png.mkChunkBytes Png.iendTypeBytes ByteArray.empty
 
-private def pngWithPostIdatAncillary {px : Type} [Pixel px] [Png.PngPixel px]
+private def pngWithPostIdatAncillary {px : Type} [PixelFormat px] [Png.PixelFormat px]
     (bmp : Bitmap px) (postIdat : ByteArray) : ByteArray :=
   let raw := Png.encodeRawFast bmp
   let idat := Png.zlibCompressFixed raw
@@ -701,7 +701,7 @@ private def pngWithPostIdatAncillary {px : Type} [Pixel px] [Png.PngPixel px]
     Png.u32be bmp.size.width ++
     Png.u32be bmp.size.height ++
     ByteArray.mk
-      #[Png.PngPixel.bitDepth (α := px), Png.PngPixel.colorType (α := px),
+      #[Png.PixelFormat.bitDepth (α := px), Png.PixelFormat.colorType (α := px),
         Png.u8 0, Png.u8 0, Png.u8 0]
   Png.pngSignature ++
     Png.mkChunkBytes Png.ihdrTypeBytes ihdr ++
@@ -863,8 +863,8 @@ private def chrmTransformGrayAlpha8Data
           out := out.push (data.get! (base + 3))
         return out
 
-private def rgb16MetadataFixture : BitmapRGB16 :=
-  BitmapRGB16.ofPixelFn 2 1 (fun idx : Fin (2 * 1) =>
+private def rgb16MetadataFixture : Bitmap.RGB16 :=
+  Bitmap.RGB16.ofFn 2 1 (fun idx : Fin (2 * 1) =>
     match idx.val with
     | 0 => { r := u16 0x1234, g := u16 0x5678, b := u16 0x9abc }
     | _ => { r := u16 0x2001, g := u16 0x4002, b := u16 0x6003 })
@@ -876,8 +876,8 @@ private def rgb16MetadataPng : ByteArray :=
       Png.mkChunkBytes Png.bkgdTypeBytes
         (u16be 0x2100 ++ u16be 0x4300 ++ u16be 0x6500))
 
-private def grayAlpha16MetadataFixture : BitmapGrayAlpha16 :=
-  BitmapGrayAlpha16.ofPixelFn 2 1 (fun idx : Fin (2 * 1) =>
+private def grayAlpha16MetadataFixture : Bitmap.GrayAlpha16 :=
+  Bitmap.GrayAlpha16.ofFn 2 1 (fun idx : Fin (2 * 1) =>
     match idx.val with
     | 0 => { v := u16 0x1234, a := u16 0x0000 }
     | _ => { v := u16 0x8001, a := u16 0xffff })
@@ -886,8 +886,8 @@ private def grayAlpha16MetadataPng : ByteArray :=
   pngWithAncillary grayAlpha16MetadataFixture
     (Png.mkChunkBytes Png.bkgdTypeBytes (u16be 0x3000))
 
-private def rgba16MetadataFixture : BitmapRGBA16 :=
-  BitmapRGBA16.ofPixelFn 2 1 (fun idx : Fin (2 * 1) =>
+private def rgba16MetadataFixture : Bitmap.RGBA16 :=
+  Bitmap.RGBA16.ofFn 2 1 (fun idx : Fin (2 * 1) =>
     match idx.val with
     | 0 => { r := u16 0x1234, g := u16 0x5678, b := u16 0x9abc, a := u16 0x0000 }
     | _ => { r := u16 0x2001, g := u16 0x4002, b := u16 0x6003, a := u16 0xffff })
@@ -897,7 +897,7 @@ private def rgba16MetadataPng : ByteArray :=
     (Png.mkChunkBytes Png.bkgdTypeBytes
       (u16be 0x2100 ++ u16be 0x4300 ++ u16be 0x6500))
 
-private def encodeFixturePng {px : Type} [Pixel px] [Png.PngPixel px]
+private def encodeFixturePng {px : Type} [PixelFormat px] [Png.PixelFormat px]
     (bmp : Bitmap px) : IO ByteArray := do
   match Png.encodeBitmapChecked (px := px) bmp .fixed with
   | Except.ok bytes => pure bytes
@@ -914,7 +914,7 @@ private def pushU16BE (out : ByteArray) (n : Nat) : ByteArray :=
 
 private def adam7RGB8ExpectedData (w h : Nat) : ByteArray :=
   Id.run do
-    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelRGB)
+    let mut out := ByteArray.emptyWithCapacity (w * h * RGB8.bytesPerPixel)
     for y in [0:h] do
       for x in [0:w] do
         out := out.push (adam7Sample8 x y 5)
@@ -924,7 +924,7 @@ private def adam7RGB8ExpectedData (w h : Nat) : ByteArray :=
 
 private def adam7RGB8ExpectedRGBAData (w h : Nat) : ByteArray :=
   Id.run do
-    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelRGBA)
+    let mut out := ByteArray.emptyWithCapacity (w * h * RGBA8.bytesPerPixel)
     for y in [0:h] do
       for x in [0:w] do
         out := out.push (adam7Sample8 x y 5)
@@ -935,7 +935,7 @@ private def adam7RGB8ExpectedRGBAData (w h : Nat) : ByteArray :=
 
 private def adam7RGB8ExpectedOverBackgroundData (w h : Nat) : ByteArray :=
   Id.run do
-    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelRGB)
+    let mut out := ByteArray.emptyWithCapacity (w * h * RGB8.bytesPerPixel)
     for y in [0:h] do
       for x in [0:w] do
         if x == 0 && y == 0 then
@@ -950,7 +950,7 @@ private def adam7RGB8ExpectedOverBackgroundData (w h : Nat) : ByteArray :=
 
 private def adam7Gray8ExpectedData (w h : Nat) : ByteArray :=
   Id.run do
-    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelGray)
+    let mut out := ByteArray.emptyWithCapacity (w * h * Gray8.bytesPerPixel)
     for y in [0:h] do
       for x in [0:w] do
         out := out.push (adam7Sample8 x y 3)
@@ -958,7 +958,7 @@ private def adam7Gray8ExpectedData (w h : Nat) : ByteArray :=
 
 private def adam7GrayAlpha8ExpectedData (w h : Nat) : ByteArray :=
   Id.run do
-    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelGrayAlpha)
+    let mut out := ByteArray.emptyWithCapacity (w * h * GrayAlpha8.bytesPerPixel)
     for y in [0:h] do
       for x in [0:w] do
         out := out.push (adam7Sample8 x y 7)
@@ -967,7 +967,7 @@ private def adam7GrayAlpha8ExpectedData (w h : Nat) : ByteArray :=
 
 private def adam7RGBA8ExpectedData (w h : Nat) : ByteArray :=
   Id.run do
-    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelRGBA)
+    let mut out := ByteArray.emptyWithCapacity (w * h * RGBA8.bytesPerPixel)
     for y in [0:h] do
       for x in [0:w] do
         out := out.push (adam7Sample8 x y 11)
@@ -978,7 +978,7 @@ private def adam7RGBA8ExpectedData (w h : Nat) : ByteArray :=
 
 private def adam7RGB16ExpectedData (w h : Nat) : ByteArray :=
   Id.run do
-    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelRGB16)
+    let mut out := ByteArray.emptyWithCapacity (w * h * RGB16.bytesPerPixel)
     for y in [0:h] do
       for x in [0:w] do
         out := pushU16BE out (adam7Sample16 x y 0x1001)
@@ -988,7 +988,7 @@ private def adam7RGB16ExpectedData (w h : Nat) : ByteArray :=
 
 private def adam7RGB16DownsampleExpectedData (w h : Nat) : ByteArray :=
   Id.run do
-    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelRGB)
+    let mut out := ByteArray.emptyWithCapacity (w * h * RGB8.bytesPerPixel)
     for y in [0:h] do
       for x in [0:w] do
         out := out.push (Png.u8 (adam7Sample16 x y 0x1001 / 256))
@@ -998,7 +998,7 @@ private def adam7RGB16DownsampleExpectedData (w h : Nat) : ByteArray :=
 
 private def adam7Gray16ExpectedData (w h : Nat) : ByteArray :=
   Id.run do
-    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelGray16)
+    let mut out := ByteArray.emptyWithCapacity (w * h * Gray16.bytesPerPixel)
     for y in [0:h] do
       for x in [0:w] do
         out := pushU16BE out (adam7Sample16 x y 0x1234)
@@ -1006,7 +1006,7 @@ private def adam7Gray16ExpectedData (w h : Nat) : ByteArray :=
 
 private def adam7Gray16DownsampleExpectedData (w h : Nat) : ByteArray :=
   Id.run do
-    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelGray)
+    let mut out := ByteArray.emptyWithCapacity (w * h * Gray8.bytesPerPixel)
     for y in [0:h] do
       for x in [0:w] do
         out := out.push (Png.u8 (adam7Sample16 x y 0x1234 / 256))
@@ -1014,7 +1014,7 @@ private def adam7Gray16DownsampleExpectedData (w h : Nat) : ByteArray :=
 
 private def expectAdam7Fixtures : IO Unit := do
   let rgb8Bytes ← IO.FS.readBinFile (testFixturePath "test_adam7_rgb8_9x9_filters.png")
-  match Png.decodeBitmap (px := PixelRGB8) rgb8Bytes with
+  match Png.decodeBitmap (px := RGB8) rgb8Bytes with
   | some bmp =>
       if bmp.size.width != 9 || bmp.size.height != 9 ||
           bmp.data != adam7RGB8ExpectedData 9 9 then
@@ -1022,7 +1022,7 @@ private def expectAdam7Fixtures : IO Unit := do
   | none =>
       throw (IO.userError "Adam7 RGB8 varied-filter fixture failed to decode")
   let gray8Bytes ← IO.FS.readBinFile (testFixturePath "test_adam7_gray8_2x3.png")
-  match Png.decodeBitmap (px := PixelGray8) gray8Bytes with
+  match Png.decodeBitmap (px := Gray8) gray8Bytes with
   | some bmp =>
       if bmp.size.width != 2 || bmp.size.height != 3 ||
           bmp.data != adam7Gray8ExpectedData 2 3 then
@@ -1030,7 +1030,7 @@ private def expectAdam7Fixtures : IO Unit := do
   | none =>
       throw (IO.userError "Adam7 Gray8 small fixture failed to decode")
   let grayAlpha8Bytes ← IO.FS.readBinFile (testFixturePath "test_adam7_grayalpha8_9x9.png")
-  match Png.decodeBitmap (px := PixelGrayAlpha8) grayAlpha8Bytes with
+  match Png.decodeBitmap (px := GrayAlpha8) grayAlpha8Bytes with
   | some bmp =>
       if bmp.size.width != 9 || bmp.size.height != 9 ||
           bmp.data != adam7GrayAlpha8ExpectedData 9 9 then
@@ -1038,7 +1038,7 @@ private def expectAdam7Fixtures : IO Unit := do
   | none =>
       throw (IO.userError "Adam7 GrayAlpha8 fixture failed to decode")
   let rgba8Bytes ← IO.FS.readBinFile (testFixturePath "test_adam7_rgba8_1x1.png")
-  match Png.decodeBitmap (px := PixelRGBA8) rgba8Bytes with
+  match Png.decodeBitmap (px := RGBA8) rgba8Bytes with
   | some bmp =>
       if bmp.size.width != 1 || bmp.size.height != 1 ||
           bmp.data != adam7RGBA8ExpectedData 1 1 then
@@ -1046,58 +1046,58 @@ private def expectAdam7Fixtures : IO Unit := do
   | none =>
       throw (IO.userError "Adam7 RGBA8 1x1 fixture failed to decode")
   let rgb16Bytes ← IO.FS.readBinFile (testFixturePath "test_adam7_rgb16_9x9.png")
-  match Png.decodeBitmap (px := PixelRGB16) rgb16Bytes with
+  match Png.decodeBitmap (px := RGB16) rgb16Bytes with
   | some bmp =>
       if bmp.size.width != 9 || bmp.size.height != 9 ||
           bmp.data != adam7RGB16ExpectedData 9 9 then
         throw (IO.userError "Adam7 RGB16 fixture mismatch")
   | none =>
       throw (IO.userError "Adam7 RGB16 fixture failed to decode")
-  match Png.decodeBitmap (px := PixelRGB8) rgb16Bytes with
+  match Png.decodeBitmap (px := RGB8) rgb16Bytes with
   | some bmp =>
       if bmp.data != adam7RGB16DownsampleExpectedData 9 9 then
         throw (IO.userError "Adam7 RGB16 -> RGB8 downsample mismatch")
   | none =>
       throw (IO.userError "Adam7 RGB16 -> RGB8 downsample failed")
   let gray16Bytes ← IO.FS.readBinFile (testFixturePath "test_adam7_gray16_2x3.png")
-  match Png.decodeBitmap (px := PixelGray16) gray16Bytes with
+  match Png.decodeBitmap (px := Gray16) gray16Bytes with
   | some bmp =>
       if bmp.size.width != 2 || bmp.size.height != 3 ||
           bmp.data != adam7Gray16ExpectedData 2 3 then
         throw (IO.userError "Adam7 Gray16 fixture mismatch")
   | none =>
       throw (IO.userError "Adam7 Gray16 fixture failed to decode")
-  match Png.decodeBitmap (px := PixelGray8) gray16Bytes with
+  match Png.decodeBitmap (px := Gray8) gray16Bytes with
   | some bmp =>
       if bmp.data != adam7Gray16DownsampleExpectedData 2 3 then
         throw (IO.userError "Adam7 Gray16 -> Gray8 downsample mismatch")
   | none =>
       throw (IO.userError "Adam7 Gray16 -> Gray8 downsample failed")
   let trnsBkgdBytes ← IO.FS.readBinFile (testFixturePath "test_adam7_trns_bkgd_rgb8.png")
-  match Png.decodeBitmapWithMetadata (px := PixelRGBA8) trnsBkgdBytes with
+  match Png.decodeBitmapWithMetadata (px := RGBA8) trnsBkgdBytes with
   | some decoded =>
       if decoded.bitmap.data != adam7RGB8ExpectedRGBAData 2 3 then
         throw (IO.userError "Adam7 tRNS RGBA alpha mismatch")
   | none =>
       throw (IO.userError "Adam7 tRNS RGBA metadata decode failed")
-  match Png.decodeBitmapWithMetadata (px := PixelRGB8) trnsBkgdBytes with
+  match Png.decodeBitmapWithMetadata (px := RGB8) trnsBkgdBytes with
   | some decoded =>
       if decoded.bitmap.data != adam7RGB8ExpectedOverBackgroundData 2 3 then
         throw (IO.userError "Adam7 tRNS+bKGD RGB composition mismatch")
   | none =>
       throw (IO.userError "Adam7 tRNS+bKGD RGB metadata decode failed")
   let interlace2Bytes ← IO.FS.readBinFile (testFixturePath "test_adam7_interlace2.png")
-  if (Png.decodeBitmap (px := PixelRGB8) interlace2Bytes).isSome then
+  if (Png.decodeBitmap (px := RGB8) interlace2Bytes).isSome then
     throw (IO.userError "decoder accepted invalid Adam7 interlace method 2")
   let truncatedBytes ← IO.FS.readBinFile (testFixturePath "test_adam7_truncated.png")
-  if (Png.decodeBitmap (px := PixelRGB8) truncatedBytes).isSome then
+  if (Png.decodeBitmap (px := RGB8) truncatedBytes).isSome then
     throw (IO.userError "decoder accepted truncated Adam7 payload")
 
 private def gray1FixtureOn (x y : Nat) : Bool :=
   ((x * 3 + y * 5 + x * y) % 7) < 3
 
-private def gray1FixtureBitmap (w h : Nat) : BitmapGray1 :=
-  BitmapGray1.ofPixelFn w h (fun idx =>
+private def gray1FixtureBitmap (w h : Nat) : Bitmap.Gray1 :=
+  Bitmap.Gray1.ofFn w h (fun idx =>
     let x := idx.val % w
     let y := idx.val / w
     { v := gray1FixtureOn x y })
@@ -1113,7 +1113,7 @@ private def gray1ExpandedGray8Data (w h : Nat) : ByteArray :=
 
 private def expectGray1ExactFixture (name : String) (w h : Nat) : IO Unit := do
   let bytes ← IO.FS.readBinFile (testFixturePath name)
-  match Png.decodeBitmapGray1 bytes with
+  match Png.decodeGray1Bitmap bytes with
   | some bmp =>
       if bmp.size.width != w || bmp.size.height != h ||
           bmp.data != (gray1FixtureBitmap w h).data then
@@ -1128,20 +1128,20 @@ private def expectGray1Fixtures : IO Unit := do
   expectGray1ExactFixture "test_gray1_adam7.png" 9 9
 
   let filterBytes ← IO.FS.readBinFile (testFixturePath "test_gray1_filters.png")
-  match Png.decodeBitmap (px := PixelGray8) filterBytes with
+  match Png.decodeBitmap (px := Gray8) filterBytes with
   | some bmp =>
       if bmp.size.width != 17 || bmp.size.height != 5 ||
           bmp.data != gray1ExpandedGray8Data 17 5 then
         throw (IO.userError "Gray1 -> Gray8 decode mismatch")
   | none =>
       throw (IO.userError "Gray1 -> Gray8 decode failed")
-  match Png.decodeBitmap (px := PixelRGB8) filterBytes with
+  match Png.decodeBitmap (px := RGB8) filterBytes with
   | some bmp =>
       if bmp.size.width != 17 || bmp.size.height != 5 then
         throw (IO.userError "Gray1 -> RGB8 dimensions mismatch")
   | none =>
       throw (IO.userError "Gray1 -> RGB8 decode failed")
-  match Png.decodeBitmap (px := PixelRGBA16) filterBytes with
+  match Png.decodeBitmap (px := RGBA16) filterBytes with
   | some bmp =>
       if bmp.size.width != 17 || bmp.size.height != 5 then
         throw (IO.userError "Gray1 -> RGBA16 dimensions mismatch")
@@ -1149,7 +1149,7 @@ private def expectGray1Fixtures : IO Unit := do
       throw (IO.userError "Gray1 -> RGBA16 decode failed")
 
   let metaBytes ← IO.FS.readBinFile (testFixturePath "test_gray1_trns_bkgd.png")
-  match Png.decodeBitmapGray1WithMetadata metaBytes with
+  match Png.decodeGray1BitmapWithMetadata metaBytes with
   | some decoded =>
       if decoded.bitmap.data != (gray1FixtureBitmap 9 3).data then
         throw (IO.userError "Gray1 metadata exact data mismatch")
@@ -1158,7 +1158,7 @@ private def expectGray1Fixtures : IO Unit := do
       | _, _ => throw (IO.userError "Gray1 metadata values mismatch")
   | none =>
       throw (IO.userError "Gray1 metadata decode failed")
-  match Png.decodeBitmapWithMetadata (px := PixelRGBA8) metaBytes with
+  match Png.decodeBitmapWithMetadata (px := RGBA8) metaBytes with
   | some decoded =>
       if decoded.bitmap.size.width != 9 || decoded.bitmap.size.height != 3 then
         throw (IO.userError "Gray1+tRNS -> RGBA8 dimensions mismatch")
@@ -1166,21 +1166,21 @@ private def expectGray1Fixtures : IO Unit := do
       throw (IO.userError "Gray1+tRNS -> RGBA8 decode failed")
 
   let invalidRgb1 ← IO.FS.readBinFile (testFixturePath "test_gray1_invalid_rgb1.png")
-  if (Png.decodeBitmap (px := PixelRGB8) invalidRgb1).isSome then
+  if (Png.decodeBitmap (px := RGB8) invalidRgb1).isSome then
     throw (IO.userError "invalid RGB bit-depth 1 fixture decoded as RGB8")
-  if (Png.decodeBitmapGray1 invalidRgb1).isSome then
+  if (Png.decodeGray1Bitmap invalidRgb1).isSome then
     throw (IO.userError "invalid RGB bit-depth 1 fixture decoded as Gray1")
   let truncated ← IO.FS.readBinFile (testFixturePath "test_gray1_truncated.png")
-  if (Png.decodeBitmapGray1 truncated).isSome then
+  if (Png.decodeGray1Bitmap truncated).isSome then
     throw (IO.userError "truncated Gray1 fixture unexpectedly decoded")
 
   let roundTripBmp := gray1FixtureBitmap 17 4
   for mode in [Png.PngEncodeMode.stored, .fixed, .dynamic] do
-    match Png.encodeBitmapGray1Checked roundTripBmp mode with
+    match Png.encodeGray1BitmapChecked roundTripBmp mode with
     | Except.error err =>
         throw (IO.userError s!"Gray1 encode failed: {err}")
     | Except.ok bytes =>
-        match Png.decodeBitmapGray1 bytes with
+        match Png.decodeGray1Bitmap bytes with
         | some decoded =>
             if decoded != roundTripBmp then
               throw (IO.userError "Gray1 encode/decode round-trip mismatch")
@@ -1241,7 +1241,7 @@ private def indexedExpectedRGB8Data (w h entryCount : Nat)
     (alpha? : Option ByteArray := none) (background? : Option UInt8 := none) :
     ByteArray :=
   Id.run do
-    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelRGB)
+    let mut out := ByteArray.emptyWithCapacity (w * h * RGB8.bytesPerPixel)
     let bgRGB :=
       match background? with
       | some bg => indexedPaletteRGB bg.toNat
@@ -1267,7 +1267,7 @@ private def indexedExpectedRGB8Data (w h entryCount : Nat)
 private def indexedExpectedRGBA8Data (w h entryCount : Nat)
     (alpha? : Option ByteArray := none) : ByteArray :=
   Id.run do
-    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelRGBA)
+    let mut out := ByteArray.emptyWithCapacity (w * h * RGBA8.bytesPerPixel)
     for y in [0:h] do
       for x in [0:w] do
         let idx := (indexedFixtureIndex entryCount x y).toNat
@@ -1280,7 +1280,7 @@ private def indexedExpectedRGBA8Data (w h entryCount : Nat)
 
 private def indexedExpectedGray8Data (w h entryCount : Nat) : ByteArray :=
   Id.run do
-    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelGray)
+    let mut out := ByteArray.emptyWithCapacity (w * h * Gray8.bytesPerPixel)
     for y in [0:h] do
       for x in [0:w] do
         let idx := (indexedFixtureIndex entryCount x y).toNat
@@ -1291,7 +1291,7 @@ private def indexedExpectedGray8Data (w h entryCount : Nat) : ByteArray :=
 private def indexedExpectedGrayAlpha8Data (w h entryCount : Nat)
     (alpha? : Option ByteArray := none) : ByteArray :=
   Id.run do
-    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelGrayAlpha)
+    let mut out := ByteArray.emptyWithCapacity (w * h * GrayAlpha8.bytesPerPixel)
     for y in [0:h] do
       for x in [0:w] do
         let idx := (indexedFixtureIndex entryCount x y).toNat
@@ -1302,7 +1302,7 @@ private def indexedExpectedGrayAlpha8Data (w h entryCount : Nat)
 
 private def indexedExpectedRGB16Data (w h entryCount : Nat) : ByteArray :=
   Id.run do
-    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelRGB16)
+    let mut out := ByteArray.emptyWithCapacity (w * h * RGB16.bytesPerPixel)
     for y in [0:h] do
       for x in [0:w] do
         let idx := (indexedFixtureIndex entryCount x y).toNat
@@ -1315,7 +1315,7 @@ private def indexedExpectedRGB16Data (w h entryCount : Nat) : ByteArray :=
 private def indexedExpectedRGBA16Data (w h entryCount : Nat)
     (alpha? : Option ByteArray := none) : ByteArray :=
   Id.run do
-    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelRGBA16)
+    let mut out := ByteArray.emptyWithCapacity (w * h * RGBA16.bytesPerPixel)
     for y in [0:h] do
       for x in [0:w] do
         let idx := (indexedFixtureIndex entryCount x y).toNat
@@ -1328,7 +1328,7 @@ private def indexedExpectedRGBA16Data (w h entryCount : Nat)
 
 private def indexedExpectedGray16Data (w h entryCount : Nat) : ByteArray :=
   Id.run do
-    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelGray16)
+    let mut out := ByteArray.emptyWithCapacity (w * h * Gray16.bytesPerPixel)
     for y in [0:h] do
       for x in [0:w] do
         let idx := (indexedFixtureIndex entryCount x y).toNat
@@ -1339,7 +1339,7 @@ private def indexedExpectedGray16Data (w h entryCount : Nat) : ByteArray :=
 private def indexedExpectedGrayAlpha16Data (w h entryCount : Nat)
     (alpha? : Option ByteArray := none) : ByteArray :=
   Id.run do
-    let mut out := ByteArray.emptyWithCapacity (w * h * bytesPerPixelGrayAlpha16)
+    let mut out := ByteArray.emptyWithCapacity (w * h * GrayAlpha16.bytesPerPixel)
     for y in [0:h] do
       for x in [0:w] do
         let idx := (indexedFixtureIndex entryCount x y).toNat
@@ -1397,7 +1397,7 @@ private def indexedAdam7Raw (w h bitDepth entryCount : Nat) : ByteArray :=
 private def expectPaletteInvalidDecode (bytes : ByteArray) (label : String) : IO Unit := do
   if (Png.decodeIndexedBitmapWithMetadata bytes).isSome then
     throw (IO.userError s!"palette invalid decode accepted: {label}")
-  if (Png.decodeBitmapWithMetadata (px := PixelRGB8) bytes).isSome then
+  if (Png.decodeBitmapWithMetadata (px := RGB8) bytes).isSome then
     throw (IO.userError s!"palette RGB invalid decode accepted: {label}")
 
 private def expectPaletteRawFilterByte (name : String) (bytes : ByteArray)
@@ -1446,25 +1446,25 @@ private def expectPalettePng : IO Unit := do
             throw (IO.userError s!"palette exact round-trip mismatch for bit depth {bitDepth}")
       | none =>
           throw (IO.userError s!"palette exact decode failed for bit depth {bitDepth}")
-      match Png.decodeBitmap (px := PixelRGB8) bytes with
+      match Png.decodeBitmap (px := RGB8) bytes with
       | some decoded =>
           if decoded.data != indexedExpectedRGB8Data 9 5 entryCount then
             throw (IO.userError s!"palette RGB8 expansion mismatch for bit depth {bitDepth}")
       | none =>
           throw (IO.userError s!"palette RGB8 expansion failed for bit depth {bitDepth}")
-      match Png.decodeBitmap (px := PixelRGBA8) bytes with
+      match Png.decodeBitmap (px := RGBA8) bytes with
       | some decoded =>
           if decoded.data != indexedExpectedRGBA8Data 9 5 entryCount then
             throw (IO.userError s!"palette RGBA8 expansion mismatch for bit depth {bitDepth}")
       | none =>
           throw (IO.userError s!"palette RGBA8 expansion failed for bit depth {bitDepth}")
-      match Png.decodeBitmap (px := PixelGray8) bytes with
+      match Png.decodeBitmap (px := Gray8) bytes with
       | some decoded =>
           if decoded.data != indexedExpectedGray8Data 9 5 entryCount then
             throw (IO.userError s!"palette Gray8 expansion mismatch for bit depth {bitDepth}")
       | none =>
           throw (IO.userError s!"palette Gray8 expansion failed for bit depth {bitDepth}")
-      match Png.decodeBitmap (px := PixelGrayAlpha8) bytes with
+      match Png.decodeBitmap (px := GrayAlpha8) bytes with
       | some decoded =>
           if decoded.data != indexedExpectedGrayAlpha8Data 9 5 entryCount then
             throw (IO.userError s!"palette GrayAlpha8 expansion mismatch for bit depth {bitDepth}")
@@ -1477,25 +1477,25 @@ private def expectPalettePng : IO Unit := do
     match Png.encodeIndexedBitmapChecked bmp16 .fixed with
     | Except.ok bytes => pure bytes
     | Except.error err => throw (IO.userError s!"palette RGB16 encode failed: {err}")
-  match Png.decodeBitmap (px := PixelRGB16) bytes16 with
+  match Png.decodeBitmap (px := RGB16) bytes16 with
   | some decoded =>
       if decoded.data != indexedExpectedRGB16Data 7 3 16 then
         throw (IO.userError "palette RGB16 expansion mismatch")
   | none =>
       throw (IO.userError "palette RGB16 expansion failed")
-  match Png.decodeBitmap (px := PixelRGBA16) bytes16 with
+  match Png.decodeBitmap (px := RGBA16) bytes16 with
   | some decoded =>
       if decoded.data != indexedExpectedRGBA16Data 7 3 16 then
         throw (IO.userError "palette RGBA16 expansion mismatch")
   | none =>
       throw (IO.userError "palette RGBA16 expansion failed")
-  match Png.decodeBitmap (px := PixelGray16) bytes16 with
+  match Png.decodeBitmap (px := Gray16) bytes16 with
   | some decoded =>
       if decoded.data != indexedExpectedGray16Data 7 3 16 then
         throw (IO.userError "palette Gray16 expansion mismatch")
   | none =>
       throw (IO.userError "palette Gray16 expansion failed")
-  match Png.decodeBitmap (px := PixelGrayAlpha16) bytes16 with
+  match Png.decodeBitmap (px := GrayAlpha16) bytes16 with
   | some decoded =>
       if decoded.data != indexedExpectedGrayAlpha16Data 7 3 16 then
         throw (IO.userError "palette GrayAlpha16 expansion mismatch")
@@ -1508,9 +1508,9 @@ private def expectPalettePng : IO Unit := do
     match Png.encodeIndexedBitmapChecked alphaBmp .fixed with
     | Except.ok bytes => pure bytes
     | Except.error err => throw (IO.userError s!"palette alpha encode failed: {err}")
-  if (Png.decodeBitmap (px := PixelRGBA8) alphaBytes).isSome then
+  if (Png.decodeBitmap (px := RGBA8) alphaBytes).isSome then
     throw (IO.userError "pixel-only palette decode accepted tRNS")
-  match Png.decodeBitmapWithMetadata (px := PixelRGBA8) alphaBytes with
+  match Png.decodeBitmapWithMetadata (px := RGBA8) alphaBytes with
   | some decoded =>
       if decoded.bitmap.data != indexedExpectedRGBA8Data 5 4 4 (some alpha) then
         throw (IO.userError "palette tRNS RGBA expansion mismatch")
@@ -1522,7 +1522,7 @@ private def expectPalettePng : IO Unit := do
           throw (IO.userError "palette metadata missing")
   | none =>
       throw (IO.userError "palette tRNS RGBA metadata decode failed")
-  match Png.decodeBitmapWithMetadata (px := PixelRGB8) alphaBytes with
+  match Png.decodeBitmapWithMetadata (px := RGB8) alphaBytes with
   | some decoded =>
       if decoded.bitmap.data != indexedExpectedRGB8Data 5 4 4 (some alpha) (some (Png.u8 1)) then
         throw (IO.userError "palette tRNS+bKGD RGB composition mismatch")
@@ -1560,7 +1560,7 @@ private def expectPalettePng : IO Unit := do
         { mode := .fixed, colorSpace := some (.gamma gamma) } with
     | Except.ok bytes => pure bytes
     | Except.error err => throw (IO.userError s!"palette gAMA encode failed: {err}")
-  match Png.decodeBitmapWithMetadata (px := PixelRGB8) gammaBytes with
+  match Png.decodeBitmapWithMetadata (px := RGB8) gammaBytes with
   | some decoded =>
       if decoded.bitmap.data != gammaTransformRgb8Data gamma (indexedExpectedRGB8Data 4 2 4) then
         throw (IO.userError "palette gAMA RGB8 decode did not convert samples")
@@ -1574,7 +1574,7 @@ private def expectPalettePng : IO Unit := do
           chromaticities := some Png.PngChromaticities.srgb } with
     | Except.ok bytes => pure bytes
     | Except.error err => throw (IO.userError s!"palette sRGB encode failed: {err}")
-  match Png.decodeBitmapWithMetadata (px := PixelRGB8) srgbBytes with
+  match Png.decodeBitmapWithMetadata (px := RGB8) srgbBytes with
   | some decoded =>
       if decoded.bitmap.data != indexedExpectedRGB8Data 4 2 4 then
         throw (IO.userError "palette sRGB decode changed already-sRGB samples")
@@ -1590,7 +1590,7 @@ private def expectPalettePng : IO Unit := do
           chromaticities := some wideChromaticities } with
     | Except.ok bytes => pure bytes
     | Except.error err => throw (IO.userError s!"palette cHRM encode failed: {err}")
-  match Png.decodeBitmapWithMetadata (px := PixelRGB8) chrmBytes with
+  match Png.decodeBitmapWithMetadata (px := RGB8) chrmBytes with
   | some decoded =>
       if decoded.bitmap.data !=
           chrmTransformRgb8Data wideChromaticities (some gamma)
@@ -1678,16 +1678,16 @@ private def expectPalettePng : IO Unit := do
       ByteArray.empty)
     "palette bKGD after IDAT"
 
-private def filterRGB8Fixture : BitmapRGB8 :=
-  Bitmap.ofPixelFn 6 4 (fun idx : Fin (6 * 4) =>
+private def filterRGB8Fixture : Bitmap.RGB8 :=
+  Bitmap.ofFn 6 4 (fun idx : Fin (6 * 4) =>
     let x := idx.val % 6
     let y := idx.val / 6
     { r := Png.u8 (30 + x * 17 + y * 9)
       g := Png.u8 (20 + x * 11 + y * 23)
       b := Png.u8 (200 - x * 13 + y * 5) })
 
-private def filterRGBA8Fixture : BitmapRGBA8 :=
-  BitmapRGBA8.ofPixelFn 5 3 (fun idx : Fin (5 * 3) =>
+private def filterRGBA8Fixture : Bitmap.RGBA8 :=
+  Bitmap.RGBA8.ofFn 5 3 (fun idx : Fin (5 * 3) =>
     let x := idx.val % 5
     let y := idx.val / 5
     { r := Png.u8 (x * 40 + y * 7)
@@ -1695,23 +1695,23 @@ private def filterRGBA8Fixture : BitmapRGBA8 :=
       b := Png.u8 (50 + x * 21 + y * 15)
       a := Png.u8 (90 + x * 19 + y * 17) })
 
-private def filterGray8Fixture : BitmapGray8 :=
-  BitmapGray8.ofPixelFn 7 3 (fun idx : Fin (7 * 3) =>
+private def filterGray8Fixture : Bitmap.Gray8 :=
+  Bitmap.Gray8.ofFn 7 3 (fun idx : Fin (7 * 3) =>
     let x := idx.val % 7
     let y := idx.val / 7
     { v := Png.u8 (x * 31 + y * 37) })
 
-private def filterGray16Fixture : BitmapGray16 :=
-  BitmapGray16.ofPixelFn 4 3 (fun idx : Fin (4 * 3) =>
+private def filterGray16Fixture : Bitmap.Gray16 :=
+  Bitmap.Gray16.ofFn 4 3 (fun idx : Fin (4 * 3) =>
     let x := idx.val % 4
     let y := idx.val / 4
     { v := u16 (0x1200 + x * 0x101 + y * 0x1111) })
 
-private def adaptiveNonzeroFixture : BitmapRGB8 :=
-  Bitmap.ofPixelFn 8 4 (fun _idx : Fin (8 * 4) =>
+private def adaptiveNonzeroFixture : Bitmap.RGB8 :=
+  Bitmap.ofFn 8 4 (fun _idx : Fin (8 * 4) =>
     { r := Png.u8 80, g := Png.u8 80, b := Png.u8 80 })
 
-private def expectFilteredBitmapRoundTrip {px : Type} [Pixel px] [Png.PngPixel px]
+private def expectFilteredBitmapRoundTrip {px : Type} [PixelFormat px] [Png.PixelFormat px]
     (name : String) (bmp : Bitmap px) (strategy : Png.PngFilterStrategy) : IO ByteArray := do
   match Png.encodeBitmapWithOptionsChecked (px := px) bmp
       { mode := .fixed, filter := strategy } with
@@ -1729,13 +1729,13 @@ private def expectFilteredBitmapRoundTrip {px : Type} [Pixel px] [Png.PngPixel p
           throw (IO.userError s!"{name}: filtered decode failed")
 
 private def expectFilteredGray1RoundTrip
-    (name : String) (bmp : BitmapGray1) (strategy : Png.PngFilterStrategy) :
+    (name : String) (bmp : Bitmap.Gray1) (strategy : Png.PngFilterStrategy) :
     IO ByteArray := do
-  match Png.encodeBitmapGray1WithOptionsChecked bmp { mode := .fixed, filter := strategy } with
+  match Png.encodeGray1BitmapWithOptionsChecked bmp { mode := .fixed, filter := strategy } with
   | Except.error err =>
       throw (IO.userError s!"{name}: filtered Gray1 encode failed: {err}")
   | Except.ok bytes =>
-      match Png.decodeBitmapGray1 bytes with
+      match Png.decodeGray1Bitmap bytes with
       | some decoded =>
           if decoded != bmp then
             throw (IO.userError s!"{name}: filtered Gray1 round-trip mismatch")
@@ -1760,22 +1760,22 @@ private def expectPngEncodeFilters : IO Unit := do
     let strategy := Png.PngFilterStrategy.fixed filter
     let rgbBytes ← expectFilteredBitmapRoundTrip "RGB8 fixed filter" filterRGB8Fixture strategy
     expectRawFilterByte "RGB8 fixed filter" rgbBytes
-      (filterRGB8Fixture.size.width * bytesPerPixelRGB) filterRGB8Fixture.size.height filter.toByte
+      (filterRGB8Fixture.size.width * RGB8.bytesPerPixel) filterRGB8Fixture.size.height filter.toByte
     let rgbaBytes ← expectFilteredBitmapRoundTrip "RGBA8 fixed filter" filterRGBA8Fixture strategy
     expectRawFilterByte "RGBA8 fixed filter" rgbaBytes
-      (filterRGBA8Fixture.size.width * bytesPerPixelRGBA) filterRGBA8Fixture.size.height filter.toByte
+      (filterRGBA8Fixture.size.width * RGBA8.bytesPerPixel) filterRGBA8Fixture.size.height filter.toByte
     let grayBytes ← expectFilteredBitmapRoundTrip "Gray8 fixed filter" filterGray8Fixture strategy
     expectRawFilterByte "Gray8 fixed filter" grayBytes
-      (filterGray8Fixture.size.width * bytesPerPixelGray) filterGray8Fixture.size.height filter.toByte
+      (filterGray8Fixture.size.width * Gray8.bytesPerPixel) filterGray8Fixture.size.height filter.toByte
     let grayAlphaBytes ← expectFilteredBitmapRoundTrip "GrayAlpha8 fixed filter" grayAlphaFixture strategy
     expectRawFilterByte "GrayAlpha8 fixed filter" grayAlphaBytes
-      (grayAlphaFixture.size.width * bytesPerPixelGrayAlpha) grayAlphaFixture.size.height filter.toByte
+      (grayAlphaFixture.size.width * GrayAlpha8.bytesPerPixel) grayAlphaFixture.size.height filter.toByte
     let rgb16Bytes ← expectFilteredBitmapRoundTrip "RGB16 fixed filter" rgb16DownsampleFixture strategy
     expectRawFilterByte "RGB16 fixed filter" rgb16Bytes
-      (rgb16DownsampleFixture.size.width * bytesPerPixelRGB16) rgb16DownsampleFixture.size.height filter.toByte
+      (rgb16DownsampleFixture.size.width * RGB16.bytesPerPixel) rgb16DownsampleFixture.size.height filter.toByte
     let gray16Bytes ← expectFilteredBitmapRoundTrip "Gray16 fixed filter" filterGray16Fixture strategy
     expectRawFilterByte "Gray16 fixed filter" gray16Bytes
-      (filterGray16Fixture.size.width * bytesPerPixelGray16) filterGray16Fixture.size.height filter.toByte
+      (filterGray16Fixture.size.width * Gray16.bytesPerPixel) filterGray16Fixture.size.height filter.toByte
     for w in [1, 7, 8, 9, 17] do
       let bmp := gray1FixtureBitmap w 4
       let bytes ← expectFilteredGray1RoundTrip "Gray1 fixed filter" bmp strategy
@@ -1783,11 +1783,11 @@ private def expectPngEncodeFilters : IO Unit := do
         (gray1RowBytes bmp.size.width) bmp.size.height filter.toByte
 
   let defaultBytes ←
-    match Png.encodeBitmapChecked (px := PixelRGB8) filterRGB8Fixture .fixed with
+    match Png.encodeBitmapChecked (px := RGB8) filterRGB8Fixture .fixed with
     | Except.ok bytes => pure bytes
     | Except.error err => throw (IO.userError err)
   let optionDefaultBytes ←
-    match Png.encodeBitmapWithOptionsChecked (px := PixelRGB8) filterRGB8Fixture
+    match Png.encodeBitmapWithOptionsChecked (px := RGB8) filterRGB8Fixture
         { mode := .fixed, filter := .none } with
     | Except.ok bytes => pure bytes
     | Except.error err => throw (IO.userError err)
@@ -1799,7 +1799,7 @@ private def expectPngEncodeFilters : IO Unit := do
   match inflatedPngRaw? adaptiveBytes with
   | some raw =>
       if !rawHasNonzeroFilter raw
-          (adaptiveNonzeroFixture.size.width * bytesPerPixelRGB)
+          (adaptiveNonzeroFixture.size.width * RGB8.bytesPerPixel)
           adaptiveNonzeroFixture.size.height then
         throw (IO.userError "adaptive filter failed to choose any nonzero row filter")
   | none =>
@@ -1808,39 +1808,39 @@ private def expectPngEncodeFilters : IO Unit := do
     expectFilteredGray1RoundTrip "Gray1 adaptive filter" (gray1FixtureBitmap 17 4) .adaptive
   if (inflatedPngRaw? gray1Adaptive).isNone then
     throw (IO.userError "Gray1 adaptive filter PNG failed to inflate")
-  let zeroBmp := mkBlankBitmap 5 3 { r := Png.u8 0, g := Png.u8 0, b := Png.u8 0 }
+  let zeroBmp := Bitmap.fill (px := RGB8) 5 3 { r := Png.u8 0, g := Png.u8 0, b := Png.u8 0 }
   let zeroBytes ← expectFilteredBitmapRoundTrip "adaptive zero tie" zeroBmp .adaptive
   match inflatedPngRaw? zeroBytes with
   | some raw =>
-      if !allRowsHaveFilter raw (zeroBmp.size.width * bytesPerPixelRGB) zeroBmp.size.height 0 then
+      if !allRowsHaveFilter raw (zeroBmp.size.width * RGB8.bytesPerPixel) zeroBmp.size.height 0 then
         throw (IO.userError "adaptive all-zero tie did not choose filter 0")
   | none =>
       throw (IO.userError "adaptive zero PNG failed to inflate")
 
 private def expect16To8Downsample : IO Unit := do
   let rgbBytes ← encodeFixturePng rgb16DownsampleFixture
-  match Png.decodeBitmap (px := PixelRGB8) rgbBytes with
+  match Png.decodeBitmap (px := RGB8) rgbBytes with
   | some bmp =>
       if bmp.data != ByteArray.mk #[0x12, 0x34, 0xfe, 0x01, 0x80, 0x00] then
         throw (IO.userError "RGB16 -> RGB8 downsample used unexpected bytes")
   | none =>
       throw (IO.userError "RGB16 -> RGB8 downsample failed")
   let rgbaBytes ← encodeFixturePng rgba16DownsampleFixture
-  match Png.decodeBitmap (px := PixelRGBA8) rgbaBytes with
+  match Png.decodeBitmap (px := RGBA8) rgbaBytes with
   | some bmp =>
       if bmp.data != ByteArray.mk #[0x12, 0x34, 0xfe, 0x77, 0x01, 0x80, 0x00, 0xff] then
         throw (IO.userError "RGBA16 -> RGBA8 downsample used unexpected bytes")
   | none =>
       throw (IO.userError "RGBA16 -> RGBA8 downsample failed")
   let grayBytes ← encodeFixturePng gray16DownsampleFixture
-  match Png.decodeBitmap (px := PixelGray8) grayBytes with
+  match Png.decodeBitmap (px := Gray8) grayBytes with
   | some bmp =>
       if bmp.data != ByteArray.mk #[0x12, 0x80, 0x00] then
         throw (IO.userError "Gray16 -> Gray8 downsample used unexpected bytes")
   | none =>
       throw (IO.userError "Gray16 -> Gray8 downsample failed")
   let grayAlphaBytes ← encodeFixturePng grayAlpha16DownsampleFixture
-  match Png.decodeBitmap (px := PixelGrayAlpha8) grayAlphaBytes with
+  match Png.decodeBitmap (px := GrayAlpha8) grayAlphaBytes with
   | some bmp =>
       if bmp.data != ByteArray.mk #[0x12, 0x34, 0x80, 0x00] then
         throw (IO.userError "GrayAlpha16 -> GrayAlpha8 downsample used unexpected bytes")
@@ -1848,7 +1848,7 @@ private def expect16To8Downsample : IO Unit := do
       throw (IO.userError "GrayAlpha16 -> GrayAlpha8 downsample failed")
 
 private def expect16BitMetadata : IO Unit := do
-  match Png.decodeBitmapWithMetadata (px := PixelRGBA8) rgb16MetadataPng with
+  match Png.decodeBitmapWithMetadata (px := RGBA8) rgb16MetadataPng with
   | some decoded =>
       if decoded.bitmap.data != ByteArray.mk
           #[0x12, 0x56, 0x9a, 0x00, 0x20, 0x40, 0x60, 0xff] then
@@ -1861,7 +1861,7 @@ private def expect16BitMetadata : IO Unit := do
           throw (IO.userError "RGB16 tRNS metadata was missing")
   | none =>
       throw (IO.userError "RGB16+tRNS -> RGBA8 metadata decode failed")
-  match Png.decodeBitmapWithMetadata (px := PixelRGB8) rgb16MetadataPng with
+  match Png.decodeBitmapWithMetadata (px := RGB8) rgb16MetadataPng with
   | some decoded =>
       if decoded.bitmap.data != ByteArray.mk #[0x21, 0x43, 0x65, 0x20, 0x40, 0x60] then
         throw (IO.userError "RGB16+tRNS+bKGD -> RGB8 composition mismatch")
@@ -1873,14 +1873,14 @@ private def expect16BitMetadata : IO Unit := do
           throw (IO.userError "RGB16 bKGD metadata was missing")
   | none =>
       throw (IO.userError "RGB16+tRNS+bKGD -> RGB8 metadata decode failed")
-  match Png.decodeBitmapWithMetadata (px := PixelRGB16) rgb16MetadataPng with
+  match Png.decodeBitmapWithMetadata (px := RGB16) rgb16MetadataPng with
   | some decoded =>
       if decoded.bitmap.data != ByteArray.mk
           #[0x21, 0x00, 0x43, 0x00, 0x65, 0x00, 0x20, 0x01, 0x40, 0x02, 0x60, 0x03] then
         throw (IO.userError "RGB16+tRNS+bKGD -> RGB16 composition mismatch")
   | none =>
       throw (IO.userError "RGB16+tRNS+bKGD -> RGB16 metadata decode failed")
-  match Png.decodeBitmapWithMetadata (px := PixelRGBA16) rgb16MetadataPng with
+  match Png.decodeBitmapWithMetadata (px := RGBA16) rgb16MetadataPng with
   | some decoded =>
       if decoded.bitmap.data != ByteArray.mk
           #[0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0x00, 0x00,
@@ -1888,7 +1888,7 @@ private def expect16BitMetadata : IO Unit := do
         throw (IO.userError "RGB16+tRNS -> RGBA16 alpha mismatch")
   | none =>
       throw (IO.userError "RGB16+tRNS -> RGBA16 metadata decode failed")
-  match Png.decodeBitmapWithMetadata (px := PixelGray8) grayAlpha16MetadataPng with
+  match Png.decodeBitmapWithMetadata (px := Gray8) grayAlpha16MetadataPng with
   | some decoded =>
       if decoded.bitmap.data != ByteArray.mk #[0x30, 0x80] then
         throw (IO.userError "GrayAlpha16+bKGD -> Gray8 composition mismatch")
@@ -1900,13 +1900,13 @@ private def expect16BitMetadata : IO Unit := do
           throw (IO.userError "GrayAlpha16 bKGD metadata was missing")
   | none =>
       throw (IO.userError "GrayAlpha16+bKGD -> Gray8 metadata decode failed")
-  match Png.decodeBitmapWithMetadata (px := PixelGray16) grayAlpha16MetadataPng with
+  match Png.decodeBitmapWithMetadata (px := Gray16) grayAlpha16MetadataPng with
   | some decoded =>
       if decoded.bitmap.data != ByteArray.mk #[0x30, 0x00, 0x80, 0x01] then
         throw (IO.userError "GrayAlpha16+bKGD -> Gray16 composition mismatch")
   | none =>
       throw (IO.userError "GrayAlpha16+bKGD -> Gray16 metadata decode failed")
-  match Png.decodeBitmapWithMetadata (px := PixelRGB8) rgba16MetadataPng with
+  match Png.decodeBitmapWithMetadata (px := RGB8) rgba16MetadataPng with
   | some decoded =>
       if decoded.bitmap.data != ByteArray.mk #[0x21, 0x43, 0x65, 0x20, 0x40, 0x60] then
         throw (IO.userError "RGBA16+bKGD -> RGB8 composition mismatch")
@@ -1914,24 +1914,24 @@ private def expect16BitMetadata : IO Unit := do
       throw (IO.userError "RGBA16+bKGD -> RGB8 metadata decode failed")
 
 private def expectGrayAlphaFixtures : IO Unit := do
-  match Png.decodeBitmap (px := PixelGrayAlpha8) grayAlphaPng with
+  match Png.decodeBitmap (px := GrayAlpha8) grayAlphaPng with
   | some bmp =>
       if bmp != grayAlphaFixture then
         throw (IO.userError "gray+alpha PNG did not decode exactly")
   | none =>
       throw (IO.userError "gray+alpha PNG failed to decode")
-  match Png.decodeBitmap (px := PixelRGBA8) grayAlphaPng with
+  match Png.decodeBitmap (px := RGBA8) grayAlphaPng with
   | some bmp =>
       if bmp.size.width != 2 || bmp.size.height != 2 ||
           bmp.data != grayAlphaFixtureExpectedRGBAData then
         throw (IO.userError "gray+alpha PNG did not expand to RGBA")
   | none =>
       throw (IO.userError "gray+alpha PNG failed to decode as RGBA")
-  if (Png.decodeBitmap (px := PixelRGB8) grayAlphaPng).isSome then
+  if (Png.decodeBitmap (px := RGB8) grayAlphaPng).isSome then
     throw (IO.userError "pixel-only RGB decode accepted gray+alpha without bKGD")
-  if (Png.decodeBitmap (px := PixelGray8) grayAlphaPng).isSome then
+  if (Png.decodeBitmap (px := Gray8) grayAlphaPng).isSome then
     throw (IO.userError "pixel-only Gray decode accepted gray+alpha without bKGD")
-  match Png.decodeBitmapWithMetadata (px := PixelGrayAlpha8) grayAlphaPngWithBkgd with
+  match Png.decodeBitmapWithMetadata (px := GrayAlpha8) grayAlphaPngWithBkgd with
   | some decoded =>
       if decoded.bitmap != grayAlphaFixture then
         throw (IO.userError "bKGD changed exact gray+alpha decode")
@@ -1943,24 +1943,24 @@ private def expectGrayAlphaFixtures : IO Unit := do
           throw (IO.userError "gray+alpha bKGD metadata was missing")
   | none =>
       throw (IO.userError "metadata-aware gray+alpha bKGD decode failed")
-  match Png.decodeBitmapWithMetadata (px := PixelRGB8) grayAlphaPngWithBkgd with
+  match Png.decodeBitmapWithMetadata (px := RGB8) grayAlphaPngWithBkgd with
   | some decoded =>
       if decoded.bitmap.data != grayAlphaOverBackgroundRGBData (Png.u8 100) then
         throw (IO.userError "gray+alpha bKGD RGB composition mismatch")
   | none =>
       throw (IO.userError "gray+alpha bKGD RGB decode failed")
-  match Png.decodeBitmapWithMetadata (px := PixelGray8) grayAlphaPngWithBkgd with
+  match Png.decodeBitmapWithMetadata (px := Gray8) grayAlphaPngWithBkgd with
   | some decoded =>
       if decoded.bitmap.data != grayAlphaOverBackgroundGrayData (Png.u8 100) then
         throw (IO.userError "gray+alpha bKGD Gray composition mismatch")
   | none =>
       throw (IO.userError "gray+alpha bKGD Gray decode failed")
-  if (Png.decodeBitmapWithMetadata (px := PixelRGBA8) grayAlphaPngWithTrns).isSome then
+  if (Png.decodeBitmapWithMetadata (px := RGBA8) grayAlphaPngWithTrns).isSome then
     throw (IO.userError "metadata-aware decoder accepted tRNS for gray+alpha")
 
 private def expectAncDecodeOk (path : System.FilePath) : IO Unit := do
   let bytes <- IO.FS.readBinFile path
-  match Png.decodeBitmap (px := PixelRGB8) bytes with
+  match Png.decodeBitmap (px := RGB8) bytes with
   | some bmp =>
       if bmp.size.width != 4 || bmp.size.height != 4 then
         throw (IO.userError s!"{path}: unexpected dimensions {bmp.size.width}x{bmp.size.height}")
@@ -1971,7 +1971,7 @@ private def expectAncDecodeOk (path : System.FilePath) : IO Unit := do
 
 private def expectAncTrnsRgbaOk (path : System.FilePath) : IO Unit := do
   let bytes <- IO.FS.readBinFile path
-  match Png.decodeBitmapWithMetadata (px := PixelRGBA8) bytes with
+  match Png.decodeBitmapWithMetadata (px := RGBA8) bytes with
   | some decoded =>
       if decoded.bitmap.size.width != 4 || decoded.bitmap.size.height != 4 then
         throw (IO.userError s!"{path}: unexpected dimensions {decoded.bitmap.size.width}x{decoded.bitmap.size.height}")
@@ -1990,7 +1990,7 @@ private def expectAncTrnsRgbaOk (path : System.FilePath) : IO Unit := do
 
 private def expectAncTrnsBkgdRgbOk (path : System.FilePath) : IO Unit := do
   let bytes <- IO.FS.readBinFile path
-  match Png.decodeBitmapWithMetadata (px := PixelRGB8) bytes with
+  match Png.decodeBitmapWithMetadata (px := RGB8) bytes with
   | some decoded =>
       if decoded.bitmap.size.width != 4 || decoded.bitmap.size.height != 4 then
         throw (IO.userError s!"{path}: unexpected dimensions {decoded.bitmap.size.width}x{decoded.bitmap.size.height}")
@@ -2010,7 +2010,7 @@ private def expectAncTrnsBkgdRgbOk (path : System.FilePath) : IO Unit := do
 
 private def expectAncRgbaBkgdRgbOk (path : System.FilePath) : IO Unit := do
   let bytes <- IO.FS.readBinFile path
-  match Png.decodeBitmapWithMetadata (px := PixelRGB8) bytes with
+  match Png.decodeBitmapWithMetadata (px := RGB8) bytes with
   | some decoded =>
       if decoded.bitmap.size.width != 4 || decoded.bitmap.size.height != 4 then
         throw (IO.userError s!"{path}: unexpected dimensions {decoded.bitmap.size.width}x{decoded.bitmap.size.height}")
@@ -2029,7 +2029,7 @@ private def expectAncRgbaBkgdRgbOk (path : System.FilePath) : IO Unit := do
 
 private def expectAncBkgdRgbOk (path : System.FilePath) : IO Unit := do
   let bytes <- IO.FS.readBinFile path
-  match Png.decodeBitmapWithMetadata (px := PixelRGB8) bytes with
+  match Png.decodeBitmapWithMetadata (px := RGB8) bytes with
   | some decoded =>
       if decoded.bitmap.size.width != 4 || decoded.bitmap.size.height != 4 then
         throw (IO.userError s!"{path}: unexpected dimensions {decoded.bitmap.size.width}x{decoded.bitmap.size.height}")
@@ -2048,7 +2048,7 @@ private def expectAncBkgdRgbOk (path : System.FilePath) : IO Unit := do
 
 private def expectAncBkgdGrayOk (path : System.FilePath) : IO Unit := do
   let bytes <- IO.FS.readBinFile path
-  match Png.decodeBitmapWithMetadata (px := PixelGray8) bytes with
+  match Png.decodeBitmapWithMetadata (px := Gray8) bytes with
   | some decoded =>
       if decoded.bitmap.size.width != 4 || decoded.bitmap.size.height != 4 then
         throw (IO.userError s!"{path}: unexpected dimensions {decoded.bitmap.size.width}x{decoded.bitmap.size.height}")
@@ -2065,7 +2065,7 @@ private def expectAncBkgdGrayOk (path : System.FilePath) : IO Unit := do
 
 private def expectAncDecodeNone (path : System.FilePath) (label : String) : IO Unit := do
   let bytes <- IO.FS.readBinFile path
-  match Png.decodeBitmap (px := PixelRGB8) bytes with
+  match Png.decodeBitmap (px := RGB8) bytes with
   | some _ =>
       throw (IO.userError s!"{path}: decoder accepted a {label} fixture that should be rejected")
   | none =>
@@ -2073,22 +2073,22 @@ private def expectAncDecodeNone (path : System.FilePath) (label : String) : IO U
 
 private def expectAncMetadataDecodeNone (path : System.FilePath) (label : String) : IO Unit := do
   let bytes <- IO.FS.readBinFile path
-  match Png.decodeBitmapWithMetadata (px := PixelRGBA8) bytes with
+  match Png.decodeBitmapWithMetadata (px := RGBA8) bytes with
   | some _ =>
       throw (IO.userError s!"{path}: metadata-aware decoder accepted a {label} fixture that should be rejected")
   | none =>
       pure ()
 
 private def expectMetadataDecodeNoneBytes (bytes : ByteArray) (label : String) : IO Unit := do
-  match Png.decodeBitmapWithMetadata (px := PixelRGBA8) bytes with
+  match Png.decodeBitmapWithMetadata (px := RGBA8) bytes with
   | some _ =>
       throw (IO.userError s!"metadata-aware decoder accepted invalid metadata chunk: {label}")
   | none =>
       pure ()
 
 private def expectColorSpaceChunks : IO Unit := do
-  let rgbFixture : BitmapRGB8 :=
-    Bitmap.ofPixelFn 3 1 (fun idx : Fin (3 * 1) =>
+  let rgbFixture : Bitmap.RGB8 :=
+    Bitmap.ofFn 3 1 (fun idx : Fin (3 * 1) =>
       match idx.val with
       | 0 => { r := Png.u8 32, g := Png.u8 96, b := Png.u8 160 }
       | 1 => { r := Png.u8 64, g := Png.u8 128, b := Png.u8 192 }
@@ -2096,7 +2096,7 @@ private def expectColorSpaceChunks : IO Unit := do
   for intent in
       #[Png.PngSrgbIntent.perceptual, .relativeColorimetric, .saturation, .absoluteColorimetric] do
     let bytes := pngWithAncillary rgbFixture (srgbChunk intent)
-    match Png.decodeBitmapWithMetadata (px := PixelRGB8) bytes with
+    match Png.decodeBitmapWithMetadata (px := RGB8) bytes with
     | some decoded =>
         if decoded.bitmap.data != rgbFixture.data then
           throw (IO.userError "sRGB changed already-sRGB RGB samples")
@@ -2106,40 +2106,40 @@ private def expectColorSpaceChunks : IO Unit := do
         throw (IO.userError "sRGB fixture failed to decode")
   let gamma := 100000
   let gammaBytes := pngWithAncillary rgbFixture (gamaChunk gamma)
-  match Png.decodeBitmap (px := PixelRGB8) gammaBytes with
+  match Png.decodeBitmap (px := RGB8) gammaBytes with
   | some bmp =>
       if bmp.data != gammaTransformRgb8Data gamma rgbFixture.data then
         throw (IO.userError "gAMA RGB8 decode did not convert samples to sRGB")
   | none =>
       throw (IO.userError "gAMA RGB8 fixture failed to decode")
-  match Png.decodeBitmapWithMetadata (px := PixelRGB8) gammaBytes with
+  match Png.decodeBitmapWithMetadata (px := RGB8) gammaBytes with
   | some decoded =>
       if decoded.metadata.gamma != some gamma then
         throw (IO.userError "gAMA metadata was not preserved")
   | none =>
       throw (IO.userError "gAMA metadata decode failed")
-  let rgbaFixture : BitmapRGBA8 :=
-    BitmapRGBA8.ofPixelFn 1 1 (fun _ =>
+  let rgbaFixture : Bitmap.RGBA8 :=
+    Bitmap.RGBA8.ofFn 1 1 (fun _ =>
       { r := Png.u8 64, g := Png.u8 128, b := Png.u8 192, a := Png.u8 77 })
-  match Png.decodeBitmap (px := PixelRGBA8) (pngWithAncillary rgbaFixture (gamaChunk gamma)) with
+  match Png.decodeBitmap (px := RGBA8) (pngWithAncillary rgbaFixture (gamaChunk gamma)) with
   | some bmp =>
       if bmp.data != gammaTransformRgba8Data gamma rgbaFixture.data then
         throw (IO.userError "gAMA RGBA8 decode changed alpha or missed color conversion")
   | none =>
       throw (IO.userError "gAMA RGBA8 fixture failed to decode")
-  let gray16Fixture : BitmapGray16 :=
-    BitmapGray16.ofPixelFn 2 1 (fun idx : Fin (2 * 1) =>
+  let gray16Fixture : Bitmap.Gray16 :=
+    Bitmap.Gray16.ofFn 2 1 (fun idx : Fin (2 * 1) =>
       match idx.val with
       | 0 => { v := u16 0x4000 }
       | _ => { v := u16 0x9000 })
-  match Png.decodeBitmap (px := PixelGray16) (pngWithAncillary gray16Fixture (gamaChunk gamma)) with
+  match Png.decodeBitmap (px := Gray16) (pngWithAncillary gray16Fixture (gamaChunk gamma)) with
   | some bmp =>
       if bmp.data != gammaTransformGray16Data gamma gray16Fixture.data then
         throw (IO.userError "gAMA Gray16 decode did not convert samples to sRGB")
   | none =>
       throw (IO.userError "gAMA Gray16 fixture failed to decode")
   let compatBytes := pngWithAncillary rgbFixture (gamaChunk 45455 ++ srgbChunk .perceptual)
-  match Png.decodeBitmapWithMetadata (px := PixelRGB8) compatBytes with
+  match Png.decodeBitmapWithMetadata (px := RGB8) compatBytes with
   | some decoded =>
       if decoded.bitmap.data != rgbFixture.data then
         throw (IO.userError "sRGB precedence failed for compatible gAMA+sRGB")
@@ -2148,20 +2148,20 @@ private def expectColorSpaceChunks : IO Unit := do
   | none =>
       throw (IO.userError "compatible gAMA+sRGB fixture failed to decode")
   let chrmGammaBytes := pngWithAncillary rgbFixture (chrmChunk wideChromaticities ++ gamaChunk gamma)
-  match Png.decodeBitmap (px := PixelRGB8) chrmGammaBytes with
+  match Png.decodeBitmap (px := RGB8) chrmGammaBytes with
   | some bmp =>
       if bmp.data != chrmTransformRgb8Data wideChromaticities (some gamma) rgbFixture.data then
         throw (IO.userError "cHRM+gAMA RGB8 decode did not convert samples to sRGB")
   | none =>
       throw (IO.userError "cHRM+gAMA RGB8 fixture failed to decode")
-  match Png.decodeBitmapWithMetadata (px := PixelRGB8) chrmGammaBytes with
+  match Png.decodeBitmapWithMetadata (px := RGB8) chrmGammaBytes with
   | some decoded =>
       if decoded.metadata.chromaticities != some wideChromaticities ||
           decoded.metadata.gamma != some gamma then
         throw (IO.userError "cHRM+gAMA metadata was not preserved")
   | none =>
       throw (IO.userError "cHRM+gAMA metadata decode failed")
-  match Png.decodeBitmap (px := PixelRGBA8)
+  match Png.decodeBitmap (px := RGBA8)
       (pngWithAncillary rgbaFixture (chrmChunk wideChromaticities ++ gamaChunk gamma)) with
   | some bmp =>
       if bmp.data != chrmTransformRgba8Data wideChromaticities (some gamma) rgbaFixture.data then
@@ -2169,26 +2169,26 @@ private def expectColorSpaceChunks : IO Unit := do
   | none =>
       throw (IO.userError "cHRM+gAMA RGBA8 fixture failed to decode")
   let chrmLinearBytes := pngWithAncillary rgbFixture (chrmChunk wideChromaticities)
-  match Png.decodeBitmap (px := PixelRGB8) chrmLinearBytes with
+  match Png.decodeBitmap (px := RGB8) chrmLinearBytes with
   | some bmp =>
       if bmp.data != chrmTransformRgb8Data wideChromaticities none rgbFixture.data then
         throw (IO.userError "cHRM without gAMA did not use linear-source conversion")
   | none =>
       throw (IO.userError "linear cHRM RGB8 fixture failed to decode")
-  match Png.decodeBitmap (px := PixelGray8) chrmGammaBytes with
+  match Png.decodeBitmap (px := Gray8) chrmGammaBytes with
   | some bmp =>
       if bmp.data != chrmTransformGray8Data wideChromaticities (some gamma) rgbFixture.data then
         throw (IO.userError "cHRM RGB-to-gray decode did not use sRGB luminance")
   | none =>
       throw (IO.userError "cHRM RGB-to-gray fixture failed to decode")
-  match Png.decodeBitmap (px := PixelGrayAlpha8)
+  match Png.decodeBitmap (px := GrayAlpha8)
       (pngWithAncillary rgbaFixture (chrmChunk wideChromaticities ++ gamaChunk gamma)) with
   | some bmp =>
       if bmp.data != chrmTransformGrayAlpha8Data wideChromaticities (some gamma) rgbaFixture.data then
         throw (IO.userError "cHRM RGBA-to-gray-alpha decode missed luma or alpha")
   | none =>
       throw (IO.userError "cHRM RGBA-to-gray-alpha fixture failed to decode")
-  match Png.decodeBitmap (px := PixelRGB16)
+  match Png.decodeBitmap (px := RGB16)
       (pngWithAncillary rgb16MetadataFixture (chrmChunk wideChromaticities ++ gamaChunk gamma)) with
   | some bmp =>
       if bmp.data != chrmTransformRgb16Data wideChromaticities (some gamma)
@@ -2199,7 +2199,7 @@ private def expectColorSpaceChunks : IO Unit := do
   let compatChrmBytes :=
     pngWithAncillary rgbFixture
       (gamaChunk 45455 ++ chrmChunk Png.PngChromaticities.srgb ++ srgbChunk .perceptual)
-  match Png.decodeBitmapWithMetadata (px := PixelRGB8) compatChrmBytes with
+  match Png.decodeBitmapWithMetadata (px := RGB8) compatChrmBytes with
   | some decoded =>
       if decoded.bitmap.data != rgbFixture.data then
         throw (IO.userError "sRGB precedence failed for compatible gAMA+cHRM+sRGB")
@@ -2209,10 +2209,10 @@ private def expectColorSpaceChunks : IO Unit := do
         throw (IO.userError "compatible gAMA+cHRM+sRGB metadata was not preserved")
   | none =>
       throw (IO.userError "compatible gAMA+cHRM+sRGB fixture failed to decode")
-  match Png.encodeBitmapWithOptionsChecked (px := PixelRGB8) rgbFixture
+  match Png.encodeBitmapWithOptionsChecked (px := RGB8) rgbFixture
       { mode := .fixed, chromaticities := some wideChromaticities } with
   | Except.ok bytes =>
-      match Png.decodeBitmapWithMetadata (px := PixelRGB8) bytes with
+      match Png.decodeBitmapWithMetadata (px := RGB8) bytes with
       | some decoded =>
           if decoded.metadata.chromaticities != some wideChromaticities then
             throw (IO.userError "encoded cHRM metadata failed to parse")
@@ -2247,14 +2247,14 @@ private def expectColorSpaceChunks : IO Unit := do
   expectMetadataDecodeNoneBytes
     (pngWithPostIdatAncillary rgbFixture (gamaChunk gamma))
     "gAMA after IDAT"
-  match Png.encodeBitmapWithOptionsChecked (px := PixelRGB8) rgbFixture
+  match Png.encodeBitmapWithOptionsChecked (px := RGB8) rgbFixture
       { mode := .fixed, colorSpace := some (.srgb .perceptual true) } with
   | Except.ok bytes =>
       if bytes.extract 37 41 != Png.gamaTypeBytes then
         throw (IO.userError "encoder did not emit compatibility gAMA before sRGB")
       if bytes.extract 53 57 != Png.srgbTypeBytes then
         throw (IO.userError "encoder did not emit sRGB after compatibility gAMA")
-      match Png.decodeBitmapWithMetadata (px := PixelRGB8) bytes with
+      match Png.decodeBitmapWithMetadata (px := RGB8) bytes with
       | some decoded =>
           if decoded.metadata.gamma != some 45455 || decoded.metadata.srgb != some .perceptual then
             throw (IO.userError "encoded sRGB metadata failed to parse")
@@ -2262,7 +2262,7 @@ private def expectColorSpaceChunks : IO Unit := do
           throw (IO.userError "encoded sRGB PNG failed to decode")
   | Except.error err =>
       throw (IO.userError err)
-  match Png.encodeBitmapWithOptionsChecked (px := PixelRGB8) rgbFixture
+  match Png.encodeBitmapWithOptionsChecked (px := RGB8) rgbFixture
       { mode := .fixed, colorSpace := some (.gamma 0) } with
   | Except.ok _ =>
       throw (IO.userError "encoder accepted zero gAMA option")
@@ -2270,15 +2270,15 @@ private def expectColorSpaceChunks : IO Unit := do
       pure ()
 
 private def expectTimeChunks : IO Unit := do
-  let rgbFixture : BitmapRGB8 :=
-    Bitmap.ofPixelFn 2 1 (fun idx : Fin (2 * 1) =>
+  let rgbFixture : Bitmap.RGB8 :=
+    Bitmap.ofFn 2 1 (fun idx : Fin (2 * 1) =>
       match idx.val with
       | 0 => { r := Png.u8 12, g := Png.u8 34, b := Png.u8 56 }
       | _ => { r := Png.u8 78, g := Png.u8 90, b := Png.u8 123 })
-  match Png.encodeBitmapWithOptionsChecked (px := PixelRGB8) rgbFixture
+  match Png.encodeBitmapWithOptionsChecked (px := RGB8) rgbFixture
       { mode := .fixed, modificationTime := some fixedPngTime } with
   | Except.ok bytes =>
-      match Png.decodeBitmapWithMetadata (px := PixelRGB8) bytes with
+      match Png.decodeBitmapWithMetadata (px := RGB8) bytes with
       | some decoded =>
           if decoded.bitmap.data != rgbFixture.data then
             throw (IO.userError "tIME encode changed RGB samples")
@@ -2288,7 +2288,7 @@ private def expectTimeChunks : IO Unit := do
           throw (IO.userError "encoded tIME PNG failed to decode")
   | Except.error err =>
       throw (IO.userError err)
-  match Png.encodeBitmapWithOptionsChecked (px := PixelRGB8) rgbFixture
+  match Png.encodeBitmapWithOptionsChecked (px := RGB8) rgbFixture
       { mode := .fixed, modificationTime := some { fixedPngTime with month := 13 } } with
   | Except.ok _ =>
       throw (IO.userError "encoder accepted invalid tIME option")
@@ -2296,7 +2296,7 @@ private def expectTimeChunks : IO Unit := do
       pure ()
   for bytes in #[pngWithAncillary rgbFixture (timeChunk fixedPngTime),
       pngWithPostIdatAncillary rgbFixture (timeChunk fixedPngTime)] do
-    match Png.decodeBitmapWithMetadata (px := PixelRGB8) bytes with
+    match Png.decodeBitmapWithMetadata (px := RGB8) bytes with
     | some decoded =>
         if decoded.metadata.modificationTime != some fixedPngTime then
           throw (IO.userError "tIME metadata was not preserved")
@@ -2343,24 +2343,24 @@ private def expectTimeChunks : IO Unit := do
       (timeChunk fixedPngTime ++ Png.mkChunkBytes Png.idatTypeBytes ByteArray.empty))
     "IDAT after post-IDAT tIME"
   let defaultPath := System.FilePath.mk "/tmp/bitmap_time_write_default.png"
-  match ← Png.BitmapRGB8.writePng defaultPath rgbFixture .fixed with
+  match ← Png.Bitmap.RGB8.writePng defaultPath rgbFixture .fixed with
   | Except.error err =>
       throw (IO.userError err)
   | Except.ok _ =>
       let bytes ← IO.FS.readBinFile defaultPath
-      match Png.decodeBitmapWithMetadata (px := PixelRGB8) bytes with
+      match Png.decodeBitmapWithMetadata (px := RGB8) bytes with
       | some decoded =>
           if decoded.metadata.modificationTime.isNone then
             throw (IO.userError "file write did not emit default tIME metadata")
       | none =>
           throw (IO.userError "default tIME file write failed to decode")
   let noTimePath := System.FilePath.mk "/tmp/bitmap_time_write_without_time.png"
-  match ← Png.Bitmap.writePngWithoutTime (px := PixelRGB8) noTimePath rgbFixture .fixed with
+  match ← Png.Bitmap.writePngWithoutTime (px := RGB8) noTimePath rgbFixture .fixed with
   | Except.error err =>
       throw (IO.userError err)
   | Except.ok _ =>
       let bytes ← IO.FS.readBinFile noTimePath
-      match Png.decodeBitmapWithMetadata (px := PixelRGB8) bytes with
+      match Png.decodeBitmapWithMetadata (px := RGB8) bytes with
       | some decoded =>
           if decoded.metadata.modificationTime.isSome then
             throw (IO.userError "deterministic file write unexpectedly emitted tIME metadata")
@@ -2376,12 +2376,12 @@ private def expectTimeChunks : IO Unit := do
     pure ()
 
 private def expectPhysicalMetadata : IO Unit := do
-  let rgbFixture : BitmapRGB8 :=
-    Bitmap.ofPixelFn 2 1 (fun idx : Fin (2 * 1) =>
+  let rgbFixture : Bitmap.RGB8 :=
+    Bitmap.ofFn 2 1 (fun idx : Fin (2 * 1) =>
       match idx.val with
       | 0 => { r := Png.u8 22, g := Png.u8 44, b := Png.u8 66 }
       | _ => { r := Png.u8 88, g := Png.u8 110, b := Png.u8 132 })
-  match Png.encodeBitmapWithOptionsChecked (px := PixelRGB8) rgbFixture
+  match Png.encodeBitmapWithOptionsChecked (px := RGB8) rgbFixture
       { mode := .fixed
         colorSpace := some (.srgb .perceptual true)
         physical := some physical300Dpi
@@ -2395,7 +2395,7 @@ private def expectPhysicalMetadata : IO Unit := do
         throw (IO.userError "encoder did not emit pHYs after color-space metadata")
       if bytes.extract 87 91 != Png.timeTypeBytes then
         throw (IO.userError "encoder did not emit tIME after pHYs")
-      match Png.decodeBitmapWithMetadata (px := PixelRGB8) bytes with
+      match Png.decodeBitmapWithMetadata (px := RGB8) bytes with
       | some decoded =>
           if decoded.bitmap.data != rgbFixture.data then
             throw (IO.userError "pHYs encode changed RGB samples")
@@ -2406,13 +2406,13 @@ private def expectPhysicalMetadata : IO Unit := do
   | Except.error err =>
       throw (IO.userError err)
   let path := System.FilePath.mk "/tmp/bitmap_phys_write.png"
-  match ← Png.Bitmap.writePngWithOptions (px := PixelRGB8) path rgbFixture
+  match ← Png.Bitmap.writePngWithOptions (px := RGB8) path rgbFixture
       { mode := .fixed, physical := some physical300Dpi, modificationTime := some fixedPngTime } with
   | Except.error err =>
       throw (IO.userError err)
   | Except.ok _ =>
       let bytes ← IO.FS.readBinFile path
-      match Png.decodeBitmapWithMetadata (px := PixelRGB8) bytes with
+      match Png.decodeBitmapWithMetadata (px := RGB8) bytes with
       | some decoded =>
           if decoded.metadata.physical != some physical300Dpi then
             throw (IO.userError "file write did not preserve pHYs metadata")
@@ -2423,7 +2423,7 @@ private def expectPhysicalMetadata : IO Unit := do
   catch _ =>
     pure ()
   let props :=
-    (Bitmaps.Widget.BitmapRGB8.widgetProps rgbFixture).withPngMetadata
+    (Bitmaps.Widget.Bitmap.RGB8.widgetProps rgbFixture).withPngMetadata
       { Png.PngMetadata.empty with physical := some physical300Dpi }
   if props.physicalXPixelsPerUnit != some physical300Dpi.xPixelsPerUnit ||
       props.physicalYPixelsPerUnit != some physical300Dpi.yPixelsPerUnit ||
@@ -2432,7 +2432,7 @@ private def expectPhysicalMetadata : IO Unit := do
   let aspectOnly : Png.PngPhysicalPixelDimensions :=
     { xPixelsPerUnit := 2, yPixelsPerUnit := 1, unit := .unknown }
   let aspectProps :=
-    (Bitmaps.Widget.BitmapRGB8.widgetProps rgbFixture).withPngMetadata
+    (Bitmaps.Widget.Bitmap.RGB8.widgetProps rgbFixture).withPngMetadata
       { Png.PngMetadata.empty with physical := some aspectOnly }
   if aspectProps.physicalXPixelsPerUnit != some 2 ||
       aspectProps.physicalYPixelsPerUnit != some 1 ||
@@ -2469,21 +2469,21 @@ private def pngAncillaryChunkFixtures : IO Unit := do
   expectAncDecodeNone (testFixturePath "test_anc_sbit.png") "sBIT"
   expectAncDecodeNone (testFixturePath "test_anc_bad_crc.png") "bad-CRC"
 
--- Fill a bitmap with deterministic pixels using putPixel, then read all pixels back.
+-- Fill a bitmap with deterministic pixels using Bitmap.setPixel, then read all pixels back.
 -- Returns elapsed time in nanoseconds and a checksum to prevent dead-code elimination.
 private def perfFillRead (w h : Nat) : IO (Nat × Nat) := do
   let t0 <- IO.monoNanosNow
   let xs : Array (Fin w) := Array.finRange w
   let ys : Array (Fin h) := Array.finRange h
-  let img0 := mkBlankBitmap w h { r := 0, g := 0, b := 0 }
+  let img0 := Bitmap.fill (px := RGB8) w h { r := 0, g := 0, b := 0 }
   let acc0 :
-      { img : BitmapRGB8 // img.size.width = w ∧ img.size.height = h } :=
+      { img : Bitmap.RGB8 // img.size.width = w ∧ img.size.height = h } :=
     ⟨img0, by rfl, by rfl⟩
   let accFilled :=
     ys.foldl (init := acc0)
-      (fun (acc : { img : BitmapRGB8 // img.size.width = w ∧ img.size.height = h }) (y : Fin h) =>
+      (fun (acc : { img : Bitmap.RGB8 // img.size.width = w ∧ img.size.height = h }) (y : Fin h) =>
         xs.foldl (init := acc)
-          (fun (acc : { img : BitmapRGB8 // img.size.width = w ∧ img.size.height = h }) (x : Fin w) =>
+          (fun (acc : { img : Bitmap.RGB8 // img.size.width = w ∧ img.size.height = h }) (x : Fin w) =>
             let img := acc.1
             have hwidth : img.size.width = w := acc.2.1
             have hheight : img.size.height = h := acc.2.2
@@ -2494,7 +2494,7 @@ private def perfFillRead (w h : Nat) : IO (Nat × Nat) := do
             let r := UInt8.ofNat ((x.val + y.val) % 256)
             let g := UInt8.ofNat ((x.val * 3 + y.val) % 256)
             let b := UInt8.ofNat ((x.val + 2 * y.val) % 256)
-            let img' := putPixel img x.val y.val { r := r, g := g, b := b } hx hy
+            let img' := Bitmap.setPixel img x.val y.val { r := r, g := g, b := b } hx hy
             have hwidth' : img'.size.width = w := by
               have hsame : img'.size.width = img.size.width := by rfl
               exact hsame.trans hwidth
@@ -2512,7 +2512,7 @@ private def perfFillRead (w h : Nat) : IO (Nat × Nat) := do
         simp [hwidth]
       have hy : y.val < img.size.height := by
         simp [hheight]
-      let px := getPixel img x.val y.val hx hy
+      let px := Bitmap.getPixel img x.val y.val hx hy
       checksum := checksum + px.r.toNat + px.g.toNat + px.b.toNat
   let t1 <- IO.monoNanosNow
   return (t1 - t0, checksum)
@@ -2530,19 +2530,19 @@ private def perfContentByte (x y channel : Nat) : UInt8 :=
       | 1 => (x * 3 + y * 29 + blockValue * 2) % 256
       | _ => (x * 11 + y * 13 + blockValue * 3) % 256
 
-private def perfContentBitmap (w h : Nat) : BitmapRGB8 :=
-  let bpp := bytesPerPixelRGB
+private def perfContentBitmap (w h : Nat) : Bitmap.RGB8 :=
+  let bpp := RGB8.bytesPerPixel
   let data := ByteArray.mk <| Array.ofFn (fun i : Fin (w * h * bpp) =>
     let pixel := i.val / bpp
     let channel := i.val % bpp
     let x := pixel % w
     let y := pixel / w
     perfContentByte x y channel)
-  have hvalid : data.size = w * h * Pixel.bytesPerPixel (α := PixelRGB8) := by
+  have hvalid : data.size = w * h * PixelFormat.bytesPerPixel (α := RGB8) := by
     have hsize : data.size = w * h * bpp := by
       simp [data, ByteArray.size]
-    have hbpp : Pixel.bytesPerPixel (α := PixelRGB8) = bpp := by
-      change bytesPerPixelRGB = bpp
+    have hbpp : PixelFormat.bytesPerPixel (α := RGB8) = bpp := by
+      change RGB8.bytesPerPixel = bpp
       rfl
     rw [hbpp]
     exact hsize
@@ -2554,10 +2554,10 @@ private def perfPngRoundTrip (w h : Nat) : IO (Nat × Bool) := do
   let t0 <- IO.monoNanosNow
   let bmp := perfContentBitmap w h
   let bytes ←
-    match Png.encodeBitmapChecked (px := PixelRGB8) bmp .fixed with
+    match Png.encodeBitmapChecked (px := RGB8) bmp .fixed with
     | Except.ok bytes => pure bytes
     | Except.error err => throw (IO.userError s!"png perf round-trip encode failed: {err}")
-  match Png.decodeBitmap (px := PixelRGB8) bytes with
+  match Png.decodeBitmap (px := RGB8) bytes with
   | some bmp' =>
       if bmp' != bmp then
         throw (IO.userError "png perf round-trip exact bitmap mismatch")
@@ -2572,10 +2572,10 @@ private def perfPngRoundTripDynamic (w h : Nat) : IO (Nat × Bool) := do
   let t0 <- IO.monoNanosNow
   let bmp := perfContentBitmap w h
   let bytes ←
-    match Png.encodeBitmapChecked (px := PixelRGB8) bmp .dynamic with
+    match Png.encodeBitmapChecked (px := RGB8) bmp .dynamic with
     | Except.ok bytes => pure bytes
     | Except.error err => throw (IO.userError s!"png perf dynamic round-trip encode failed: {err}")
-  match Png.decodeBitmap (px := PixelRGB8) bytes with
+  match Png.decodeBitmap (px := RGB8) bytes with
   | some bmp' =>
       if bmp' != bmp then
         throw (IO.userError "png perf dynamic round-trip exact bitmap mismatch")
@@ -2590,10 +2590,10 @@ private def perfPngRoundTripStored (w h : Nat) : IO (Nat × Bool) := do
   let t0 <- IO.monoNanosNow
   let bmp := perfContentBitmap w h
   let bytes ←
-    match Png.encodeBitmapChecked (px := PixelRGB8) bmp .stored with
+    match Png.encodeBitmapChecked (px := RGB8) bmp .stored with
     | Except.ok bytes => pure bytes
     | Except.error err => throw (IO.userError s!"png perf stored round-trip encode failed: {err}")
-  match Png.decodeBitmap (px := PixelRGB8) bytes with
+  match Png.decodeBitmap (px := RGB8) bytes with
   | some bmp' =>
       if bmp' != bmp then
         throw (IO.userError "png perf stored round-trip exact bitmap mismatch")
@@ -2602,7 +2602,7 @@ private def perfPngRoundTripStored (w h : Nat) : IO (Nat × Bool) := do
   let t1 <- IO.monoNanosNow
   return (t1 - t0, true)
 
--- Fixed-size performance test for putPixel/getPixel on this machine.
+-- Fixed-size performance test for Bitmap.setPixel/Bitmap.getPixel on this machine.
 private def perfResolution : Nat := 3200
 
 private def perfIters : Nat := 10
@@ -2616,7 +2616,7 @@ private def perfPngIters : Nat := 5
 
 private def perfDynamicRatioLimit : Nat := 8
 
--- Fixed-size performance test for putPixel/getPixel on this machine.
+-- Fixed-size performance test for Bitmap.setPixel/Bitmap.getPixel on this machine.
 private def runPerfTest : IO Unit := do
   let w : Nat := perfResolution
   let h : Nat := perfResolution

@@ -51,17 +51,17 @@ deriving Repr, BEq, DecidableEq, ReflBEq, LawfulBEq
 
 -------------------------------------------------------------------------------
 -- A single color pixel of RGB values of any type
-structure PixelRGB (RangeT : Type u) where
+structure RGB (RangeT : Type u) where
   mk ::
   r : RangeT
   g : RangeT
   b : RangeT
 deriving Repr, BEq, DecidableEq, ReflBEq, LawfulBEq
 
-instance instInhabitedPixelRGB (RangeT) [Inhabited RangeT] : Inhabited (PixelRGB RangeT) where
+instance instInhabitedRGB (RangeT) [Inhabited RangeT] : Inhabited (RGB RangeT) where
   default := { r := default, g := default, b := default }
 
-instance instToJsonPixelRGB (RangeT) [ToJson RangeT] : ToJson (PixelRGB RangeT) where
+instance instToJsonRGB (RangeT) [ToJson RangeT] : ToJson (RGB RangeT) where
   toJson
     | ⟨r, g, b⟩ =>
       Json.mkObj [
@@ -70,7 +70,7 @@ instance instToJsonPixelRGB (RangeT) [ToJson RangeT] : ToJson (PixelRGB RangeT) 
         ("b", toJson b)
       ]
 
-instance instFromJsonPixelRGB (RangeT) [FromJson RangeT] : FromJson (PixelRGB RangeT) where
+instance instFromJsonRGB (RangeT) [FromJson RangeT] : FromJson (RGB RangeT) where
   fromJson? j := do
     let r ← j.getObjValAs? RangeT "r"
     let g ← j.getObjValAs? RangeT "g"
@@ -78,18 +78,18 @@ instance instFromJsonPixelRGB (RangeT) [FromJson RangeT] : FromJson (PixelRGB Ra
     return { r, g, b }
 
 -- Simple addition of intensities of two pixels
-instance {α : Type} [Add α] : Add (PixelRGB α) where
+instance {α : Type} [Add α] : Add (RGB α) where
   add p1 p2 := { r := p1.r + p2.r, g := p1.g + p2.g, b := p1.b + p2.b }
 
-instance {α : Type} [Mul α] : Mul (PixelRGB α) where
+instance {α : Type} [Mul α] : Mul (RGB α) where
   mul p1 p2 := { r := p1.r * p2.r, g := p1.g * p2.g, b := p1.b * p2.b }
 
-def PixelRGB8  := PixelRGB UInt8
-def PixelRGB16 := PixelRGB UInt16
+def RGB8  := RGB UInt8
+def RGB16 := RGB UInt16
 
 -------------------------------------------------------------------------------
 -- A single color pixel of RGBA values of any type
-structure PixelRGBA (RangeT : Type u) where
+structure RGBA (RangeT : Type u) where
   mk ::
   r : RangeT
   g : RangeT
@@ -97,10 +97,10 @@ structure PixelRGBA (RangeT : Type u) where
   a : RangeT
 deriving Repr, BEq, DecidableEq, ReflBEq, LawfulBEq
 
-instance instInhabitedPixelRGBA (RangeT) [Inhabited RangeT] : Inhabited (PixelRGBA RangeT) where
+instance instInhabitedRGBA (RangeT) [Inhabited RangeT] : Inhabited (RGBA RangeT) where
   default := { r := default, g := default, b := default, a := default }
 
-instance instToJsonPixelRGBA (RangeT) [ToJson RangeT] : ToJson (PixelRGBA RangeT) where
+instance instToJsonRGBA (RangeT) [ToJson RangeT] : ToJson (RGBA RangeT) where
   toJson
     | ⟨r, g, b, a⟩ =>
       Json.mkObj [
@@ -110,7 +110,7 @@ instance instToJsonPixelRGBA (RangeT) [ToJson RangeT] : ToJson (PixelRGBA RangeT
         ("a", toJson a)
       ]
 
-instance instFromJsonPixelRGBA (RangeT) [FromJson RangeT] : FromJson (PixelRGBA RangeT) where
+instance instFromJsonRGBA (RangeT) [FromJson RangeT] : FromJson (RGBA RangeT) where
   fromJson? j := do
     let r ← j.getObjValAs? RangeT "r"
     let g ← j.getObjValAs? RangeT "g"
@@ -119,156 +119,183 @@ instance instFromJsonPixelRGBA (RangeT) [FromJson RangeT] : FromJson (PixelRGBA 
     return { r, g, b, a }
 
 -- Simple addition of intensities of two pixels
-instance (priority := low) {α : Type} [Add α] : Add (PixelRGBA α) where
+instance (priority := low) {α : Type} [Add α] : Add (RGBA α) where
   add p1 p2 := { r := p1.r + p2.r, g := p1.g + p2.g, b := p1.b + p2.b, a := p1.a + p2.a }
 
-instance (priority := low) {α : Type} [Mul α] : Mul (PixelRGBA α) where
+instance (priority := low) {α : Type} [Mul α] : Mul (RGBA α) where
   mul p1 p2 := { r := p1.r * p2.r, g := p1.g * p2.g, b := p1.b * p2.b, a := p1.a * p2.a }
 
-def PixelRGBA8  := PixelRGBA UInt8
-def PixelRGBA16 := PixelRGBA UInt16
+def RGBA8  := RGBA UInt8
+def RGBA16 := RGBA UInt16
 
-class AlphaChannel (RangeT : Type u) extends NatCast RangeT where
+/-- Byte and numeric operations for one color channel.
+It exists so alpha math and pixel byte layouts share one small interface. -/
+class ChannelFormat (RangeT : Type u) extends NatCast RangeT where
   toNat : RangeT → Nat
   maxValue : Nat
+  byteSize : Nat
+  byteSize_pos : 0 < byteSize
+  read : (data : ByteArray) → (base : Nat) →
+    (h : base + (byteSize - 1) < data.size) → RangeT
+  write : (data : ByteArray) → (base : Nat) →
+    (h : base + (byteSize - 1) < data.size) → RangeT → ByteArray
+  write_size : ∀ (data : ByteArray) (base : Nat)
+    (h : base + (byteSize - 1) < data.size) (x : RangeT),
+    (write data base h x).size = data.size
 
-instance : AlphaChannel UInt8 where
+instance : ChannelFormat UInt8 where
   natCast := UInt8.ofNat
   toNat := UInt8.toNat
   maxValue := 255
+  byteSize := 1
+  byteSize_pos := by decide
+  read := fun data base h => data.get base (by simpa using h)
+  write := fun data base h x => data.set base x (by simpa using h)
+  write_size := by
+    intro data base h x
+    cases data with
+    | mk arr =>
+        simp [ByteArray.set, ByteArray.size, Array.size_set]
 
-instance : AlphaChannel UInt16 where
+instance : ChannelFormat UInt16 where
   natCast := UInt16.ofNat
   toNat := UInt16.toNat
   maxValue := 65535
+  byteSize := 2
+  byteSize_pos := by decide
+  read := fun data base h => readU16BEAt data base (by simpa using h)
+  write := fun data base h x => writeU16BEAt data base (by simpa using h) x
+  write_size := by
+    intro data base h x
+    exact writeU16BEAt_size data base (by simpa using h) x
 
-@[inline] def alphaDivRound (num den : Nat) : Nat :=
+@[inline] def Alpha.divRound (num den : Nat) : Nat :=
   if den = 0 then
     0
   else
     (num + den / 2) / den
 
-@[inline] def alphaClamp {RangeT : Type u} [AlphaChannel RangeT] (n : Nat) : RangeT :=
-  Nat.cast (R := RangeT) (Nat.min (AlphaChannel.maxValue (RangeT := RangeT)) n)
+@[inline] def Alpha.clamp {RangeT : Type u} [ChannelFormat RangeT] (n : Nat) : RangeT :=
+  Nat.cast (R := RangeT) (Nat.min (ChannelFormat.maxValue (RangeT := RangeT)) n)
 
-@[inline] def alphaMulNorm {RangeT : Type u} [AlphaChannel RangeT]
+@[inline] def Alpha.mulNorm {RangeT : Type u} [ChannelFormat RangeT]
     (x y : RangeT) : RangeT :=
-  let max := (AlphaChannel.maxValue (RangeT := RangeT))
-  alphaClamp (alphaDivRound (AlphaChannel.toNat x * AlphaChannel.toNat y) max)
+  let max := (ChannelFormat.maxValue (RangeT := RangeT))
+  Alpha.clamp (Alpha.divRound (ChannelFormat.toNat x * ChannelFormat.toNat y) max)
 
-@[inline] def alphaOver {RangeT : Type u} [AlphaChannel RangeT]
+@[inline] def Alpha.over {RangeT : Type u} [ChannelFormat RangeT]
     (dstA srcA : RangeT) : RangeT :=
-  let src := AlphaChannel.toNat srcA
-  let dst := AlphaChannel.toNat dstA
-  let max := (AlphaChannel.maxValue (RangeT := RangeT))
-  let outA := src + alphaDivRound (dst * (max - src)) max
-  alphaClamp outA
+  let src := ChannelFormat.toNat srcA
+  let dst := ChannelFormat.toNat dstA
+  let max := (ChannelFormat.maxValue (RangeT := RangeT))
+  let outA := src + Alpha.divRound (dst * (max - src)) max
+  Alpha.clamp outA
 
-@[inline] def blendChannelOver {RangeT : Type u} [AlphaChannel RangeT]
+@[inline] def Alpha.blendChannelOver {RangeT : Type u} [ChannelFormat RangeT]
     (dstC srcC dstA srcA : RangeT) : RangeT :=
-  let src := AlphaChannel.toNat srcA
-  let dst := AlphaChannel.toNat dstA
-  let max := (AlphaChannel.maxValue (RangeT := RangeT))
-  let outA := src + alphaDivRound (dst * (max - src)) max
+  let src := ChannelFormat.toNat srcA
+  let dst := ChannelFormat.toNat dstA
+  let max := (ChannelFormat.maxValue (RangeT := RangeT))
+  let outA := src + Alpha.divRound (dst * (max - src)) max
   if outA = 0 then
-    alphaClamp 0
+    Alpha.clamp 0
   else
-    let srcPremul := AlphaChannel.toNat srcC * src
-    let dstPremul := alphaDivRound (AlphaChannel.toNat dstC * dst * (max - src)) max
-    alphaClamp (alphaDivRound ((srcPremul + dstPremul) * max) outA)
+    let srcPremul := ChannelFormat.toNat srcC * src
+    let dstPremul := Alpha.divRound (ChannelFormat.toNat dstC * dst * (max - src)) max
+    Alpha.clamp (Alpha.divRound ((srcPremul + dstPremul) * max) outA)
 
 -- Alpha compositing: `src` over `dst`.
-@[inline] def rgbaOver {RangeT : Type u} [AlphaChannel RangeT]
-    (dst src : PixelRGBA RangeT) : PixelRGBA RangeT :=
-  let outA := alphaOver dst.a src.a
-  { r := blendChannelOver dst.r src.r dst.a src.a
-    g := blendChannelOver dst.g src.g dst.a src.a
-    b := blendChannelOver dst.b src.b dst.a src.a
+@[inline] def RGBA.over {RangeT : Type u} [ChannelFormat RangeT]
+    (dst src : RGBA RangeT) : RGBA RangeT :=
+  let outA := Alpha.over dst.a src.a
+  { r := Alpha.blendChannelOver dst.r src.r dst.a src.a
+    g := Alpha.blendChannelOver dst.g src.g dst.a src.a
+    b := Alpha.blendChannelOver dst.b src.b dst.a src.a
     a := outA }
 
 -- Multiply blend mode composed as `src` over `dst`.
-@[inline] def rgbaMultiplyOver {RangeT : Type u} [AlphaChannel RangeT]
-    (dst src : PixelRGBA RangeT) : PixelRGBA RangeT :=
-  let srcMul : PixelRGBA RangeT :=
-    { r := alphaMulNorm dst.r src.r
-      g := alphaMulNorm dst.g src.g
-      b := alphaMulNorm dst.b src.b
+@[inline] def RGBA.multiplyOver {RangeT : Type u} [ChannelFormat RangeT]
+    (dst src : RGBA RangeT) : RGBA RangeT :=
+  let srcMul : RGBA RangeT :=
+    { r := Alpha.mulNorm dst.r src.r
+      g := Alpha.mulNorm dst.g src.g
+      b := Alpha.mulNorm dst.b src.b
       a := src.a }
-  rgbaOver dst srcMul
+  RGBA.over dst srcMul
 
-instance {RangeT : Type u} [AlphaChannel RangeT] : Add (PixelRGBA RangeT) where
-  add dst src := rgbaOver dst src
+instance {RangeT : Type u} [ChannelFormat RangeT] : Add (RGBA RangeT) where
+  add dst src := RGBA.over dst src
 
-instance {RangeT : Type u} [AlphaChannel RangeT] : Mul (PixelRGBA RangeT) where
-  mul dst src := rgbaMultiplyOver dst src
+instance {RangeT : Type u} [ChannelFormat RangeT] : Mul (RGBA RangeT) where
+  mul dst src := RGBA.multiplyOver dst src
 
 -------------------------------------------------------------------------------
 -- A single grayscale pixel of any type
-structure PixelGray (RangeT : Type u) where
+structure Gray (RangeT : Type u) where
   mk ::
   v : RangeT
 deriving Repr, BEq, DecidableEq, ReflBEq, LawfulBEq
 
-instance instInhabitedPixelGray (RangeT) [Inhabited RangeT] : Inhabited (PixelGray RangeT) where
+instance instInhabitedGray (RangeT) [Inhabited RangeT] : Inhabited (Gray RangeT) where
   default := { v := default }
 
-instance instToJsonPixelGray (RangeT) [ToJson RangeT] : ToJson (PixelGray RangeT) where
+instance instToJsonGray (RangeT) [ToJson RangeT] : ToJson (Gray RangeT) where
   toJson
     | ⟨v⟩ =>
       Json.mkObj [
         ("v", toJson v)
       ]
 
-instance instFromJsonPixelGray (RangeT) [FromJson RangeT] : FromJson (PixelGray RangeT) where
+instance instFromJsonGray (RangeT) [FromJson RangeT] : FromJson (Gray RangeT) where
   fromJson? j := do
     let v ← j.getObjValAs? RangeT "v"
     return { v }
 
-instance {α : Type} [Add α] : Add (PixelGray α) where
+instance {α : Type} [Add α] : Add (Gray α) where
   add p1 p2 := { v := p1.v + p2.v }
 
-instance {α : Type} [Mul α] : Mul (PixelGray α) where
+instance {α : Type} [Mul α] : Mul (Gray α) where
   mul p1 p2 := { v := p1.v * p2.v }
 
-def PixelGray8 := PixelGray UInt8
-def PixelGray16 := PixelGray UInt16
+def Gray8 := Gray UInt8
+def Gray16 := Gray UInt16
 
 -------------------------------------------------------------------------------
 -- A packed one-bit grayscale pixel.
-structure PixelGray1 where
+structure Gray1 where
   mk ::
   v : Bool
 deriving Repr, BEq, DecidableEq, ReflBEq, LawfulBEq
 
-instance : Inhabited PixelGray1 where
+instance : Inhabited Gray1 where
   default := { v := false }
 
-instance : ToJson PixelGray1 where
+instance : ToJson Gray1 where
   toJson
     | ⟨v⟩ =>
       Json.mkObj [
         ("v", toJson v)
       ]
 
-instance : FromJson PixelGray1 where
+instance : FromJson Gray1 where
   fromJson? j := do
     let v ← j.getObjValAs? Bool "v"
     return { v }
 
 -------------------------------------------------------------------------------
 -- A single grayscale pixel with alpha of any type
-structure PixelGrayAlpha (RangeT : Type u) where
+structure GrayAlpha (RangeT : Type u) where
   mk ::
   v : RangeT
   a : RangeT
 deriving Repr, BEq, DecidableEq, ReflBEq, LawfulBEq
 
-instance instInhabitedPixelGrayAlpha (RangeT) [Inhabited RangeT] :
-    Inhabited (PixelGrayAlpha RangeT) where
+instance instInhabitedGrayAlpha (RangeT) [Inhabited RangeT] :
+    Inhabited (GrayAlpha RangeT) where
   default := { v := default, a := default }
 
-instance instToJsonPixelGrayAlpha (RangeT) [ToJson RangeT] :
-    ToJson (PixelGrayAlpha RangeT) where
+instance instToJsonGrayAlpha (RangeT) [ToJson RangeT] :
+    ToJson (GrayAlpha RangeT) where
   toJson
     | ⟨v, a⟩ =>
       Json.mkObj [
@@ -276,65 +303,65 @@ instance instToJsonPixelGrayAlpha (RangeT) [ToJson RangeT] :
         ("a", toJson a)
       ]
 
-instance instFromJsonPixelGrayAlpha (RangeT) [FromJson RangeT] :
-    FromJson (PixelGrayAlpha RangeT) where
+instance instFromJsonGrayAlpha (RangeT) [FromJson RangeT] :
+    FromJson (GrayAlpha RangeT) where
   fromJson? j := do
     let v ← j.getObjValAs? RangeT "v"
     let a ← j.getObjValAs? RangeT "a"
     return { v, a }
 
-instance {α : Type} [Add α] : Add (PixelGrayAlpha α) where
+instance {α : Type} [Add α] : Add (GrayAlpha α) where
   add p1 p2 := { v := p1.v + p2.v, a := p1.a + p2.a }
 
-instance {α : Type} [Mul α] : Mul (PixelGrayAlpha α) where
+instance {α : Type} [Mul α] : Mul (GrayAlpha α) where
   mul p1 p2 := { v := p1.v * p2.v, a := p1.a * p2.a }
 
-def PixelGrayAlpha8 := PixelGrayAlpha UInt8
-def PixelGrayAlpha16 := PixelGrayAlpha UInt16
+def GrayAlpha8 := GrayAlpha UInt8
+def GrayAlpha16 := GrayAlpha UInt16
 
-instance : Inhabited PixelRGB8 := instInhabitedPixelRGB _
-instance : DecidableEq PixelRGB8 := by
-  unfold PixelRGB8
+instance : Inhabited RGB8 := instInhabitedRGB _
+instance : DecidableEq RGB8 := by
+  unfold RGB8
   infer_instance
 
-instance : Inhabited PixelRGB16 := instInhabitedPixelRGB _
-instance : DecidableEq PixelRGB16 := by
-  unfold PixelRGB16
+instance : Inhabited RGB16 := instInhabitedRGB _
+instance : DecidableEq RGB16 := by
+  unfold RGB16
   infer_instance
 
-instance : Inhabited PixelRGBA8 := instInhabitedPixelRGBA _
-instance : DecidableEq PixelRGBA8 := by
-  unfold PixelRGBA8
+instance : Inhabited RGBA8 := instInhabitedRGBA _
+instance : DecidableEq RGBA8 := by
+  unfold RGBA8
   infer_instance
 
-instance : Inhabited PixelRGBA16 := instInhabitedPixelRGBA _
-instance : DecidableEq PixelRGBA16 := by
-  unfold PixelRGBA16
+instance : Inhabited RGBA16 := instInhabitedRGBA _
+instance : DecidableEq RGBA16 := by
+  unfold RGBA16
   infer_instance
 
-instance : Inhabited PixelGray8 := instInhabitedPixelGray _
-instance : DecidableEq PixelGray8 := by
-  unfold PixelGray8
+instance : Inhabited Gray8 := instInhabitedGray _
+instance : DecidableEq Gray8 := by
+  unfold Gray8
   infer_instance
 
-instance : Inhabited PixelGray16 := instInhabitedPixelGray _
-instance : DecidableEq PixelGray16 := by
-  unfold PixelGray16
+instance : Inhabited Gray16 := instInhabitedGray _
+instance : DecidableEq Gray16 := by
+  unfold Gray16
   infer_instance
 
-instance : Inhabited PixelGrayAlpha8 := instInhabitedPixelGrayAlpha _
-instance : DecidableEq PixelGrayAlpha8 := by
-  unfold PixelGrayAlpha8
+instance : Inhabited GrayAlpha8 := instInhabitedGrayAlpha _
+instance : DecidableEq GrayAlpha8 := by
+  unfold GrayAlpha8
   infer_instance
 
-instance : Inhabited PixelGrayAlpha16 := instInhabitedPixelGrayAlpha _
-instance : DecidableEq PixelGrayAlpha16 := by
-  unfold PixelGrayAlpha16
+instance : Inhabited GrayAlpha16 := instInhabitedGrayAlpha _
+instance : DecidableEq GrayAlpha16 := by
+  unfold GrayAlpha16
   infer_instance
 
 -------------------------------------------------------------------------------
--- Pixel metadata for byte layout.
-class Pixel (α : Type u) where
+-- Format metadata for byte layout.
+class PixelFormat (α : Type u) where
   bytesPerPixel : Nat
   bytesPerPixel_pos : 0 < bytesPerPixel
   read : (data : ByteArray) -> (base : Nat) ->
@@ -344,20 +371,15 @@ class Pixel (α : Type u) where
   write_size : ∀ (data : ByteArray) (base : Nat)
     (h : base + (bytesPerPixel - 1) < data.size) (px : α),
     (write data base h px).size = data.size
-  read_write :
-    ∀ (data : ByteArray) (base : Nat)
-      (h : base + (bytesPerPixel - 1) < data.size) (px : α),
-      read (write data base h px) base
-        (by simpa [write_size (data := data) (base := base) (h := h) (px := px)] using h) = px
 
-def bytesPerPixelRGB : Nat := 3
-def bytesPerPixelRGBA : Nat := 4
-def bytesPerPixelGray : Nat := 1
-def bytesPerPixelGrayAlpha : Nat := 2
-def bytesPerPixelRGB16 : Nat := 6
-def bytesPerPixelRGBA16 : Nat := 8
-def bytesPerPixelGray16 : Nat := 2
-def bytesPerPixelGrayAlpha16 : Nat := 4
+def RGB8.bytesPerPixel : Nat := 3
+def RGBA8.bytesPerPixel : Nat := 4
+def Gray8.bytesPerPixel : Nat := 1
+def GrayAlpha8.bytesPerPixel : Nat := 2
+def RGB16.bytesPerPixel : Nat := 6
+def RGBA16.bytesPerPixel : Nat := 8
+def Gray16.bytesPerPixel : Nat := 2
+def GrayAlpha16.bytesPerPixel : Nat := 4
 
 def gray1RowBytes (w : Nat) : Nat :=
   (w + 7) / 8
@@ -383,208 +405,242 @@ def gray1DataSize (w h : Nat) : Nat :=
 @[inline] def gray1ByteIndex (w x y : Nat) : Nat :=
   y * gray1RowBytes w + x / 8
 
-@[inline] def gray1FullByte (px : PixelGray1) : UInt8 :=
+@[inline] def gray1FullByte (px : Gray1) : UInt8 :=
   if px.v then 0xff else 0
 
-def pixelReadRGB8 (data : ByteArray) (base : Nat) (h : base + 2 < data.size) : PixelRGB8 := by
-  have h1 : base + 1 < data.size := by omega
-  have h0 : base < data.size := by omega
-  exact { r := data.get base h0
-          g := data.get (base + 1) h1
-          b := data.get (base + 2) h }
+namespace ChannelLayout
 
-def pixelWriteRGB8 (data : ByteArray) (base : Nat) (h : base + 2 < data.size)
-    (px : PixelRGB8) : ByteArray := by
-  have size_set {bs : ByteArray} {i : Nat} (hi : i < bs.size) {v : UInt8} :
-      (bs.set i v hi).size = bs.size := by
-    cases bs with
-    | mk arr =>
-        simp [ByteArray.set, ByteArray.size, Array.size_set]
-  have h1 : base + 1 < data.size := by omega
-  have h0 : base < data.size := by omega
-  let data1 := data.set base px.r h0
-  have hsize1 : data1.size = data.size := by
-    simpa [data1] using (size_set (bs := data) (i := base) (hi := h0) (v := px.r))
-  have h1' : base + 1 < data1.size := by
-    simpa [hsize1] using h1
-  let data2 := data1.set (base + 1) px.g h1'
-  have hsize2 : data2.size = data.size := by
-    have hsize2' : data2.size = data1.size := by
-      simpa [data2] using (size_set (bs := data1) (i := base + 1) (hi := h1') (v := px.g))
-    simpa [hsize1] using hsize2'
-  have h2' : base + 2 < data2.size := by
-    simpa [hsize2] using h
-  let data3 := data2.set (base + 2) px.b h2'
-  exact data3
+theorem bound2_0 {RangeT : Type u} [ChannelFormat RangeT]
+    {data : ByteArray} {base : Nat}
+    (h : base + (2 * ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size) :
+    base + (ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size := by
+  have hpos := ChannelFormat.byteSize_pos (RangeT := RangeT)
+  omega
 
+theorem bound2_1 {RangeT : Type u} [ChannelFormat RangeT]
+    {data : ByteArray} {base : Nat}
+    (h : base + (2 * ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size) :
+    base + ChannelFormat.byteSize (RangeT := RangeT) +
+      (ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size := by
+  have hpos := ChannelFormat.byteSize_pos (RangeT := RangeT)
+  omega
 
-def pixelReadRGBA8 (data : ByteArray) (base : Nat) (h : base + 3 < data.size) : PixelRGBA8 := by
-  have h2 : base + 2 < data.size := by omega
-  have h1 : base + 1 < data.size := by omega
-  have h0 : base < data.size := by omega
-  exact { r := data.get base h0
-          g := data.get (base + 1) h1
-          b := data.get (base + 2) h2
-          a := data.get (base + 3) h }
+theorem bound3_0 {RangeT : Type u} [ChannelFormat RangeT]
+    {data : ByteArray} {base : Nat}
+    (h : base + (3 * ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size) :
+    base + (ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size := by
+  have hpos := ChannelFormat.byteSize_pos (RangeT := RangeT)
+  omega
 
-def pixelWriteRGBA8 (data : ByteArray) (base : Nat) (h : base + 3 < data.size)
-    (px : PixelRGBA8) : ByteArray := by
-  have size_set {bs : ByteArray} {i : Nat} (hi : i < bs.size) {v : UInt8} :
-      (bs.set i v hi).size = bs.size := by
-    cases bs with
-    | mk arr =>
-        simp [ByteArray.set, ByteArray.size, Array.size_set]
-  have h2 : base + 2 < data.size := by omega
-  have h1 : base + 1 < data.size := by omega
-  have h0 : base < data.size := by omega
-  let data1 := data.set base px.r h0
-  have hsize1 : data1.size = data.size := by
-    simpa [data1] using (size_set (bs := data) (i := base) (hi := h0) (v := px.r))
-  have h1' : base + 1 < data1.size := by
-    simpa [hsize1] using h1
-  let data2 := data1.set (base + 1) px.g h1'
-  have hsize2 : data2.size = data.size := by
-    have hsize2' : data2.size = data1.size := by
-      simpa [data2] using (size_set (bs := data1) (i := base + 1) (hi := h1') (v := px.g))
-    simpa [hsize1] using hsize2'
-  have h2' : base + 2 < data2.size := by
-    simpa [hsize2] using h2
-  let data3 := data2.set (base + 2) px.b h2'
-  have hsize3 : data3.size = data.size := by
-    have hsize3' : data3.size = data2.size := by
-      simpa [data3] using (size_set (bs := data2) (i := base + 2) (hi := h2') (v := px.b))
-    simpa [hsize2] using hsize3'
-  have h3' : base + 3 < data3.size := by
-    simpa [hsize3] using h
-  let data4 := data3.set (base + 3) px.a h3'
-  exact data4
+theorem bound3_1 {RangeT : Type u} [ChannelFormat RangeT]
+    {data : ByteArray} {base : Nat}
+    (h : base + (3 * ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size) :
+    base + ChannelFormat.byteSize (RangeT := RangeT) +
+      (ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size := by
+  have hpos := ChannelFormat.byteSize_pos (RangeT := RangeT)
+  omega
 
-def pixelReadGray8 (data : ByteArray) (base : Nat) (h : base < data.size) : PixelGray8 := by
-  exact { v := data.get base h }
+theorem bound3_2 {RangeT : Type u} [ChannelFormat RangeT]
+    {data : ByteArray} {base : Nat}
+    (h : base + (3 * ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size) :
+    base + 2 * ChannelFormat.byteSize (RangeT := RangeT) +
+      (ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size := by
+  have hpos := ChannelFormat.byteSize_pos (RangeT := RangeT)
+  omega
 
-def pixelWriteGray8 (data : ByteArray) (base : Nat) (h : base < data.size)
-    (px : PixelGray8) : ByteArray :=
-  data.set base px.v h
+theorem bound4_0 {RangeT : Type u} [ChannelFormat RangeT]
+    {data : ByteArray} {base : Nat}
+    (h : base + (4 * ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size) :
+    base + (ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size := by
+  have hpos := ChannelFormat.byteSize_pos (RangeT := RangeT)
+  omega
 
-def pixelReadGrayAlpha8 (data : ByteArray) (base : Nat)
-    (h : base + 1 < data.size) : PixelGrayAlpha8 := by
-  have h0 : base < data.size := by omega
-  exact { v := data.get base h0
-          a := data.get (base + 1) h }
+theorem bound4_1 {RangeT : Type u} [ChannelFormat RangeT]
+    {data : ByteArray} {base : Nat}
+    (h : base + (4 * ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size) :
+    base + ChannelFormat.byteSize (RangeT := RangeT) +
+      (ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size := by
+  have hpos := ChannelFormat.byteSize_pos (RangeT := RangeT)
+  omega
 
-def pixelWriteGrayAlpha8 (data : ByteArray) (base : Nat)
-    (h : base + 1 < data.size) (px : PixelGrayAlpha8) : ByteArray := by
-  have h0 : base < data.size := by omega
-  let data1 := data.set base px.v h0
-  have hsize1 : data1.size = data.size := by
-    cases data with
-    | mk arr =>
-        simp [data1, ByteArray.set, ByteArray.size, Array.size_set]
-  have h1' : base + 1 < data1.size := by
-    simpa [hsize1] using h
-  exact data1.set (base + 1) px.a h1'
+theorem bound4_2 {RangeT : Type u} [ChannelFormat RangeT]
+    {data : ByteArray} {base : Nat}
+    (h : base + (4 * ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size) :
+    base + 2 * ChannelFormat.byteSize (RangeT := RangeT) +
+      (ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size := by
+  have hpos := ChannelFormat.byteSize_pos (RangeT := RangeT)
+  omega
 
-def pixelReadRGB16 (data : ByteArray) (base : Nat)
-    (h : base + 5 < data.size) : PixelRGB16 := by
-  have hr : base + 1 < data.size := by omega
-  have hg : (base + 2) + 1 < data.size := by omega
-  have hb : (base + 4) + 1 < data.size := by omega
-  exact
-    { r := readU16BEAt data base hr
-      g := readU16BEAt data (base + 2) hg
-      b := readU16BEAt data (base + 4) hb }
+theorem bound4_3 {RangeT : Type u} [ChannelFormat RangeT]
+    {data : ByteArray} {base : Nat}
+    (h : base + (4 * ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size) :
+    base + 3 * ChannelFormat.byteSize (RangeT := RangeT) +
+      (ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size := by
+  have hpos := ChannelFormat.byteSize_pos (RangeT := RangeT)
+  omega
 
-def pixelWriteRGB16 (data : ByteArray) (base : Nat)
-    (h : base + 5 < data.size) (px : PixelRGB16) : ByteArray := by
-  have hr : base + 1 < data.size := by omega
-  let data1 := writeU16BEAt data base hr px.r
-  have hsize1 : data1.size = data.size := by
-    exact writeU16BEAt_size data base hr px.r
-  have hg : (base + 2) + 1 < data1.size := by
-    simpa [hsize1] using (by omega : (base + 2) + 1 < data.size)
-  let data2 := writeU16BEAt data1 (base + 2) hg px.g
-  have hsize2 : data2.size = data.size := by
-    have hsize2' : data2.size = data1.size := by
-      exact writeU16BEAt_size data1 (base + 2) hg px.g
-    simpa [hsize1] using hsize2'
-  have hb : (base + 4) + 1 < data2.size := by
-    simpa [hsize2] using (by omega : (base + 4) + 1 < data.size)
-  exact writeU16BEAt data2 (base + 4) hb px.b
+@[inline] def read1 {RangeT α : Type u} [ChannelFormat RangeT]
+    (mk : RangeT → α) (data : ByteArray) (base : Nat)
+    (h : base + (ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size) : α :=
+  mk (ChannelFormat.read data base h)
 
-def pixelReadRGBA16 (data : ByteArray) (base : Nat)
-    (h : base + 7 < data.size) : PixelRGBA16 := by
-  have hr : base + 1 < data.size := by omega
-  have hg : (base + 2) + 1 < data.size := by omega
-  have hb : (base + 4) + 1 < data.size := by omega
-  have ha : (base + 6) + 1 < data.size := by omega
-  exact
-    { r := readU16BEAt data base hr
-      g := readU16BEAt data (base + 2) hg
-      b := readU16BEAt data (base + 4) hb
-      a := readU16BEAt data (base + 6) ha }
+@[inline] def write1 {RangeT α : Type u} [ChannelFormat RangeT]
+    (get0 : α → RangeT) (data : ByteArray) (base : Nat)
+    (h : base + (ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size)
+    (px : α) : ByteArray :=
+  ChannelFormat.write data base h (get0 px)
 
-def pixelWriteRGBA16 (data : ByteArray) (base : Nat)
-    (h : base + 7 < data.size) (px : PixelRGBA16) : ByteArray := by
-  have hr : base + 1 < data.size := by omega
-  let data1 := writeU16BEAt data base hr px.r
-  have hsize1 : data1.size = data.size := by
-    exact writeU16BEAt_size data base hr px.r
-  have hg : (base + 2) + 1 < data1.size := by
-    simpa [hsize1] using (by omega : (base + 2) + 1 < data.size)
-  let data2 := writeU16BEAt data1 (base + 2) hg px.g
-  have hsize2 : data2.size = data.size := by
-    have hsize2' : data2.size = data1.size := by
-      exact writeU16BEAt_size data1 (base + 2) hg px.g
-    simpa [hsize1] using hsize2'
-  have hb : (base + 4) + 1 < data2.size := by
-    simpa [hsize2] using (by omega : (base + 4) + 1 < data.size)
-  let data3 := writeU16BEAt data2 (base + 4) hb px.b
-  have hsize3 : data3.size = data.size := by
-    have hsize3' : data3.size = data2.size := by
-      exact writeU16BEAt_size data2 (base + 4) hb px.b
-    simpa [hsize2] using hsize3'
-  have ha : (base + 6) + 1 < data3.size := by
-    simpa [hsize3] using (by omega : (base + 6) + 1 < data.size)
-  exact writeU16BEAt data3 (base + 6) ha px.a
+theorem write1_size {RangeT α : Type u} [ChannelFormat RangeT]
+    (get0 : α → RangeT) (data : ByteArray) (base : Nat)
+    (h : base + (ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size)
+    (px : α) :
+    (write1 get0 data base h px).size = data.size := by
+  unfold write1
+  exact ChannelFormat.write_size data base h (get0 px)
 
-def pixelReadGray16 (data : ByteArray) (base : Nat)
-    (h : base + 1 < data.size) : PixelGray16 :=
-  { v := readU16BEAt data base h }
+@[inline] def read2 {RangeT α : Type u} [ChannelFormat RangeT]
+    (mk : RangeT → RangeT → α) (data : ByteArray) (base : Nat)
+    (h : base + (2 * ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size) : α :=
+  mk
+    (ChannelFormat.read data base (bound2_0 h))
+    (ChannelFormat.read data (base + ChannelFormat.byteSize (RangeT := RangeT)) (bound2_1 h))
 
-def pixelWriteGray16 (data : ByteArray) (base : Nat)
-    (h : base + 1 < data.size) (px : PixelGray16) : ByteArray :=
-  writeU16BEAt data base h px.v
+@[inline] def write2 {RangeT α : Type u} [ChannelFormat RangeT]
+    (get0 get1 : α → RangeT) (data : ByteArray) (base : Nat)
+    (h : base + (2 * ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size)
+    (px : α) : ByteArray :=
+  let h0 := bound2_0 h
+  let data1 := ChannelFormat.write data base h0 (get0 px)
+  have hsize1 : data1.size = data.size :=
+    ChannelFormat.write_size data base h0 (get0 px)
+  let h1 : base + ChannelFormat.byteSize (RangeT := RangeT) +
+      (ChannelFormat.byteSize (RangeT := RangeT) - 1) < data1.size := by
+    simpa [hsize1] using bound2_1 h
+  ChannelFormat.write data1 (base + ChannelFormat.byteSize (RangeT := RangeT)) h1 (get1 px)
 
-def pixelReadGrayAlpha16 (data : ByteArray) (base : Nat)
-    (h : base + 3 < data.size) : PixelGrayAlpha16 := by
-  have hv : base + 1 < data.size := by omega
-  have ha : (base + 2) + 1 < data.size := by omega
-  exact
-    { v := readU16BEAt data base hv
-      a := readU16BEAt data (base + 2) ha }
+theorem write2_size {RangeT α : Type u} [ChannelFormat RangeT]
+    (get0 get1 : α → RangeT) (data : ByteArray) (base : Nat)
+    (h : base + (2 * ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size)
+    (px : α) :
+    (write2 get0 get1 data base h px).size = data.size := by
+  unfold write2
+  simp [ChannelFormat.write_size]
 
-def pixelWriteGrayAlpha16 (data : ByteArray) (base : Nat)
-    (h : base + 3 < data.size) (px : PixelGrayAlpha16) : ByteArray := by
-  have hv : base + 1 < data.size := by omega
-  let data1 := writeU16BEAt data base hv px.v
-  have hsize1 : data1.size = data.size := by
-    exact writeU16BEAt_size data base hv px.v
-  have ha : (base + 2) + 1 < data1.size := by
-    simpa [hsize1] using (by omega : (base + 2) + 1 < data.size)
-  exact writeU16BEAt data1 (base + 2) ha px.a
+@[inline] def read3 {RangeT α : Type u} [ChannelFormat RangeT]
+    (mk : RangeT → RangeT → RangeT → α) (data : ByteArray) (base : Nat)
+    (h : base + (3 * ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size) : α :=
+  mk
+    (ChannelFormat.read data base (bound3_0 h))
+    (ChannelFormat.read data (base + ChannelFormat.byteSize (RangeT := RangeT)) (bound3_1 h))
+    (ChannelFormat.read data (base + 2 * ChannelFormat.byteSize (RangeT := RangeT)) (bound3_2 h))
 
+@[inline] def write3 {RangeT α : Type u} [ChannelFormat RangeT]
+    (get0 get1 get2 : α → RangeT) (data : ByteArray) (base : Nat)
+    (h : base + (3 * ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size)
+    (px : α) : ByteArray :=
+  let h01 : base + (2 * ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size := by
+    have hpos := ChannelFormat.byteSize_pos (RangeT := RangeT)
+    omega
+  let data2 := write2 get0 get1 data base h01 px
+  have hsize2 : data2.size = data.size :=
+    write2_size get0 get1 data base h01 px
+  let h2 : base + 2 * ChannelFormat.byteSize (RangeT := RangeT) +
+      (ChannelFormat.byteSize (RangeT := RangeT) - 1) < data2.size := by
+    simpa [hsize2] using bound3_2 h
+  ChannelFormat.write data2 (base + 2 * ChannelFormat.byteSize (RangeT := RangeT)) h2 (get2 px)
 
-structure Bitmap (px : Type u) [Pixel px] where
+theorem write3_size {RangeT α : Type u} [ChannelFormat RangeT]
+    (get0 get1 get2 : α → RangeT) (data : ByteArray) (base : Nat)
+    (h : base + (3 * ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size)
+    (px : α) :
+    (write3 get0 get1 get2 data base h px).size = data.size := by
+  unfold write3
+  simp [write2_size, ChannelFormat.write_size]
+
+@[inline] def read4 {RangeT α : Type u} [ChannelFormat RangeT]
+    (mk : RangeT → RangeT → RangeT → RangeT → α) (data : ByteArray) (base : Nat)
+    (h : base + (4 * ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size) : α :=
+  mk
+    (ChannelFormat.read data base (bound4_0 h))
+    (ChannelFormat.read data (base + ChannelFormat.byteSize (RangeT := RangeT)) (bound4_1 h))
+    (ChannelFormat.read data (base + 2 * ChannelFormat.byteSize (RangeT := RangeT)) (bound4_2 h))
+    (ChannelFormat.read data (base + 3 * ChannelFormat.byteSize (RangeT := RangeT)) (bound4_3 h))
+
+@[inline] def write4 {RangeT α : Type u} [ChannelFormat RangeT]
+    (get0 get1 get2 get3 : α → RangeT) (data : ByteArray) (base : Nat)
+    (h : base + (4 * ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size)
+    (px : α) : ByteArray :=
+  let h012 : base + (3 * ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size := by
+    have hpos := ChannelFormat.byteSize_pos (RangeT := RangeT)
+    omega
+  let data3 := write3 get0 get1 get2 data base h012 px
+  have hsize3 : data3.size = data.size :=
+    write3_size get0 get1 get2 data base h012 px
+  let h3 : base + 3 * ChannelFormat.byteSize (RangeT := RangeT) +
+      (ChannelFormat.byteSize (RangeT := RangeT) - 1) < data3.size := by
+    simpa [hsize3] using bound4_3 h
+  ChannelFormat.write data3 (base + 3 * ChannelFormat.byteSize (RangeT := RangeT)) h3 (get3 px)
+
+theorem write4_size {RangeT α : Type u} [ChannelFormat RangeT]
+    (get0 get1 get2 get3 : α → RangeT) (data : ByteArray) (base : Nat)
+    (h : base + (4 * ChannelFormat.byteSize (RangeT := RangeT) - 1) < data.size)
+    (px : α) :
+    (write4 get0 get1 get2 get3 data base h px).size = data.size := by
+  unfold write4
+  simp [write3_size, ChannelFormat.write_size]
+
+@[reducible] def pixelFormat1 {RangeT α : Type u} [ChannelFormat RangeT]
+    (mk : RangeT → α) (get0 : α → RangeT) : PixelFormat α where
+  bytesPerPixel := ChannelFormat.byteSize (RangeT := RangeT)
+  bytesPerPixel_pos := ChannelFormat.byteSize_pos (RangeT := RangeT)
+  read := read1 mk
+  write := write1 get0
+  write_size := write1_size get0
+
+@[reducible] def pixelFormat2 {RangeT α : Type u} [ChannelFormat RangeT]
+    (mk : RangeT → RangeT → α) (get0 get1 : α → RangeT) : PixelFormat α where
+  bytesPerPixel := 2 * ChannelFormat.byteSize (RangeT := RangeT)
+  bytesPerPixel_pos := by
+    have hpos := ChannelFormat.byteSize_pos (RangeT := RangeT)
+    omega
+  read := read2 mk
+  write := write2 get0 get1
+  write_size := write2_size get0 get1
+
+@[reducible] def pixelFormat3 {RangeT α : Type u} [ChannelFormat RangeT]
+    (mk : RangeT → RangeT → RangeT → α) (get0 get1 get2 : α → RangeT) : PixelFormat α where
+  bytesPerPixel := 3 * ChannelFormat.byteSize (RangeT := RangeT)
+  bytesPerPixel_pos := by
+    have hpos := ChannelFormat.byteSize_pos (RangeT := RangeT)
+    omega
+  read := read3 mk
+  write := write3 get0 get1 get2
+  write_size := write3_size get0 get1 get2
+
+@[reducible] def pixelFormat4 {RangeT α : Type u} [ChannelFormat RangeT]
+    (mk : RangeT → RangeT → RangeT → RangeT → α) (get0 get1 get2 get3 : α → RangeT) :
+    PixelFormat α where
+  bytesPerPixel := 4 * ChannelFormat.byteSize (RangeT := RangeT)
+  bytesPerPixel_pos := by
+    have hpos := ChannelFormat.byteSize_pos (RangeT := RangeT)
+    omega
+  read := read4 mk
+  write := write4 get0 get1 get2 get3
+  write_size := write4_size get0 get1 get2 get3
+
+end ChannelLayout
+
+structure Bitmap (px : Type u) [PixelFormat px] where
   mk ::
 
   size : Size
   data : ByteArray
 
-  valid : data.size = size.width * size.height * Pixel.bytesPerPixel (α := px) := by
+  valid : data.size = size.width * size.height * PixelFormat.bytesPerPixel (α := px) := by
     simp
 deriving Repr, DecidableEq
 
-structure BitmapGray1 where
+structure Bitmap.Gray1 where
   mk ::
 
   size : Size
@@ -594,40 +650,40 @@ structure BitmapGray1 where
     simp [gray1DataSize]
 deriving Repr, DecidableEq
 
-abbrev BitmapRGB8 [Pixel PixelRGB8] := Bitmap PixelRGB8
-abbrev BitmapRGB16 [Pixel PixelRGB16] := Bitmap PixelRGB16
-abbrev BitmapRGBA8 [Pixel PixelRGBA8] := Bitmap PixelRGBA8
-abbrev BitmapRGBA16 [Pixel PixelRGBA16] := Bitmap PixelRGBA16
-abbrev BitmapGray8 [Pixel PixelGray8] := Bitmap PixelGray8
-abbrev BitmapGray16 [Pixel PixelGray16] := Bitmap PixelGray16
-abbrev BitmapGrayAlpha8 [Pixel PixelGrayAlpha8] := Bitmap PixelGrayAlpha8
-abbrev BitmapGrayAlpha16 [Pixel PixelGrayAlpha16] := Bitmap PixelGrayAlpha16
+abbrev Bitmap.RGB8 [inst : PixelFormat Bitmaps.RGB8] := @Bitmap Bitmaps.RGB8 inst
+abbrev Bitmap.RGB16 [inst : PixelFormat Bitmaps.RGB16] := @Bitmap Bitmaps.RGB16 inst
+abbrev Bitmap.RGBA8 [inst : PixelFormat Bitmaps.RGBA8] := @Bitmap Bitmaps.RGBA8 inst
+abbrev Bitmap.RGBA16 [inst : PixelFormat Bitmaps.RGBA16] := @Bitmap Bitmaps.RGBA16 inst
+abbrev Bitmap.Gray8 [inst : PixelFormat Bitmaps.Gray8] := @Bitmap Bitmaps.Gray8 inst
+abbrev Bitmap.Gray16 [inst : PixelFormat Bitmaps.Gray16] := @Bitmap Bitmaps.Gray16 inst
+abbrev Bitmap.GrayAlpha8 [inst : PixelFormat Bitmaps.GrayAlpha8] := @Bitmap Bitmaps.GrayAlpha8 inst
+abbrev Bitmap.GrayAlpha16 [inst : PixelFormat Bitmaps.GrayAlpha16] := @Bitmap Bitmaps.GrayAlpha16 inst
 
-instance [Pixel PixelRGB8] : DecidableEq BitmapRGB8 := by
+instance [PixelFormat Bitmaps.RGB8] : DecidableEq Bitmap.RGB8 := by
   infer_instance
 
-instance [Pixel PixelRGB16] : DecidableEq BitmapRGB16 := by
+instance [PixelFormat Bitmaps.RGB16] : DecidableEq Bitmap.RGB16 := by
   infer_instance
 
-instance [Pixel PixelRGBA8] : DecidableEq BitmapRGBA8 := by
+instance [PixelFormat Bitmaps.RGBA8] : DecidableEq Bitmap.RGBA8 := by
   infer_instance
 
-instance [Pixel PixelRGBA16] : DecidableEq BitmapRGBA16 := by
+instance [PixelFormat Bitmaps.RGBA16] : DecidableEq Bitmap.RGBA16 := by
   infer_instance
 
-instance [Pixel PixelGray8] : DecidableEq BitmapGray8 := by
+instance [PixelFormat Bitmaps.Gray8] : DecidableEq Bitmap.Gray8 := by
   infer_instance
 
-instance [Pixel PixelGray16] : DecidableEq BitmapGray16 := by
+instance [PixelFormat Bitmaps.Gray16] : DecidableEq Bitmap.Gray16 := by
   infer_instance
 
-instance [Pixel PixelGrayAlpha8] : DecidableEq BitmapGrayAlpha8 := by
+instance [PixelFormat Bitmaps.GrayAlpha8] : DecidableEq Bitmap.GrayAlpha8 := by
   infer_instance
 
-instance [Pixel PixelGrayAlpha16] : DecidableEq BitmapGrayAlpha16 := by
+instance [PixelFormat Bitmaps.GrayAlpha16] : DecidableEq Bitmap.GrayAlpha16 := by
   infer_instance
 
-def putPixel {px : Type u} [Pixel px] (img : Bitmap px) (x y : Nat) (pixel : px)
+def Bitmap.setPixel {px : Type u} [PixelFormat px] (img : Bitmap px) (x y : Nat) (pixel : px)
     (h1 : x < img.size.width) (h2: y < img.size.height) : Bitmap px := by
   let pixIdx := x + y * img.size.width
   have hPix : pixIdx < img.size.width * img.size.height := by
@@ -652,10 +708,10 @@ def putPixel {px : Type u} [Pixel px] (img : Bitmap px) (x y : Nat) (pixel : px)
           img.size.width * img.size.height := lt_of_lt_of_le hx'' hy'
     simpa [pixIdx] using hlt
 
-  let bpp := Pixel.bytesPerPixel (α := px)
+  let bpp := PixelFormat.bytesPerPixel (α := px)
   let base := pixIdx * bpp
   have hlast : base + (bpp - 1) < img.data.size := by
-    have hbpp : 0 < bpp := Pixel.bytesPerPixel_pos (α := px)
+    have hbpp : 0 < bpp := PixelFormat.bytesPerPixel_pos (α := px)
     have hlt1 : base + (bpp - 1) < base + bpp := by
       have hltbpp : bpp - 1 < bpp := by
         exact Nat.sub_one_lt (Nat.ne_of_gt hbpp)
@@ -671,12 +727,12 @@ def putPixel {px : Type u} [Pixel px] (img : Bitmap px) (x y : Nat) (pixel : px)
       lt_of_lt_of_le hlt1 hle2
     simpa [base, img.valid] using hlt
 
-  let data' := Pixel.write img.data base hlast pixel
+  let data' := PixelFormat.write img.data base hlast pixel
   have hsize : data'.size = img.data.size := by
-    simpa using Pixel.write_size (data := img.data) (base := base) (h := hlast) (px := pixel)
+    simpa using PixelFormat.write_size (data := img.data) (base := base) (h := hlast) (px := pixel)
   exact { img with data := data', valid := by simpa [hsize] using img.valid }
 
-def getPixel {px : Type u} [Pixel px] (img : Bitmap px) (x y : Nat)
+def Bitmap.getPixel {px : Type u} [PixelFormat px] (img : Bitmap px) (x y : Nat)
     (hx : x < img.size.width)
     (hy : y < img.size.height) : px := by
   let pixIdx := x + y * img.size.width
@@ -702,10 +758,10 @@ def getPixel {px : Type u} [Pixel px] (img : Bitmap px) (x y : Nat)
           img.size.width * img.size.height := lt_of_lt_of_le hx'' hy'
     simpa [pixIdx] using hlt
 
-  let bpp := Pixel.bytesPerPixel (α := px)
+  let bpp := PixelFormat.bytesPerPixel (α := px)
   let base := pixIdx * bpp
   have hlast : base + (bpp - 1) < img.data.size := by
-    have hbpp : 0 < bpp := Pixel.bytesPerPixel_pos (α := px)
+    have hbpp : 0 < bpp := PixelFormat.bytesPerPixel_pos (α := px)
     have hlt1 : base + (bpp - 1) < base + bpp := by
       have hltbpp : bpp - 1 < bpp := by
         exact Nat.sub_one_lt (Nat.ne_of_gt hbpp)
@@ -721,10 +777,10 @@ def getPixel {px : Type u} [Pixel px] (img : Bitmap px) (x y : Nat)
       lt_of_lt_of_le hlt1 hle2
     simpa [base, img.valid] using hlt
 
-  exact Pixel.read img.data base hlast
+  exact PixelFormat.read img.data base hlast
 
-def Bitmap.ofPixelFn {px : Type u} [Pixel px] (w h : Nat) (f : Fin (w * h) → px) : Bitmap px := by
-  let bpp := Pixel.bytesPerPixel (α := px)
+def Bitmap.ofFn {px : Type u} [PixelFormat px] (w h : Nat) (f : Fin (w * h) → px) : Bitmap px := by
+  let bpp := PixelFormat.bytesPerPixel (α := px)
   let total := w * h * bpp
   let data0 := ByteArray.mk <| Array.replicate total 0
   have hsize0 : data0.size = total := by
@@ -734,7 +790,7 @@ def Bitmap.ofPixelFn {px : Type u} [Pixel px] (w h : Nat) (f : Fin (w * h) → p
     if hi : i < w * h then
       let base := i * bpp
       have hlast : base + (bpp - 1) < data.size := by
-        have hbpp : 0 < bpp := Pixel.bytesPerPixel_pos (α := px)
+        have hbpp : 0 < bpp := PixelFormat.bytesPerPixel_pos (α := px)
         have hlt1 : base + (bpp - 1) < base + bpp := by
           have hltbpp : bpp - 1 < bpp := Nat.sub_one_lt (Nat.ne_of_gt hbpp)
           exact Nat.add_lt_add_left hltbpp base
@@ -747,10 +803,10 @@ def Bitmap.ofPixelFn {px : Type u} [Pixel px] (w h : Nat) (f : Fin (w * h) → p
           simpa [hbase] using hle'
         have hlt : base + (bpp - 1) < w * h * bpp := lt_of_lt_of_le hlt1 hle2
         simpa [hsize] using hlt
-      let data' := Pixel.write data base hlast (f ⟨i, hi⟩)
+      let data' := PixelFormat.write data base hlast (f ⟨i, hi⟩)
       have hsize' : data'.size = total := by
         simpa [hsize] using
-          (Pixel.write_size (data := data) (base := base) (h := hlast) (px := f ⟨i, hi⟩))
+          (PixelFormat.write_size (data := data) (base := base) (h := hlast) (px := f ⟨i, hi⟩))
       exact fill (i + 1) data' hsize'
     else
       exact ⟨data, hsize⟩
@@ -763,67 +819,47 @@ def Bitmap.ofPixelFn {px : Type u} [Pixel px] (w h : Nat) (f : Fin (w * h) → p
   refine { size := { width := w, height := h }, data := filled.1, valid := ?_ }
   simpa [total] using filled.2
 
-def mkBlankBitmap (w h : Nat) (color : PixelRGB8) [Pixel PixelRGB8] : BitmapRGB8 :=
-  Bitmap.ofPixelFn w h (fun _ => color)
+def Bitmap.fill {px : Type u} [PixelFormat px] (w h : Nat) (color : px) : Bitmap px :=
+  Bitmap.ofFn w h (fun _ => color)
 
-def BitmapRGB16.ofPixelFn (w h : Nat) (f : Fin (w * h) → PixelRGB16)
-    [Pixel PixelRGB16] : BitmapRGB16 :=
-  Bitmap.ofPixelFn w h f
+def Bitmap.RGB8.ofFn (w h : Nat) (f : Fin (w * h) → Bitmaps.RGB8)
+    [PixelFormat Bitmaps.RGB8] : Bitmap.RGB8 :=
+  Bitmap.ofFn w h f
 
-def mkBlankBitmapRGB16 (w h : Nat) (color : PixelRGB16)
-    [Pixel PixelRGB16] : BitmapRGB16 :=
-  BitmapRGB16.ofPixelFn w h (fun _ => color)
+def Bitmap.RGB16.ofFn (w h : Nat) (f : Fin (w * h) → Bitmaps.RGB16)
+    [PixelFormat Bitmaps.RGB16] : Bitmap.RGB16 :=
+  Bitmap.ofFn w h f
 
-def BitmapRGBA8.ofPixelFn (w h : Nat) (f : Fin (w * h) → PixelRGBA8) [Pixel PixelRGBA8] :
-    BitmapRGBA8 :=
-  Bitmap.ofPixelFn w h f
+def Bitmap.RGBA8.ofFn (w h : Nat) (f : Fin (w * h) → Bitmaps.RGBA8)
+    [PixelFormat Bitmaps.RGBA8] :
+    Bitmap.RGBA8 :=
+  Bitmap.ofFn w h f
 
-def mkBlankBitmapRGBA (w h : Nat) (color : PixelRGBA8) [Pixel PixelRGBA8] : BitmapRGBA8 :=
-  BitmapRGBA8.ofPixelFn w h (fun _ => color)
+def Bitmap.RGBA16.ofFn (w h : Nat) (f : Fin (w * h) → Bitmaps.RGBA16)
+    [PixelFormat Bitmaps.RGBA16] : Bitmap.RGBA16 :=
+  Bitmap.ofFn w h f
 
-def BitmapRGBA16.ofPixelFn (w h : Nat) (f : Fin (w * h) → PixelRGBA16)
-    [Pixel PixelRGBA16] : BitmapRGBA16 :=
-  Bitmap.ofPixelFn w h f
+def Bitmap.Gray8.ofFn (w h : Nat) (f : Fin (w * h) → Bitmaps.Gray8)
+    [PixelFormat Bitmaps.Gray8] :
+    Bitmap.Gray8 :=
+  Bitmap.ofFn w h f
 
-def mkBlankBitmapRGBA16 (w h : Nat) (color : PixelRGBA16)
-    [Pixel PixelRGBA16] : BitmapRGBA16 :=
-  BitmapRGBA16.ofPixelFn w h (fun _ => color)
+def Bitmap.Gray16.ofFn (w h : Nat) (f : Fin (w * h) → Bitmaps.Gray16)
+    [PixelFormat Bitmaps.Gray16] : Bitmap.Gray16 :=
+  Bitmap.ofFn w h f
 
-def BitmapGray8.ofPixelFn (w h : Nat) (f : Fin (w * h) → PixelGray8) [Pixel PixelGray8] :
-    BitmapGray8 :=
-  Bitmap.ofPixelFn w h f
+def Bitmap.GrayAlpha8.ofFn (w h : Nat)
+    (f : Fin (w * h) → Bitmaps.GrayAlpha8) [PixelFormat Bitmaps.GrayAlpha8] :
+    Bitmap.GrayAlpha8 :=
+  Bitmap.ofFn w h f
 
-def mkBlankBitmapGray (w h : Nat) (color : PixelGray8) [Pixel PixelGray8] : BitmapGray8 :=
-  BitmapGray8.ofPixelFn w h (fun _ => color)
-
-def BitmapGray16.ofPixelFn (w h : Nat) (f : Fin (w * h) → PixelGray16)
-    [Pixel PixelGray16] : BitmapGray16 :=
-  Bitmap.ofPixelFn w h f
-
-def mkBlankBitmapGray16 (w h : Nat) (color : PixelGray16)
-    [Pixel PixelGray16] : BitmapGray16 :=
-  BitmapGray16.ofPixelFn w h (fun _ => color)
-
-def BitmapGrayAlpha8.ofPixelFn (w h : Nat)
-    (f : Fin (w * h) → PixelGrayAlpha8) [Pixel PixelGrayAlpha8] :
-    BitmapGrayAlpha8 :=
-  Bitmap.ofPixelFn w h f
-
-def mkBlankBitmapGrayAlpha (w h : Nat) (color : PixelGrayAlpha8)
-    [Pixel PixelGrayAlpha8] : BitmapGrayAlpha8 :=
-  BitmapGrayAlpha8.ofPixelFn w h (fun _ => color)
-
-def BitmapGrayAlpha16.ofPixelFn (w h : Nat)
-    (f : Fin (w * h) → PixelGrayAlpha16) [Pixel PixelGrayAlpha16] :
-    BitmapGrayAlpha16 :=
-  Bitmap.ofPixelFn w h f
-
-def mkBlankBitmapGrayAlpha16 (w h : Nat) (color : PixelGrayAlpha16)
-    [Pixel PixelGrayAlpha16] : BitmapGrayAlpha16 :=
-  BitmapGrayAlpha16.ofPixelFn w h (fun _ => color)
+def Bitmap.GrayAlpha16.ofFn (w h : Nat)
+    (f : Fin (w * h) → Bitmaps.GrayAlpha16) [PixelFormat Bitmaps.GrayAlpha16] :
+    Bitmap.GrayAlpha16 :=
+  Bitmap.ofFn w h f
 
 private def gray1PackedByteOfFn (w h rowBytes : Nat)
-    (i : Fin (h * rowBytes)) (f : Fin (w * h) → PixelGray1) : UInt8 :=
+    (i : Fin (h * rowBytes)) (f : Fin (w * h) → Bitmaps.Gray1) : UInt8 :=
   Id.run do
     let y := i.val / rowBytes
     let byteX := i.val % rowBytes
@@ -845,8 +881,8 @@ private def gray1PackedByteOfFn (w h rowBytes : Nat)
             byte := gray1SetBitInByte byte x true
     return byte
 
-def BitmapGray1.ofPixelFn (w h : Nat) (f : Fin (w * h) → PixelGray1) :
-    BitmapGray1 :=
+def Bitmap.Gray1.ofFn (w h : Nat) (f : Fin (w * h) → Bitmaps.Gray1) :
+    Bitmap.Gray1 :=
   let rowBytes := gray1RowBytes w
   let data := ByteArray.mk <|
     Array.ofFn (fun i : Fin (h * rowBytes) => gray1PackedByteOfFn w h rowBytes i f)
@@ -858,10 +894,10 @@ def BitmapGray1.ofPixelFn (w h : Nat) (f : Fin (w * h) → PixelGray1) :
           gray1DataSize w h
       simp [gray1DataSize, rowBytes] }
 
-def mkBlankBitmapGray1 (w h : Nat) (color : PixelGray1) : BitmapGray1 :=
-  BitmapGray1.ofPixelFn w h (fun _ => color)
+def Bitmap.Gray1.fill (w h : Nat) (color : Bitmaps.Gray1) : Bitmap.Gray1 :=
+  Bitmap.Gray1.ofFn w h (fun _ => color)
 
-def BitmapGray1.getBitLinear (bmp : BitmapGray1) (i : Nat) : Bool :=
+def Bitmap.Gray1.getBitLinear (bmp : Bitmap.Gray1) (i : Nat) : Bool :=
   if _hpix : i < bmp.size.width * bmp.size.height then
     if bmp.size.width == 0 then
       false
@@ -873,7 +909,7 @@ def BitmapGray1.getBitLinear (bmp : BitmapGray1) (i : Nat) : Bool :=
   else
     false
 
-def BitmapGray1.getPixel? (bmp : BitmapGray1) (x y : Nat) : Option PixelGray1 :=
+def Bitmap.Gray1.getPixel? (bmp : Bitmap.Gray1) (x y : Nat) : Option Bitmaps.Gray1 :=
   if _hx : x < bmp.size.width then
     if _hy : y < bmp.size.height then
       let byte := bmp.data.get! (gray1ByteIndex bmp.size.width x y)
@@ -883,8 +919,8 @@ def BitmapGray1.getPixel? (bmp : BitmapGray1) (x y : Nat) : Option PixelGray1 :=
   else
     none
 
-def BitmapGray1.setPixel? (bmp : BitmapGray1) (x y : Nat) (px : PixelGray1) :
-    Option BitmapGray1 :=
+def Bitmap.Gray1.setPixel? (bmp : Bitmap.Gray1) (x y : Nat) (px : Bitmaps.Gray1) :
+    Option Bitmap.Gray1 :=
   if _hx : x < bmp.size.width then
     if _hy : y < bmp.size.height then
       let idx := gray1ByteIndex bmp.size.width x y
@@ -909,558 +945,65 @@ def BitmapGray1.setPixel? (bmp : BitmapGray1) (x y : Nat) (px : PixelGray1) :
   else
     none
 
-def BitmapGray1.putPixel? := BitmapGray1.setPixel?
-
-def BitmapGray1.toGray8 (bmp : BitmapGray1) [Pixel PixelGray8] : BitmapGray8 :=
-  BitmapGray8.ofPixelFn bmp.size.width bmp.size.height (fun idx =>
+def Bitmap.Gray1.toGray8 (bmp : Bitmap.Gray1) [PixelFormat Bitmaps.Gray8] : Bitmap.Gray8 :=
+  Bitmap.Gray8.ofFn bmp.size.width bmp.size.height (fun idx =>
     { v := if bmp.getBitLinear idx.val then 0xff else 0 })
 
-def BitmapGray1.toRGB8 (bmp : BitmapGray1) [Pixel PixelRGB8] : BitmapRGB8 :=
-  Bitmap.ofPixelFn bmp.size.width bmp.size.height (fun idx =>
+def Bitmap.Gray1.toRGB8 (bmp : Bitmap.Gray1) [PixelFormat Bitmaps.RGB8] : Bitmap.RGB8 :=
+  Bitmap.ofFn bmp.size.width bmp.size.height (fun idx =>
     let v : UInt8 := if bmp.getBitLinear idx.val then 0xff else 0
     { r := v, g := v, b := v })
 
-def BitmapGray1.toRGBA8 (bmp : BitmapGray1) [Pixel PixelRGBA8] : BitmapRGBA8 :=
-  BitmapRGBA8.ofPixelFn bmp.size.width bmp.size.height (fun idx =>
+def Bitmap.Gray1.toRGBA8 (bmp : Bitmap.Gray1) [PixelFormat Bitmaps.RGBA8] : Bitmap.RGBA8 :=
+  Bitmap.RGBA8.ofFn bmp.size.width bmp.size.height (fun idx =>
     let v : UInt8 := if bmp.getBitLinear idx.val then 0xff else 0
     { r := v, g := v, b := v, a := 0xff })
 
-def BitmapGray8.toGray1Threshold [Pixel PixelGray8] (bmp : BitmapGray8)
+def Bitmap.Gray8.toGray1Threshold [PixelFormat Bitmaps.Gray8] (bmp : Bitmap.Gray8)
     (threshold : UInt8 := 128) :
-    BitmapGray1 :=
-  BitmapGray1.ofPixelFn bmp.size.width bmp.size.height (fun idx =>
+    Bitmap.Gray1 :=
+  Bitmap.Gray1.ofFn bmp.size.width bmp.size.height (fun idx =>
     { v := (bmp.data.get! idx.val).toNat >= threshold.toNat })
 
-instance instPixelRGB8 : Pixel PixelRGB8 where
-  bytesPerPixel := bytesPerPixelRGB
-  bytesPerPixel_pos := by decide
-  read_write := by
-    intro data base h px
-    cases px with
-    | mk r g b =>
-        have h2 : base + 2 < data.size := by
-          simpa [bytesPerPixelRGB] using h
-        have h1 : base + 1 < data.size := by omega
-        have h0 : base < data.size := by omega
-        have size_set {bs : ByteArray} {i : Nat} (hi : i < bs.size) {v : UInt8} :
-            (bs.set i v hi).size = bs.size := by
-          cases bs with
-          | mk arr =>
-              simp [ByteArray.set, ByteArray.size, Array.size_set]
-        let data1 := data.set base r h0
-        have hsize1 : data1.size = data.size := by
-          simp [data1, size_set]
-        have h1d1 : base + 1 < data1.size := by
-          simpa [hsize1] using h1
-        let data2 := data1.set (base + 1) g h1d1
-        have hsize2 : data2.size = data.size := by
-          have hsize2' : data2.size = data1.size := by
-            simp [data2, size_set]
-          simpa [hsize1] using hsize2'
-        have h2d2 : base + 2 < data2.size := by
-          simpa [hsize2] using h2
-        let data3 := data2.set (base + 2) b h2d2
-        have hsize3 : data3.size = data.size := by
-          have hsize3' : data3.size = data2.size := by
-            simp [data3, size_set]
-          simpa [hsize2] using hsize3'
-        have h0d1 : base < data1.size := by
-          simpa [hsize1] using h0
-        have h0d2 : base < data2.size := by
-          simpa [hsize2] using h0
-        have h0d3 : base < data3.size := by
-          simpa [hsize3] using h0
-        have h1d2 : base + 1 < data2.size := by
-          simpa [hsize2] using h1
-        have h1d3 : base + 1 < data3.size := by
-          simpa [hsize3] using h1
-        have h2d3 : base + 2 < data3.size := by
-          simpa [hsize3] using h2
-        have get_set_ne :
-            ∀ {bs : ByteArray} {i j : Nat} (hi : i < bs.size) (hj : j < bs.size)
-              (hij : i ≠ j) {v : UInt8} {h' : j < (bs.set i v hi).size},
-              (bs.set i v hi).get j h' = bs.get j hj := by
-          intro bs i j hi hj hij v h'
-          cases bs with
-          | mk arr =>
-              simpa [ByteArray.set, ByteArray.get] using
-                (Array.getElem_set_ne (xs := arr) (i := i) (j := j) (h' := hi) (pj := hj)
-                  (h := hij))
-        have hr : data3.get base h0d3 = r := by
-          have hr1 : data3.get base h0d3 = data2.get base h0d2 := by
-            simpa [data3] using
-              (get_set_ne (bs := data2) (i := base + 2) (j := base)
-                (hi := h2d2) (hj := h0d2) (hij := by omega) (v := b) (h' := h0d3))
-          have hr2 : data2.get base h0d2 = data1.get base h0d1 := by
-            simpa [data2] using
-              (get_set_ne (bs := data1) (i := base + 1) (j := base)
-                (hi := h1d1) (hj := h0d1) (hij := by omega) (v := g) (h' := h0d2))
-          have hr3 : data1.get base h0d1 = r := by
-            simp [data1, ByteArray.set, ByteArray.get]
-          simp [hr1, hr2, hr3]
-        have hg : data3.get (base + 1) h1d3 = g := by
-          have hg1 : data3.get (base + 1) h1d3 = data2.get (base + 1) h1d2 := by
-            simpa [data3] using
-              (get_set_ne (bs := data2) (i := base + 2) (j := base + 1)
-                (hi := h2d2) (hj := h1d2) (hij := by omega) (v := b) (h' := h1d3))
-          have hg2 : data2.get (base + 1) h1d2 = g := by
-            simp [data2, ByteArray.set, ByteArray.get]
-          simp [hg1, hg2]
-        have hb : data3.get (base + 2) h2d3 = b := by
-          simp [data3, ByteArray.set, ByteArray.get]
-        simp [pixelReadRGB8, pixelWriteRGB8, data1, data2, data3, hr, hg, hb]
-  read := fun data base h =>
-    pixelReadRGB8 data base (by simpa [bytesPerPixelRGB] using h)
-  write := fun data base h px =>
-    pixelWriteRGB8 data base (by simpa [bytesPerPixelRGB] using h) px
-  write_size := by
-    intro data base h px
-    cases data with
-    | mk arr =>
-        simp [pixelWriteRGB8, ByteArray.set, ByteArray.size, Array.size_set]
+instance instPixelFormatRGB8 : PixelFormat RGB8 :=
+  ChannelLayout.pixelFormat3
+    (fun r g b => { r := r, g := g, b := b })
+    RGB.r RGB.g RGB.b
 
-instance instPixelRGBA8 : Pixel PixelRGBA8 where
-  bytesPerPixel := bytesPerPixelRGBA
-  bytesPerPixel_pos := by decide
-  read_write := by
-    intro data base h px
-    cases px with
-    | mk r g b a =>
-        have h3 : base + 3 < data.size := by
-          simpa [bytesPerPixelRGBA] using h
-        have h2 : base + 2 < data.size := by omega
-        have h1 : base + 1 < data.size := by omega
-        have h0 : base < data.size := by omega
-        have size_set {bs : ByteArray} {i : Nat} (hi : i < bs.size) {v : UInt8} :
-            (bs.set i v hi).size = bs.size := by
-          cases bs with
-          | mk arr =>
-              simp [ByteArray.set, ByteArray.size, Array.size_set]
-        let data1 := data.set base r h0
-        have hsize1 : data1.size = data.size := by
-          simp [data1, size_set]
-        have h1d1 : base + 1 < data1.size := by
-          simpa [hsize1] using h1
-        let data2 := data1.set (base + 1) g h1d1
-        have hsize2 : data2.size = data.size := by
-          have hsize2' : data2.size = data1.size := by
-            simp [data2, size_set]
-          simpa [hsize1] using hsize2'
-        have h2d2 : base + 2 < data2.size := by
-          simpa [hsize2] using h2
-        let data3 := data2.set (base + 2) b h2d2
-        have hsize3 : data3.size = data.size := by
-          have hsize3' : data3.size = data2.size := by
-            simp [data3, size_set]
-          simpa [hsize2] using hsize3'
-        have h3d3 : base + 3 < data3.size := by
-          simpa [hsize3] using h3
-        let data4 := data3.set (base + 3) a h3d3
-        have hsize4 : data4.size = data.size := by
-          have hsize4' : data4.size = data3.size := by
-            simp [data4, size_set]
-          simpa [hsize3] using hsize4'
-        have h0d1 : base < data1.size := by
-          simpa [hsize1] using h0
-        have h0d2 : base < data2.size := by
-          simpa [hsize2] using h0
-        have h0d3 : base < data3.size := by
-          simpa [hsize3] using h0
-        have h0d4 : base < data4.size := by
-          simpa [hsize4] using h0
-        have h1d2 : base + 1 < data2.size := by
-          simpa [hsize2] using h1
-        have h1d3 : base + 1 < data3.size := by
-          simpa [hsize3] using h1
-        have h1d4 : base + 1 < data4.size := by
-          simpa [hsize4] using h1
-        have h2d3 : base + 2 < data3.size := by
-          simpa [hsize3] using h2
-        have h2d4 : base + 2 < data4.size := by
-          simpa [hsize4] using h2
-        have h3d4 : base + 3 < data4.size := by
-          simpa [hsize4] using h3
-        have get_set_ne {bs : ByteArray} {i j : Nat}
-            (hi : i < bs.size) (hj : j < bs.size) (hij : i ≠ j) {v : UInt8}
-            (h' : j < (bs.set i v hi).size) :
-            (bs.set i v hi).get j h' = bs.get j hj := by
-          cases bs with
-          | mk arr =>
-              simpa [ByteArray.set, ByteArray.get] using
-                (Array.getElem_set_ne (xs := arr) (i := i) (j := j) (h' := hi) (pj := hj)
-                  (h := hij))
-        have hr : data4.get base h0d4 = r := by
-          have hr1 : data4.get base h0d4 = data3.get base h0d3 := by
-            simpa [data4] using
-              (get_set_ne (bs := data3) (i := base + 3) (j := base)
-                (hi := h3d3) (hj := h0d3) (hij := by omega) (v := a) (h' := h0d4))
-          have hr2 : data3.get base h0d3 = data2.get base h0d2 := by
-            simpa [data3] using
-              (get_set_ne (bs := data2) (i := base + 2) (j := base)
-                (hi := h2d2) (hj := h0d2) (hij := by omega) (v := b) (h' := h0d3))
-          have hr3 : data2.get base h0d2 = data1.get base h0d1 := by
-            simpa [data2] using
-              (get_set_ne (bs := data1) (i := base + 1) (j := base)
-                (hi := h1d1) (hj := h0d1) (hij := by omega) (v := g) (h' := h0d2))
-          have hr4 : data1.get base h0d1 = r := by
-            simp [data1, ByteArray.set, ByteArray.get]
-          simp [hr1, hr2, hr3, hr4]
-        have hg : data4.get (base + 1) h1d4 = g := by
-          have hg1 : data4.get (base + 1) h1d4 = data3.get (base + 1) h1d3 := by
-            simpa [data4] using
-              (get_set_ne (bs := data3) (i := base + 3) (j := base + 1)
-                (hi := h3d3) (hj := h1d3) (hij := by omega) (v := a) (h' := h1d4))
-          have hg2 : data3.get (base + 1) h1d3 = data2.get (base + 1) h1d2 := by
-            simpa [data3] using
-              (get_set_ne (bs := data2) (i := base + 2) (j := base + 1)
-                (hi := h2d2) (hj := h1d2) (hij := by omega) (v := b) (h' := h1d3))
-          have hg3 : data2.get (base + 1) h1d2 = g := by
-            simp [data2, ByteArray.set, ByteArray.get]
-          simp [hg1, hg2, hg3]
-        have hb : data4.get (base + 2) h2d4 = b := by
-          have hb1 : data4.get (base + 2) h2d4 = data3.get (base + 2) h2d3 := by
-            simpa [data4] using
-              (get_set_ne (bs := data3) (i := base + 3) (j := base + 2)
-                (hi := h3d3) (hj := h2d3) (hij := by omega) (v := a) (h' := h2d4))
-          have hb2 : data3.get (base + 2) h2d3 = b := by
-            simp [data3, ByteArray.set, ByteArray.get]
-          simp [hb1, hb2]
-        have ha : data4.get (base + 3) h3d4 = a := by
-          simp [data4, ByteArray.set, ByteArray.get]
-        simp [pixelReadRGBA8, pixelWriteRGBA8, data1, data2, data3, data4, hr, hg, hb, ha]
-  read := fun data base h =>
-    pixelReadRGBA8 data base (by simpa [bytesPerPixelRGBA] using h)
-  write := fun data base h px =>
-    pixelWriteRGBA8 data base (by simpa [bytesPerPixelRGBA] using h) px
-  write_size := by
-    intro data base h px
-    cases data with
-    | mk arr =>
-        simp [pixelWriteRGBA8, ByteArray.set, ByteArray.size, Array.size_set]
+instance instPixelFormatRGBA8 : PixelFormat RGBA8 :=
+  ChannelLayout.pixelFormat4
+    (fun r g b a => { r := r, g := g, b := b, a := a })
+    RGBA.r RGBA.g RGBA.b RGBA.a
 
-instance instPixelGray8 : Pixel PixelGray8 where
-  bytesPerPixel := bytesPerPixelGray
-  bytesPerPixel_pos := by decide
-  read_write := by
-    intro data base h px
-    cases px with
-    | mk v =>
-        have h0 : base < data.size := by
-          simpa [bytesPerPixelGray] using h
-        simp [pixelReadGray8, pixelWriteGray8, ByteArray.set, ByteArray.get]
-  read := fun data base h =>
-    pixelReadGray8 data base (by simpa [bytesPerPixelGray] using h)
-  write := fun data base h px =>
-    pixelWriteGray8 data base (by simpa [bytesPerPixelGray] using h) px
-  write_size := by
-    intro data base h px
-    cases data with
-    | mk arr =>
-        simp [pixelWriteGray8, ByteArray.set, ByteArray.size, Array.size_set]
+instance instPixelFormatGray8 : PixelFormat Gray8 :=
+  ChannelLayout.pixelFormat1
+    (fun v => { v := v })
+    Gray.v
 
-instance instPixelGrayAlpha8 : Pixel PixelGrayAlpha8 where
-  bytesPerPixel := bytesPerPixelGrayAlpha
-  bytesPerPixel_pos := by decide
-  read_write := by
-    intro data base h px
-    cases px with
-    | mk v a =>
-        have h1 : base + 1 < data.size := by
-          simpa [bytesPerPixelGrayAlpha] using h
-        have h0 : base < data.size := by omega
-        have size_set {bs : ByteArray} {i : Nat} (hi : i < bs.size) {v : UInt8} :
-            (bs.set i v hi).size = bs.size := by
-          cases bs with
-          | mk arr =>
-              simp [ByteArray.set, ByteArray.size, Array.size_set]
-        let data1 := data.set base v h0
-        have hsize1 : data1.size = data.size := by
-          simp [data1, size_set]
-        have h1d1 : base + 1 < data1.size := by
-          simpa [hsize1] using h1
-        let data2 := data1.set (base + 1) a h1d1
-        have hsize2 : data2.size = data.size := by
-          have hsize2' : data2.size = data1.size := by
-            simp [data2, size_set]
-          simpa [hsize1] using hsize2'
-        have h0d1 : base < data1.size := by
-          simpa [hsize1] using h0
-        have h0d2 : base < data2.size := by
-          simpa [hsize2] using h0
-        have h1d2 : base + 1 < data2.size := by
-          simpa [hsize2] using h1
-        have get_set_ne {bs : ByteArray} {i j : Nat}
-            (hi : i < bs.size) (hj : j < bs.size) (hij : i ≠ j) {v : UInt8}
-            (h' : j < (bs.set i v hi).size) :
-            (bs.set i v hi).get j h' = bs.get j hj := by
-          cases bs with
-          | mk arr =>
-              simpa [ByteArray.set, ByteArray.get] using
-                (Array.getElem_set_ne (xs := arr) (i := i) (j := j) (h' := hi) (pj := hj)
-                  (h := hij))
-        have hv : data2.get base h0d2 = v := by
-          have hv1 : data2.get base h0d2 = data1.get base h0d1 := by
-            simpa [data2] using
-              (get_set_ne (bs := data1) (i := base + 1) (j := base)
-                (hi := h1d1) (hj := h0d1) (hij := by omega) (v := a) (h' := h0d2))
-          have hv2 : data1.get base h0d1 = v := by
-            simp [data1, ByteArray.set, ByteArray.get]
-          simp [hv1, hv2]
-        have ha : data2.get (base + 1) h1d2 = a := by
-          simp [data2, ByteArray.set, ByteArray.get]
-        simp [pixelReadGrayAlpha8, pixelWriteGrayAlpha8, data1, data2, hv, ha]
-  read := fun data base h =>
-    pixelReadGrayAlpha8 data base (by simpa [bytesPerPixelGrayAlpha] using h)
-  write := fun data base h px =>
-    pixelWriteGrayAlpha8 data base (by simpa [bytesPerPixelGrayAlpha] using h) px
-  write_size := by
-    intro data base h px
-    cases data with
-    | mk arr =>
-        simp [pixelWriteGrayAlpha8, ByteArray.set, ByteArray.size, Array.size_set]
+instance instPixelFormatGrayAlpha8 : PixelFormat GrayAlpha8 :=
+  ChannelLayout.pixelFormat2
+    (fun v a => { v := v, a := a })
+    GrayAlpha.v GrayAlpha.a
 
-instance instPixelGray16 : Pixel PixelGray16 where
-  bytesPerPixel := bytesPerPixelGray16
-  bytesPerPixel_pos := by decide
-  read_write := by
-    intro data base h px
-    cases px with
-    | mk v =>
-        have hv : base + 1 < data.size := by
-          simpa [bytesPerPixelGray16] using h
-        have hvread := readU16BEAt_write_same data base hv v
-        simp [pixelReadGray16, pixelWriteGray16, hvread]
-  read := fun data base h =>
-    pixelReadGray16 data base (by simpa [bytesPerPixelGray16] using h)
-  write := fun data base h px =>
-    pixelWriteGray16 data base (by simpa [bytesPerPixelGray16] using h) px
-  write_size := by
-    intro data base h px
-    cases px with
-    | mk v =>
-        simpa [pixelWriteGray16] using
-          (writeU16BEAt_size data base (by simpa [bytesPerPixelGray16] using h) v)
+instance instPixelFormatGray16 : PixelFormat Gray16 :=
+  ChannelLayout.pixelFormat1
+    (fun v => { v := v })
+    Gray.v
 
-instance instPixelGrayAlpha16 : Pixel PixelGrayAlpha16 where
-  bytesPerPixel := bytesPerPixelGrayAlpha16
-  bytesPerPixel_pos := by decide
-  read_write := by
-    intro data base h px
-    cases px with
-    | mk v a =>
-        have hv : base + 1 < data.size := by
-          have h3 : base + 3 < data.size := by
-            simpa [bytesPerPixelGrayAlpha16] using h
-          omega
-        let data1 := writeU16BEAt data base hv v
-        have hsize1 : data1.size = data.size := by
-          exact writeU16BEAt_size data base hv v
-        have ha : (base + 2) + 1 < data1.size := by
-          simpa [hsize1] using
-            (by
-              have h3 : base + 3 < data.size := by
-                simpa [bytesPerPixelGrayAlpha16] using h
-              omega : (base + 2) + 1 < data.size)
-        let data2 := writeU16BEAt data1 (base + 2) ha a
-        have hsize2 : data2.size = data.size := by
-          have hsize2' : data2.size = data1.size := by
-            exact writeU16BEAt_size data1 (base + 2) ha a
-          simpa [hsize1] using hsize2'
-        have hv1 : base + 1 < data1.size := by
-          simpa [hsize1] using hv
-        have hv2 : base + 1 < data2.size := by
-          simpa [hsize2] using hv
-        have hvr : readU16BEAt data2 base hv2 = v := by
-          have hkeep :
-              readU16BEAt data2 base hv2 = readU16BEAt data1 base hv1 := by
-            simpa [data2] using
-              (readU16BEAt_write_after data1 base (base + 2) hv1 ha a (by omega))
-          have hsame : readU16BEAt data1 base hv1 = v := by
-            simpa [data1] using (readU16BEAt_write_same data base hv v)
-          simp [hkeep, hsame]
-        have haar : readU16BEAt data2 (base + 2) (by simpa [hsize2, hsize1] using ha) = a := by
-          simpa [data2] using (readU16BEAt_write_same data1 (base + 2) ha a)
-        simp [pixelReadGrayAlpha16, pixelWriteGrayAlpha16, data1, data2, hvr, haar]
-  read := fun data base h =>
-    pixelReadGrayAlpha16 data base (by simpa [bytesPerPixelGrayAlpha16] using h)
-  write := fun data base h px =>
-    pixelWriteGrayAlpha16 data base (by simpa [bytesPerPixelGrayAlpha16] using h) px
-  write_size := by
-    intro data base h px
-    cases px with
-    | mk v a =>
-        have hv : base + 1 < data.size := by
-          have h3 : base + 3 < data.size := by
-            simpa [bytesPerPixelGrayAlpha16] using h
-          omega
-        unfold pixelWriteGrayAlpha16
-        simp [writeU16BEAt_size]
+instance instPixelFormatGrayAlpha16 : PixelFormat GrayAlpha16 :=
+  ChannelLayout.pixelFormat2
+    (fun v a => { v := v, a := a })
+    GrayAlpha.v GrayAlpha.a
 
-instance instPixelRGB16 : Pixel PixelRGB16 where
-  bytesPerPixel := bytesPerPixelRGB16
-  bytesPerPixel_pos := by decide
-  read_write := by
-    intro data base h px
-    cases px with
-    | mk r g b =>
-        have h5 : base + 5 < data.size := by
-          simpa [bytesPerPixelRGB16] using h
-        have hr : base + 1 < data.size := by omega
-        let data1 := writeU16BEAt data base hr r
-        have hsize1 : data1.size = data.size := by
-          exact writeU16BEAt_size data base hr r
-        have hg : (base + 2) + 1 < data1.size := by
-          simpa [hsize1] using (by omega : (base + 2) + 1 < data.size)
-        let data2 := writeU16BEAt data1 (base + 2) hg g
-        have hsize2 : data2.size = data.size := by
-          have hsize2' : data2.size = data1.size := by
-            exact writeU16BEAt_size data1 (base + 2) hg g
-          simpa [hsize1] using hsize2'
-        have hb : (base + 4) + 1 < data2.size := by
-          simpa [hsize2] using (by omega : (base + 4) + 1 < data.size)
-        let data3 := writeU16BEAt data2 (base + 4) hb b
-        have hsize3 : data3.size = data.size := by
-          have hsize3' : data3.size = data2.size := by
-            exact writeU16BEAt_size data2 (base + 4) hb b
-          simpa [hsize2] using hsize3'
-        have hr1 : base + 1 < data1.size := by simpa [hsize1] using hr
-        have hr2 : base + 1 < data2.size := by simpa [hsize2] using hr
-        have hr3 : base + 1 < data3.size := by simpa [hsize3] using hr
-        have hg2 : (base + 2) + 1 < data2.size := by simpa [hsize2] using
-          (by omega : (base + 2) + 1 < data.size)
-        have hg3 : (base + 2) + 1 < data3.size := by simpa [hsize3] using
-          (by omega : (base + 2) + 1 < data.size)
-        have hb3 : (base + 4) + 1 < data3.size := by simpa [hsize3] using
-          (by omega : (base + 4) + 1 < data.size)
-        have hrr : readU16BEAt data3 base hr3 = r := by
-          have hkeep2 : readU16BEAt data3 base hr3 = readU16BEAt data2 base hr2 := by
-            simpa [data3] using
-              (readU16BEAt_write_after data2 base (base + 4) hr2 hb b (by omega))
-          have hkeep1 : readU16BEAt data2 base hr2 = readU16BEAt data1 base hr1 := by
-            simpa [data2] using
-              (readU16BEAt_write_after data1 base (base + 2) hr1 hg g (by omega))
-          have hsame : readU16BEAt data1 base hr1 = r := by
-            simpa [data1] using (readU16BEAt_write_same data base hr r)
-          simp [hkeep2, hkeep1, hsame]
-        have hgr : readU16BEAt data3 (base + 2) hg3 = g := by
-          have hkeep : readU16BEAt data3 (base + 2) hg3 =
-              readU16BEAt data2 (base + 2) hg2 := by
-            simpa [data3] using
-              (readU16BEAt_write_after data2 (base + 2) (base + 4) hg2 hb b
-                (by omega))
-          have hsame : readU16BEAt data2 (base + 2) hg2 = g := by
-            simpa [data2] using (readU16BEAt_write_same data1 (base + 2) hg g)
-          simp [hkeep, hsame]
-        have hbr : readU16BEAt data3 (base + 4) hb3 = b := by
-          simpa [data3] using (readU16BEAt_write_same data2 (base + 4) hb b)
-        simp [pixelReadRGB16, pixelWriteRGB16, data1, data2, data3, hrr, hgr, hbr]
-  read := fun data base h =>
-    pixelReadRGB16 data base (by simpa [bytesPerPixelRGB16] using h)
-  write := fun data base h px =>
-    pixelWriteRGB16 data base (by simpa [bytesPerPixelRGB16] using h) px
-  write_size := by
-    intro data base h px
-    unfold pixelWriteRGB16
-    simp [writeU16BEAt_size]
+instance instPixelFormatRGB16 : PixelFormat RGB16 :=
+  ChannelLayout.pixelFormat3
+    (fun r g b => { r := r, g := g, b := b })
+    RGB.r RGB.g RGB.b
 
-instance instPixelRGBA16 : Pixel PixelRGBA16 where
-  bytesPerPixel := bytesPerPixelRGBA16
-  bytesPerPixel_pos := by decide
-  read_write := by
-    intro data base h px
-    cases px with
-    | mk r g b a =>
-        have h7 : base + 7 < data.size := by
-          simpa [bytesPerPixelRGBA16] using h
-        have hr : base + 1 < data.size := by omega
-        let data1 := writeU16BEAt data base hr r
-        have hsize1 : data1.size = data.size := by
-          exact writeU16BEAt_size data base hr r
-        have hg : (base + 2) + 1 < data1.size := by
-          simpa [hsize1] using (by omega : (base + 2) + 1 < data.size)
-        let data2 := writeU16BEAt data1 (base + 2) hg g
-        have hsize2 : data2.size = data.size := by
-          have hsize2' : data2.size = data1.size := by
-            exact writeU16BEAt_size data1 (base + 2) hg g
-          simpa [hsize1] using hsize2'
-        have hb : (base + 4) + 1 < data2.size := by
-          simpa [hsize2] using (by omega : (base + 4) + 1 < data.size)
-        let data3 := writeU16BEAt data2 (base + 4) hb b
-        have hsize3 : data3.size = data.size := by
-          have hsize3' : data3.size = data2.size := by
-            exact writeU16BEAt_size data2 (base + 4) hb b
-          simpa [hsize2] using hsize3'
-        have ha : (base + 6) + 1 < data3.size := by
-          simpa [hsize3] using (by omega : (base + 6) + 1 < data.size)
-        let data4 := writeU16BEAt data3 (base + 6) ha a
-        have hsize4 : data4.size = data.size := by
-          have hsize4' : data4.size = data3.size := by
-            exact writeU16BEAt_size data3 (base + 6) ha a
-          simpa [hsize3] using hsize4'
-        have hr1 : base + 1 < data1.size := by simpa [hsize1] using hr
-        have hr2 : base + 1 < data2.size := by simpa [hsize2] using hr
-        have hr3 : base + 1 < data3.size := by simpa [hsize3] using hr
-        have hr4 : base + 1 < data4.size := by simpa [hsize4] using hr
-        have hg2 : (base + 2) + 1 < data2.size := by simpa [hsize2] using
-          (by omega : (base + 2) + 1 < data.size)
-        have hg3 : (base + 2) + 1 < data3.size := by simpa [hsize3] using
-          (by omega : (base + 2) + 1 < data.size)
-        have hg4 : (base + 2) + 1 < data4.size := by simpa [hsize4] using
-          (by omega : (base + 2) + 1 < data.size)
-        have hb3 : (base + 4) + 1 < data3.size := by simpa [hsize3] using
-          (by omega : (base + 4) + 1 < data.size)
-        have hb4 : (base + 4) + 1 < data4.size := by simpa [hsize4] using
-          (by omega : (base + 4) + 1 < data.size)
-        have ha4 : (base + 6) + 1 < data4.size := by simpa [hsize4] using
-          (by omega : (base + 6) + 1 < data.size)
-        have hrr : readU16BEAt data4 base hr4 = r := by
-          have hkeep3 : readU16BEAt data4 base hr4 = readU16BEAt data3 base hr3 := by
-            simpa [data4] using
-              (readU16BEAt_write_after data3 base (base + 6) hr3 ha a (by omega))
-          have hkeep2 : readU16BEAt data3 base hr3 = readU16BEAt data2 base hr2 := by
-            simpa [data3] using
-              (readU16BEAt_write_after data2 base (base + 4) hr2 hb b (by omega))
-          have hkeep1 : readU16BEAt data2 base hr2 = readU16BEAt data1 base hr1 := by
-            simpa [data2] using
-              (readU16BEAt_write_after data1 base (base + 2) hr1 hg g (by omega))
-          have hsame : readU16BEAt data1 base hr1 = r := by
-            simpa [data1] using (readU16BEAt_write_same data base hr r)
-          simp [hkeep3, hkeep2, hkeep1, hsame]
-        have hgr : readU16BEAt data4 (base + 2) hg4 = g := by
-          have hkeep3 : readU16BEAt data4 (base + 2) hg4 =
-              readU16BEAt data3 (base + 2) hg3 := by
-            simpa [data4] using
-              (readU16BEAt_write_after data3 (base + 2) (base + 6) hg3 ha a
-                (by omega))
-          have hkeep2 : readU16BEAt data3 (base + 2) hg3 =
-              readU16BEAt data2 (base + 2) hg2 := by
-            simpa [data3] using
-              (readU16BEAt_write_after data2 (base + 2) (base + 4) hg2 hb b
-                (by omega))
-          have hsame : readU16BEAt data2 (base + 2) hg2 = g := by
-            simpa [data2] using (readU16BEAt_write_same data1 (base + 2) hg g)
-          simp [hkeep3, hkeep2, hsame]
-        have hbr : readU16BEAt data4 (base + 4) hb4 = b := by
-          have hkeep : readU16BEAt data4 (base + 4) hb4 =
-              readU16BEAt data3 (base + 4) hb3 := by
-            simpa [data4] using
-              (readU16BEAt_write_after data3 (base + 4) (base + 6) hb3 ha a
-                (by omega))
-          have hsame : readU16BEAt data3 (base + 4) hb3 = b := by
-            simpa [data3] using (readU16BEAt_write_same data2 (base + 4) hb b)
-          simp [hkeep, hsame]
-        have har : readU16BEAt data4 (base + 6) ha4 = a := by
-          simpa [data4] using (readU16BEAt_write_same data3 (base + 6) ha a)
-        simp [pixelReadRGBA16, pixelWriteRGBA16, data1, data2, data3, data4,
-          hrr, hgr, hbr, har]
-  read := fun data base h =>
-    pixelReadRGBA16 data base (by simpa [bytesPerPixelRGBA16] using h)
-  write := fun data base h px =>
-    pixelWriteRGBA16 data base (by simpa [bytesPerPixelRGBA16] using h) px
-  write_size := by
-    intro data base h px
-    unfold pixelWriteRGBA16
-    simp [writeU16BEAt_size]
+instance instPixelFormatRGBA16 : PixelFormat RGBA16 :=
+  ChannelLayout.pixelFormat4
+    (fun r g b a => { r := r, g := g, b := b, a := a })
+    RGBA.r RGBA.g RGBA.b RGBA.a
 
 class FileWritable (α : Type) where
   write : FilePath -> α -> IO (Except String Unit)

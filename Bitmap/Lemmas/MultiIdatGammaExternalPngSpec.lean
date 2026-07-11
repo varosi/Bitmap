@@ -17,23 +17,23 @@ pixel data via `applyGamma8ToPixels`. So the spec carries an explicit
 pre-transform pixel array (`preTransformPixels`) plus a witness that
 applying the color-space transform yields `bitmap.data`. -/
 
-structure ExternalPngMultiIdatGammaSpec (px : Type u) [Pixel px] [PngPixel px] where
+structure ExternalPngMultiIdatGammaSpec (px : Type u) [PixelFormat px] [Png.PixelFormat px] where
   bitmap : Bitmap px
   container : MultiIdatGammaContainerSpec
   hWidth : container.header.width = bitmap.size.width
   hHeight : container.header.height = bitmap.size.height
   hColorType :
-    container.header.colorType = (PngPixel.colorType (α := px)).toNat
+    container.header.colorType = (Png.PixelFormat.colorType (α := px)).toNat
   hInterlace : container.header.interlace = 0
-  hPxColorType : PngPixel.colorType (α := px) = u8 container.header.colorType
+  hPxColorType : Png.PixelFormat.colorType (α := px) = u8 container.header.colorType
   hTargetBitDepth :
-    PngPixel.bitDepth (α := px) = u8 8 ∨ PngPixel.bitDepth (α := px) = u8 16
+    Png.PixelFormat.bitDepth (α := px) = u8 8 ∨ Png.PixelFormat.bitDepth (α := px) = u8 16
   hBitDepthMatch :
-    container.header.bitDepth = (PngPixel.bitDepth (α := px)).toNat
+    container.header.bitDepth = (Png.PixelFormat.bitDepth (α := px)).toNat
   hBppLookup :
     pngBytesPerPixelForColorTypeAndBitDepth?
       container.header.colorType container.header.bitDepth =
-        some (Pixel.bytesPerPixel (α := px))
+        some (PixelFormat.bytesPerPixel (α := px))
   hIdatMin : 2 ≤ container.idatData.size
   inflatedRaw : ByteArray
   hInflated :
@@ -43,30 +43,30 @@ structure ExternalPngMultiIdatGammaSpec (px : Type u) [Pixel px] [PngPixel px] w
   hRawSize :
     inflatedRaw.size =
       bitmap.size.height *
-        (bitmap.size.width * Pixel.bytesPerPixel (α := px) + 1)
+        (bitmap.size.width * PixelFormat.bytesPerPixel (α := px) + 1)
   /-- The intermediate pixel array after row-filter reconstruction
       but BEFORE the gamma color-space transform. -/
   preTransformPixels : ByteArray
   hPixels :
-    PngPixel.decodeRowsLoop (α := px) inflatedRaw bitmap.size.width
-        bitmap.size.height (Pixel.bytesPerPixel (α := px))
-        (bitmap.size.width * Pixel.bytesPerPixel (α := px))
+    Png.PixelFormat.decodeRowsLoop (α := px) inflatedRaw bitmap.size.width
+        bitmap.size.height (PixelFormat.bytesPerPixel (α := px))
+        (bitmap.size.width * PixelFormat.bytesPerPixel (α := px))
         0 0 ByteArray.empty
         { data := Array.replicate
             (bitmap.size.width * bitmap.size.height *
-              Pixel.bytesPerPixel (α := px)) 0 } =
+              PixelFormat.bytesPerPixel (α := px)) 0 } =
       some preTransformPixels
   /-- Applying the gamma transform to `preTransformPixels` produces
       `bitmap.data`. For gAMA-none, this reduces to identity. -/
   hTransform :
     applyPngColorSpaceTransform
       (PngMetadata.pixelOnlyColorSpace container.expectedMetadata)
-      container.header.colorType (PngPixel.colorType (α := px))
-      (PngPixel.bitDepth (α := px)) preTransformPixels = some bitmap.data
+      container.header.colorType (Png.PixelFormat.colorType (α := px))
+      (Png.PixelFormat.bitDepth (α := px)) preTransformPixels = some bitmap.data
 
 namespace ExternalPngMultiIdatGammaSpec
 
-variable {px : Type u} [Pixel px] [PngPixel px]
+variable {px : Type u} [PixelFormat px] [Png.PixelFormat px]
 
 lemma expectedMetadata_chromaticities_none (s : ExternalPngMultiIdatGammaSpec px) :
     s.container.expectedMetadata.chromaticities = none := by
@@ -119,7 +119,7 @@ theorem decodeBitmap_external_multiIdatGamma_correct (s : ExternalPngMultiIdatGa
       ¬ (((s.container.expectedMetadata.pixelOnlyColorSpace.srgb = none ∧
             s.container.expectedMetadata.pixelOnlyColorSpace.chromaticities.isSome = true) ∧
           (s.container.header.colorType = 2 ∨ s.container.header.colorType = 6)) ∧
-        (PngPixel.colorType (α := px) = u8 0 ∨ PngPixel.colorType (α := px) = u8 4)) := by
+        (Png.PixelFormat.colorType (α := px) = u8 0 ∨ Png.PixelFormat.colorType (α := px) = u8 4)) := by
     intro ⟨⟨⟨_, h⟩, _⟩, _⟩
     have : s.container.expectedMetadata.pixelOnlyColorSpace.chromaticities.isSome = false := by
       unfold PngMetadata.pixelOnlyColorSpace

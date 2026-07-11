@@ -104,7 +104,7 @@ lemma mkChunkBytes_size (typBytes data : ByteArray) (hType : typBytes.size = 4) 
 
 /-- Discharge `pngColorTypeBitDepthSupported` for the {8, 16} subset
 of bit depths × {0, 2, 4, 6} color types. The 1-bit case (which only
-admits color type 0) is handled directly via `s.hCtBdSupported` in the
+allows color type 0) is handled directly via `s.hCtBdSupported` in the
 spec. -/
 lemma pngColorTypeBitDepthSupported_of_subset
     {ct bd : Nat}
