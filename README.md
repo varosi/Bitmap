@@ -102,6 +102,9 @@ This library has proofs about:
   `Bitmap.Lemmas.decodeBitmapParallel_eq`,
   `Bitmap.Lemmas.decodeBitmapParallel_encodeBitmapParallel`,
   `Bitmap.Lemmas.decodeIndexedBitmapParallel_encodeIndexedBitmapCheckedParallel_paletteRange_data`),
+  stored zlib encode/decode byte equality
+  (`Bitmap.Lemmas.zlibCompressStoredParallel_eq`,
+  `Bitmap.Lemmas.zlibDecompressStoredParallel_eq`),
   plus one-shard byte equality for the segmented fixed-Huffman encoder
   (`Bitmap.Lemmas.deflateFixedSegmentedParallel_oneShard_eq`,
   `Bitmap.Lemmas.zlibCompressFixedSegmentedParallel_oneShard_eq`,

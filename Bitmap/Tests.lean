@@ -2610,6 +2610,21 @@ private def expectParallelApiEquality : IO Unit := do
       throw (IO.userError s!"parallel stored deflate block mismatch for maxShards {maxShards}")
     if Png.zlibCompressStoredParallel storedRaw storedParallel != Png.zlibCompressStored storedRaw then
       throw (IO.userError s!"parallel stored zlib block mismatch for maxShards {maxShards}")
+    let storedZlib := Png.zlibCompressStored storedRaw
+    let storedSeqDecoded :=
+      if hsize : 2 <= storedZlib.size then
+        Png.zlibDecompressStored storedZlib hsize
+      else
+        none
+    let storedParDecoded :=
+      if hsize : 2 <= storedZlib.size then
+        Png.zlibDecompressStoredParallel storedZlib hsize storedParallel
+      else
+        none
+    if storedParDecoded != storedSeqDecoded then
+      throw (IO.userError s!"parallel stored zlib decode mismatch for maxShards {maxShards}")
+    if storedParDecoded != some storedRaw then
+      throw (IO.userError s!"parallel stored zlib decode payload mismatch for maxShards {maxShards}")
     let segmentedFixed := Png.zlibCompressFixedSegmentedParallel storedRaw storedParallel
     if maxShards == 1 && segmentedFixed != Png.zlibCompressFixed storedRaw then
       throw (IO.userError "segmented fixed one-shard zlib did not match sequential fixed zlib")
@@ -2836,6 +2851,12 @@ private def runPngStagePerfTest : IO Unit := do
     match if hsize : 2 <= input.stored.size then Png.zlibDecompressStored input.stored hsize else none with
     | some raw => pure (byteArrayChecksum raw)
     | none => throw (IO.userError "stored zlib stage failed")
+  let _ ← measurePngStageInputs "zlib decompress stored parallel" iters inputs <| fun input => do
+    match if hsize : 2 <= input.stored.size then
+        Png.zlibDecompressStoredParallel input.stored hsize storedParallelOptions
+      else none with
+    | some raw => pure (byteArrayChecksum raw)
+    | none => throw (IO.userError "stored parallel zlib stage failed")
   let _ ← measurePngStageInputs "zlib decompress fixed" iters inputs <| fun input => do
     match if hsize : 2 <= input.fixed.size then Png.zlibDecompress input.fixed hsize else none with
     | some raw => pure (byteArrayChecksum raw)

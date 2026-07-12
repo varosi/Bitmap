@@ -187,6 +187,14 @@ independently without changing bytes. -/
     Png.zlibCompressStoredParallel raw parallel = Png.zlibCompressStored raw := by
   simp [Png.zlibCompressStoredParallel, Png.zlibCompressStored]
 
+/-- Parallel stored decompression preserves the existing stored-only zlib
+decoder result byte-for-byte. -/
+@[simp] lemma zlibDecompressStoredParallel_eq
+    (data : ByteArray) (hsize : 2 <= data.size) (parallel : PngParallelOptions) :
+    Png.zlibDecompressStoredParallel data hsize parallel =
+      Png.zlibDecompressStored data hsize := by
+  simp [Png.zlibDecompressStoredParallel]
+
 /-- Parallel fixed compression preserves the existing fixed-Huffman zlib stream. -/
 @[simp] lemma zlibCompressFixedParallel_eq
     (raw : ByteArray) (parallel : PngParallelOptions) :

@@ -189,6 +189,15 @@ def zlibCompressStoredParallel
     (raw : ByteArray) (parallel : PngParallelOptions := {}) : ByteArray :=
   zlibCompressWithParallel (fun raw => deflateStoredParallel raw parallel) raw parallel
 
+/-- Decode a stored-only zlib stream through the parallel scheduler. This keeps
+the same validation and output bytes as `zlibDecompressStored` while exposing a
+stored-specific parallel decode entry point. -/
+def zlibDecompressStoredParallel
+    (data : ByteArray) (hsize : 2 <= data.size)
+    (parallel : PngParallelOptions := {}) : Option ByteArray :=
+  parallelEval parallel data.size data.size fun _ =>
+    zlibDecompressStored data hsize
+
 /-- Write one fixed-Huffman DEFLATE block from already-tokenized LZ77 data.
 The writer is not flushed here so callers can concatenate multiple fixed blocks
 in one bit stream and mark only the final block with `BFINAL = 1`. -/
