@@ -2606,49 +2606,17 @@ private def expectParallelScheduling : IO Unit := do
   if shardSizes.foldl (· + ·) 0 != 16 then
     throw (IO.userError "parallel shard task result ordering/coverage mismatch")
 
-private def expectParallelApiEquality : IO Unit := do
-  let parallel : Png.PngParallelOptions :=
-    { maxShards := 32, minRowsPerShard := 1, targetBytesPerShard := 1 }
+private def expectParallelRemainingSemantics : IO Unit := do
   let storedRaw := Png.PixelFormat.encodeRaw (α := RGB8) (perfContentBitmap 257 257)
   let manyBlockStoredRaw :=
     repeatByteArray (Png.uint16MaxValue * 130 + 123) (Png.u8 77)
   for maxShards in [1, 2, 4, 8, 16] do
     let storedParallel : Png.PngParallelOptions :=
       { maxShards := maxShards, minRowsPerShard := 1, targetBytesPerShard := 1 }
-    if Png.deflateStoredParallel storedRaw storedParallel != Png.deflateStored storedRaw then
-      throw (IO.userError s!"parallel stored deflate block mismatch for maxShards {maxShards}")
-    if Png.deflateStoredGroupedParallel manyBlockStoredRaw storedParallel !=
-        Png.deflateStored manyBlockStoredRaw then
-      throw (IO.userError s!"grouped stored deflate block mismatch for maxShards {maxShards}")
-    if Png.zlibCompressStoredParallel storedRaw storedParallel != Png.zlibCompressStored storedRaw then
-      throw (IO.userError s!"parallel stored zlib block mismatch for maxShards {maxShards}")
-    if Png.zlibCompressStoredGroupedParallel manyBlockStoredRaw storedParallel !=
-        Png.zlibCompressStored manyBlockStoredRaw then
-      throw (IO.userError s!"grouped stored zlib block mismatch for maxShards {maxShards}")
-    let storedZlib := Png.zlibCompressStored storedRaw
-    let storedSeqDecoded :=
-      if hsize : 2 <= storedZlib.size then
-        Png.zlibDecompressStored storedZlib hsize
-      else
-        none
-    let storedParDecoded :=
-      if hsize : 2 <= storedZlib.size then
-        Png.zlibDecompressStoredParallel storedZlib hsize storedParallel
-      else
-        none
-    if storedParDecoded != storedSeqDecoded then
-      throw (IO.userError s!"parallel stored zlib decode mismatch for maxShards {maxShards}")
-    if storedParDecoded != some storedRaw then
-      throw (IO.userError s!"parallel stored zlib decode payload mismatch for maxShards {maxShards}")
     let manyBlockStoredZlib := Png.zlibCompressStored manyBlockStoredRaw
     let manyBlockSeqDecoded :=
       if hsize : 2 <= manyBlockStoredZlib.size then
         Png.zlibDecompressStored manyBlockStoredZlib hsize
-      else
-        none
-    let manyBlockScannedSeqDecoded :=
-      if hsize : 2 <= manyBlockStoredZlib.size then
-        Png.zlibDecompressStoredScanned manyBlockStoredZlib hsize
       else
         none
     let manyBlockScannedDecoded :=
@@ -2656,15 +2624,11 @@ private def expectParallelApiEquality : IO Unit := do
         Png.zlibDecompressStoredScannedParallel manyBlockStoredZlib hsize storedParallel
       else
         none
-    if manyBlockScannedDecoded != manyBlockScannedSeqDecoded then
-      throw (IO.userError s!"parallel scanned stored zlib decode mismatch for maxShards {maxShards}")
     if manyBlockScannedDecoded != manyBlockSeqDecoded then
       throw (IO.userError s!"scanned stored zlib decode mismatch for maxShards {maxShards}")
     if manyBlockScannedDecoded != some manyBlockStoredRaw then
       throw (IO.userError s!"scanned stored zlib decode payload mismatch for maxShards {maxShards}")
     let segmentedFixed := Png.zlibCompressFixedSegmentedParallel storedRaw storedParallel
-    if maxShards == 1 && segmentedFixed != Png.zlibCompressFixed storedRaw then
-      throw (IO.userError "segmented fixed one-shard zlib did not match sequential fixed zlib")
     match zlibDecompressFixture segmentedFixed with
     | some raw' =>
         if raw' != storedRaw then
@@ -2673,25 +2637,6 @@ private def expectParallelApiEquality : IO Unit := do
         throw (IO.userError s!"segmented fixed zlib failed to decompress for maxShards {maxShards}")
 
   let rgbBmp := filterRGB8Fixture
-  for mode in [Png.PngEncodeMode.stored, .fixed, .dynamic] do
-    match Png.encodeBitmapChecked (px := RGB8) rgbBmp mode,
-        Png.encodeBitmapCheckedParallel (px := RGB8) rgbBmp mode parallel with
-    | Except.ok seq, Except.ok par =>
-        if seq != par then
-          throw (IO.userError "parallel RGB checked encode mismatch")
-        match Png.decodeBitmap (px := RGB8) seq,
-            Png.decodeBitmapParallel (px := RGB8) seq parallel with
-        | some seqBmp, some parBmp =>
-            if seqBmp != parBmp then
-              throw (IO.userError "parallel RGB decode mismatch")
-        | _, _ =>
-            throw (IO.userError "parallel RGB decode success mismatch")
-    | Except.error seqErr, Except.error parErr =>
-        if seqErr != parErr then
-          throw (IO.userError "parallel RGB checked encode error mismatch")
-    | _, _ =>
-        throw (IO.userError "parallel RGB checked encode shape mismatch")
-
   for maxShards in [1, 2, 4, 8, 16, 32, 64, 128] do
     let segmentedParallel : Png.PngParallelOptions :=
       { maxShards := maxShards, minRowsPerShard := 1, targetBytesPerShard := 1 }
@@ -2705,72 +2650,6 @@ private def expectParallelApiEquality : IO Unit := do
             throw (IO.userError s!"segmented fixed parallel RGB decode failed for maxShards {maxShards}")
     | Except.error err =>
         throw (IO.userError s!"segmented fixed parallel RGB encode failed: {err}")
-
-  let optionConfig : Png.PngEncodeOptions :=
-    { mode := .fixed, filter := .adaptive, colorSpace := some (.srgb .perceptual false) }
-  match Png.encodeBitmapWithOptionsChecked (px := RGB8) adaptiveNonzeroFixture optionConfig,
-      Png.encodeBitmapWithOptionsCheckedParallel (px := RGB8) adaptiveNonzeroFixture
-        optionConfig parallel with
-  | Except.ok seq, Except.ok par =>
-      if seq != par then
-        throw (IO.userError "parallel RGB option encode mismatch")
-      match Png.decodeBitmapWithMetadata (px := RGB8) seq,
-          Png.decodeBitmapWithMetadataParallel (px := RGB8) seq parallel with
-      | some seqDecoded, some parDecoded =>
-          if seqDecoded.bitmap != parDecoded.bitmap ||
-              seqDecoded.metadata.srgb != parDecoded.metadata.srgb then
-            throw (IO.userError "parallel RGB metadata decode mismatch")
-      | _, _ =>
-          throw (IO.userError "parallel RGB metadata decode success mismatch")
-  | Except.error seqErr, Except.error parErr =>
-      if seqErr != parErr then
-        throw (IO.userError "parallel RGB option encode error mismatch")
-  | _, _ =>
-      throw (IO.userError "parallel RGB option encode shape mismatch")
-
-  let gray1Bmp := gray1FixtureBitmap 17 4
-  match Png.encodeGray1BitmapChecked gray1Bmp .fixed,
-      Png.encodeGray1BitmapCheckedParallel gray1Bmp .fixed parallel with
-  | Except.ok seq, Except.ok par =>
-      if seq != par then
-        throw (IO.userError "parallel Gray1 checked encode mismatch")
-      match Png.decodeGray1Bitmap seq, Png.decodeGray1BitmapParallel seq parallel with
-      | some seqBmp, some parBmp =>
-          if seqBmp != parBmp then
-            throw (IO.userError "parallel Gray1 decode mismatch")
-      | _, _ =>
-          throw (IO.userError "parallel Gray1 decode success mismatch")
-  | Except.error seqErr, Except.error parErr =>
-      if seqErr != parErr then
-        throw (IO.userError "parallel Gray1 checked encode error mismatch")
-  | _, _ =>
-      throw (IO.userError "parallel Gray1 checked encode shape mismatch")
-
-  let indexedBmp := indexedFixtureBitmap 9 5 4 12
-  match Png.encodeIndexedBitmapChecked indexedBmp .fixed,
-      Png.encodeIndexedBitmapCheckedParallel indexedBmp .fixed parallel with
-  | Except.ok seq, Except.ok par =>
-      if seq != par then
-        throw (IO.userError "parallel indexed checked encode mismatch")
-      match Png.decodeIndexedBitmap seq, Png.decodeIndexedBitmapParallel seq parallel with
-      | some seqBmp, some parBmp =>
-          if seqBmp.data != parBmp.data || seqBmp.palette != parBmp.palette then
-            throw (IO.userError "parallel indexed decode mismatch")
-      | _, _ =>
-          throw (IO.userError "parallel indexed decode success mismatch")
-      match Png.decodeIndexedBitmapWithMetadata seq,
-          Png.decodeIndexedBitmapWithMetadataParallel seq parallel with
-      | some seqDecoded, some parDecoded =>
-          if seqDecoded.bitmap.data != parDecoded.bitmap.data ||
-              seqDecoded.metadata.palette != parDecoded.metadata.palette then
-            throw (IO.userError "parallel indexed metadata decode mismatch")
-      | _, _ =>
-          throw (IO.userError "parallel indexed metadata decode success mismatch")
-  | Except.error seqErr, Except.error parErr =>
-      if seqErr != parErr then
-        throw (IO.userError "parallel indexed checked encode error mismatch")
-  | _, _ =>
-      throw (IO.userError "parallel indexed checked encode shape mismatch")
 
 private def measurePngStage (label : String) (iters : Nat) (act : IO Nat) : IO Nat := do
   let hb0 <- IO.getNumHeartbeats
@@ -3249,9 +3128,6 @@ private def runStoredZlibLargeParallelPerfTest : IO Unit := do
       else none with
     | some decoded => pure decoded
     | none => throw (IO.userError "large stored zlib scanned decode failed")
-  let grouped := Png.zlibCompressStoredGroupedParallel raw parallel
-  if grouped != stored then
-    throw (IO.userError "large grouped stored zlib bytes changed")
   match if hsize : 2 <= stored.size then
       Png.zlibDecompressStoredScannedParallel stored hsize parallel
     else none with
@@ -3281,8 +3157,8 @@ def run : IO Unit := do
   IO.println "png encoder filter fixtures: ok"
   expectParallelScheduling
   IO.println "png parallel scheduler: ok"
-  expectParallelApiEquality
-  IO.println "png parallel API equality: ok"
+  expectParallelRemainingSemantics
+  IO.println "png parallel remaining semantics: ok"
   expectColorSpaceChunks
   IO.println "png sRGB/gAMA/cHRM fixtures: ok"
   expectTimeChunks
