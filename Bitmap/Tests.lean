@@ -2646,11 +2646,18 @@ private def expectParallelApiEquality : IO Unit := do
         Png.zlibDecompressStored manyBlockStoredZlib hsize
       else
         none
+    let manyBlockScannedSeqDecoded :=
+      if hsize : 2 <= manyBlockStoredZlib.size then
+        Png.zlibDecompressStoredScanned manyBlockStoredZlib hsize
+      else
+        none
     let manyBlockScannedDecoded :=
       if hsize : 2 <= manyBlockStoredZlib.size then
         Png.zlibDecompressStoredScannedParallel manyBlockStoredZlib hsize storedParallel
       else
         none
+    if manyBlockScannedDecoded != manyBlockScannedSeqDecoded then
+      throw (IO.userError s!"parallel scanned stored zlib decode mismatch for maxShards {maxShards}")
     if manyBlockScannedDecoded != manyBlockSeqDecoded then
       throw (IO.userError s!"scanned stored zlib decode mismatch for maxShards {maxShards}")
     if manyBlockScannedDecoded != some manyBlockStoredRaw then

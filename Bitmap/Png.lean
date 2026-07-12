@@ -265,6 +265,10 @@ def storedBlock (payload : ByteArray) (final : Bool) : ByteArray :=
   ByteArray.mk #[if final then u8 0x01 else u8 0x00]
     ++ u16le len ++ u16le (uint16MaxValue - len) ++ payload
 
+/-- Concatenate byte chunks in their existing order. -/
+def concatByteArrays (chunks : List ByteArray) : ByteArray :=
+  chunks.foldr (fun chunk out => chunk ++ out) ByteArray.empty
+
 def deflateStoredFastAux (raw : ByteArray) (out : ByteArray) : ByteArray :=
   if _hzero : raw.size = 0 then
     out ++ storedBlock ByteArray.empty true
@@ -2853,6 +2857,79 @@ def inflateStored (data : ByteArray) : Option ByteArray := do
       none
   else
     none
+
+/-! ### Stored-only DEFLATE scanner
+
+These helpers describe stored-block payload ranges without copying them. The
+explicit scanned sequential and parallel stored decoders share this scanner so
+their byte-equality theorem can reduce to deterministic sharding of the same
+payload ranges. The existing `zlibDecompressStored` path keeps using the older
+recursive inflater and its established proofs.
+-/
+
+/-- Payload range for one stored DEFLATE block inside a deflated byte stream. -/
+structure StoredInflatePayloadRange where
+  start : Nat
+  stop : Nat
+deriving Repr, DecidableEq
+
+/-- Extract one stored payload range from the original deflated byte stream. -/
+def StoredInflatePayloadRange.bytes
+    (range : StoredInflatePayloadRange) (deflated : ByteArray) : ByteArray :=
+  deflated.extract range.start range.stop
+
+/-- Scan stored DEFLATE block descriptors from `offset`, returning the ordered
+payload ranges and the byte position immediately after the final block. -/
+def scanStoredInflatePayloadRangesFrom
+    (deflated : ByteArray) (offset fuel : Nat) :
+    Option (List StoredInflatePayloadRange × Nat) := do
+  match fuel with
+  | 0 => none
+  | fuel + 1 =>
+      if hheader : offset < deflated.size then
+        let header := deflated.get offset hheader
+        let bfinal := header &&& (0x01 : UInt8)
+        let btype := (header >>> 1) &&& (0x03 : UInt8)
+        if btype != (0 : UInt8) then
+          none
+        else if hlen : offset + 4 < deflated.size then
+          let len := readU16LE deflated (offset + 1) (by omega)
+          let nlen := readU16LE deflated (offset + 3) (by omega)
+          if len + nlen != uint16MaxValue then
+            none
+          else
+            let start := offset + 5
+            let stop := start + len
+            if hbad : stop > deflated.size then
+              none
+            else
+              let range : StoredInflatePayloadRange := { start, stop }
+              if bfinal == (1 : UInt8) then
+                some ([range], stop)
+              else
+                let (tail, rest) ←
+                  scanStoredInflatePayloadRangesFrom deflated stop fuel
+                some (range :: tail, rest)
+        else
+          none
+      else
+        none
+
+/-- Scan a full stored DEFLATE stream and require the final stored block to end
+exactly at the end of the stream. -/
+def scanStoredInflatePayloadRanges
+    (deflated : ByteArray) : Option (List StoredInflatePayloadRange) := do
+  let (ranges, rest) ←
+    scanStoredInflatePayloadRangesFrom deflated 0 (deflated.size + 1)
+  if rest == deflated.size then
+    some ranges
+  else
+    none
+
+/-- Sequentially materialize stored payload ranges from a scanned stream. -/
+def inflateStoredByPayloadRanges (deflated : ByteArray) : Option ByteArray := do
+  let ranges ← scanStoredInflatePayloadRanges deflated
+  some <| concatByteArrays <| ranges.map fun range => range.bytes deflated
 
 -- Tail-recursive stored-block inflater used for the runtime implementation.
 -- Fast path for zlib streams that use only stored (uncompressed) deflate blocks.

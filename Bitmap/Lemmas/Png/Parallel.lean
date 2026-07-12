@@ -43,6 +43,102 @@ parallelism uses this to recover the ordered sequential block stream. -/
   | cons x xs ih =>
       simp [ih]
 
+/-- Appending all chunks from two lists is the same as appending each list's
+materialized bytes. This lets grouped shard proofs flatten back to one stream. -/
+lemma concatByteArrays_append (xs ys : List ByteArray) :
+    Png.concatByteArrays (xs ++ ys) =
+      Png.concatByteArrays xs ++ Png.concatByteArrays ys := by
+  induction xs with
+  | nil => simp [Png.concatByteArrays]
+  | cons x xs ih =>
+      calc
+        Png.concatByteArrays ((x :: xs) ++ ys) =
+            x ++ Png.concatByteArrays (xs ++ ys) := rfl
+        _ = x ++ (Png.concatByteArrays xs ++ Png.concatByteArrays ys) := by
+            rw [ih]
+        _ = (x ++ Png.concatByteArrays xs) ++ Png.concatByteArrays ys := by
+            rw [← ByteArray.append_assoc]
+        _ = Png.concatByteArrays (x :: xs) ++ Png.concatByteArrays ys := rfl
+
+/-- The capacity-aware concatenator preserves the same bytes as the simple
+folded concatenator. Capacity changes allocation behavior only. -/
+lemma concatByteArraysWithCapacityAux_eq
+    (chunks : List ByteArray) (out : ByteArray) :
+    Png.concatByteArraysWithCapacityAux chunks out =
+      out ++ Png.concatByteArrays chunks := by
+  induction chunks generalizing out with
+  | nil => simp [Png.concatByteArraysWithCapacityAux, Png.concatByteArrays]
+  | cons chunk chunks ih =>
+      calc
+        Png.concatByteArraysWithCapacityAux (chunk :: chunks) out =
+            Png.concatByteArraysWithCapacityAux chunks (out ++ chunk) := rfl
+        _ = (out ++ chunk) ++ Png.concatByteArrays chunks := ih (out ++ chunk)
+        _ = out ++ (chunk ++ Png.concatByteArrays chunks) := by
+            rw [ByteArray.append_assoc]
+        _ = out ++ Png.concatByteArrays (chunk :: chunks) := rfl
+
+/-- The public capacity-aware concatenator is byte-for-byte equal to the
+reference concatenator. -/
+@[simp] lemma concatByteArraysWithCapacity_eq (chunks : List ByteArray) :
+    Png.concatByteArraysWithCapacity chunks = Png.concatByteArrays chunks := by
+  simp [Png.concatByteArraysWithCapacity, concatByteArraysWithCapacityAux_eq,
+    emptyWithCapacity_eq_empty]
+
+/-- Grouping list shards and flattening them preserves the original ordered
+work list. This is the list-level scheduling invariant. -/
+lemma listShardGroups_join {α : Type u} (groupSize : Nat) (xs : List α) :
+    (Png.listShardGroups groupSize xs).flatten = xs := by
+  classical
+  induction hlen : xs.length using Nat.strong_induction_on generalizing xs with
+  | h n ih =>
+      cases xs with
+      | nil =>
+          simp [Png.listShardGroups]
+      | cons x xs =>
+          let chunkSize := Nat.max 1 groupSize
+          have hpos : 0 < chunkSize := by
+            exact Nat.lt_of_lt_of_le Nat.zero_lt_one (Nat.le_max_left 1 groupSize)
+          have hdropLen :
+              ((x :: xs).drop chunkSize).length < (x :: xs).length := by
+            simp [List.length_drop, chunkSize]
+            omega
+          have ihdrop :
+              (Png.listShardGroups groupSize ((x :: xs).drop chunkSize)).flatten =
+                (x :: xs).drop chunkSize := by
+            exact ih ((x :: xs).drop chunkSize).length
+              (by simpa [hlen] using hdropLen) ((x :: xs).drop chunkSize) rfl
+          have hsplit := List.take_append_drop chunkSize (x :: xs)
+          rw [Png.listShardGroups]
+          change
+            List.take chunkSize (x :: xs) ++
+                (Png.listShardGroups groupSize ((x :: xs).drop chunkSize)).flatten =
+              x :: xs
+          rw [ihdrop]
+          exact hsplit
+
+/-- Concatenating bytes produced per list group is equivalent to mapping across
+the flattened list and concatenating once. -/
+lemma concatByteArrays_map_groups {α : Type u}
+    (groups : List (List α)) (f : α → ByteArray) :
+    Png.concatByteArrays (groups.map fun group =>
+        Png.concatByteArrays (group.map f)) =
+      Png.concatByteArrays (groups.flatten.map f) := by
+  induction groups with
+  | nil => simp [Png.concatByteArrays]
+  | cons group groups ih =>
+      calc
+        Png.concatByteArrays ((group :: groups).map fun group =>
+            Png.concatByteArrays (group.map f)) =
+          Png.concatByteArrays (group.map f) ++
+            Png.concatByteArrays (groups.map fun group =>
+              Png.concatByteArrays (group.map f)) := rfl
+        _ = Png.concatByteArrays (group.map f) ++
+            Png.concatByteArrays (groups.flatten.map f) := by rw [ih]
+        _ = Png.concatByteArrays (group.map f ++ groups.flatten.map f) := by
+            rw [concatByteArrays_append]
+        _ = Png.concatByteArrays ((group ++ groups.flatten).map f) := by simp
+        _ = Png.concatByteArrays ((group :: groups).flatten.map f) := rfl
+
 /-- Canonical one-shard options for segmented fixed-Huffman proof reductions.
 With these options, the segmented encoder must collapse to the sequential path. -/
 def oneShardPngParallelOptions : PngParallelOptions :=
@@ -166,6 +262,28 @@ existing stored DEFLATE encoder for the whole raw payload. -/
   · simpa [h, Png.deflateStoredByBlocks] using (deflateStoredByBlocks_eq raw)
   · simp [h]
 
+/-- A grouped stored-block shard materializes the same bytes as the reference
+ordered concatenation of its block descriptors. -/
+@[simp] lemma storedDeflateBlockRangeShardBytes_eq
+    (ranges : List Png.StoredDeflateBlockRange) (raw : ByteArray) :
+    Png.storedDeflateBlockRangeShardBytes ranges raw =
+      Png.concatByteArrays (ranges.map fun range => range.toBlock raw) := by
+  simp [Png.storedDeflateBlockRangeShardBytes]
+
+/-- Grouped stored DEFLATE construction is byte-for-byte equal to the existing
+sequential stored encoder. -/
+@[simp] lemma deflateStoredGroupedParallel_eq
+    (raw : ByteArray) (parallel : PngParallelOptions) :
+    Png.deflateStoredGroupedParallel raw parallel = Png.deflateStored raw := by
+  unfold Png.deflateStoredGroupedParallel
+  by_cases h :
+      (parallel.useParallel (Png.storedDeflateBlockRanges raw).length raw.size &&
+        decide (parallel.minRowsPerShard ≤ (Png.storedDeflateBlockRanges raw).length)) = true
+  · simpa [h, mapListParallel_eq_map, Png.deflateStoredByBlocks,
+      concatByteArrays_map_groups, listShardGroups_join]
+      using (deflateStoredByBlocks_eq raw)
+  · simp [h]
+
 /-- Parallel zlib wrapper construction preserves the existing envelope shape.
 This justifies spawning deflate payload generation and Adler checksum
 independently without changing bytes. -/
@@ -187,6 +305,14 @@ independently without changing bytes. -/
     Png.zlibCompressStoredParallel raw parallel = Png.zlibCompressStored raw := by
   simp [Png.zlibCompressStoredParallel, Png.zlibCompressStored]
 
+/-- Grouped parallel stored zlib compression preserves the exact existing
+stored zlib byte stream, including header and Adler trailer. -/
+@[simp] lemma zlibCompressStoredGroupedParallel_eq
+    (raw : ByteArray) (parallel : PngParallelOptions) :
+    Png.zlibCompressStoredGroupedParallel raw parallel =
+      Png.zlibCompressStored raw := by
+  simp [Png.zlibCompressStoredGroupedParallel, Png.zlibCompressStored]
+
 /-- Parallel stored decompression preserves the existing stored-only zlib
 decoder result byte-for-byte. -/
 @[simp] lemma zlibDecompressStoredParallel_eq
@@ -194,6 +320,23 @@ decoder result byte-for-byte. -/
     Png.zlibDecompressStoredParallel data hsize parallel =
       Png.zlibDecompressStored data hsize := by
   simp [Png.zlibDecompressStoredParallel]
+
+/-- A grouped stored-inflate payload shard materializes the same bytes as the
+reference ordered concatenation of its scanned payload ranges. -/
+@[simp] lemma storedInflatePayloadRangeShardBytes_eq
+    (ranges : List Png.StoredInflatePayloadRange) (deflated : ByteArray) :
+    Png.storedInflatePayloadRangeShardBytes ranges deflated =
+      Png.concatByteArrays (ranges.map fun range => range.bytes deflated) := by
+  simp [Png.storedInflatePayloadRangeShardBytes]
+
+/-- Parallel scanned stored zlib decompression preserves the exact bytes of the
+sequential scanned decoder. This proves the sharded payload extraction step. -/
+@[simp] lemma zlibDecompressStoredScannedParallel_eq_scanned
+    (data : ByteArray) (hsize : 2 <= data.size) (parallel : PngParallelOptions) :
+    Png.zlibDecompressStoredScannedParallel data hsize parallel =
+      Png.zlibDecompressStoredScanned data hsize := by
+  simp [Png.zlibDecompressStoredScannedParallel, Png.zlibDecompressStoredScanned,
+    mapListParallel_eq_map, concatByteArrays_map_groups, listShardGroups_join]
 
 /-- Parallel fixed compression preserves the existing fixed-Huffman zlib stream. -/
 @[simp] lemma zlibCompressFixedParallel_eq
