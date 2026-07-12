@@ -80,6 +80,9 @@ throughput-oriented fixed-Huffman encoding, use
 `encodeBitmapFixedSegmentedCheckedParallel`; it emits ordered fixed DEFLATE
 blocks from independent shards, so multi-shard compressed bytes may differ from
 the sequential encoder while preserving PNG decode round trips.
+For large stored-only zlib payloads, `zlibCompressStoredGroupedParallel` and
+`zlibDecompressStoredScannedParallel` expose explicitly sharded stored block
+construction and stored payload extraction helpers.
 
 ## Tests
 

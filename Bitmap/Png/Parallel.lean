@@ -83,6 +83,10 @@ def mapListParallel {α : Type u} {β : Type v} (xs : List α) (f : α → β) :
   let tasks := xs.map fun x => Task.spawn (fun _ => f x)
   tasks.map fun task => task.get
 
+/-- Extract the work items covered by a shard of list indices. -/
+def listShard {α : Type u} (xs : List α) (shard : PngShard) : List α :=
+  (xs.drop shard.start).take shard.size
+
 /-- Evaluate deterministic pure work directly or through a task according to
 the configured work-size thresholds. -/
 def parallelEval {α : Type u}
@@ -95,6 +99,17 @@ def parallelEval {α : Type u}
 /-- Concatenate byte chunks in their existing order. -/
 def concatByteArrays (chunks : List ByteArray) : ByteArray :=
   chunks.foldr (fun chunk out => chunk ++ out) ByteArray.empty
+
+/-- Concatenate byte chunks after precomputing the output capacity. This is
+used by large explicit stored-mode parallel helpers where concatenation cost is
+part of the measured path and no proof depends on the fold shape. -/
+def concatByteArraysWithCapacity (chunks : List ByteArray) : ByteArray :=
+  let capacity := chunks.foldl (fun total chunk => total + chunk.size) 0
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity capacity
+    for chunk in chunks do
+      out := out ++ chunk
+    return out
 
 /-- Descriptor for a stored DEFLATE block payload inside the original raw
 buffer. The final flag is stored explicitly because only the last block may set
@@ -145,6 +160,11 @@ def deflateStoredByBlocks (raw : ByteArray) : ByteArray :=
   concatByteArrays <| (storedDeflateBlockRanges raw).map fun range =>
     range.toBlock raw
 
+/-- Materialize a list of stored DEFLATE block descriptors in one shard. -/
+def storedDeflateBlockRangeShardBytes
+    (ranges : List StoredDeflateBlockRange) (raw : ByteArray) : ByteArray :=
+  concatByteArraysWithCapacity <| ranges.map fun range => range.toBlock raw
+
 /-- Build stored DEFLATE blocks in deterministic block-index shards. This keeps
 the wire bytes identical to `deflateStored` while allowing block payload copies
 and block headers to be prepared by independent tasks. -/
@@ -158,6 +178,22 @@ def deflateStoredParallel
     concatByteArrays <|
       mapListParallel ranges fun range =>
         range.toBlock raw
+  else
+    deflateStored raw
+
+/-- Build stored DEFLATE blocks by grouping block descriptors into capped
+block-index shards. Unlike `deflateStoredParallel`, this path still uses
+parallel block construction when the stored-block count exceeds `maxShards`. -/
+def deflateStoredGroupedParallel
+    (raw : ByteArray) (parallel : PngParallelOptions := {}) : ByteArray :=
+  let ranges := storedDeflateBlockRanges raw
+  let blockCount := ranges.length
+  if parallel.useParallel blockCount raw.size &&
+      parallel.minRowsPerShard <= blockCount then
+    let shards := shardRanges blockCount (parallel.shardCountForWork blockCount raw.size)
+    concatByteArraysWithCapacity <|
+      mapShardsParallel shards fun shard =>
+        storedDeflateBlockRangeShardBytes (listShard ranges shard) raw
   else
     deflateStored raw
 
@@ -189,6 +225,12 @@ def zlibCompressStoredParallel
     (raw : ByteArray) (parallel : PngParallelOptions := {}) : ByteArray :=
   zlibCompressWithParallel (fun raw => deflateStoredParallel raw parallel) raw parallel
 
+/-- Stored zlib compression that keeps block construction parallel for large
+payloads by grouping many stored blocks into each scheduled shard. -/
+def zlibCompressStoredGroupedParallel
+    (raw : ByteArray) (parallel : PngParallelOptions := {}) : ByteArray :=
+  zlibCompressWithParallel (fun raw => deflateStoredGroupedParallel raw parallel) raw parallel
+
 /-- Decode a stored-only zlib stream through the parallel scheduler. This keeps
 the same validation and output bytes as `zlibDecompressStored` while exposing a
 stored-specific parallel decode entry point. -/
@@ -197,6 +239,121 @@ def zlibDecompressStoredParallel
     (parallel : PngParallelOptions := {}) : Option ByteArray :=
   parallelEval parallel data.size data.size fun _ =>
     zlibDecompressStored data hsize
+
+/-! ### Stored-only zlib decode scanner
+
+The public equality theorem for `zlibDecompressStoredParallel` keeps using the
+existing decoder. The helpers below expose a scanner-based stored-only decode
+path whose payload copies can be sharded and benchmarked independently. -/
+
+/-- Payload range for one stored DEFLATE block inside a deflated byte stream. -/
+structure StoredInflatePayloadRange where
+  start : Nat
+  stop : Nat
+deriving Repr, DecidableEq
+
+/-- Extract one stored payload range from the original deflated byte stream. -/
+def StoredInflatePayloadRange.bytes
+    (range : StoredInflatePayloadRange) (deflated : ByteArray) : ByteArray :=
+  deflated.extract range.start range.stop
+
+/-- Scan stored DEFLATE block descriptors from `offset`, returning the ordered
+payload ranges and the byte position immediately after the final block. -/
+def scanStoredInflatePayloadRangesFrom
+    (deflated : ByteArray) (offset fuel : Nat) :
+    Option (List StoredInflatePayloadRange × Nat) := do
+  match fuel with
+  | 0 => none
+  | fuel + 1 =>
+      if hheader : offset < deflated.size then
+        let header := deflated.get offset hheader
+        let bfinal := header &&& (0x01 : UInt8)
+        let btype := (header >>> 1) &&& (0x03 : UInt8)
+        if btype != (0 : UInt8) then
+          none
+        else if hlen : offset + 4 < deflated.size then
+          let len := readU16LE deflated (offset + 1) (by omega)
+          let nlen := readU16LE deflated (offset + 3) (by omega)
+          if len + nlen != uint16MaxValue then
+            none
+          else
+            let start := offset + 5
+            let stop := start + len
+            if hbad : stop > deflated.size then
+              none
+            else
+              let range : StoredInflatePayloadRange := { start, stop }
+              if bfinal == (1 : UInt8) then
+                some ([range], stop)
+              else
+                let (tail, rest) ←
+                  scanStoredInflatePayloadRangesFrom deflated stop fuel
+                some (range :: tail, rest)
+        else
+          none
+      else
+        none
+
+/-- Scan a full stored DEFLATE stream and require the final stored block to end
+exactly at the end of the stream. -/
+def scanStoredInflatePayloadRanges
+    (deflated : ByteArray) : Option (List StoredInflatePayloadRange) := do
+  let (ranges, rest) ←
+    scanStoredInflatePayloadRangesFrom deflated 0 (deflated.size + 1)
+  if rest == deflated.size then
+    some ranges
+  else
+    none
+
+/-- Sequentially materialize stored payload ranges from a scanned stream. -/
+def inflateStoredByPayloadRanges (deflated : ByteArray) : Option ByteArray := do
+  let ranges ← scanStoredInflatePayloadRanges deflated
+  some <| concatByteArrays <| ranges.map fun range => range.bytes deflated
+
+/-- Materialize a shard of stored payload ranges from a scanned stream. -/
+def storedInflatePayloadRangeShardBytes
+    (ranges : List StoredInflatePayloadRange) (deflated : ByteArray) : ByteArray :=
+  concatByteArraysWithCapacity <| ranges.map fun range => range.bytes deflated
+
+/-- Decode a stored-only zlib stream by scanning block descriptors sequentially,
+then extracting payload ranges through the parallel scheduler. This is intended
+for large stored payloads where the old recursive inflater is copy-bound. -/
+def zlibDecompressStoredScannedParallel
+    (data : ByteArray) (hsize : 2 <= data.size)
+    (parallel : PngParallelOptions := {}) : Option ByteArray := do
+  let cmf := data.get 0 (by omega)
+  let flg := data.get 1 (by omega)
+  if ((cmf.toNat <<< 8) + flg.toNat) % 31 != 0 then
+    none
+  if (cmf &&& (0x0F : UInt8)) != (8 : UInt8) then
+    none
+  if (flg &&& (0x20 : UInt8)) != (0 : UInt8) then
+    none
+  if hmin : 6 ≤ data.size then
+    let deflated := data.extract 2 (data.size - 4)
+    let ranges ← scanStoredInflatePayloadRanges deflated
+    let rangeCount := ranges.length
+    let out :=
+      if parallel.useParallel rangeCount deflated.size &&
+          parallel.minRowsPerShard <= rangeCount then
+        let shards := shardRanges rangeCount
+          (parallel.shardCountForWork rangeCount deflated.size)
+        concatByteArraysWithCapacity <|
+          mapShardsParallel shards fun shard =>
+            storedInflatePayloadRangeShardBytes (listShard ranges shard) deflated
+      else
+        concatByteArraysWithCapacity <| ranges.map fun range => range.bytes deflated
+    let pos := data.size - 4
+    have hAdler : pos + 3 < data.size := by
+      have : 4 ≤ data.size := by omega
+      omega
+    let adlerExpected := readU32BE data pos hAdler
+    let adlerActual := (adler32 out).toNat
+    if adlerExpected != adlerActual then
+      none
+    return out
+  else
+    none
 
 /-- Write one fixed-Huffman DEFLATE block from already-tokenized LZ77 data.
 The writer is not flushed here so callers can concatenate multiple fixed blocks

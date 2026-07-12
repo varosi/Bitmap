@@ -26,6 +26,13 @@ private def repeatBytes (chunk : ByteArray) (count : Nat) : ByteArray :=
 private def rangeBytes (count : Nat) : ByteArray :=
   ByteArray.mk <| (List.range count).toArray.map randByte
 
+private def repeatByteArray (count : Nat) (byte : UInt8) : ByteArray :=
+  Id.run do
+    let mut out := ByteArray.emptyWithCapacity count
+    for _ in [0:count] do
+      out := out.push byte
+    return out
+
 private def deterministicPrefix (size : Nat) : ByteArray :=
   ByteArray.mk <| (List.range size).toArray.map (fun i => randByte (17 * i + 3))
 
@@ -2603,13 +2610,21 @@ private def expectParallelApiEquality : IO Unit := do
   let parallel : Png.PngParallelOptions :=
     { maxShards := 32, minRowsPerShard := 1, targetBytesPerShard := 1 }
   let storedRaw := Png.PixelFormat.encodeRaw (α := RGB8) (perfContentBitmap 257 257)
+  let manyBlockStoredRaw :=
+    repeatByteArray (Png.uint16MaxValue * 130 + 123) (Png.u8 77)
   for maxShards in [1, 2, 4, 8, 16] do
     let storedParallel : Png.PngParallelOptions :=
       { maxShards := maxShards, minRowsPerShard := 1, targetBytesPerShard := 1 }
     if Png.deflateStoredParallel storedRaw storedParallel != Png.deflateStored storedRaw then
       throw (IO.userError s!"parallel stored deflate block mismatch for maxShards {maxShards}")
+    if Png.deflateStoredGroupedParallel manyBlockStoredRaw storedParallel !=
+        Png.deflateStored manyBlockStoredRaw then
+      throw (IO.userError s!"grouped stored deflate block mismatch for maxShards {maxShards}")
     if Png.zlibCompressStoredParallel storedRaw storedParallel != Png.zlibCompressStored storedRaw then
       throw (IO.userError s!"parallel stored zlib block mismatch for maxShards {maxShards}")
+    if Png.zlibCompressStoredGroupedParallel manyBlockStoredRaw storedParallel !=
+        Png.zlibCompressStored manyBlockStoredRaw then
+      throw (IO.userError s!"grouped stored zlib block mismatch for maxShards {maxShards}")
     let storedZlib := Png.zlibCompressStored storedRaw
     let storedSeqDecoded :=
       if hsize : 2 <= storedZlib.size then
@@ -2625,6 +2640,21 @@ private def expectParallelApiEquality : IO Unit := do
       throw (IO.userError s!"parallel stored zlib decode mismatch for maxShards {maxShards}")
     if storedParDecoded != some storedRaw then
       throw (IO.userError s!"parallel stored zlib decode payload mismatch for maxShards {maxShards}")
+    let manyBlockStoredZlib := Png.zlibCompressStored manyBlockStoredRaw
+    let manyBlockSeqDecoded :=
+      if hsize : 2 <= manyBlockStoredZlib.size then
+        Png.zlibDecompressStored manyBlockStoredZlib hsize
+      else
+        none
+    let manyBlockScannedDecoded :=
+      if hsize : 2 <= manyBlockStoredZlib.size then
+        Png.zlibDecompressStoredScannedParallel manyBlockStoredZlib hsize storedParallel
+      else
+        none
+    if manyBlockScannedDecoded != manyBlockSeqDecoded then
+      throw (IO.userError s!"scanned stored zlib decode mismatch for maxShards {maxShards}")
+    if manyBlockScannedDecoded != some manyBlockStoredRaw then
+      throw (IO.userError s!"scanned stored zlib decode payload mismatch for maxShards {maxShards}")
     let segmentedFixed := Png.zlibCompressFixedSegmentedParallel storedRaw storedParallel
     if maxShards == 1 && segmentedFixed != Png.zlibCompressFixed storedRaw then
       throw (IO.userError "segmented fixed one-shard zlib did not match sequential fixed zlib")
@@ -2812,6 +2842,12 @@ private def byteArrayChecksum (bytes : ByteArray) : Nat :=
       checksum := checksum + (bytes.get! i).toNat
     return checksum
 
+private def formatRatioTimes100 (ratioTimes100 : Nat) : String :=
+  let whole := ratioTimes100 / 100
+  let frac := ratioTimes100 % 100
+  let fracStr := if frac < 10 then s!"0{frac}" else s!"{frac}"
+  s!"{whole}.{fracStr}"
+
 private def perfPngStageResolution : Nat := 192
 
 private def perfPngStageIters : Nat := 5
@@ -2840,6 +2876,9 @@ private def runPngStagePerfTest : IO Unit := do
     pure (byteArrayChecksum (Png.zlibCompressStored input.rawNone))
   let _ ← measurePngStageInputs "zlib compress stored parallel blocks" iters inputs <| fun input => do
     pure (byteArrayChecksum (Png.zlibCompressStoredParallel input.rawNone storedParallelOptions))
+  let _ ← measurePngStageInputs "zlib compress stored grouped parallel" iters inputs <| fun input => do
+    pure (byteArrayChecksum
+      (Png.zlibCompressStoredGroupedParallel input.rawNone storedParallelOptions))
   let _ ← measurePngStageInputs "zlib compress fixed" iters inputs <| fun input => do
     pure (byteArrayChecksum (Png.zlibCompressFixed input.rawNone))
   let _ ← measurePngStageInputs "zlib compress fixed segmented parallel" iters inputs <| fun input => do
@@ -2857,6 +2896,12 @@ private def runPngStagePerfTest : IO Unit := do
       else none with
     | some raw => pure (byteArrayChecksum raw)
     | none => throw (IO.userError "stored parallel zlib stage failed")
+  let _ ← measurePngStageInputs "zlib decompress stored scanned parallel" iters inputs <| fun input => do
+    match if hsize : 2 <= input.stored.size then
+        Png.zlibDecompressStoredScannedParallel input.stored hsize storedParallelOptions
+      else none with
+    | some raw => pure (byteArrayChecksum raw)
+    | none => throw (IO.userError "stored scanned parallel zlib stage failed")
   let _ ← measurePngStageInputs "zlib decompress fixed" iters inputs <| fun input => do
     match if hsize : 2 <= input.fixed.size then Png.zlibDecompress input.fixed hsize else none with
     | some raw => pure (byteArrayChecksum raw)
@@ -3056,6 +3101,8 @@ private def perfPngStoredParallelMinTotalNs : Nat := 1_000_000_000
 
 private def perfPngIters : Nat := 5
 
+private def perfStoredZlibLargeBlocks : Nat := 1024
+
 private def perfDynamicRatioLimit : Nat := 8
 
 -- Fixed-size performance test for Bitmap.setPixel/Bitmap.getPixel on this machine.
@@ -3109,7 +3156,7 @@ private def runPngPerfTestDynamic (fixedAvgNs : Nat) : IO Nat := do
   let avgNs := totalNs / iters
   let avgMs := avgNs / 1_000_000
   let ratioTimes100 := if fixedAvgNs == 0 then 0 else (avgNs * 100) / fixedAvgNs
-  IO.println s!"perf png dynamic round-trip: {w}x{h} pixels, avg {avgMs} ms over {iters} runs, ratio {ratioTimes100 / 100}.{ratioTimes100 % 100}x fixed, heartbeats {hb1 - hb0}"
+  IO.println s!"perf png dynamic round-trip: {w}x{h} pixels, avg {avgMs} ms over {iters} runs, ratio {formatRatioTimes100 ratioTimes100}x fixed, heartbeats {hb1 - hb0}"
   if avgNs > fixedAvgNs * perfDynamicRatioLimit then
     throw (IO.userError
       s!"png perf dynamic round-trip too slow: avg {avgMs} ms exceeds {perfDynamicRatioLimit}x fixed")
@@ -3154,6 +3201,61 @@ private def runPngPerfTestStoredParallel : IO Unit := do
       throw (IO.userError
         s!"png perf stored parallel round-trip sample too small for maxShards {maxShards}: total {totalMs} ms is below 1000 ms")
 
+private def measureStoredZlibLarge
+    (label : String) (iters : Nat) (act : Unit → IO ByteArray) : IO Nat := do
+  let hb0 <- IO.getNumHeartbeats
+  let mut totalNs : Nat := 0
+  let mut checksum : Nat := 0
+  for _ in [0:iters] do
+    let t0 <- IO.monoNanosNow
+    let bytes ← act ()
+    let t1 <- IO.monoNanosNow
+    totalNs := totalNs + (t1 - t0)
+    checksum := checksum + byteArrayChecksum bytes
+  let hb1 <- IO.getNumHeartbeats
+  let avgNs := totalNs / iters
+  IO.println s!"perf png stored zlib large {label}: avg {avgNs / 1_000_000} ms ({avgNs / 1_000} us) over {iters} runs, total {totalNs / 1_000_000} ms, checksum {checksum}, heartbeats {hb1 - hb0}"
+  return avgNs
+
+-- Large stored-zlib performance test for the grouped block encoder and scanned
+-- payload decoder. The payload intentionally exceeds 128 stored blocks, which
+-- is where the proof-backed public stored encoder keeps its conservative
+-- fallback and this explicit grouped API continues to shard work.
+private def runStoredZlibLargeParallelPerfTest : IO Unit := do
+  let iters : Nat := perfPngIters
+  let rawSize := Png.uint16MaxValue * perfStoredZlibLargeBlocks + 123
+  let raw := repeatByteArray rawSize (Png.u8 91)
+  let parallel : Png.PngParallelOptions :=
+    { maxShards := 128, minRowsPerShard := 1, targetBytesPerShard := 1 }
+  let seqAvg ← measureStoredZlibLarge "compress sequential" iters <| fun _ => do
+    pure (Png.zlibCompressStored raw)
+  let groupedAvg ← measureStoredZlibLarge "compress grouped parallel" iters <| fun _ => do
+    pure (Png.zlibCompressStoredGroupedParallel raw parallel)
+  let stored := Png.zlibCompressStored raw
+  let decSeqAvg ← measureStoredZlibLarge "decode sequential" iters <| fun _ => do
+    match if hsize : 2 <= stored.size then Png.zlibDecompressStored stored hsize else none with
+    | some decoded => pure decoded
+    | none => throw (IO.userError "large stored zlib sequential decode failed")
+  let decScannedAvg ← measureStoredZlibLarge "decode scanned parallel" iters <| fun _ => do
+    match if hsize : 2 <= stored.size then
+        Png.zlibDecompressStoredScannedParallel stored hsize parallel
+      else none with
+    | some decoded => pure decoded
+    | none => throw (IO.userError "large stored zlib scanned decode failed")
+  let grouped := Png.zlibCompressStoredGroupedParallel raw parallel
+  if grouped != stored then
+    throw (IO.userError "large grouped stored zlib bytes changed")
+  match if hsize : 2 <= stored.size then
+      Png.zlibDecompressStoredScannedParallel stored hsize parallel
+    else none with
+  | some decoded =>
+      if decoded != raw then
+        throw (IO.userError "large scanned stored zlib decoded bytes changed")
+  | none => throw (IO.userError "large scanned stored zlib final decode failed")
+  let compressRatioTimes100 := if seqAvg == 0 then 0 else (groupedAvg * 100) / seqAvg
+  let decodeRatioTimes100 := if decSeqAvg == 0 then 0 else (decScannedAvg * 100) / decSeqAvg
+  IO.println s!"perf png stored zlib large ratios: grouped/sequential compress {formatRatioTimes100 compressRatioTimes100}x, scanned/sequential decode {formatRatioTimes100 decodeRatioTimes100}x"
+
 def run : IO Unit := do
   pngDecodeFixedHuffmanFixtures
   expectGrayAlphaFixtures
@@ -3196,6 +3298,7 @@ def run : IO Unit := do
   let _dynamicAvgNs <- runPngPerfTestDynamic fixedAvgNs
   runPngPerfTestStored
   runPngPerfTestStoredParallel
+  runStoredZlibLargeParallelPerfTest
   runPngParallelPerfTest
 
 end Bitmap.Tests
