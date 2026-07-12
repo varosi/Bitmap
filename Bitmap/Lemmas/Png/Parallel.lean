@@ -338,6 +338,657 @@ sequential scanned decoder. This proves the sharded payload extraction step. -/
   simp [Png.zlibDecompressStoredScannedParallel, Png.zlibDecompressStoredScanned,
     mapListParallel_eq_map, concatByteArrays_map_groups, listShardGroups_join]
 
+/-- Materialize scanned stored payload ranges from an offset.
+This private proof helper packages scanner output with its extracted bytes. -/
+private def scannedMaterializedFrom
+    (deflated : ByteArray) (offset fuel : Nat) :
+    Option (ByteArray × Nat) :=
+  match Png.scanStoredInflatePayloadRangesFrom deflated offset fuel with
+  | some (ranges, rest) =>
+      some (Png.concatByteArrays (ranges.map fun range => range.bytes deflated), rest)
+  | none => none
+
+/-- Shift a stored-inflate payload range across an appended prefix.
+This records how scanner offsets move when recursion enters a suffix. -/
+private def shiftStoredInflatePayloadRange
+    (delta : Nat) (range : Png.StoredInflatePayloadRange) :
+    Png.StoredInflatePayloadRange :=
+  { start := delta + range.start, stop := delta + range.stop }
+
+/-- Reading LEN/NLEN through an appended prefix sees the same suffix bytes.
+This lets the scanner proof transport offset reads into recursive suffix scans. -/
+private lemma readU16LE_append_right (pre data : ByteArray) (pos : Nat)
+    (h : pre.size + pos + 1 < (pre ++ data).size)
+    (h' : pos + 1 < data.size) :
+    Png.readU16LE (pre ++ data) (pre.size + pos) h =
+      Png.readU16LE data pos h' := by
+  unfold Png.readU16LE
+  have hget0 :
+      (pre ++ data).get (pre.size + pos) (by omega) =
+        data.get pos (by omega) := by
+    have hget := ByteArray.get_append_right
+      (a := pre) (b := data) (i := pre.size + pos)
+      (hle := by omega) (h := by omega) (h' := by omega)
+    simpa [byteArray_get_eq_getElem, Nat.add_sub_cancel_left] using hget
+  have hget1 :
+      (pre ++ data).get (pre.size + pos + 1) (by omega) =
+        data.get (pos + 1) (by omega) := by
+    have hget := ByteArray.get_append_right
+      (a := pre) (b := data) (i := pre.size + pos + 1)
+      (hle := by omega) (h := by omega) (h' := by omega)
+    have hsub : pre.size + pos + 1 - pre.size = pos + 1 := by omega
+    simpa [byteArray_get_eq_getElem, hsub, Nat.add_assoc] using hget
+  simp [hget0, hget1]
+
+/-- Extracting a shifted stored payload range from `pre ++ data` extracts the
+unshifted range from `data`. This is the byte-level range transport fact. -/
+private lemma storedInflatePayloadRange_bytes_append_right
+    (pre data : ByteArray) (start stop : Nat) :
+    (Png.StoredInflatePayloadRange.bytes
+        { start := pre.size + start, stop := pre.size + stop }
+        (pre ++ data)) =
+      Png.StoredInflatePayloadRange.bytes { start, stop } data := by
+  unfold Png.StoredInflatePayloadRange.bytes
+  exact ByteArray.extract_append_size_add
+
+/-- Shifted stored payload descriptors materialize the same bytes from an
+appended stream. This converts descriptor offsets back to suffix-local bytes. -/
+private lemma storedInflatePayloadRange_bytes_shift_append_right
+    (pre data : ByteArray) (range : Png.StoredInflatePayloadRange) :
+    (shiftStoredInflatePayloadRange pre.size range).bytes (pre ++ data) =
+      range.bytes data := by
+  cases range
+  simpa [shiftStoredInflatePayloadRange]
+    using storedInflatePayloadRange_bytes_append_right pre data _ _
+
+set_option linter.unusedSimpArgs false
+
+/-- Scanning a suffix through an appended prefix yields the same descriptor list
+with every payload range shifted by the prefix size. -/
+private lemma scanStoredInflatePayloadRangesFrom_append_prefix
+    (pre data : ByteArray) (offset fuel : Nat) :
+    Png.scanStoredInflatePayloadRangesFrom (pre ++ data) (pre.size + offset) fuel =
+      match Png.scanStoredInflatePayloadRangesFrom data offset fuel with
+      | some (ranges, rest) =>
+          some (ranges.map (shiftStoredInflatePayloadRange pre.size), pre.size + rest)
+      | none => none := by
+  induction fuel generalizing pre data offset with
+  | zero =>
+      simp [Png.scanStoredInflatePayloadRangesFrom]
+  | succ fuel ih =>
+      rw [Png.scanStoredInflatePayloadRangesFrom]
+      rw [Png.scanStoredInflatePayloadRangesFrom]
+      by_cases hdata : offset < data.size
+      · have hpre : pre.size + offset < (pre ++ data).size := by
+          simp [ByteArray.size_append]
+          omega
+        have hget :
+            (pre ++ data).get (pre.size + offset) hpre =
+              data.get offset hdata := by
+          have hget := ByteArray.get_append_right
+            (a := pre) (b := data) (i := pre.size + offset)
+            (hle := by omega) (h := hpre) (h' := by omega)
+          simpa [byteArray_get_eq_getElem, Nat.add_sub_cancel_left] using hget
+        simp [hpre, hdata, hget]
+        by_cases hbtype :
+            ((data.get offset hdata >>> 1) &&& (0x03 : UInt8)) = (0 : UInt8)
+        · simp [hbtype]
+          by_cases hlen : offset + 4 < data.size
+          · have hlenPre : pre.size + offset + 4 < (pre ++ data).size := by
+              simp [ByteArray.size_append]
+              omega
+            have hlenRead :
+                Png.readU16LE (pre ++ data) (pre.size + (offset + 1)) (by omega) =
+                  Png.readU16LE data (offset + 1) (by omega) := by
+              simpa [Nat.add_assoc] using
+                (readU16LE_append_right pre data (offset + 1) (by omega) (by omega))
+            have hnlenRead :
+                Png.readU16LE (pre ++ data) (pre.size + (offset + 3)) (by omega) =
+                  Png.readU16LE data (offset + 3) (by omega) := by
+              simpa [Nat.add_assoc] using
+                (readU16LE_append_right pre data (offset + 3) (by omega) (by omega))
+            simp [hlenPre, hlen, hlenRead, hnlenRead, ByteArray.size_append,
+              Nat.add_assoc, readU16LE_proof_irrel]
+            by_cases hsum :
+                Png.readU16LE data (offset + 1) (by omega) +
+                  Png.readU16LE data (offset + 3) (by omega) = Png.uint16MaxValue
+            · simp [hsum, readU16LE_proof_irrel]
+              let len := Png.readU16LE data (offset + 1) (by omega)
+              let start := offset + 5
+              let stop := start + len
+              by_cases hbad : data.size < stop
+              · have hbadPre : (pre ++ data).size < pre.size + stop := by
+                  simp [ByteArray.size_append]
+                  omega
+                have hbadData :
+                    data.size <
+                      offset + (5 + Png.readU16LE data (offset + 1) (by omega)) := by
+                  simpa [stop, start, len, Nat.add_assoc] using hbad
+                simp [hbadData, hbadPre, len, start, stop, hlenRead, hnlenRead,
+                  hsum, ByteArray.size_append, Nat.add_assoc,
+                  readU16LE_proof_irrel]
+              · have hbadPre : ¬ (pre ++ data).size < pre.size + stop := by
+                  simp [ByteArray.size_append]
+                  omega
+                have hbadData :
+                    ¬ data.size <
+                      offset + (5 + Png.readU16LE data (offset + 1) (by omega)) := by
+                  simpa [stop, start, len, Nat.add_assoc] using hbad
+                simp [hbadData, hbadPre, len, start, stop, hlenRead, hnlenRead,
+                  hsum, ByteArray.size_append, Nat.add_assoc,
+                  readU16LE_proof_irrel]
+                by_cases hfinal :
+                    (data.get offset hdata &&& (0x01 : UInt8)) = (1 : UInt8)
+                · simp [hfinal, hlenRead, hnlenRead, hsum, hbadPre,
+                    ByteArray.size_append, Nat.add_assoc, readU16LE_proof_irrel,
+                    shiftStoredInflatePayloadRange]
+                · simp [hfinal, hlenRead, hnlenRead, hsum, hbadPre,
+                    ByteArray.size_append, Nat.add_assoc, readU16LE_proof_irrel,
+                    shiftStoredInflatePayloadRange]
+                  have ih' := ih pre data stop
+                  cases htail : Png.scanStoredInflatePayloadRangesFrom data stop fuel with
+                  | none =>
+                      simp [htail] at ih'
+                      have htail' :
+                          Png.scanStoredInflatePayloadRangesFrom data
+                              (offset + (5 + Png.readU16LE data (offset + 1) (by omega)))
+                              fuel = none := by
+                        simpa [stop, start, len, Nat.add_assoc,
+                          readU16LE_proof_irrel] using htail
+                      have ih'' :
+                          Png.scanStoredInflatePayloadRangesFrom (pre ++ data)
+                              (pre.size +
+                                (offset + (5 + Png.readU16LE data (offset + 1) (by omega))))
+                              fuel = none := by
+                        simpa [stop, start, len, Nat.add_assoc,
+                          readU16LE_proof_irrel] using ih'
+                      simp [htail', ih'']
+                  | some pair =>
+                      cases pair with
+                      | mk tail rest =>
+                          simp [htail] at ih'
+                          have htail' :
+                              Png.scanStoredInflatePayloadRangesFrom data
+                                  (offset + (5 + Png.readU16LE data (offset + 1) (by omega)))
+                                  fuel = some (tail, rest) := by
+                            simpa [stop, start, len, Nat.add_assoc,
+                              readU16LE_proof_irrel] using htail
+                          have ih'' :
+                              Png.scanStoredInflatePayloadRangesFrom (pre ++ data)
+                                  (pre.size +
+                                    (offset + (5 + Png.readU16LE data (offset + 1) (by omega))))
+                                  fuel =
+                                some (tail.map (shiftStoredInflatePayloadRange pre.size),
+                                  pre.size + rest) := by
+                            simpa [stop, start, len, Nat.add_assoc,
+                              readU16LE_proof_irrel] using ih'
+                          simp [htail', ih'', shiftStoredInflatePayloadRange,
+                            List.map_cons, Nat.add_assoc]
+            · simp [hlenRead, hnlenRead, hsum, ByteArray.size_append,
+                Nat.add_assoc, readU16LE_proof_irrel]
+          · have hlenPre : ¬ pre.size + offset + 4 < (pre ++ data).size := by
+              simp [ByteArray.size_append]
+              omega
+            simp [hlen, hlenPre, ByteArray.size_append, Nat.add_assoc]
+        · simp [hbtype]
+      · have hpre : ¬ pre.size + offset < (pre ++ data).size := by
+          simp [ByteArray.size_append]
+          omega
+        simp [hpre, hdata]
+
+/-- Concatenating shifted payload ranges from an appended stream gives the same
+bytes as concatenating the original suffix-local ranges. -/
+private lemma concatByteArrays_map_shifted_range_bytes
+    (pre data : ByteArray) (ranges : List Png.StoredInflatePayloadRange) :
+    Png.concatByteArrays
+        (ranges.map fun range =>
+          (shiftStoredInflatePayloadRange pre.size range).bytes (pre ++ data)) =
+      Png.concatByteArrays (ranges.map fun range => range.bytes data) := by
+  induction ranges with
+  | nil => simp [Png.concatByteArrays]
+  | cons range ranges ih =>
+      simp [Png.concatByteArrays, storedInflatePayloadRange_bytes_shift_append_right, ih]
+
+/-- Materialized scanner output is invariant under entering an appended suffix.
+This is the byte-level version of the shifted descriptor scan lemma. -/
+private lemma scannedMaterializedFrom_append_prefix
+    (pre data : ByteArray) (offset fuel : Nat) :
+    scannedMaterializedFrom (pre ++ data) (pre.size + offset) fuel =
+      match scannedMaterializedFrom data offset fuel with
+      | some (payload, rest) => some (payload, pre.size + rest)
+      | none => none := by
+  unfold scannedMaterializedFrom
+  rw [scanStoredInflatePayloadRangesFrom_append_prefix]
+  cases h : Png.scanStoredInflatePayloadRangesFrom data offset fuel with
+  | none => simp
+  | some pair =>
+      cases pair with
+      | mk ranges rest =>
+          simp [h]
+          exact concatByteArrays_map_shifted_range_bytes pre data ranges
+
+/-- Scanning one stored DEFLATE block materializes its payload and either stops
+at a final block or continues with the suffix scanner. -/
+private lemma scannedMaterializedFrom_storedBlock
+    (payload rest : ByteArray) (final : Bool) (fuel : Nat)
+    (hlen : payload.size ≤ Png.uint16MaxValue) :
+    scannedMaterializedFrom (Png.storedBlock payload final ++ rest) 0 (fuel + 1) =
+      if final then
+        some (payload, (Png.storedBlock payload final).size)
+      else
+        match scannedMaterializedFrom rest 0 fuel with
+        | some (tail, rest') =>
+            some (payload ++ tail, (Png.storedBlock payload final).size + rest')
+        | none => none := by
+  let data := Png.storedBlock payload final ++ rest
+  have hblockSize : (Png.storedBlock payload final).size = payload.size + 5 :=
+    storedBlock_size payload final
+  have hdataPos : 0 < data.size := by
+    simp [data, ByteArray.size_append, hblockSize]
+    omega
+  have hlenPos : 0 + 4 < data.size := by
+    simp [data, ByteArray.size_append, hblockSize]
+    omega
+  have hsize1 : 1 ≤ (Png.storedBlock payload final).size := by
+    simp [hblockSize]
+  have hsize3 : 3 ≤ (Png.storedBlock payload final).size := by
+    simp [hblockSize]
+  have hsize5 : 5 ≤ (Png.storedBlock payload final).size := by
+    simp [hblockSize]
+  have hsize5len : 5 + payload.size ≤ (Png.storedBlock payload final).size := by
+    simp [hblockSize, Nat.add_comm]
+  have hlen_extract :
+      data.extract 1 3 = Png.u16le payload.size := by
+    have hleft :
+        data.extract 1 3 = (Png.storedBlock payload final).extract 1 3 := by
+      apply byteArray_extract_append_left (a := Png.storedBlock payload final)
+        (b := rest) (i := 1) (j := 3)
+      · exact hsize1
+      · exact hsize3
+    calc
+      data.extract 1 3 = (Png.storedBlock payload final).extract 1 3 := hleft
+      _ = Png.u16le payload.size := storedBlock_extract_len payload final
+  have hnlen_extract :
+      data.extract 3 5 = Png.u16le (Png.uint16MaxValue - payload.size) := by
+    have hleft :
+        data.extract 3 5 = (Png.storedBlock payload final).extract 3 5 := by
+      apply byteArray_extract_append_left (a := Png.storedBlock payload final)
+        (b := rest) (i := 3) (j := 5)
+      · exact hsize3
+      · exact hsize5
+    calc
+      data.extract 3 5 = (Png.storedBlock payload final).extract 3 5 := hleft
+      _ = Png.u16le (Png.uint16MaxValue - payload.size) :=
+          storedBlock_extract_nlen payload final
+  have hpayload_extract :
+      data.extract 5 (5 + payload.size) = payload := by
+    have hleft :
+        data.extract 5 (5 + payload.size) =
+          (Png.storedBlock payload final).extract 5 (5 + payload.size) := by
+      apply byteArray_extract_append_left (a := Png.storedBlock payload final)
+        (b := rest) (i := 5) (j := 5 + payload.size)
+      · exact hsize5
+      · exact hsize5len
+    calc
+      data.extract 5 (5 + payload.size) =
+          (Png.storedBlock payload final).extract 5 (5 + payload.size) := hleft
+      _ = payload := storedBlock_extract_payload payload final
+  have hlen_read : Png.readU16LE data 1 (by omega) = payload.size := by
+    have hlt : payload.size < 2 ^ 16 := by
+      have hlt' : (Png.uint16MaxValue : Nat) < 2 ^ 16 := by decide
+      exact lt_of_le_of_lt hlen hlt'
+    exact readU16LE_of_extract_eq (bytes := data) (pos := 1) (n := payload.size)
+      (h := by omega) hlen_extract hlt
+  have hnlen_read :
+      Png.readU16LE data 3 (by omega) = Png.uint16MaxValue - payload.size := by
+    have hlt : Png.uint16MaxValue - payload.size < 2 ^ 16 := by
+      have hlt' : (Png.uint16MaxValue : Nat) < 2 ^ 16 := by decide
+      exact lt_of_le_of_lt (Nat.sub_le _ _) hlt'
+    exact readU16LE_of_extract_eq (bytes := data) (pos := 3)
+      (n := Png.uint16MaxValue - payload.size) (h := by omega) hnlen_extract hlt
+  have hsum : payload.size + (Png.uint16MaxValue - payload.size) =
+      Png.uint16MaxValue := by
+    exact Nat.add_sub_of_le hlen
+  have hnotBad : ¬ data.size < 5 + payload.size := by
+    simp [data, ByteArray.size_append, hblockSize]
+    omega
+  have hheader :
+      data.get 0 hdataPos = if final then Png.u8 0x01 else Png.u8 0x00 := by
+    simpa [data] using
+      (storedBlock_get0_append (payload := payload) (rest := rest)
+        (final := final) hdataPos)
+  have hbtype :
+      ((data.get 0 hdataPos >>> 1) &&& (0x03 : UInt8)) = (0 : UInt8) := by
+    simpa [hheader] using storedBlock_btype final
+  have hbfinalBeq :
+      ((data.get 0 hdataPos &&& (0x01 : UInt8)) == (1 : UInt8)) = final := by
+    cases final
+    · simp [hheader]
+      decide
+    · simp [hheader]
+      decide
+  cases final
+  · have hposFalse : 0 < payload.size + (rest.size + 5) := by omega
+    have hlenFalse : 4 < payload.size + (rest.size + 5) := by omega
+    have hbadFalse : ¬ rest.size + 5 < 5 := by omega
+    have hblockSizeFalse :
+        (Png.storedBlock payload false).size = payload.size + 5 := by
+      simpa using storedBlock_size payload false
+    unfold scannedMaterializedFrom
+    rw [Png.scanStoredInflatePayloadRangesFrom]
+    simp [data, hdataPos, hbtype, hlenPos, hlen_read, hnlen_read, hsum, hnotBad,
+      hbfinalBeq, readU16LE_proof_irrel, Png.StoredInflatePayloadRange.bytes,
+      hpayload_extract, hposFalse, hlenFalse, hbadFalse]
+    have hprefix :=
+      scanStoredInflatePayloadRangesFrom_append_prefix
+        (Png.storedBlock payload false) rest 0 fuel
+    cases htail : Png.scanStoredInflatePayloadRangesFrom rest 0 fuel with
+    | none =>
+        have hprefix' :
+            Png.scanStoredInflatePayloadRangesFrom
+                (Png.storedBlock payload false ++ rest) (payload.size + 5) fuel =
+              none := by
+          simpa [hblockSizeFalse, htail, Nat.add_comm, Nat.add_left_comm,
+            Nat.add_assoc] using hprefix
+        simp [scannedMaterializedFrom, htail, hprefix', hblockSizeFalse,
+          hposFalse, hlenFalse, hbadFalse, Nat.add_comm]
+    | some pair =>
+        cases pair with
+        | mk ranges rest' =>
+            have hprefix' :
+                Png.scanStoredInflatePayloadRangesFrom
+                    (Png.storedBlock payload false ++ rest) (payload.size + 5) fuel =
+                  some (ranges.map (shiftStoredInflatePayloadRange
+                    (Png.storedBlock payload false).size),
+                    (Png.storedBlock payload false).size + rest') := by
+              simpa [hblockSizeFalse, htail, Nat.add_comm, Nat.add_left_comm,
+                Nat.add_assoc] using hprefix
+            have hconcat :=
+              concatByteArrays_map_shifted_range_bytes
+                (Png.storedBlock payload false) rest ranges
+            simp [scannedMaterializedFrom, htail, hprefix', hposFalse,
+              hlenFalse, hbadFalse,
+              Png.concatByteArrays, Png.StoredInflatePayloadRange.bytes,
+              hpayload_extract, hconcat, hblockSizeFalse, Nat.add_comm,
+              Nat.add_left_comm, Nat.add_assoc]
+            have hpayload' :
+                (Png.storedBlock payload false ++ rest).extract 5
+                    (payload.size + 5) = payload := by
+              simpa [data, Nat.add_comm] using hpayload_extract
+            have hconcat' :
+                Png.concatByteArrays
+                    (ranges.map fun range =>
+                      (shiftStoredInflatePayloadRange (payload.size + 5) range).bytes
+                        (Png.storedBlock payload false ++ rest)) =
+                  Png.concatByteArrays (ranges.map fun range => range.bytes rest) := by
+              simpa [hblockSizeFalse] using hconcat
+            simpa [Png.StoredInflatePayloadRange.bytes, hpayload', hconcat']
+  · have hposTrue : 0 < rest.size + (payload.size + 5) := by omega
+    have hlenTrue : 4 < rest.size + (payload.size + 5) := by omega
+    have hbadTrue : ¬ rest.size + (payload.size + 5) < payload.size + 5 := by
+      omega
+    unfold scannedMaterializedFrom
+    rw [Png.scanStoredInflatePayloadRangesFrom]
+    simp [data, hdataPos, hbtype, hlenPos, hlen_read, hnlen_read, hsum, hnotBad,
+      hbfinalBeq, readU16LE_proof_irrel, Png.StoredInflatePayloadRange.bytes,
+      hpayload_extract, hposTrue, hlenTrue, hbadTrue, hblockSize, Nat.add_comm]
+    simp [Png.concatByteArrays, Png.StoredInflatePayloadRange.bytes,
+      hpayload_extract, Nat.add_comm]
+    simpa [data, Nat.add_comm] using hpayload_extract
+
+/-- A generated stored DEFLATE stream scans to exactly the original raw bytes.
+The fuel parameter allows recursive scanner calls to consume one block at a time. -/
+private lemma scannedMaterializedFrom_deflateStored_of_fuel
+    (raw : ByteArray) (fuel : Nat)
+    (hfuel : (Png.deflateStored raw).size + 1 ≤ fuel) :
+    scannedMaterializedFrom (Png.deflateStored raw) 0 fuel =
+      some (raw, (Png.deflateStored raw).size) := by
+  classical
+  refine Nat.strongRecOn (motive := fun n =>
+    ∀ raw, raw.size = n →
+      ∀ fuel, (Png.deflateStored raw).size + 1 ≤ fuel →
+        scannedMaterializedFrom (Png.deflateStored raw) 0 fuel =
+          some (raw, (Png.deflateStored raw).size))
+    raw.size ?_ raw rfl fuel hfuel
+  intro n ih raw hsize fuel hfuel
+  subst hsize
+  by_cases hzero : raw.size = 0
+  · have hraw : raw = ByteArray.empty := (ByteArray.size_eq_zero_iff).1 hzero
+    have hdef : Png.deflateStored raw = Png.storedBlock ByteArray.empty true := by
+      rw [Png.deflateStored.eq_1]
+      simp [hraw]
+    cases fuel with
+    | zero =>
+        have hpos : 0 < (Png.deflateStored raw).size + 1 := Nat.succ_pos _
+        omega
+    | succ fuel' =>
+        have hblock :=
+          scannedMaterializedFrom_storedBlock
+            (payload := ByteArray.empty) (rest := ByteArray.empty)
+            (final := true) (fuel := fuel') (by simp)
+        calc
+          scannedMaterializedFrom (Png.deflateStored raw) 0 (fuel' + 1) =
+              scannedMaterializedFrom (Png.storedBlock ByteArray.empty true) 0
+                (fuel' + 1) := by rw [hdef]
+          _ = some (ByteArray.empty, (Png.storedBlock ByteArray.empty true).size) :=
+                hblock
+          _ = some (raw, (Png.deflateStored raw).size) := by
+                simp [hraw, Png.deflateStored]
+  · let blockLen := Nat.min Png.uint16MaxValue raw.size
+    let final := blockLen == raw.size
+    let payload := raw.extract 0 blockLen
+    let restRaw := raw.extract blockLen raw.size
+    let block := Png.storedBlock payload final
+    have hblockLen_le : blockLen ≤ raw.size := by
+      simpa [blockLen] using Nat.min_le_right Png.uint16MaxValue raw.size
+    have hpayload_size : payload.size = blockLen := by
+      simp [payload, ByteArray.size_extract, Nat.min_eq_left hblockLen_le]
+    have hpayload_le : payload.size ≤ Png.uint16MaxValue := by
+      simpa [hpayload_size] using Nat.min_le_left Png.uint16MaxValue raw.size
+    by_cases hlarge : Png.uint16MaxValue < raw.size
+    · have hfinal : final = false := by
+        have hlen : blockLen = Png.uint16MaxValue := by
+          simpa [blockLen] using Nat.min_eq_left (Nat.le_of_lt hlarge)
+        have hneq : Png.uint16MaxValue ≠ raw.size := ne_of_lt hlarge
+        simp [final, hlen, hneq]
+      have hfinalNe : Nat.min Png.uint16MaxValue raw.size ≠ raw.size := by
+        intro hEq
+        have hleMin : Nat.min Png.uint16MaxValue raw.size ≤ Png.uint16MaxValue :=
+          Nat.min_le_left Png.uint16MaxValue raw.size
+        have hle : raw.size ≤ Png.uint16MaxValue := by
+          simpa [hEq] using hleMin
+        exact (Nat.not_lt_of_ge hle) hlarge
+      have hfinalBeq : (Nat.min Png.uint16MaxValue raw.size == raw.size) = false :=
+        beq_false_of_ne hfinalNe
+      have hdef :
+          Png.deflateStored raw = block ++ Png.deflateStored restRaw := by
+        rw [Png.deflateStored.eq_1]
+        simp [hzero, blockLen, hfinalBeq, final, block, payload, restRaw]
+      have hrest_size : restRaw.size = raw.size - blockLen := by
+        simp [restRaw, ByteArray.size_extract]
+      have hrest_lt : restRaw.size < raw.size := by
+        have hpos : 0 < blockLen := by
+          have hpos_max : 0 < Png.uint16MaxValue := by
+            simp [Png.uint16MaxValue, UInt16.size]
+          rw [Nat.lt_min]
+          exact ⟨hpos_max, Nat.lt_trans hpos_max hlarge⟩
+        have hlt : raw.size - blockLen < raw.size := Nat.sub_lt_self hpos hblockLen_le
+        simpa [hrest_size] using hlt
+      have hsplit : payload ++ restRaw = raw := by
+        simp [payload, restRaw, byteArray_extract_split (a := raw)
+          (n := blockLen) hblockLen_le]
+      have hdef' :
+          Png.deflateStored raw =
+            Png.storedBlock payload false ++ Png.deflateStored restRaw := by
+        simpa [block, hfinal] using hdef
+      cases fuel with
+      | zero =>
+          have hpos : 0 < (Png.deflateStored raw).size + 1 := Nat.succ_pos _
+          omega
+      | succ fuel' =>
+          have hblockPos : 0 < (Png.storedBlock payload false).size := by
+            simp [storedBlock_size]
+          have hdefSize :
+              (Png.deflateStored raw).size =
+                (Png.storedBlock payload false).size +
+                  (Png.deflateStored restRaw).size := by
+            simp [hdef', ByteArray.size_append]
+          have htailFuel : (Png.deflateStored restRaw).size + 1 ≤ fuel' := by
+            omega
+          have ih' :
+              scannedMaterializedFrom (Png.deflateStored restRaw) 0 fuel' =
+                some (restRaw, (Png.deflateStored restRaw).size) :=
+            ih restRaw.size hrest_lt restRaw rfl fuel' htailFuel
+          have hblockScan :=
+            scannedMaterializedFrom_storedBlock
+              (payload := payload) (rest := Png.deflateStored restRaw)
+              (final := false) (fuel := fuel') hpayload_le
+          calc
+            scannedMaterializedFrom (Png.deflateStored raw) 0 (fuel' + 1) =
+                scannedMaterializedFrom
+                  (Png.storedBlock payload false ++ Png.deflateStored restRaw)
+                  0 (fuel' + 1) := by rw [hdef']
+            _ = some (payload ++ restRaw,
+                (Png.storedBlock payload false).size +
+                  (Png.deflateStored restRaw).size) := by
+                  simpa [ih'] using hblockScan
+            _ = some (raw, (Png.deflateStored raw).size) := by
+                  simp [hsplit, hdefSize]
+    · have hfinal : final = true := by
+        have hlen : blockLen = raw.size := by
+          simpa [blockLen] using Nat.min_eq_right (Nat.le_of_not_gt hlarge)
+        simp [final, hlen]
+      have hfinalEq : Nat.min Png.uint16MaxValue raw.size = raw.size :=
+        Nat.min_eq_right (Nat.le_of_not_gt hlarge)
+      have hdef : Png.deflateStored raw = block := by
+        rw [Png.deflateStored.eq_1]
+        simp [hzero, blockLen, hfinalEq, final, hfinal, block, payload]
+      have hpayload_eq : payload = raw := by
+        have hlen : blockLen = raw.size := by
+          simpa [blockLen] using Nat.min_eq_right (Nat.le_of_not_gt hlarge)
+        simp [payload, hlen, ByteArray.extract_zero_size]
+      have hdef' : Png.deflateStored raw = Png.storedBlock payload true := by
+        simpa [block, hfinal] using hdef
+      cases fuel with
+      | zero =>
+          have hpos : 0 < (Png.deflateStored raw).size + 1 := Nat.succ_pos _
+          omega
+      | succ fuel' =>
+          have hblockScan :=
+            scannedMaterializedFrom_storedBlock
+              (payload := payload) (rest := ByteArray.empty)
+              (final := true) (fuel := fuel') hpayload_le
+          calc
+            scannedMaterializedFrom (Png.deflateStored raw) 0 (fuel' + 1) =
+                scannedMaterializedFrom (Png.storedBlock payload true) 0 (fuel' + 1) := by
+                  rw [hdef']
+            _ = some (payload, (Png.storedBlock payload true).size) := by
+                  simpa using hblockScan
+            _ = some (raw, (Png.deflateStored raw).size) := by
+                  simp [hpayload_eq, hdef']
+
+/-- The scanner-based stored payload materializer accepts generated stored
+DEFLATE streams and returns exactly the original raw bytes. -/
+@[simp] lemma inflateStoredByPayloadRanges_deflateStored (raw : ByteArray) :
+    Png.inflateStoredByPayloadRanges (Png.deflateStored raw) = some raw := by
+  have hmat :=
+    scannedMaterializedFrom_deflateStored_of_fuel raw
+      ((Png.deflateStored raw).size + 1) (by rfl)
+  unfold scannedMaterializedFrom at hmat
+  unfold Png.inflateStoredByPayloadRanges Png.scanStoredInflatePayloadRanges
+  cases hscan :
+      Png.scanStoredInflatePayloadRangesFrom (Png.deflateStored raw) 0
+        ((Png.deflateStored raw).size + 1) with
+  | none =>
+      simp [hscan] at hmat
+  | some pair =>
+      cases pair with
+      | mk ranges rest =>
+          simp [hscan] at hmat
+          have hpayload := hmat.1
+          have hrest := hmat.2
+          simp [hscan, hpayload, hrest]
+
+set_option linter.unusedSimpArgs true
+
+/-- The sequential scanned stored zlib decoder accepts stored zlib streams
+produced by the existing stored encoder. -/
+@[simp] lemma zlibDecompressStoredScanned_zlibCompressStored (raw : ByteArray)
+    (hsize : 2 ≤ (Png.zlibCompressStored raw).size) :
+    Png.zlibDecompressStoredScanned (Png.zlibCompressStored raw) hsize =
+      some raw := by
+  let bytes := Png.zlibCompressStored raw
+  have hmin : 6 ≤ bytes.size := zlibCompressStored_size_ge raw
+  have h0 : 0 < bytes.size := lt_of_lt_of_le (by decide : 0 < 6) hmin
+  have h1 : 1 < bytes.size := lt_of_lt_of_le (by decide : 1 < 6) hmin
+  have h0' : 0 < bytes.size := lt_of_lt_of_le (by decide : 0 < 6) hmin
+  have h1' : 1 < bytes.size := lt_of_lt_of_le (by decide : 1 < 6) hmin
+  have hcmf' : bytes[0]'h0' = Png.u8 0x78 := (zlibCompressStored_cmf_flg raw).1
+  have hflg' : bytes[1]'h1' = Png.u8 0x01 := (zlibCompressStored_cmf_flg raw).2
+  have hcmf : bytes.get 0 h0 = Png.u8 0x78 := by
+    have htmp : bytes.get 0 h0' = Png.u8 0x78 := by
+      simpa [byteArray_get_eq_getElem] using hcmf'
+    simpa using htmp
+  have hflg : bytes.get 1 h1 = Png.u8 0x01 := by
+    have htmp : bytes.get 1 h1' = Png.u8 0x01 := by
+      simpa [byteArray_get_eq_getElem] using hflg'
+    simpa using htmp
+  have hdeflated :
+      bytes.extract 2 (bytes.size - 4) = Png.deflateStored raw := by
+    simpa [bytes] using zlibCompressStored_extract_deflated raw
+  have hAdlerPos : bytes.size - 4 + 3 < bytes.size := by
+    omega
+  have hadler :
+      Png.readU32BE bytes (bytes.size - 4) hAdlerPos =
+        (Png.adler32 raw).toNat := by
+    have hextract :
+        bytes.extract (bytes.size - 4) (bytes.size - 4 + 4) =
+          Png.u32be (Png.adler32 raw).toNat := by
+      simpa [bytes] using zlibCompressStored_extract_adler raw
+    have hlt : (Png.adler32 raw).toNat < 2 ^ 32 := by
+      simpa using (UInt32.toNat_lt (Png.adler32 raw))
+    exact readU32BE_of_extract_eq (bytes := bytes) (pos := bytes.size - 4)
+      (n := (Png.adler32 raw).toNat) (h := hAdlerPos) hextract hlt
+  have hpayload :
+      Png.inflateStoredByPayloadRanges (bytes.extract 2 (bytes.size - 4)) =
+        some raw := by
+    simp [hdeflated]
+  have hpayload' :
+      (do
+        let ranges ← Png.scanStoredInflatePayloadRanges
+          ((Png.zlibCompressStored raw).extract 2
+            ((Png.zlibCompressStored raw).size - 4))
+        some (Png.concatByteArrays <| ranges.map fun range =>
+          range.bytes ((Png.zlibCompressStored raw).extract 2
+            ((Png.zlibCompressStored raw).size - 4)))) = some raw := by
+    simpa [bytes, Png.inflateStoredByPayloadRanges] using hpayload
+  have hmod : ((Png.u8 0x78).toNat <<< 8 + (Png.u8 0x01).toNat) % 31 = 0 := by
+    decide
+  have hbtype : (Png.u8 0x78 &&& (0x0F : UInt8)) = 8 := by
+    decide
+  have hflg0 : (Png.u8 0x01 &&& (0x20 : UInt8)) = 0 := by
+    decide
+  cases hscan :
+      Png.scanStoredInflatePayloadRanges
+        ((Png.zlibCompressStored raw).extract 2
+          ((Png.zlibCompressStored raw).size - 4)) with
+  | none =>
+      simp [hscan] at hpayload'
+  | some ranges =>
+      simp [hscan] at hpayload'
+      unfold Png.zlibDecompressStoredScanned
+      simp [bytes, hcmf, hflg, hmin, hscan, hpayload', hadler, hmod, hbtype, hflg0]
+
+/-- The scanned parallel stored zlib decoder accepts streams produced by the
+existing stored zlib encoder and returns exactly the original raw bytes. -/
+@[simp] lemma zlibDecompressStoredScannedParallel_zlibCompressStored
+    (raw : ByteArray) (hsize : 2 ≤ (Png.zlibCompressStored raw).size)
+    (parallel : PngParallelOptions) :
+    Png.zlibDecompressStoredScannedParallel
+        (Png.zlibCompressStored raw) hsize parallel = some raw := by
+  rw [zlibDecompressStoredScannedParallel_eq_scanned]
+  exact zlibDecompressStoredScanned_zlibCompressStored raw hsize
+
 /-- Parallel fixed compression preserves the existing fixed-Huffman zlib stream. -/
 @[simp] lemma zlibCompressFixedParallel_eq
     (raw : ByteArray) (parallel : PngParallelOptions) :

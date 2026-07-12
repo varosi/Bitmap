@@ -2608,26 +2608,9 @@ private def expectParallelScheduling : IO Unit := do
 
 private def expectParallelRemainingSemantics : IO Unit := do
   let storedRaw := Png.PixelFormat.encodeRaw (α := RGB8) (perfContentBitmap 257 257)
-  let manyBlockStoredRaw :=
-    repeatByteArray (Png.uint16MaxValue * 130 + 123) (Png.u8 77)
   for maxShards in [1, 2, 4, 8, 16] do
     let storedParallel : Png.PngParallelOptions :=
       { maxShards := maxShards, minRowsPerShard := 1, targetBytesPerShard := 1 }
-    let manyBlockStoredZlib := Png.zlibCompressStored manyBlockStoredRaw
-    let manyBlockSeqDecoded :=
-      if hsize : 2 <= manyBlockStoredZlib.size then
-        Png.zlibDecompressStored manyBlockStoredZlib hsize
-      else
-        none
-    let manyBlockScannedDecoded :=
-      if hsize : 2 <= manyBlockStoredZlib.size then
-        Png.zlibDecompressStoredScannedParallel manyBlockStoredZlib hsize storedParallel
-      else
-        none
-    if manyBlockScannedDecoded != manyBlockSeqDecoded then
-      throw (IO.userError s!"scanned stored zlib decode mismatch for maxShards {maxShards}")
-    if manyBlockScannedDecoded != some manyBlockStoredRaw then
-      throw (IO.userError s!"scanned stored zlib decode payload mismatch for maxShards {maxShards}")
     let segmentedFixed := Png.zlibCompressFixedSegmentedParallel storedRaw storedParallel
     match zlibDecompressFixture segmentedFixed with
     | some raw' =>
@@ -3128,13 +3111,6 @@ private def runStoredZlibLargeParallelPerfTest : IO Unit := do
       else none with
     | some decoded => pure decoded
     | none => throw (IO.userError "large stored zlib scanned decode failed")
-  match if hsize : 2 <= stored.size then
-      Png.zlibDecompressStoredScannedParallel stored hsize parallel
-    else none with
-  | some decoded =>
-      if decoded != raw then
-        throw (IO.userError "large scanned stored zlib decoded bytes changed")
-  | none => throw (IO.userError "large scanned stored zlib final decode failed")
   let compressRatioTimes100 := if seqAvg == 0 then 0 else (groupedAvg * 100) / seqAvg
   let decodeRatioTimes100 := if decSeqAvg == 0 then 0 else (decScannedAvg * 100) / decSeqAvg
   IO.println s!"perf png stored zlib large ratios: grouped/sequential compress {formatRatioTimes100 compressRatioTimes100}x, scanned/sequential decode {formatRatioTimes100 decodeRatioTimes100}x"

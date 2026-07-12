@@ -113,7 +113,9 @@ This library has proofs about:
   `Bitmap.Lemmas.zlibCompressStoredGroupedParallel_eq`),
   scanned stored zlib parallel extraction byte equality against the sequential
   scanned decoder
-  (`Bitmap.Lemmas.zlibDecompressStoredScannedParallel_eq_scanned`),
+  (`Bitmap.Lemmas.zlibDecompressStoredScannedParallel_eq_scanned`)
+  plus generated stored-stream scanned decode correctness
+  (`Bitmap.Lemmas.zlibDecompressStoredScannedParallel_zlibCompressStored`),
   plus one-shard byte equality for the segmented fixed-Huffman encoder
   (`Bitmap.Lemmas.deflateFixedSegmentedParallel_oneShard_eq`,
   `Bitmap.Lemmas.zlibCompressFixedSegmentedParallel_oneShard_eq`,
