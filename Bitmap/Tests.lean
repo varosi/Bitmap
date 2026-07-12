@@ -3048,6 +3048,12 @@ private def perfIters : Nat := 10
 -- that generic dynamic-Huffman decoding does not dominate the whole test suite.
 private def perfPngResolution : Nat := 512
 
+-- Stored-mode parallel round-trips are much faster than fixed/dynamic
+-- compression, so use a larger fixture to keep each shard-setting sample stable.
+private def perfPngStoredParallelResolution : Nat := 1664
+
+private def perfPngStoredParallelMinTotalNs : Nat := 1_000_000_000
+
 private def perfPngIters : Nat := 5
 
 private def perfDynamicRatioLimit : Nat := 8
@@ -3128,8 +3134,8 @@ private def runPngPerfTestStored : IO Unit := do
 
 -- Fixed-size performance test for PNG encode/decode via stored parallel blocks.
 private def runPngPerfTestStoredParallel : IO Unit := do
-  let w : Nat := perfPngResolution
-  let h : Nat := perfPngResolution
+  let w : Nat := perfPngStoredParallelResolution
+  let h : Nat := perfPngStoredParallelResolution
   let iters : Nat := perfPngIters
   for maxShards in [1, 16, 128] do
     let hb0 <- IO.getNumHeartbeats
@@ -3142,7 +3148,11 @@ private def runPngPerfTestStoredParallel : IO Unit := do
     let hb1 <- IO.getNumHeartbeats
     let avgNs := totalNs / iters
     let avgMs := avgNs / 1_000_000
-    IO.println s!"perf png stored parallel round-trip: {w}x{h}, maxShards {maxShards}, avg {avgMs} ms over {iters} runs, heartbeats {hb1 - hb0}"
+    let totalMs := totalNs / 1_000_000
+    IO.println s!"perf png stored parallel round-trip: {w}x{h}, maxShards {maxShards}, avg {avgMs} ms over {iters} runs, total {totalMs} ms, heartbeats {hb1 - hb0}"
+    if totalNs < perfPngStoredParallelMinTotalNs then
+      throw (IO.userError
+        s!"png perf stored parallel round-trip sample too small for maxShards {maxShards}: total {totalMs} ms is below 1000 ms")
 
 def run : IO Unit := do
   pngDecodeFixedHuffmanFixtures
