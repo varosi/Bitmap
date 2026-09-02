@@ -12,7 +12,7 @@ lang.lemmaCmd = true
 [[require]]
 name = "batteries"
 scope = "leanprover-community"
-rev = "32dc18cde3684679f3c003de608743b57498c56f"
+rev = "023ce7d62a0531e22a5331e20b587817a80d49ff"
 
 [[lean_lib]]
 name = "Bitmap"
