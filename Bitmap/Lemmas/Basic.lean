@@ -65,20 +65,20 @@ instance : LawfulChannelFormat UInt8 where
   maxValue_pos := by decide
   read_write := by
     intro data base h x
-    change (data.set base x (by simpa using h)).get base _ = x
+    change (data.set base x (by omega)).get base _ = x
     cases data with
     | mk arr =>
         simp [ByteArray.set, ByteArray.get]
   read_write_preserve := by
     intro data readBase writeBase hread hwrite x hdisj
-    have hread' : readBase < data.size := by simpa using hread
-    have hwrite' : writeBase < data.size := by simpa using hwrite
+    have hread' : readBase < data.size := by omega
+    have hwrite' : writeBase < data.size := by omega
     have hreadAfter : readBase < (data.set writeBase x hwrite').size := by
       simpa [byteArray_set_size (bs := data) (i := writeBase) (hi := hwrite') (v := x)]
         using hread'
     have hne : writeBase ≠ readBase := by
       rcases hdisj with h | h <;> omega
-    simpa using
+    simpa [ChannelFormat.read, ChannelFormat.write] using
       (byteArray_get_set_ne (bs := data) (i := writeBase) (j := readBase)
         (hi := hwrite') (hj := hread') (hij := hne) (v := x) (h' := hreadAfter))
 
@@ -109,16 +109,16 @@ instance : LawfulChannelFormat UInt16 where
   maxValue_pos := by decide
   read_write := by
     intro data base h x
-    simpa using readU16BEAt_write_same data base (by simpa using h) x
+    simpa [ChannelFormat.read, ChannelFormat.write] using readU16BEAt_write_same data base (by omega) x
   read_write_preserve := by
     intro data readBase writeBase hread hwrite x hdisj
     rcases hdisj with hbefore | hbefore
-    · simpa using
+    · simpa [ChannelFormat.read, ChannelFormat.write] using
         (readU16BEAt_write_after data readBase writeBase
-          (by simpa using hread) (by simpa using hwrite) x (by simpa using hbefore))
-    · simpa using
+          (by omega) (by omega) x (by omega))
+    · simpa [ChannelFormat.read, ChannelFormat.write] using
         (readU16BEAt_write_before data readBase writeBase
-          (by simpa using hread) (by simpa using hwrite) x (by simpa using hbefore))
+          (by omega) (by omega) x (by omega))
 
 /-- Proof-side round-trip law for pixel byte formats.
 It keeps `Bitmap.Basic` focused on executable layout data and size preservation. -/
@@ -252,12 +252,12 @@ theorem read_write3 {RangeT α : Type u} [ChannelFormat RangeT] [LawfulChannelFo
   have hpair0 :
       ChannelFormat.read data2 base h0d2 = get0 px := by
     have := congrArg Prod.fst hpair
-    simpa [ChannelLayout.read2, ChannelLayout.write2, data2] using this
+    simpa [ChannelLayout.read2, ChannelLayout.write2, data2, ChannelFormat.read, ChannelFormat.write] using this
   have hpair1 :
       ChannelFormat.read data2 (base + ChannelFormat.byteSize (RangeT := RangeT)) h1d2 =
         get1 px := by
     have := congrArg Prod.snd hpair
-    simpa [ChannelLayout.read2, ChannelLayout.write2, data2] using this
+    simpa [ChannelLayout.read2, ChannelLayout.write2, data2, ChannelFormat.read, ChannelFormat.write] using this
   have hread0 : ChannelFormat.read data3 base h0d3 = get0 px := by
     have hkeep : ChannelFormat.read data3 base h0d3 =
         ChannelFormat.read data2 base h0d2 := by
@@ -351,17 +351,17 @@ theorem read_write4 {RangeT α : Type u} [ChannelFormat RangeT] [LawfulChannelFo
   have htriple0 :
       ChannelFormat.read data3 base h0d3 = get0 px := by
     have := congrArg Prod.fst htriple
-    simpa [ChannelLayout.read3, ChannelLayout.write3, data3] using this
+    simpa [ChannelLayout.read3, ChannelLayout.write3, data3, ChannelFormat.read, ChannelFormat.write] using this
   have htriple1 :
       ChannelFormat.read data3 (base + ChannelFormat.byteSize (RangeT := RangeT)) h1d3 =
         get1 px := by
     have := congrArg (fun p : RangeT × RangeT × RangeT => p.2.1) htriple
-    simpa [ChannelLayout.read3, ChannelLayout.write3, data3] using this
+    simpa [ChannelLayout.read3, ChannelLayout.write3, data3, ChannelFormat.read, ChannelFormat.write] using this
   have htriple2 :
       ChannelFormat.read data3 (base + 2 * ChannelFormat.byteSize (RangeT := RangeT)) h2d3 =
         get2 px := by
     have := congrArg (fun p : RangeT × RangeT × RangeT => p.2.2) htriple
-    simpa [ChannelLayout.read3, ChannelLayout.write3, data3] using this
+    simpa [ChannelLayout.read3, ChannelLayout.write3, data3, ChannelFormat.read, ChannelFormat.write] using this
   have hread0 : ChannelFormat.read data4 base h0d4 = get0 px := by
     have hkeep : ChannelFormat.read data4 base h0d4 =
         ChannelFormat.read data3 base h0d3 := by
