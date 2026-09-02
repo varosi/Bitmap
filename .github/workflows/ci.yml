@@ -18,12 +18,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - lane: lean-4.30
-            lean_version: v4.30.0
-            toolchain: leanprover/lean4:v4.30.0
-          - lane: lean-4.31
-            lean_version: v4.31.0
-            toolchain: leanprover/lean4:v4.31.0
+          - lane: lean-4.32
+            lean_version: v4.32.2
+            toolchain: leanprover/lean4:v4.32.2
+          - lane: lean-4.33
+            lean_version: v4.33.1
+            toolchain: leanprover/lean4:v4.33.1
     steps:
       - name: Checkout
         uses: actions/checkout@v4
