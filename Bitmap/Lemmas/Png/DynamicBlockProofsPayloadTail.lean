@@ -203,6 +203,56 @@ lemma fixedLitLenHuffman_decode_readerAt_writeBits
       (bw := bw) (sym := sym) (restBits := restBits) (restLen := restLen)
       h144 h255 hbit hcur
 
+/-- Names one nonempty-fuel compressed-block step so proofs unfold only the outer recursion layer. -/
+private def decodeCompressedBlockFuelStep (fuel : Nat) (litLen dist : Huffman)
+    (out : ByteArray) (sym : Nat) (br' : BitReader) : Option (BitReader × ByteArray) :=
+  if sym < 256 then
+    decodeCompressedBlockFuel fuel litLen dist br' (out.push (u8 sym))
+  else if (sym == 256) = true then
+    pure (br', out)
+  else if hlen : 257 ≤ sym ∧ sym ≤ 285 then
+    let idx := sym - 257
+    have hidxle : idx ≤ 28 := by
+      dsimp [idx]
+      omega
+    have hidxlt : idx < 29 := Nat.lt_succ_of_le hidxle
+    have hidxExtra : idx < lengthExtra.size := by
+      have hsize : lengthExtra.size = 29 := by decide
+      simpa [hsize] using hidxlt
+    let extra := Array.getInternal lengthExtra idx hidxExtra
+    if hbits : br'.bitIndex + extra ≤ br'.data.size * 8 then
+      do
+        let (len, br'') := decodeLength sym br' hlen
+          (by simpa [extra, idx, array_getInternal_eq_getElem, array_getElem_eq] using hbits)
+        let (distSym, br''') ← dist.decode br''
+        if hdist : distSym < distBases.size then
+          let extraD := Array.getInternal distExtra distSym (by
+            have hDistExtraSize : distExtra.size = 30 := by decide
+            have hDistBasesSize : distBases.size = 30 := by decide
+            simpa [hDistExtraSize, hDistBasesSize] using hdist)
+          if hbitsD : br'''.bitIndex + extraD ≤ br'''.data.size * 8 then
+            let (distance, br'''') := decodeDistance distSym br''' hdist
+              (by simpa [extraD, array_getInternal_eq_getElem, array_getElem_eq] using hbitsD)
+            let out' ← copyDistance out distance len
+            decodeCompressedBlockFuel fuel litLen dist br'''' out'
+          else
+            none
+        else
+          none
+    else
+      none
+  else
+    none
+
+set_option maxRecDepth 200000 in
+/-- Exposes one compressed-block recursion layer without the generated equation theorem. -/
+private lemma decodeCompressedBlockFuel_succ_eq (fuel : Nat) (litLen dist : Huffman)
+    (br : BitReader) (out : ByteArray) :
+    decodeCompressedBlockFuel (fuel + 1) litLen dist br out = (do
+      let (sym, br') ← litLen.decode br
+      decodeCompressedBlockFuelStep fuel litLen dist out sym br') := by
+  rfl
+
 /-- Converts a known literal decode into one step of `decodeCompressedBlockFuel`. -/
 lemma decodeCompressedBlockFuel_step_literal_of_decodes_aux
     (fuel : Nat) (litLen dist : Huffman) (br br' : BitReader)
@@ -211,51 +261,12 @@ lemma decodeCompressedBlockFuel_step_literal_of_decodes_aux
     (hlit : sym < 256) :
     decodeCompressedBlockFuel (fuel + 1) litLen dist br out =
       decodeCompressedBlockFuel fuel litLen dist br' (out.push (u8 sym)) := by
-  rw [decodeCompressedBlockFuel.eq_2]
+  rw [decodeCompressedBlockFuel_succ_eq]
   rw [hdecodeSym]
   rw [option_do_some]
-  let k : Nat → BitReader → Option (BitReader × ByteArray) := fun sym br' =>
-    if sym < 256 then
-      decodeCompressedBlockFuel fuel litLen dist br' (out.push (u8 sym))
-    else if (sym == 256) = true then
-      pure (br', out)
-    else if hlen : 257 ≤ sym ∧ sym ≤ 285 then
-      let idx := sym - 257
-      have hidxle : idx ≤ 28 := by
-        dsimp [idx]
-        omega
-      have hidxlt : idx < 29 := Nat.lt_succ_of_le hidxle
-      have hidxExtra : idx < lengthExtra.size := by
-        have hsize : lengthExtra.size = 29 := by decide
-        simpa [hsize] using hidxlt
-      let extra := Array.getInternal lengthExtra idx hidxExtra
-      if hbits : br'.bitIndex + extra ≤ br'.data.size * 8 then
-        do
-          let (len, br'') := decodeLength sym br' hlen (by simpa [extra, idx, array_getInternal_eq_getElem, array_getElem_eq] using hbits)
-          let (distSym, br''') ← dist.decode br''
-          if hdist : distSym < distBases.size then
-            let extraD := Array.getInternal distExtra distSym (by
-              have hDistExtraSize : distExtra.size = 30 := by decide
-              have hDistBasesSize : distBases.size = 30 := by decide
-              simpa [hDistExtraSize, hDistBasesSize] using hdist)
-            if hbitsD : br'''.bitIndex + extraD ≤ br'''.data.size * 8 then
-              let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa [extraD, array_getInternal_eq_getElem, array_getElem_eq] using hbitsD)
-              let out' ← copyDistance out distance len
-              decodeCompressedBlockFuel fuel litLen dist br'''' out'
-            else
-              none
-          else
-            none
-      else
-        none
-    else
-      none
-  change (match (sym, br') with | (s, r) => k s r) =
+  change decodeCompressedBlockFuelStep fuel litLen dist out sym br' =
     decodeCompressedBlockFuel fuel litLen dist br' (out.push (u8 sym))
-  have hpair : (match (sym, br') with | (s, r) => k s r) = k sym br' := by
-    simpa using (match_pair_eta (a := sym) (b := br') (k := k))
-  rw [hpair]
-  dsimp [k]
+  unfold decodeCompressedBlockFuelStep
   rw [if_pos hlit]
 
 set_option maxRecDepth 200000 in
@@ -373,51 +384,12 @@ lemma decodeCompressedBlockFuel_step_literal_of_decodes
     (hlit : sym < 256) :
     decodeCompressedBlockFuel (fuel + 1) litLen dist br out =
       decodeCompressedBlockFuel fuel litLen dist br' (out.push (u8 sym)) := by
-  rw [decodeCompressedBlockFuel.eq_2]
+  rw [decodeCompressedBlockFuel_succ_eq]
   rw [hdecodeSym]
   rw [option_do_some]
-  let k : Nat → BitReader → Option (BitReader × ByteArray) := fun sym br' =>
-    if sym < 256 then
-      decodeCompressedBlockFuel fuel litLen dist br' (out.push (u8 sym))
-    else if (sym == 256) = true then
-      pure (br', out)
-    else if hlen : 257 ≤ sym ∧ sym ≤ 285 then
-      let idx := sym - 257
-      have hidxle : idx ≤ 28 := by
-        dsimp [idx]
-        omega
-      have hidxlt : idx < 29 := Nat.lt_succ_of_le hidxle
-      have hidxExtra : idx < lengthExtra.size := by
-        have hsize : lengthExtra.size = 29 := by decide
-        simpa [hsize] using hidxlt
-      let extra := Array.getInternal lengthExtra idx hidxExtra
-      if hbits : br'.bitIndex + extra ≤ br'.data.size * 8 then
-        do
-          let (len, br'') := decodeLength sym br' hlen (by simpa [extra, idx, array_getInternal_eq_getElem, array_getElem_eq] using hbits)
-          let (distSym, br''') ← dist.decode br''
-          if hdist : distSym < distBases.size then
-            let extraD := Array.getInternal distExtra distSym (by
-              have hDistExtraSize : distExtra.size = 30 := by decide
-              have hDistBasesSize : distBases.size = 30 := by decide
-              simpa [hDistExtraSize, hDistBasesSize] using hdist)
-            if hbitsD : br'''.bitIndex + extraD ≤ br'''.data.size * 8 then
-              let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa [extraD, array_getInternal_eq_getElem, array_getElem_eq] using hbitsD)
-              let out' ← copyDistance out distance len
-              decodeCompressedBlockFuel fuel litLen dist br'''' out'
-            else
-              none
-          else
-            none
-      else
-        none
-    else
-      none
-  change (match (sym, br') with | (s, r) => k s r) =
+  change decodeCompressedBlockFuelStep fuel litLen dist out sym br' =
     decodeCompressedBlockFuel fuel litLen dist br' (out.push (u8 sym))
-  have hpair : (match (sym, br') with | (s, r) => k s r) = k sym br' := by
-    simpa using (match_pair_eta (a := sym) (b := br') (k := k))
-  rw [hpair]
-  dsimp [k]
+  unfold decodeCompressedBlockFuelStep
   rw [if_pos hlit]
 
 set_option maxRecDepth 200000 in
@@ -428,51 +400,13 @@ lemma decodeCompressedBlockFuel_step_eob_of_decodes
     (hdecodeSym : litLen.decode br = some (sym, br'))
     (hnotLit : ¬ sym < 256) (heob : (sym == 256) = true) :
     decodeCompressedBlockFuel (fuel + 1) litLen dist br out = some (br', out) := by
-  rw [decodeCompressedBlockFuel.eq_2]
+  rw [decodeCompressedBlockFuel_succ_eq]
   rw [hdecodeSym]
   rw [option_do_some]
-  let k : Nat → BitReader → Option (BitReader × ByteArray) := fun sym br' =>
-    if sym < 256 then
-      decodeCompressedBlockFuel fuel litLen dist br' (out.push (u8 sym))
-    else if (sym == 256) = true then
-      pure (br', out)
-    else if hlen : 257 ≤ sym ∧ sym ≤ 285 then
-      let idx := sym - 257
-      have hidxle : idx ≤ 28 := by
-        dsimp [idx]
-        omega
-      have hidxlt : idx < 29 := Nat.lt_succ_of_le hidxle
-      have hidxExtra : idx < lengthExtra.size := by
-        have hsize : lengthExtra.size = 29 := by decide
-        simpa [hsize] using hidxlt
-      let extra := Array.getInternal lengthExtra idx hidxExtra
-      if hbits : br'.bitIndex + extra ≤ br'.data.size * 8 then
-        do
-          let (len, br'') := decodeLength sym br' hlen (by simpa [extra, idx, array_getInternal_eq_getElem, array_getElem_eq] using hbits)
-          let (distSym, br''') ← dist.decode br''
-          if hdist : distSym < distBases.size then
-            let extraD := Array.getInternal distExtra distSym (by
-              have hDistExtraSize : distExtra.size = 30 := by decide
-              have hDistBasesSize : distBases.size = 30 := by decide
-              simpa [hDistExtraSize, hDistBasesSize] using hdist)
-            if hbitsD : br'''.bitIndex + extraD ≤ br'''.data.size * 8 then
-              let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa [extraD, array_getInternal_eq_getElem, array_getElem_eq] using hbitsD)
-              let out' ← copyDistance out distance len
-              decodeCompressedBlockFuel fuel litLen dist br'''' out'
-            else
-              none
-          else
-            none
-      else
-        none
-    else
-      none
-  change (match (sym, br') with | (s, r) => k s r) = some (br', out)
-  have hpair : (match (sym, br') with | (s, r) => k s r) = k sym br' := by
-    simpa using (match_pair_eta (a := sym) (b := br') (k := k))
-  rw [hpair]
-  dsimp [k]
+  change decodeCompressedBlockFuelStep fuel litLen dist out sym br' = some (br', out)
+  unfold decodeCompressedBlockFuelStep
   rw [if_neg hnotLit, if_pos heob]
+  rfl
 
 set_option maxRecDepth 200000 in
 /-- Converts a known match decode into one recursive step of `decodeCompressedBlockFuel`. -/
@@ -528,46 +462,11 @@ lemma decodeCompressedBlockFuel_step_match_of_decodes
   let recCall := decodeCompressedBlockFuel fuel litLen dist br'''' out'
   change decodeCompressedBlockFuel (fuel + 1) litLen dist br out = recCall
   have hrec : decodeCompressedBlockFuel fuel litLen dist br'''' out' = recCall := rfl
-  rw [decodeCompressedBlockFuel.eq_2]
+  rw [decodeCompressedBlockFuel_succ_eq]
   rw [hdecodeSym]
   rw [option_do_some]
-  change
-    (if sym < 256 then
-      decodeCompressedBlockFuel fuel litLen dist br' (out.push (u8 sym))
-    else if (sym == 256) = true then
-      pure (br', out)
-    else if hlen : 257 ≤ sym ∧ sym ≤ 285 then
-      let idx := sym - 257
-      have hidxle : idx ≤ 28 := by
-        dsimp [idx]
-        omega
-      have hidxlt : idx < 29 := Nat.lt_succ_of_le hidxle
-      have hidxExtra : idx < lengthExtra.size := by
-        have hsize : lengthExtra.size = 29 := by decide
-        simpa [hsize] using hidxlt
-      let extra := Array.getInternal lengthExtra idx hidxExtra
-      if hbits : br'.bitIndex + extra ≤ br'.data.size * 8 then
-        do
-        let (len, br'') := decodeLength sym br' hlen (by simpa [extra, idx, array_getInternal_eq_getElem, array_getElem_eq] using hbits)
-        let (distSym, br''') ← dist.decode br''
-        if hdist : distSym < distBases.size then
-          let extraD := Array.getInternal distExtra distSym (by
-            have hDistExtraSize : distExtra.size = 30 := by decide
-            have hDistBasesSize : distBases.size = 30 := by decide
-            simpa [hDistExtraSize, hDistBasesSize] using hdist)
-          if hbitsD : br'''.bitIndex + extraD ≤ br'''.data.size * 8 then
-            do
-              let (distance, br'''') := decodeDistance distSym br''' hdist (by simpa [extraD, array_getInternal_eq_getElem, array_getElem_eq] using hbitsD)
-              let out' ← copyDistance out distance len
-              decodeCompressedBlockFuel fuel litLen dist br'''' out'
-          else
-            none
-        else
-          none
-      else
-        none
-    else
-      none) = recCall
+  change decodeCompressedBlockFuelStep fuel litLen dist out sym br' = recCall
+  unfold decodeCompressedBlockFuelStep
   rw [if_neg hnotLit]
   rw [if_neg (by simpa using hnotEob)]
   rw [dif_pos hsym]

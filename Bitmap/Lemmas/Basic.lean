@@ -348,20 +348,24 @@ theorem read_write4 {RangeT α : Type u} [ChannelFormat RangeT] [LawfulChannelFo
     Prod.fst (fun p => p.2.1) (fun p => p.2.2)
     (by intro p; cases p with | mk x yz => cases yz; rfl)
     data base h012 (get0 px, get1 px, get2 px)
+  have hdata3 : data3 =
+      ChannelLayout.write3 Prod.fst (fun p => p.2.1) (fun p => p.2.2)
+        data base h012 (get0 px, get1 px, get2 px) := by
+    rfl
   have htriple0 :
       ChannelFormat.read data3 base h0d3 = get0 px := by
     have := congrArg Prod.fst htriple
-    simpa [ChannelLayout.read3, ChannelLayout.write3, data3, ChannelFormat.read, ChannelFormat.write] using this
+    simpa [hdata3, ChannelLayout.read3, ChannelFormat.read, ChannelFormat.write] using this
   have htriple1 :
       ChannelFormat.read data3 (base + ChannelFormat.byteSize (RangeT := RangeT)) h1d3 =
         get1 px := by
     have := congrArg (fun p : RangeT × RangeT × RangeT => p.2.1) htriple
-    simpa [ChannelLayout.read3, ChannelLayout.write3, data3, ChannelFormat.read, ChannelFormat.write] using this
+    simpa [hdata3, ChannelLayout.read3, ChannelFormat.read, ChannelFormat.write] using this
   have htriple2 :
       ChannelFormat.read data3 (base + 2 * ChannelFormat.byteSize (RangeT := RangeT)) h2d3 =
         get2 px := by
     have := congrArg (fun p : RangeT × RangeT × RangeT => p.2.2) htriple
-    simpa [ChannelLayout.read3, ChannelLayout.write3, data3, ChannelFormat.read, ChannelFormat.write] using this
+    simpa [hdata3, ChannelLayout.read3, ChannelFormat.read, ChannelFormat.write] using this
   have hread0 : ChannelFormat.read data4 base h0d4 = get0 px := by
     have hkeep : ChannelFormat.read data4 base h0d4 =
         ChannelFormat.read data3 base h0d3 := by

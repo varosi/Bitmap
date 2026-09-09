@@ -4612,19 +4612,7 @@ private def finishGeneratedDynamicTablesAfterCodeLenLengthsLz77
 `HCLEN` have been read for an LZ77 generated header. -/
 private def readGeneratedDynamicTablesAfterHeaderLz77
     (br : Png.BitReader) : Option (Png.Huffman × Png.Huffman × Png.BitReader) := do
-  let r ←
-    forIn (List.range' 0 Png.codeLenOrder.size)
-        ((⟨br, Array.replicate 19 0⟩ : MProd Png.BitReader (Array Nat)))
-        (fun i r =>
-          if h : r.fst.bitIndex + 3 ≤ r.fst.data.size * 8 then
-            some
-              (ForInStep.yield
-                ⟨(r.fst.readBits 3 h).snd,
-                  r.snd.setIfInBounds Png.codeLenOrder[i]! (r.fst.readBits 3 h).fst⟩)
-          else
-            none)
-  let brCur := r.fst
-  let codeLenLengths := r.snd
+  let (codeLenLengths, brCur) ← readGeneratedCodeLenLengths19 br
   let codeLenTable ← Png.mkHuffman codeLenLengths
   let total := 286 + 30
   let lengths0 : Array Nat := Array.mkEmpty total
@@ -4653,7 +4641,6 @@ private lemma readGeneratedDynamicTablesAfterHeaderLz77_eq_finish
       finishGeneratedDynamicTablesAfterCodeLenLengthsLz77 brNext := by
   unfold readGeneratedDynamicTablesAfterHeaderLz77
     finishGeneratedDynamicTablesAfterCodeLenLengthsLz77
-  rw [readGeneratedCodeLenLengths19_eq_forIn_mprod br]
   simp [hread, hmk]
 
 set_option maxRecDepth 200000 in

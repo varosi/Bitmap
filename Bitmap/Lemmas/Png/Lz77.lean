@@ -123,7 +123,8 @@ lemma deflateLengthInfo_spec_internal (len : Nat) (hlo : 3 ≤ len) (hhi : len �
               extraLen = Array.getInternal lengthExtra (sym - 257) hidxExtra ∧
               Array.getInternal lengthBases (sym - 257) hidxBase + extraBits = len ∧
               extraBits < 2 ^ extraLen := by
-  simpa [deflateLengthInfo] using fixedLenMatchInfo_spec_internal len hlo hhi
+  unfold deflateLengthInfo
+  exact fixedLenMatchInfo_spec_internal len hlo hhi
 
 /-- The encoder's length symbol and extra bits describe exactly the original
 valid match length in the decoder's length tables. -/

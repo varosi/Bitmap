@@ -5,6 +5,32 @@ namespace Bitmaps
 
 namespace Png
 
+/-- Mirrors the source loop state order produced for the two mutable table-reader variables. -/
+private def dynamicCodeLenLoopBodySource (i : Nat) (r : Array Nat × BitReader) :
+    Option (ForInStep (Array Nat × BitReader)) :=
+  if h : r.snd.bitIndex + 3 ≤ r.snd.data.size * 8 then
+    some
+      (ForInStep.yield
+        (r.fst.setIfInBounds
+            ([16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15][i]?.getD 0)
+            (r.snd.readBits 3 h).fst,
+          (r.snd.readBits 3 h).snd))
+  else
+    none
+
+/-- Transports the table-reader loop between its proof-facing and source-facing state orders. -/
+private lemma forIn_dynamicCodeLenLoopBodyM_swap (l : List Nat) (br : BitReader)
+    (lengths : Array Nat) :
+    (Option.map (fun r : MProd BitReader (Array Nat) => (r.snd, r.fst))
+        (forIn l (⟨br, lengths⟩ : MProd BitReader (Array Nat)) dynamicCodeLenLoopBodyM)) =
+      forIn l (lengths, br) dynamicCodeLenLoopBodySource := by
+  induction l generalizing br lengths with
+  | nil => simp
+  | cons i l ih =>
+      simp only [List.forIn_cons]
+      simp [dynamicCodeLenLoopBodyM, dynamicCodeLenLoopBodySource]
+      split <;> simp_all [readBits_proof_irrel]
+
 set_option maxRecDepth 200000 in
 set_option maxHeartbeats 20000000 in
 /-- Restates the full table-read theorem in the concrete front-end shape of `readDynamicTables`. -/
@@ -209,28 +235,20 @@ lemma readDynamicTables_readerAt_writeBits_concrete
     refine ⟨hcondHclen, ?_⟩
     rw [hreadHclen]
     simp
-    have hloop :
+    have hloopM := readDynamicCodeLenLengths10_eq_forIn_range10_mprod br14
+    have hloopSource :
         forIn (List.range' 0 10)
-            ((⟨br14, Array.replicate 19 0⟩ : MProd BitReader (Array Nat)))
-            (fun i r =>
-              if h : r.fst.bitIndex + 3 ≤ r.fst.data.size * 8 then
-                some
-                  (ForInStep.yield
-                    ⟨(r.fst.readBits 3 h).snd,
-                      r.snd.setIfInBounds
-                        ([16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15][i]?.getD 0)
-                        (r.fst.readBits 3 h).fst⟩)
-              else
-                none) =
-          ((fun r : Array Nat × BitReader => (⟨r.snd, r.fst⟩ : MProd BitReader (Array Nat))) <$>
-            readDynamicCodeLenLengths10 br14) := by
-      change
-        forIn (List.range' 0 10)
-            ((⟨br14, Array.replicate 19 0⟩ : MProd BitReader (Array Nat)))
-            dynamicCodeLenLoopBodyM =
-          ((fun r : Array Nat × BitReader => (⟨r.snd, r.fst⟩ : MProd BitReader (Array Nat))) <$>
-            readDynamicCodeLenLengths10 br14)
-      exact readDynamicCodeLenLengths10_eq_forIn_range10_mprod br14
+            ((Array.replicate 19 0, br14) : Array Nat × BitReader)
+            dynamicCodeLenLoopBodySource =
+          readDynamicCodeLenLengths10 br14 := by
+      have hswap := forIn_dynamicCodeLenLoopBodyM_swap
+        (List.range' 0 10) br14 (Array.replicate 19 0)
+      rw [hloopM] at hswap
+      cases hread : readDynamicCodeLenLengths10 br14 with
+      | none => simpa [hread, Option.map] using hswap.symm
+      | some r =>
+          rcases r with ⟨lengths, brNext⟩
+          simpa [hread, Option.map] using hswap.symm
     let tail : Array Nat × BitReader → Option (Huffman × Huffman × BitReader) :=
       fun (r : Array Nat × BitReader) =>
       (mkHuffman r.fst).bind fun codeLenTable =>
@@ -242,24 +260,21 @@ lemma readDynamicTables_readerAt_writeBits_concrete
                   some (litLenTable, distTable, __discr.snd)
             else
               none
-    let tailM : MProd BitReader (Array Nat) → Option (Huffman × Huffman × BitReader) :=
-      fun r => tail (r.snd, r.fst)
-    have hloopBind0 := by
-      simpa [tailM, Option.map] using congrArg (fun x => x.bind tailM) hloop
-    have hswapBind :
-        ((((fun r : Array Nat × BitReader => (⟨r.snd, r.fst⟩ : MProd BitReader (Array Nat))) <$>
-            readDynamicCodeLenLengths10 br14)).bind tailM) =
-          (readDynamicCodeLenLengths10 br14).bind tail := by
-      cases hread : readDynamicCodeLenLengths10 br14 <;> simp [tailM, tail]
-    have hloopBind := hloopBind0.trans hswapBind
+    have hloopBind := congrArg (fun x => x.bind tail) hloopSource
     have hafter :
         (readDynamicCodeLenLengths10 br14).bind tail =
           some
             (fixedLitLenHuffman, fixedDistHuffman,
               dynamicTablesAfterHeaderReaderAt bw14 restBits restLen hbit14) := by
       simpa [tail, readDynamicTablesAfterHeader] using hafterHeader
-    simpa [tailM, tail, bitsTot, lenTot, bwFull, bw14, br14, readBits_proof_irrel] using
-      hloopBind.trans hafter
+    change
+      ((forIn (List.range' 0 10)
+          ((Array.replicate 19 0, br14) : Array Nat × BitReader)
+          dynamicCodeLenLoopBodySource).bind tail) =
+        some
+          (fixedLitLenHuffman, fixedDistHuffman,
+            dynamicTablesAfterHeaderReaderAt bw14 restBits restLen hbit14)
+    exact hloopBind.trans hafter
   simpa [br, bwFull, bitsTot, lenTot, bw14] using hmain
 
 end Png

@@ -101,8 +101,7 @@ lemma byteArray_extract_split (a : ByteArray) (n : Nat) (hn : n ≤ a.size) :
             change a.get (0 + i) h0iA = a.get i hiA
             cases a with
             | mk data =>
-                simp [ByteArray.get, Nat.zero_add]
-                rfl
+                simp [ByteArray.get, Nat.zero_add] <;> rfl
       calc
         (a.extract 0 n ++ a.extract n a.size)[i] = (a.extract 0 n)[i] := hget_left
         _ = a[i] := hget_extract

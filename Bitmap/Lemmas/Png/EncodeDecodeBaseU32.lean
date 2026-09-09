@@ -134,8 +134,7 @@ lemma readU32BE_extract (bytes : ByteArray) (pos : Nat) (h : pos + 3 < bytes.siz
         simp [ByteArray.size_extract, Nat.min_eq_left hle, Nat.add_sub_cancel_left]) := by
   cases bytes with
   | mk data =>
-      simp [readU32BE, ByteArray.extract, ByteArray.get]
-      rfl
+      simp [readU32BE, ByteArray.extract, ByteArray.get] <;> rfl
 
 /-- `readU32BE` ignores which proof witnesses the same bounds check. -/
 lemma readU32BE_proof_irrel {bytes : ByteArray} {pos : Nat}

@@ -282,8 +282,7 @@ lemma readU16LE_extract (bytes : ByteArray) (pos : Nat) (h : pos + 1 < bytes.siz
         simp [ByteArray.size_extract, Nat.min_eq_left hle, Nat.add_sub_cancel_left]) := by
   cases bytes with
   | mk data =>
-      simp [readU16LE, ByteArray.extract, ByteArray.get]
-      rfl
+      simp [readU16LE, ByteArray.extract, ByteArray.get] <;> rfl
 
 -- `readU16LE` is proof-irrelevant in its bounds argument.
 lemma readU16LE_proof_irrel {bytes : ByteArray} {pos : Nat}
@@ -472,8 +471,7 @@ lemma readU32BE_extract (bytes : ByteArray) (pos : Nat) (h : pos + 3 < bytes.siz
         simp [ByteArray.size_extract, Nat.min_eq_left hle, Nat.add_sub_cancel_left]) := by
   cases bytes with
   | mk data =>
-      simp [readU32BE, ByteArray.extract, ByteArray.get]
-      rfl
+      simp [readU32BE, ByteArray.extract, ByteArray.get] <;> rfl
 
 -- `readU32BE` is proof-irrelevant in its bounds argument.
 lemma readU32BE_proof_irrel {bytes : ByteArray} {pos : Nat}
@@ -1351,7 +1349,12 @@ lemma ihdr_payload_extract_width_depth (w h : Nat) (bd ct il : UInt8) :
         (ByteArray.get_append_left (a := u32be w) (b := u32be h ++ tail) (i := i) hiw)
       simpa [ihdr, tail, ByteArray.append_assoc] using h
     have hget' : (ihdr.extract 0 4)[i] = ihdr[i]'hi_ihdr := by
-      simp
+      have hiExtract : i < (ihdr.extract 0 4).size := by simpa [hsize] using hi4
+      calc
+        (ihdr.extract 0 4)[i] =
+            ihdr[0 + i]'(ByteArray.get_extract_aux hiExtract) :=
+          ByteArray.get_extract hiExtract
+        _ = ihdr[i]'hi_ihdr := getElem_congr_idx (Nat.zero_add i)
     calc
       (ihdr.extract 0 4)[i] = ihdr[i]'hi_ihdr := hget'
       _ = (u32be w)[i]'hiw := hget
@@ -1423,7 +1426,8 @@ lemma ihdr_payload_extract_height_depth (w h : Nat) (bd ct il : UInt8) :
         have : ihdr.size = 13 := by
           simpa [ihdr, tail] using ihdr_payload_size_depth w h bd ct il
         omega) := by
-      simp
+      exact ByteArray.get_extract (a := ihdr) (start := 4) (stop := 8) (i := i)
+        (by simpa [hsize] using hi4)
     calc
       (ihdr.extract 4 8)[i] = ihdr[4 + i]'(by
         have : ihdr.size = 13 := by

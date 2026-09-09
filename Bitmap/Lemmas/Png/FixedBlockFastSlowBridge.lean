@@ -540,7 +540,7 @@ lemma decodeFixedLiteralSymFast9_eq_decodeFixedLiteralSym (br : BitReader) :
 /-! ### Per-fuel-step bridge -/
 
 set_option maxHeartbeats 1600000 in
-set_option maxRecDepth 2048 in
+set_option maxRecDepth 200000 in
 lemma decodeFixedBlockFuelFast_eq_decodeFixedBlockFuel :
     ∀ (fuel : Nat) (br : BitReader) (out : ByteArray),
       decodeFixedBlockFuelFast fuel br out = decodeFixedBlockFuel fuel br out := by
@@ -548,7 +548,7 @@ lemma decodeFixedBlockFuelFast_eq_decodeFixedBlockFuel :
   induction fuel with
   | zero =>
       intro br out
-      simp [decodeFixedBlockFuelFast, decodeFixedBlockFuel]
+      rfl
   | succ n ih =>
       intro br out
       unfold decodeFixedBlockFuelFast decodeFixedBlockFuel

@@ -888,18 +888,68 @@ lemma readGeneratedDynamicHeader_codeLenChunk_readerAt_writeBits
 /-- Proof-facing replay of the generated 19-entry code-length-code table loop.
 It mirrors the parser loop while returning `(lengths, reader)`. -/
 def readGeneratedCodeLenLengths19 (br : Png.BitReader) :
-    Option (Array Nat × Png.BitReader) := do
-  let mut codeLenLengths : Array Nat := Array.replicate 19 0
-  let mut brCur := br
-  for i in [0:Png.codeLenOrder.size] do
-    let (len, br') ←
-      if h : brCur.bitIndex + 3 ≤ brCur.data.size * 8 then
-        some (brCur.readBits 3 h)
+    Option (Array Nat × Png.BitReader) :=
+  forIn (List.range' 0 Png.codeLenOrder.size)
+    ((Array.replicate 19 0, br) : Array Nat × Png.BitReader)
+    (fun i r =>
+      if h : r.snd.bitIndex + 3 ≤ r.snd.data.size * 8 then
+        some
+          (ForInStep.yield
+            (r.fst.setIfInBounds
+                ([16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15][i]?.getD 0)
+                (r.snd.readBits 3 h).fst,
+              (r.snd.readBits 3 h).snd))
       else
-        none
-    codeLenLengths := codeLenLengths.set! Png.codeLenOrder[i]! len
-    brCur := br'
-  return (codeLenLengths, brCur)
+        none)
+
+/-- Names the reader-first loop body used by the proof-facing 19-entry replay. -/
+private def readGeneratedCodeLenLoopBodyM (i : Nat)
+    (r : MProd Png.BitReader (Array Nat)) :
+    Option (ForInStep (MProd Png.BitReader (Array Nat))) :=
+  if h : r.fst.bitIndex + 3 ≤ r.fst.data.size * 8 then
+    some
+      (ForInStep.yield
+        ⟨(r.fst.readBits 3 h).snd,
+          r.snd.setIfInBounds Png.codeLenOrder[i]! (r.fst.readBits 3 h).fst⟩)
+  else
+    none
+
+/-- Names the array-first state order emitted for the two mutable source variables. -/
+private def readGeneratedCodeLenLoopBodySource (i : Nat)
+    (r : Array Nat × Png.BitReader) :
+    Option (ForInStep (Array Nat × Png.BitReader)) :=
+  if h : r.snd.bitIndex + 3 ≤ r.snd.data.size * 8 then
+    some
+      (ForInStep.yield
+        (r.fst.setIfInBounds
+            ([16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15][i]?.getD 0)
+            (r.snd.readBits 3 h).fst,
+          (r.snd.readBits 3 h).snd))
+  else
+    none
+
+/-- Transports the generated table loop between reader-first and source state orders. -/
+private lemma forIn_readGeneratedCodeLenLoopBody_swap (l : List Nat)
+    (br : Png.BitReader) (lengths : Array Nat) :
+    Option.map (fun r : MProd Png.BitReader (Array Nat) => (r.snd, r.fst))
+        (forIn l (⟨br, lengths⟩ : MProd Png.BitReader (Array Nat))
+          readGeneratedCodeLenLoopBodyM) =
+      forIn l (lengths, br) readGeneratedCodeLenLoopBodySource := by
+  induction l generalizing br lengths with
+  | nil => simp
+  | cons i l ih =>
+      simp only [List.forIn_cons]
+      simp [readGeneratedCodeLenLoopBodyM, readGeneratedCodeLenLoopBodySource,
+        Png.codeLenOrder]
+      split <;> simp_all [Png.readBits_proof_irrel]
+
+/-- Exposes the source-facing state order of the generated 19-entry replay. -/
+private lemma readGeneratedCodeLenLengths19_eq_forIn_source (br : Png.BitReader) :
+    readGeneratedCodeLenLengths19 br =
+      forIn (List.range' 0 Png.codeLenOrder.size)
+        ((Array.replicate 19 0, br) : Array Nat × Png.BitReader)
+        readGeneratedCodeLenLoopBodySource := by
+  rfl
 
 /-- The proof-facing generated code-length loop has the same `forIn` shape as
 the loop produced by `readDynamicTables`. -/
@@ -917,24 +967,23 @@ lemma readGeneratedCodeLenLengths19_eq_forIn_mprod (br : Png.BitReader) :
       ((fun r : Array Nat × Png.BitReader =>
           (⟨r.snd, r.fst⟩ : MProd Png.BitReader (Array Nat))) <$>
         readGeneratedCodeLenLengths19 br) := by
-  unfold readGeneratedCodeLenLengths19
+  change
+    forIn (List.range' 0 Png.codeLenOrder.size)
+        ((⟨br, Array.replicate 19 0⟩ : MProd Png.BitReader (Array Nat)))
+        readGeneratedCodeLenLoopBodyM = _
+  rw [readGeneratedCodeLenLengths19_eq_forIn_source]
+  have hswap := forIn_readGeneratedCodeLenLoopBody_swap
+    (List.range' 0 Png.codeLenOrder.size) br (Array.replicate 19 0)
+  rw [← hswap]
   generalize hloop :
     forIn (List.range' 0 Png.codeLenOrder.size)
         ((⟨br, Array.replicate 19 0⟩ : MProd Png.BitReader (Array Nat)))
-        (fun i r =>
-          if h : r.fst.bitIndex + 3 ≤ r.fst.data.size * 8 then
-            some
-              (ForInStep.yield
-                ⟨(r.fst.readBits 3 h).snd,
-                  r.snd.setIfInBounds Png.codeLenOrder[i]! (r.fst.readBits 3 h).fst⟩)
-          else
-            none) = loop
+        readGeneratedCodeLenLoopBodyM = loop
   cases loop with
-  | none =>
-      simp [hloop, Option.bind, Option.map]
+  | none => simp [hloop, Option.map]
   | some r =>
       cases r
-      simp [hloop, Option.bind, Option.map]
+      simp [hloop, Option.map]
 
 /-- Reader positioned at generated code-length-code entry `idx`. The index is
 counted after the 14-bit dynamic-header front matter. -/
@@ -1198,9 +1247,11 @@ lemma readGeneratedCodeLenLengths19_readerAt_writeBits
     (order := 15) (codeLenLengths := a18)
     (by native_decide) (by native_decide) hbit hcur
   rw [← hfilled]
-  unfold readGeneratedCodeLenLengths19
+  rw [readGeneratedCodeLenLengths19_eq_forIn_source]
+  rw [← forIn_readGeneratedCodeLenLoopBody_swap]
   simp [br, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13,
     a14, a15, a16, a17, a18, a19, Png.codeLenOrder,
+    readGeneratedCodeLenLoopBodyM,
     List.forIn_eq_bindList, List.range',
     h0, h1, h2, h3, h4, h5, h6, h7, h8, h9, h10, h11, h12, h13, h14, h15,
     h16, h17, h18, Option.bind, Option.map]
@@ -3072,19 +3123,7 @@ private def finishGeneratedDynamicTablesAfterCodeLenLengths
 `HCLEN` have been read for the generated full-header shape. -/
 private def readGeneratedDynamicTablesAfterHeader
     (br : Png.BitReader) : Option (Png.Huffman × Png.Huffman × Png.BitReader) := do
-  let r ←
-    forIn (List.range' 0 Png.codeLenOrder.size)
-        ((⟨br, Array.replicate 19 0⟩ : MProd Png.BitReader (Array Nat)))
-        (fun i r =>
-          if h : r.fst.bitIndex + 3 ≤ r.fst.data.size * 8 then
-            some
-              (ForInStep.yield
-                ⟨(r.fst.readBits 3 h).snd,
-                  r.snd.setIfInBounds Png.codeLenOrder[i]! (r.fst.readBits 3 h).fst⟩)
-          else
-            none)
-  let brCur := r.fst
-  let codeLenLengths := r.snd
+  let (codeLenLengths, brCur) ← readGeneratedCodeLenLengths19 br
   let codeLenTable ← Png.mkHuffman codeLenLengths
   let total := 286 + 30
   let lengths0 : Array Nat := Array.mkEmpty total
@@ -3113,7 +3152,6 @@ private lemma readGeneratedDynamicTablesAfterHeader_eq_finish
       finishGeneratedDynamicTablesAfterCodeLenLengths brNext := by
   unfold readGeneratedDynamicTablesAfterHeader
     finishGeneratedDynamicTablesAfterCodeLenLengths
-  rw [readGeneratedCodeLenLengths19_eq_forIn_mprod br]
   simp [hread, hmk]
 
 /-- The generated header code-length buffer has the full generated parser

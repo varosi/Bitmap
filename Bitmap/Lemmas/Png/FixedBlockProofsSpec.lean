@@ -127,6 +127,55 @@ runtime entry point used by `parsePng`. The next three lemmas are the
 slow-variant analogues — pure runtime reductions of `decodeFixedBlockFuel`
 on its three exhaustive branches. -/
 
+/-- Names one nonempty-fuel decoder step so proofs can unfold only the outer recursion layer. -/
+private def decodeFixedBlockFuelStep (fuel : Nat) (out : ByteArray)
+    (sym : Nat) (br' : BitReader) : Option (BitReader × ByteArray) :=
+  if sym < 256 then
+    decodeFixedBlockFuel fuel br' (out.push (u8 sym))
+  else if (sym == 256) = true then
+    pure (br', out)
+  else if hlen : 257 ≤ sym ∧ sym ≤ 285 then
+    let idx := sym - 257
+    have hidxle : idx ≤ 28 := by
+      dsimp [idx]
+      omega
+    have hidxlt : idx < 29 := Nat.lt_succ_of_le hidxle
+    have hidxExtra : idx < lengthExtra.size := by
+      have hsize : lengthExtra.size = 29 := by decide
+      simpa [hsize] using hidxlt
+    let extra := Array.getInternal lengthExtra idx hidxExtra
+    if hbits : br'.bitIndex + extra ≤ br'.data.size * 8 then
+      do
+        let (len, br'') := decodeLength sym br' hlen
+          (by simpa [extra, idx, array_getInternal_eq_getElem, array_getElem_eq] using hbits)
+        let (distSym, br''') ← decodeFixedDistanceSym br''
+        if hdist : distSym < distBases.size then
+          let extraD := Array.getInternal distExtra distSym (by
+            have hDistExtraSize : distExtra.size = 30 := by decide
+            have hDistBasesSize : distBases.size = 30 := by decide
+            simpa [hDistExtraSize, hDistBasesSize] using hdist)
+          if hbitsD : br'''.bitIndex + extraD ≤ br'''.data.size * 8 then
+            let (distance, br'''') := decodeDistance distSym br''' hdist
+              (by simpa [extraD, array_getInternal_eq_getElem, array_getElem_eq] using hbitsD)
+            let out' ← copyDistance out distance len
+            decodeFixedBlockFuel fuel br'''' out'
+          else
+            none
+        else
+          none
+    else
+      none
+  else
+    none
+
+/-- Exposes exactly one decoder recursion layer without invoking the generated equation theorem. -/
+private lemma decodeFixedBlockFuel_succ_eq (fuel : Nat) (br : BitReader)
+    (out : ByteArray) :
+    decodeFixedBlockFuel (fuel + 1) br out = (do
+      let (sym, br') ← decodeFixedLiteralSym br
+      decodeFixedBlockFuelStep fuel out sym br') := by
+  rfl
+
 /-- Slow-variant literal step: decoding a symbol below 256 pushes its
 byte and recurses with one less fuel. -/
 lemma decodeFixedBlockFuel_step_literal_of_decodes
@@ -135,9 +184,6 @@ lemma decodeFixedBlockFuel_step_literal_of_decodes
     (hlit : sym < 256) :
     decodeFixedBlockFuel (fuel + 1) br out =
       decodeFixedBlockFuel fuel br' (out.push (u8 sym)) := by
-  rw [decodeFixedBlockFuel.eq_2]
-  rw [hdecodeSym]
-  rw [option_do_some]
   let k : Nat → BitReader → Option (BitReader × ByteArray) := fun sym br' =>
     if sym < 256 then
       decodeFixedBlockFuel fuel br' (out.push (u8 sym))
@@ -174,10 +220,11 @@ lemma decodeFixedBlockFuel_step_literal_of_decodes
         none
     else
       none
-  change (match (sym, br') with | (s, r) => k s r) = decodeFixedBlockFuel fuel br' (out.push (u8 sym))
-  have hpair : (match (sym, br') with | (s, r) => k s r) = k sym br' := by
-    exact match_pair_eta (a := sym) (b := br') (k := k)
-  rw [hpair]
+  change
+    (do
+      let (s, r) ← decodeFixedLiteralSym br
+      k s r) = decodeFixedBlockFuel fuel br' (out.push (u8 sym))
+  simp only [hdecodeSym]
   dsimp [k]
   rw [if_pos hlit]
 
@@ -239,7 +286,7 @@ lemma decodeFixedBlockFuel_step_match_of_decodes
   let recCall := decodeFixedBlockFuel fuel br'''' out'
   change decodeFixedBlockFuel (fuel + 1) br out = recCall
   have hrec : decodeFixedBlockFuel fuel br'''' out' = recCall := rfl
-  rw [decodeFixedBlockFuel.eq_2]
+  rw [decodeFixedBlockFuel_succ_eq]
   rw [hdecodeSym]
   rw [option_do_some]
   change
@@ -494,7 +541,7 @@ lemma decodeFixedBlockFuel_step_eob_of_decodes
     (hdecodeSym : decodeFixedLiteralSym br = some (sym, br'))
     (hnotLit : ¬ sym < 256) (heob : (sym == 256) = true) :
     decodeFixedBlockFuel (fuel + 1) br out = some (br', out) := by
-  rw [decodeFixedBlockFuel.eq_2]
+  rw [decodeFixedBlockFuel_succ_eq]
   rw [hdecodeSym]
   rw [option_do_some]
   let k : Nat → BitReader → Option (BitReader × ByteArray) := fun sym br' =>

@@ -21,12 +21,14 @@ jobs:
           - lane: lean-4.32
             lean_version: v4.32.2
             toolchain: leanprover/lean4:v4.32.2
+            batteries_rev: cb3961288e99f02ee3d23aab55391aebb258fd0c
           - lane: lean-4.33
             lean_version: v4.33.1
             toolchain: leanprover/lean4:v4.33.1
+            batteries_rev: 4488d40d070b9700d4d5a6aa342f0d40c31b2a2d
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Forbid implemented_by on main
         if: github.ref == 'refs/heads/main' || github.base_ref == 'main'
@@ -37,28 +39,21 @@ jobs:
           curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
-      - name: Select Lean/Lake toolchain
+      - name: Configure dependency lane
         run: |
           printf '%s\n' "${{ matrix.toolchain }}" > lean-toolchain
+          sed -i -E 's/^rev = "[^"]+"/rev = "${{ matrix.batteries_rev }}"/' lakefile.toml
           cat lean-toolchain
+          grep '^rev = ' lakefile.toml
 
       - name: Cache Lake dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             .lake/packages
-          key: ${{ runner.os }}-lake-deps-${{ matrix.lean_version }}-${{ hashFiles('lean-toolchain', 'lakefile.toml', 'lake-manifest.json') }}
+          key: ${{ runner.os }}-lake-deps-${{ matrix.lean_version }}-${{ matrix.batteries_rev }}-${{ hashFiles('lakefile.toml', 'lake-manifest.json') }}
           restore-keys: |
-            ${{ runner.os }}-lake-deps-${{ matrix.lean_version }}-
-
-      - name: Cache project build artifacts
-        uses: actions/cache@v4
-        with:
-          path: |
-            .lake/build
-          key: ${{ runner.os }}-lake-build-${{ matrix.lean_version }}-${{ hashFiles('lean-toolchain', 'lakefile.toml', 'lake-manifest.json', 'Bitmap.lean', 'Bitmap/**/*.lean') }}
-          restore-keys: |
-            ${{ runner.os }}-lake-build-${{ matrix.lean_version }}-
+            ${{ runner.os }}-lake-deps-${{ matrix.lean_version }}-${{ matrix.batteries_rev }}-
 
       - name: Install selected Lean/Lake
         run: |
@@ -68,6 +63,21 @@ jobs:
 
       - name: Update dependencies
         run: lake update
+
+      - name: Re-select requested Lean/Lake toolchain
+        run: |
+          printf '%s\n' "${{ matrix.toolchain }}" > lean-toolchain
+          lean --version
+          lake --version
+
+      - name: Cache project build artifacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            .lake/build
+          key: ${{ runner.os }}-lake-build-${{ matrix.lean_version }}-${{ matrix.batteries_rev }}-${{ hashFiles('lean-toolchain', 'lakefile.toml', 'lake-manifest.json', 'Bitmap.lean', 'Bitmap/**/*.lean') }}
+          restore-keys: |
+            ${{ runner.os }}-lake-build-${{ matrix.lean_version }}-${{ matrix.batteries_rev }}-
 
       - name: Build
         run: lake build
