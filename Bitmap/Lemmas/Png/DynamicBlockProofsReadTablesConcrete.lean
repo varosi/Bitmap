@@ -260,21 +260,28 @@ lemma readDynamicTables_readerAt_writeBits_concrete
                   some (litLenTable, distTable, __discr.snd)
             else
               none
-    have hloopBind := congrArg (fun x => x.bind tail) hloopSource
+    let tailM : MProd BitReader (Array Nat) → Option (Huffman × Huffman × BitReader) :=
+      fun r => tail (r.snd, r.fst)
+    have hloopBindSource := congrArg (fun x => x.bind tail) hloopSource
+    have hloopBindM0 := congrArg (fun x => x.bind tailM) hloopM
+    have hswapBind :
+        ((Option.map (fun r : Array Nat × BitReader =>
+            (⟨r.snd, r.fst⟩ : MProd BitReader (Array Nat)))
+          (readDynamicCodeLenLengths10 br14)).bind tailM) =
+          (readDynamicCodeLenLengths10 br14).bind tail := by
+      cases readDynamicCodeLenLengths10 br14 <;> simp [tailM, tail]
+    have hloopBindM := hloopBindM0.trans hswapBind
     have hafter :
         (readDynamicCodeLenLengths10 br14).bind tail =
           some
             (fixedLitLenHuffman, fixedDistHuffman,
               dynamicTablesAfterHeaderReaderAt bw14 restBits restLen hbit14) := by
       simpa [tail, readDynamicTablesAfterHeader] using hafterHeader
-    change
-      ((forIn (List.range' 0 10)
-          ((Array.replicate 19 0, br14) : Array Nat × BitReader)
-          dynamicCodeLenLoopBodySource).bind tail) =
-        some
-          (fixedLitLenHuffman, fixedDistHuffman,
-            dynamicTablesAfterHeaderReaderAt bw14 restBits restLen hbit14)
-    exact hloopBind.trans hafter
+    have hsourceResult := hloopBindSource.trans hafter
+    have hmprodResult := hloopBindM.trans hafter
+    first
+    | exact hsourceResult
+    | exact hmprodResult
   simpa [br, bwFull, bitsTot, lenTot, bw14] using hmain
 
 end Png

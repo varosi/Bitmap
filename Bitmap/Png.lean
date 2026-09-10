@@ -6497,7 +6497,7 @@ def encodeBitmapWithOptionsChecked {px : Type u} [Bitmaps.PixelFormat px] [Png.P
   else
     Except.error "bitmap width exceeds PNG limit (2^32)"
 
-def PngTime.ofDateTimeUTC? (dt : Std.Time.DateTime) : Option PngTime :=
+def PngTime.ofDateTimeUTC? (dt : Std.Time.PlainDateTime) : Option PngTime :=
   let year := (dt.year : Int)
   if year < 0 then
     none
@@ -6512,7 +6512,9 @@ def PngTime.ofDateTimeUTC? (dt : Std.Time.DateTime) : Option PngTime :=
     if time.valid then some time else none
 
 def currentPngTimeUTC? : IO (Except String PngTime) := do
-  let dt ← Std.Time.DateTime.now
+  let timestamp ← Std.Time.Timestamp.now
+  let dt := Std.Time.PlainDateTime.ofWallTime
+    (Std.Time.WallTime.ofTimestamp timestamp Std.Time.TimeZone.UTC.offset)
   match PngTime.ofDateTimeUTC? dt with
   | some time => pure (Except.ok time)
   | none => pure (Except.error "current UTC time is outside PNG tIME range")

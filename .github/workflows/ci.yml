@@ -18,6 +18,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - lane: lean-4.31
+            lean_version: v4.31.0
+            toolchain: leanprover/lean4:v4.31.0
+            batteries_rev: fa08db58b30eb033edcdab331bba000827f9f785
+          - lane: lean-4.32.1
+            lean_version: v4.32.1
+            toolchain: leanprover/lean4:v4.32.1
+            batteries_rev: 124bfde3a13b5cb3725d4f2889b2f34342b2fcac
           - lane: lean-4.32
             lean_version: v4.32.2
             toolchain: leanprover/lean4:v4.32.2

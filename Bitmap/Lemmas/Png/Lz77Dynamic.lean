@@ -5014,6 +5014,9 @@ lemma readDynamicTables_generatedHeaderLz77_readerAt_writeBits
     readGeneratedDynamicTablesAfterHeaderLz77_readerAt_writeBits
       (bw := bw) (source := source)
       (restBits := restBits) (restLen := restLen) hbit hcur
+  change readGeneratedDynamicTablesAfterHeaderLz77 br14 =
+    some ((generatedDynamicTableSpecLz77 source).litLenTable,
+      (generatedDynamicTableSpecLz77 source).distTable, brAfter) at hafterHeader
   have hcondHlit : br.bitIndex + 5 ≤ br.data.size * 8 := by
     have hk : 5 ≤ lenTot := by
       have hprefix : 5 ≤ Png.generatedDynamicHeaderPrefixLen :=
@@ -5062,10 +5065,20 @@ lemma readDynamicTables_generatedHeaderLz77_readerAt_writeBits
   unfold Png.readDynamicTables
   simp [hcondHlit, hreadHlit', hcondHdist, hreadHdist', hcondHclen,
     hreadHclen', Option.bind]
-  simpa [readGeneratedDynamicTablesAfterHeaderLz77, readGeneratedCodeLenLengths19,
-    Png.codeLenOrder, lengths, codeTokens,
-    codeBits, codeLen, restAfterPrefixBits, restAfterPrefixLen, prefixBits,
-    bitsTot, lenTot, bw', br14, brAfter, Option.bind] using hafterHeader
+  first
+  | rw [readGeneratedCodeLenLengths19_eq_forIn_mprod_concrete]
+    cases hloop : readGeneratedCodeLenLengths19 br14 <;>
+      unfold readGeneratedDynamicTablesAfterHeaderLz77 at hafterHeader <;>
+      rw [hloop] at hafterHeader <;>
+      simp [hloop, Option.map, Option.bind] at hafterHeader ⊢
+    simpa [readGeneratedDynamicTablesAfterHeaderLz77,
+      readGeneratedCodeLenLengths19, Png.codeLenOrder, lengths, codeTokens,
+      codeBits, codeLen, restAfterPrefixBits, restAfterPrefixLen, prefixBits,
+      bitsTot, lenTot, bw', br14, brAfter, hloop, Option.bind] using hafterHeader
+  | simpa [readGeneratedDynamicTablesAfterHeaderLz77,
+      readGeneratedCodeLenLengths19, Png.codeLenOrder, lengths, codeTokens,
+      codeBits, codeLen, restAfterPrefixBits, restAfterPrefixLen, prefixBits,
+      bitsTot, lenTot, bw', br14, brAfter, Option.bind] using hafterHeader
 
 set_option maxRecDepth 200000 in
 set_option maxHeartbeats 5000000 in

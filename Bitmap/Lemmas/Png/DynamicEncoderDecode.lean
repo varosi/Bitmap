@@ -985,6 +985,28 @@ lemma readGeneratedCodeLenLengths19_eq_forIn_mprod (br : Png.BitReader) :
       cases r
       simp [hloop, Option.map]
 
+/-- Concrete form of the reader-first loop bridge after reducing the fixed
+DEFLATE code-length order. -/
+lemma readGeneratedCodeLenLengths19_eq_forIn_mprod_concrete
+    (br : Png.BitReader) :
+    forIn (List.range' 0 19)
+        ((⟨br, Array.replicate 19 0⟩ : MProd Png.BitReader (Array Nat)))
+        (fun i r =>
+          if h : r.fst.bitIndex + 3 ≤ r.fst.data.size * 8 then
+            some
+              (ForInStep.yield
+                ⟨(r.fst.readBits 3 h).snd,
+                  r.snd.setIfInBounds
+                    ([16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15][i]?.getD 0)
+                    (r.fst.readBits 3 h).fst⟩)
+          else
+            none) =
+      ((fun r : Array Nat × Png.BitReader =>
+          (⟨r.snd, r.fst⟩ : MProd Png.BitReader (Array Nat))) <$>
+        readGeneratedCodeLenLengths19 br) := by
+  simpa [Png.codeLenOrder] using
+    (readGeneratedCodeLenLengths19_eq_forIn_mprod br)
+
 /-- Reader positioned at generated code-length-code entry `idx`. The index is
 counted after the 14-bit dynamic-header front matter. -/
 def generatedCodeLenReaderAt
@@ -3553,6 +3575,8 @@ lemma readDynamicTables_generatedHeader_readerAt_writeBits
     readGeneratedDynamicTablesAfterHeader_readerAt_writeBits
       (bw := bw) (tokens := tokens)
       (restBits := restBits) (restLen := restLen) hbit hcur
+  change readGeneratedDynamicTablesAfterHeader br14 =
+    some (spec.litLenTable, spec.distTable, brAfter) at hafterHeader
   refine ⟨spec, hspec, ?_⟩
   have hcondHlit : br.bitIndex + 5 ≤ br.data.size * 8 := by
     have hk : 5 ≤ lenTot := by
@@ -3602,10 +3626,20 @@ lemma readDynamicTables_generatedHeader_readerAt_writeBits
   unfold Png.readDynamicTables
   simp [hcondHlit, hreadHlit', hcondHdist, hreadHdist', hcondHclen,
     hreadHclen', Option.bind]
-  simpa [readGeneratedDynamicTablesAfterHeader, readGeneratedCodeLenLengths19,
-    Png.codeLenOrder, litLenLengths, distLengths, lengths, codeTokens,
-    codeBits, codeLen, restAfterPrefixBits, restAfterPrefixLen, prefixBits,
-    bitsTot, lenTot, bw', br14, brAfter, Option.bind] using hafterHeader
+  first
+  | rw [readGeneratedCodeLenLengths19_eq_forIn_mprod_concrete]
+    cases hloop : readGeneratedCodeLenLengths19 br14 <;>
+      unfold readGeneratedDynamicTablesAfterHeader at hafterHeader <;>
+      rw [hloop] at hafterHeader <;>
+      simp [hloop, Option.map, Option.bind] at hafterHeader ⊢
+    simpa [readGeneratedDynamicTablesAfterHeader, readGeneratedCodeLenLengths19,
+      Png.codeLenOrder, litLenLengths, distLengths, lengths, codeTokens,
+      codeBits, codeLen, restAfterPrefixBits, restAfterPrefixLen, prefixBits,
+      bitsTot, lenTot, bw', br14, brAfter, hloop, Option.bind] using hafterHeader
+  | simpa [readGeneratedDynamicTablesAfterHeader, readGeneratedCodeLenLengths19,
+      Png.codeLenOrder, litLenLengths, distLengths, lengths, codeTokens,
+      codeBits, codeLen, restAfterPrefixBits, restAfterPrefixLen, prefixBits,
+      bitsTot, lenTot, bw', br14, brAfter, Option.bind] using hafterHeader
 
 end Lemmas
 
